@@ -34,6 +34,19 @@ pub(crate) fn io_error(location: &Path, error: &std::io::Error) -> StoreError {
     }
 }
 
+/// A directory nothing has written yet reads as empty rather than as a
+/// failure, since every one of them is created by its first write.
+pub(crate) fn entries(
+    dir: &Path,
+) -> Result<impl Iterator<Item = std::io::Result<std::fs::DirEntry>>, StoreError> {
+    match std::fs::read_dir(dir) {
+        Ok(entries) => Ok(Some(entries)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(io_error(dir, &e)),
+    }
+    .map(|found| found.into_iter().flatten())
+}
+
 /// Writes a whole file, creating its directory, with the path in any
 /// refusal.
 pub(crate) fn write_file(path: &Path, text: &str) -> Result<(), StoreError> {

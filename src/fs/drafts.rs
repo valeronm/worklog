@@ -54,12 +54,7 @@ impl FsDrafts {
     }
 
     fn walk(dir: &Path, found: &mut Vec<PathBuf>) -> Result<(), StoreError> {
-        let entries = match fs::read_dir(dir) {
-            Ok(entries) => entries,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-            Err(e) => return Err(io_error(dir, &e)),
-        };
-        for entry in entries {
+        for entry in super::entries(dir)? {
             let entry = entry.map_err(|e| io_error(dir, &e))?;
             let path = entry.path();
             if path.is_dir() {

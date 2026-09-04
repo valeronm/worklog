@@ -41,13 +41,8 @@ impl Usage for FsUsage {
     }
 
     fn all(&self) -> Result<Vec<Invocation>, StoreError> {
-        let entries = match fs::read_dir(&self.dir) {
-            Ok(entries) => entries,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(e) => return Err(io_error(&self.dir, &e)),
-        };
         let mut found = Vec::new();
-        for entry in entries {
+        for entry in super::entries(&self.dir)? {
             let path = entry.map_err(|e| io_error(&self.dir, &e))?.path();
             if path.extension().is_none_or(|e| e != "tsv") {
                 continue;

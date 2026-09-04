@@ -66,14 +66,9 @@ impl FsStore {
 /// Directories under `dir` holding version files, as paths relative to
 /// the kind directory.
 fn walk(dir: &Path, relative: &str, kind: Kind, found: &mut Vec<Slug>) -> Result<(), StoreError> {
-    let entries = match fs::read_dir(dir) {
-        Ok(entries) => entries,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(e) => return Err(io_error(dir, &e)),
-    };
     let mut holds_versions = false;
     let mut subdirs = Vec::new();
-    for entry in entries {
+    for entry in super::entries(dir)? {
         let entry = entry.map_err(|e| io_error(dir, &e))?;
         let name = entry.file_name();
         let name = name.to_string_lossy();
@@ -111,13 +106,8 @@ impl Store for FsStore {
 
     fn document(&self, slug: &Slug) -> Result<Document, StoreError> {
         let dir = self.slug_dir(slug);
-        let entries = match fs::read_dir(&dir) {
-            Ok(entries) => entries,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Document::default()),
-            Err(e) => return Err(io_error(&dir, &e)),
-        };
         let mut versions = Vec::new();
-        for entry in entries {
+        for entry in super::entries(&dir)? {
             let entry = entry.map_err(|e| io_error(&dir, &e))?;
             let name = entry.file_name();
             let name = name.to_string_lossy();
