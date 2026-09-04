@@ -149,8 +149,8 @@ pub fn history(deps: &Deps, slug: &Slug) -> Result<History, Failure> {
 /// machine or from one, ordered by the instant they were written.
 pub fn log(deps: &Deps, n: usize, machine_name: Option<&str>) -> Result<Log, Failure> {
     let only = machine_name.map(MachineName::parse).transpose()?;
-    // Stamps resolve to the second, so a document's own order, newest
-    // first, breaks a tie between its versions.
+    // Two stamps can still fall together, so a document's own order,
+    // newest first, breaks a tie between its versions.
     let mut rows = Vec::new();
     for (slug, document) in load::documents(deps.store)? {
         for (place, v) in document.history().into_iter().enumerate() {
@@ -701,9 +701,9 @@ pub fn diff(
             (v.slug, before, after)
         }
         (load::Named::Version(a), Some(load::Named::Version(b))) => {
-            // Within one document the chain says which came first, since
-            // stamps resolve to the second; across documents only the
-            // instant can.
+            // Within one document the chain says which came first
+            // whatever the clocks did; across documents only the instant
+            // can.
             let a_is_older = if a.slug == b.slug {
                 let order = deps.store.document(&a.slug)?.history_ids();
                 let place = |id: &VersionId| order.iter().position(|o| o == id);

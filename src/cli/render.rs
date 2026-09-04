@@ -20,6 +20,24 @@ fn short(id: &str) -> &str {
     id.get(..12).unwrap_or(id)
 }
 
+/// A stamp carries microseconds so two versions of one command can be
+/// ordered, which is finer than a line needs to show.
+fn millis(stamp: &str) -> String {
+    let Some(dot) = stamp.find('.') else {
+        return stamp.to_owned();
+    };
+    let first_digit = dot + 1;
+    let digits = stamp[first_digit..]
+        .bytes()
+        .take_while(u8::is_ascii_digit)
+        .count();
+    format!(
+        "{}{}",
+        &stamp[..first_digit + digits.min(3)],
+        &stamp[first_digit + digits..]
+    )
+}
+
 /// Parent ids on one line, or `none` for a first version.
 fn parents(ids: &[String]) -> String {
     if ids.is_empty() {
@@ -81,7 +99,7 @@ pub fn shown(s: &Shown) -> String {
                 short(&head.stamp.id),
                 head.stamp.operation,
                 head.stamp.machine,
-                head.stamp.written
+                millis(&head.stamp.written)
             );
         }
         out.push_str(&head.text);
@@ -114,7 +132,7 @@ pub fn history(h: &History) -> String {
             out,
             "{}  {}  {}  {}  parents: {}",
             short(&v.stamp.id),
-            v.stamp.written,
+            millis(&v.stamp.written),
             v.stamp.machine,
             v.stamp.operation,
             parents(&v.parents)
@@ -130,7 +148,7 @@ pub fn log(l: &Log) -> String {
             out,
             "{}  {}  {}  {}  {}",
             short(&v.stamp.id),
-            v.stamp.written,
+            millis(&v.stamp.written),
             v.stamp.machine,
             v.stamp.operation,
             v.slug
@@ -480,5 +498,21 @@ mod tests {
         assert!(painted.contains(&format!("{}fixed{}", REMOVED.word, REMOVED.line)));
         assert!(painted.contains(&format!("{}free{}", ADDED.word, ADDED.line)));
         assert!(painted.contains("   5 -"), "{painted}");
+    }
+
+    #[test]
+    fn a_stamp_shows_three_fraction_digits_at_most() {
+        assert_eq!(
+            millis("2026-09-04T10:00:00.123456+01:00"),
+            "2026-09-04T10:00:00.123+01:00"
+        );
+        assert_eq!(
+            millis("2026-09-04T10:00:00.12+01:00"),
+            "2026-09-04T10:00:00.12+01:00"
+        );
+        assert_eq!(
+            millis("2026-09-04T10:00:00+01:00"),
+            "2026-09-04T10:00:00+01:00"
+        );
     }
 }
