@@ -43,8 +43,9 @@ Prose goes through a draft; the store is never edited directly.
 1. `worklog new entry <name>`, `worklog new fact <topic>/<name>`, `worklog
    new idea <topic>/<name>`, `worklog new topic <name>`, or `worklog
    checkout <slug>` for an existing document. Each prints the draft path.
-2. Edit the file at that path. Change only the kind's own fields and the
-   body; the `version` block is the tool's.
+2. Read the file at that path, then edit it: it lives outside the working
+   directory, and an edit tool refuses a file it has not read. Change only
+   the kind's own fields and the body; the `version` block is the tool's.
 3. `worklog diff <slug>` shows the draft against the store. Show it to the
    user before saving anything they have not seen.
 4. `worklog save <slug>` validates, stamps and stores it. A refusal names
@@ -108,13 +109,13 @@ waiting on it.
 
 ## Facts and topics
 
-A fact is one claim, under the topic it is about, with a `summary` that is
+A fact is one thing that is true, under the topic it is about, with a `summary` that is
 the fact itself, then a body: the fact as it holds now, **Why**, and **How
 to apply**. It is rewritten (checkout, save) when it changes and
 tombstoned when it stops being true. `worklog verify <fact>` records that
 it was checked and found still true.
 
-Which store holds a claim:
+Which store holds it:
 
 - A repo's own `CLAUDE.md` holds what a stranger cloning it needs. A fact
   that turns out to be the repo's business moves there and is tombstoned
@@ -152,29 +153,40 @@ Writing one well:
 
 A topic's document carries a `summary` other sessions see, `includes`, the
 topics loaded along with it, and a free body for what to know before
-touching the subject at all. A machine topic carries `machine: <name>`,
-`claims` mapping topics to that host's directories, and `unclaimed` for
-topics loaded only in unclaimed directories.
-`worklog topics` lists them; `worklog where <topic>` shows a topic's
-directories on this machine, and `worklog where` alone every claim here,
-marking a directory this host lacks.
+touching the subject at all. `worklog topics` lists them.
 
 Write a topic's summary from the subject itself, its README or what the
 device is, not from its facts: facts cluster in whatever corner needed
 writing down, and the summary is all a session in another directory ever
 sees of the topic, so it decides whether the topic is opened at all.
 
-## Setting up a project
+## Machines and claims
 
-A checkout `context` reaches nothing in is unclaimed. Two commands make it
-a project:
+A machine has a topic carrying `machine: <name>`, the name `worklog init`
+recorded, and it loads in every session on that host. `init` does not
+write it: on a new machine, `worklog new topic <name>` with that field and
+a summary of what the machine is and the role it plays, then `worklog
+save`.
 
-1. `worklog new topic <name>`; give the draft a `summary` written from the
-   repo, and `includes` for the topics it shares; `worklog save <name>`.
-2. `worklog claim <name>` from inside the checkout, or with the directory
-   as a second argument. A claim covers the directory and everything
-   under it, so a parent holding several checkouts of one topic is claimed
-   once. `worklog unclaim <name> [<dir>]` takes it back.
+A claim places a topic on a directory of this machine: `worklog claim
+<topic>` from inside the checkout, or with the directory as a second
+argument. Claims are always made this way, never by editing the `claims`
+map in the topic's draft, so every claim is one version naming what it
+did. A claim covers the directory and everything under it: claim the
+narrowest directory the topic's facts hold for, a parent once when it
+holds several checkouts of one topic, and a device's topic on the trees of
+the apps tested on it. Several topics may claim one directory, and all of
+them load there. Topics wanted only outside every claim go in the machine
+topic's `unclaimed` list.
+
+A checkout `context` reaches nothing in is unclaimed: `worklog new topic
+<name>`, with a summary written from the repo and `includes` for the
+topics it shares, then `worklog claim <name>` inside it.
+
+`worklog where` lists every claim on this machine and marks a directory
+this host lacks; after a migration or a moved checkout, `worklog unclaim
+<topic> <dir>` drops each marked line. `worklog where <topic>` shows one
+topic's directories, `--machine <name>` another host's.
 
 ## Search and recall
 
