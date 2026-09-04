@@ -10,7 +10,7 @@ use std::fmt::Write as _;
 
 use crate::app::output::{
     Check, Context, Diff, DraftList, DraftRef, FactListing, FollowupItem, Followups, Forks,
-    History, Listing, Row, Search, Shown, Tags, Topics, Where, Written,
+    History, Listing, Log, Row, Search, Shown, Tags, Topics, Where, Written,
 };
 
 pub const IDEAS_HEADING: &str = "Ideas — unbuilt, kept with their settled design:";
@@ -78,10 +78,10 @@ pub fn shown(s: &Shown) -> String {
             let _ = writeln!(
                 out,
                 "==== head {} — {} on {} by {}",
-                short(&head.id),
-                head.operation,
-                head.machine,
-                head.written
+                short(&head.stamp.id),
+                head.stamp.operation,
+                head.stamp.machine,
+                head.stamp.written
             );
         }
         out.push_str(&head.text);
@@ -113,11 +113,25 @@ pub fn history(h: &History) -> String {
         let _ = writeln!(
             out,
             "{}  {}  {}  {}  parents: {}",
-            short(&v.id),
-            v.written,
-            v.machine,
-            v.operation,
+            short(&v.stamp.id),
+            v.stamp.written,
+            v.stamp.machine,
+            v.stamp.operation,
             parents(&v.parents)
+        );
+    }
+    out
+}
+
+/// No id: the line names what changed and who, and `history` on the slug
+/// has the ids.
+pub fn log(l: &Log) -> String {
+    let mut out = String::new();
+    for v in &l.versions {
+        let _ = writeln!(
+            out,
+            "{}  {}  {}  {}",
+            v.stamp.written, v.stamp.machine, v.stamp.operation, v.slug
         );
     }
     out

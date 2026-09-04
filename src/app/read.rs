@@ -15,9 +15,11 @@ use crate::domain::version::{State, Version};
 use super::load::{self, Doc, Loaded};
 use super::output::{
     Check, Claimed, Context, Diff, FactListing, FollowupItem, Followups, Fork, Forks, Group, Head,
-    History, HistoryRow, Hit, Listing, Problem, Row, Search, Shown, Tags, TopicRow, Topics, Where,
+    History, HistoryRow, Hit, Listing, Log, LogRow, Problem, Row, Search, Shown, Stamp, Tags,
+    TopicRow, Topics, Where,
 };
 use super::{Deps, Failure, machine};
+use crate::domain::machine::MachineName;
 
 fn row(slug: &Slug, date: &str, summary: &str, tags: &[String]) -> Row {
     Row {
@@ -55,14 +57,27 @@ fn followup_row(doc: &Doc<Followup>) -> Row {
     )
 }
 
-fn head(version: &Version) -> Head {
-    Head {
+fn stamp(version: &Version) -> Stamp {
+    Stamp {
         id: version.id.to_string(),
         written: version.block.written.clone(),
         machine: version.block.machine.to_string(),
         operation: version.block.operation.to_string(),
+    }
+}
+
+fn head(version: &Version) -> Head {
+    Head {
+        stamp: stamp(version),
         text: version.content_text(),
     }
+}
+
+/// When a version was written, as an instant, since machines stamp their
+/// own offsets; a stamp that does not parse sorts before everything.
+fn instant(version: &Version) -> i64 {
+    chrono::DateTime::parse_from_rfc3339(&version.block.written)
+        .map_or(i64::MIN, |t| t.timestamp_micros())
 }
 
 /// Tags are compared without case, so `Lantern` and `lantern` are one.
@@ -112,13 +127,37 @@ pub fn history(deps: &Deps, slug: &Slug) -> Result<History, Failure> {
             .history()
             .into_iter()
             .map(|v| HistoryRow {
-                id: v.id.to_string(),
-                written: v.block.written.clone(),
-                machine: v.block.machine.to_string(),
-                operation: v.block.operation.to_string(),
+                stamp: stamp(v),
                 parents: v.block.parents.iter().map(ToString::to_string).collect(),
             })
             .collect(),
+    })
+}
+
+/// The newest `n` versions written anywhere in the store, from every
+/// machine or from one, ordered by the instant they were written.
+pub fn log(deps: &Deps, n: usize, machine_name: Option<&str>) -> Result<Log, Failure> {
+    let only = machine_name.map(MachineName::parse).transpose()?;
+    // Stamps resolve to the second, so a document's own order, newest
+    // first, breaks a tie between its versions.
+    let mut rows = Vec::new();
+    for kind in Kind::ALL {
+        for slug in deps.store.slugs(kind)? {
+            let document = deps.store.document(&slug)?;
+            for (place, v) in document.history().into_iter().enumerate() {
+                if only.as_ref().is_none_or(|m| &v.block.machine == m) {
+                    let row = LogRow {
+                        stamp: stamp(v),
+                        slug: slug.path().to_owned(),
+                    };
+                    rows.push((std::cmp::Reverse(instant(v)), place, row));
+                }
+            }
+        }
+    }
+    rows.sort_by_key(|(newest, place, _)| (*newest, *place));
+    Ok(Log {
+        versions: rows.into_iter().take(n).map(|(_, _, row)| row).collect(),
     })
 }
 

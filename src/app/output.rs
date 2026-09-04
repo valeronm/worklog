@@ -24,12 +24,20 @@ pub struct FactListing {
     pub ideas: Vec<Row>,
 }
 
+/// Who wrote a version, when, and as what; the same four fields wherever
+/// a version is listed.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Head {
+pub struct Stamp {
     pub id: String,
     pub written: String,
     pub machine: String,
     pub operation: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Head {
+    #[serde(flatten)]
+    pub stamp: Stamp,
     pub text: String,
 }
 
@@ -46,10 +54,8 @@ pub struct Shown {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct HistoryRow {
-    pub id: String,
-    pub written: String,
-    pub machine: String,
-    pub operation: String,
+    #[serde(flatten)]
+    pub stamp: Stamp,
     pub parents: Vec<String>,
 }
 
@@ -57,6 +63,19 @@ pub struct HistoryRow {
 pub struct History {
     pub slug: String,
     pub versions: Vec<HistoryRow>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct LogRow {
+    #[serde(flatten)]
+    pub stamp: Stamp,
+    pub slug: String,
+}
+
+/// Versions across the whole store, newest first.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct Log {
+    pub versions: Vec<LogRow>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

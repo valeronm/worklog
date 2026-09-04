@@ -154,6 +154,14 @@ pub enum ReadCommand {
         #[arg(default_value_t = 10)]
         n: usize,
     },
+    /// The newest versions written anywhere in the store, from any machine
+    Log {
+        #[arg(default_value_t = 20)]
+        n: usize,
+        /// Only what this machine wrote
+        #[arg(long)]
+        machine: Option<String>,
+    },
     /// Documents whose text holds the term, facts first
     Search {
         #[arg(required = true)]

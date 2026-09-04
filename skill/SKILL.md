@@ -194,6 +194,9 @@ topic's directories, `--machine <name>` another host's.
 - `worklog search <term>` — every document holding the term, facts first;
   `--regex` for a pattern.
 - `worklog tag <tag>`, `worklog recent [n]`, `worklog list --kind <kind>`.
+- `worklog log [n]` — the newest versions written anywhere in the store,
+  whatever their kind, so what other machines wrote since is one call;
+  `--machine <name>` for one host's writes.
 - `worklog show <slug>` prints a document as it stands; `worklog history
   <slug>` its versions.
 

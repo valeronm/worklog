@@ -432,6 +432,15 @@ fn claims_are_commands_on_the_machine_topic() {
         history.lines().next().unwrap().contains("unclaim"),
         "{history}"
     );
+    // Everything here is stamped within a second, so only membership holds.
+    let log = s.ok(&["log", "2"]);
+    assert_eq!(log.lines().count(), 2, "{log}");
+    let log = s.ok(&["log", "100"]);
+    assert!(
+        log.lines().any(|l| l.ends_with("  m1  unclaim  host")),
+        "{log}"
+    );
+    assert!(s.ok(&["log", "--machine", "nobody"]).is_empty());
 }
 
 #[test]

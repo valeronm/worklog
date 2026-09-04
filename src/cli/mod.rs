@@ -101,6 +101,10 @@ fn dispatch_read(deps: &Deps, json: bool, command: ReadCommand) -> Result<Render
             let out = read::recent(deps, n)?;
             rendered(json, &out, || render::listing(&out))
         }
+        ReadCommand::Log { n, machine } => {
+            let out = read::log(deps, n, machine.as_deref())?;
+            rendered(json, &out, || render::log(&out))
+        }
         ReadCommand::Search { term, regex } => {
             let out = read::search(deps, &term.join(" "), regex)?;
             note_empty(
