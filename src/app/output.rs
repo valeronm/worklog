@@ -92,7 +92,14 @@ pub struct Search {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct Tags {
-    pub tags: Vec<(String, usize)>,
+    /// Most used first.
+    pub tags: Vec<Count>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Count {
+    pub name: String,
+    pub count: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -169,7 +176,8 @@ pub struct Context {
     pub due: Vec<FollowupItem>,
     pub forks: Vec<String>,
     pub drafts: Vec<String>,
-    pub unreached: Vec<(String, usize)>,
+    /// By name, since the count is what a topic holds and not its rank.
+    pub unreached: Vec<Count>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -206,13 +214,7 @@ pub struct Usage {
 pub struct MachineUsage {
     pub machine: String,
     /// Most used first.
-    pub commands: Vec<CommandCount>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct CommandCount {
-    pub command: String,
-    pub count: usize,
+    pub commands: Vec<Count>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

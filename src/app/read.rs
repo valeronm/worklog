@@ -14,9 +14,9 @@ use crate::domain::version::{State, Version, VersionId};
 
 use super::load::{self, Doc, Loaded};
 use super::output::{
-    Check, Claimed, CommandCount, Context, Diff, FactListing, FollowupItem, Followups, Fork, Forks,
-    Group, Head, History, HistoryRow, Hit, Listing, Log, LogRow, MachineUsage, Problem, Row,
-    Search, Shown, Side, Stamp, Tags, TopicRow, Topics, Usage, Where,
+    Check, Claimed, Context, Count, Diff, FactListing, FollowupItem, Followups, Fork, Forks, Group,
+    Head, History, HistoryRow, Hit, Listing, Log, LogRow, MachineUsage, Problem, Row, Search,
+    Shown, Side, Stamp, Tags, TopicRow, Topics, Usage, Where,
 };
 use super::{Deps, Failure, machine};
 use crate::domain::machine::MachineName;
@@ -89,9 +89,12 @@ fn has_tag(tags: &[String], tag: &str) -> bool {
     tags.iter().any(|t| t.eq_ignore_ascii_case(tag))
 }
 
-fn most_used_first(counts: BTreeMap<String, usize>) -> Vec<(String, usize)> {
-    let mut ranked: Vec<(String, usize)> = counts.into_iter().collect();
-    ranked.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+fn most_used_first(counts: BTreeMap<String, usize>) -> Vec<Count> {
+    let mut ranked: Vec<Count> = counts
+        .into_iter()
+        .map(|(name, count)| Count { name, count })
+        .collect();
+    ranked.sort_by(|a, b| b.count.cmp(&a.count).then(a.name.cmp(&b.name)));
     ranked
 }
 
@@ -545,8 +548,10 @@ pub fn context(deps: &Deps, directory: &str) -> Result<Context, Failure> {
         .collect();
     for slug in loaded.topics.keys() {
         if !reached.iter().any(|r| &r.topic == slug) {
-            out.unreached
-                .push((slug.clone(), loaded.facts_of(slug).count()));
+            out.unreached.push(Count {
+                name: slug.clone(),
+                count: loaded.facts_of(slug).count(),
+            });
         }
     }
     Ok(out)
@@ -572,11 +577,10 @@ pub fn usage(deps: &Deps, machine: Option<&str>, since: Option<&str>) -> Result<
     }
     let mut out = Usage::default();
     for (machine, commands) in counted {
-        let commands: Vec<CommandCount> = most_used_first(commands)
-            .into_iter()
-            .map(|(command, count)| CommandCount { command, count })
-            .collect();
-        out.machines.push(MachineUsage { machine, commands });
+        out.machines.push(MachineUsage {
+            machine,
+            commands: most_used_first(commands),
+        });
     }
     Ok(out)
 }
@@ -764,6 +768,13 @@ mod tests {
     use crate::app::testing::World;
     use crate::app::write;
 
+    fn counted(name: &str, count: usize) -> Count {
+        Count {
+            name: name.to_owned(),
+            count,
+        }
+    }
+
     fn seed(deps: &Deps) {
         write::put_topic(deps, "lantern", "A Rust app", &[], None).unwrap();
         write::put_topic(deps, "android", "The toolchain", &["phone"], None).unwrap();
@@ -834,7 +845,7 @@ mod tests {
         let topics: Vec<&str> = ctx.groups.iter().map(|g| g.topic.as_str()).collect();
         assert_eq!(topics, ["atlas", "android", "phone", "host"]);
         assert_eq!(ctx.groups[2].ideas, ["needs-beta"]);
-        assert_eq!(ctx.unreached, [("lantern".to_owned(), 1)]);
+        assert_eq!(ctx.unreached, [counted("lantern", 1)]);
         assert_eq!(ctx.open, 0);
         let ctx = context(&d, "/home/u/projects/lantern").unwrap();
         assert_eq!(ctx.open, 2);
@@ -854,7 +865,7 @@ mod tests {
         assert_eq!(tag(&d, "lantern").unwrap().rows.len(), 2);
         assert_eq!(
             tags(&d).unwrap().tags,
-            [("lantern".to_owned(), 2), ("android".to_owned(), 1)]
+            [counted("lantern", 2), counted("android", 1)]
         );
         let listing = facts(&d, Some("atlas"), true).unwrap();
         assert!(listing.facts.is_empty());
@@ -919,16 +930,7 @@ mod tests {
         assert_eq!(all.machines[0].machine, "desk");
         assert_eq!(
             all.machines[0].commands,
-            [
-                CommandCount {
-                    command: "context".into(),
-                    count: 2
-                },
-                CommandCount {
-                    command: "show".into(),
-                    count: 1
-                }
-            ]
+            [counted("context", 2), counted("show", 1)]
         );
         let phone = usage(d, Some("phone"), None).unwrap();
         assert_eq!(phone.machines.len(), 1);
@@ -936,16 +938,7 @@ mod tests {
         let recent = usage(d, None, Some("2026-09-02")).unwrap();
         assert_eq!(
             recent.machines[0].commands,
-            [
-                CommandCount {
-                    command: "context".into(),
-                    count: 1
-                },
-                CommandCount {
-                    command: "show".into(),
-                    count: 1
-                },
-            ]
+            [counted("context", 1), counted("show", 1)]
         );
         assert!(usage(d, Some("nobody"), None).unwrap().machines.is_empty());
     }

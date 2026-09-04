@@ -174,8 +174,8 @@ pub fn search(s: &Search) -> String {
 
 pub fn tags(t: &Tags) -> String {
     let mut out = String::new();
-    for (tag, count) in &t.tags {
-        count_line(&mut out, *count, tag);
+    for tag in &t.tags {
+        count_line(&mut out, tag.count, &tag.name);
     }
     out
 }
@@ -337,7 +337,7 @@ pub fn context(c: &Context) -> String {
         let names: Vec<String> = c
             .unreached
             .iter()
-            .map(|(t, n)| format!("{t} ({n})"))
+            .map(|t| format!("{} ({})", t.name, t.count))
             .collect();
         wrapped(&mut out, &names);
     }
@@ -380,7 +380,7 @@ pub fn usage(u: &Usage) -> String {
         let runs: usize = machine.commands.iter().map(|c| c.count).sum();
         let _ = writeln!(out, "{} — {runs} runs", machine.machine);
         for c in &machine.commands {
-            count_line(&mut out, c.count, &c.command);
+            count_line(&mut out, c.count, &c.name);
         }
     }
     out
