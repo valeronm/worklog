@@ -110,6 +110,8 @@ pub enum SetupCommand {
         #[command(subcommand)]
         what: HookWhat,
     },
+    /// Shell completions for the commands of this binary, to source
+    Completions { shell: clap_complete::Shell },
 }
 
 #[derive(Subcommand)]

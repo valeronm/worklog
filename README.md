@@ -72,6 +72,11 @@ it is; `show` on either prints what would be written. The installer above
 refreshes the skill on a host that has one, since the skill describes the
 commands of the binary it shipped with.
 
+`worklog completions <shell>` prints completions for the commands of the
+binary it runs from, so a shell sources them rather than keeping a copy:
+`worklog completions fish | source` in a fish completions file, or the
+bash or zsh output in the place that shell reads.
+
 ## Develop
 
 `cargo test` runs the unit tests, the layer test and the command-line

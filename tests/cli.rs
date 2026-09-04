@@ -172,6 +172,9 @@ fn init_is_once_and_writes_need_it() {
     let skill = fs::read_to_string(agent.join("skills/worklog/SKILL.md")).unwrap();
     assert_eq!(skill, worklog::cli::SKILL);
     assert_eq!(elsewhere.ok(&["skill", "show"]), skill);
+    let completions = elsewhere.ok(&["completions", "fish"]);
+    assert!(completions.contains("complete -c worklog"), "{completions}");
+    assert!(completions.contains("unclaim"), "{completions}");
     let settings = fs::read_to_string(agent.join("settings.json")).unwrap();
     assert!(settings.contains("\"SessionStart\""), "{settings}");
     assert!(written.contains("settings.json"), "{written}");

@@ -8,7 +8,7 @@ use crate::app::Failure;
 use crate::domain::machine::MachineName;
 use crate::fs::{Config, Paths, write_file};
 
-use super::args::{HookWhat, SetupCommand, SkillWhat};
+use super::args::{Cli, HookWhat, SetupCommand, SkillWhat};
 use super::hook::{self, Merged};
 
 /// The agent skill, compiled in so it always describes this binary's
@@ -167,6 +167,12 @@ pub fn run(paths: &Paths, command: &SetupCommand) -> Result<String, Failure> {
                 Ok(format!("{}\n", file.display()))
             }
         },
+        SetupCommand::Completions { shell } => {
+            use clap::CommandFactory as _;
+            let mut out = Vec::new();
+            clap_complete::generate(*shell, &mut Cli::command(), "worklog", &mut out);
+            Ok(String::from_utf8_lossy(&out).into_owned())
+        }
         SetupCommand::Hook { what } => match what {
             HookWhat::Show => super::pretty_json(&hook::entry()?),
             HookWhat::Install { settings } => {
