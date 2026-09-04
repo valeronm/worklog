@@ -219,7 +219,15 @@ pub struct DraftList {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+/// The two texts a diff is made of; the diff itself is a rendering.
 pub struct Diff {
     pub slug: String,
+    pub before: Side,
+    pub after: Side,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Side {
+    pub name: String,
     pub text: String,
 }

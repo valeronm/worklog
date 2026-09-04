@@ -77,6 +77,61 @@ pub fn live(store: &dyn Store, slug: &Slug) -> Result<Version, Failure> {
     }
 }
 
+/// Every document in the store, whatever its kind.
+pub fn documents(store: &dyn Store) -> Result<Vec<(Slug, Document)>, Failure> {
+    let mut all = Vec::new();
+    for kind in Kind::ALL {
+        for slug in store.slugs(kind)? {
+            let document = store.document(&slug)?;
+            all.push((slug, document));
+        }
+    }
+    Ok(all)
+}
+
+/// What a command-line word names: a stored version, by an id or a
+/// prefix of one, or else a document by its slug, read along with it. A
+/// word that is both is refused rather than guessed.
+pub enum Named {
+    Version(Version),
+    Slug(Slug, Document),
+}
+
+pub fn named(deps: &Deps, text: &str, kind: Option<Kind>) -> Result<Named, Failure> {
+    let mut found = Vec::new();
+    if VersionId::is_prefix(text) {
+        for (_, document) in documents(deps.store)? {
+            found.extend(
+                document
+                    .versions
+                    .into_iter()
+                    .filter(|v| v.id.as_str().starts_with(text)),
+            );
+            if found.len() > 1 {
+                return Err(Failure::Refused(format!(
+                    "{text} is a prefix of more than one version; give more of it"
+                )));
+            }
+        }
+    }
+    let document = match super::slug_arg(text, kind) {
+        Ok(slug) => {
+            let document = deps.store.document(&slug)?;
+            (!document.versions.is_empty()).then_some((slug, document))
+        }
+        Err(e) if found.is_empty() => return Err(e),
+        Err(_) => None,
+    };
+    match (found.pop(), document) {
+        (Some(version), None) => Ok(Named::Version(version)),
+        (None, Some((slug, document))) => Ok(Named::Slug(slug, document)),
+        (None, None) => Err(Failure::Refused(format!("no version or document: {text}"))),
+        (Some(_), Some(_)) => Err(Failure::Refused(format!(
+            "{text} is both a version and a document; give more of the id or the slug's kind"
+        ))),
+    }
+}
+
 pub fn draft(deps: &Deps, slug: &Slug) -> Result<Draft, Failure> {
     deps.drafts
         .read(slug)?

@@ -10,12 +10,12 @@ use crate::domain::links;
 use crate::domain::recheck::Recheck;
 use crate::domain::slug::{Kind, Slug};
 use crate::domain::topic::Topic;
-use crate::domain::version::{State, Version};
+use crate::domain::version::{State, Version, VersionId};
 
 use super::load::{self, Doc, Loaded};
 use super::output::{
     Check, Claimed, Context, Diff, FactListing, FollowupItem, Followups, Fork, Forks, Group, Head,
-    History, HistoryRow, Hit, Listing, Log, LogRow, Problem, Row, Search, Shown, Stamp, Tags,
+    History, HistoryRow, Hit, Listing, Log, LogRow, Problem, Row, Search, Shown, Side, Stamp, Tags,
     TopicRow, Topics, Where,
 };
 use super::{Deps, Failure, machine};
@@ -89,15 +89,26 @@ fn has_tag(tags: &[String], tag: &str) -> bool {
     tags.iter().any(|t| t.eq_ignore_ascii_case(tag))
 }
 
-/// The document's current text, or every head of a fork.
-pub fn show(deps: &Deps, slug: &Slug) -> Result<Shown, Failure> {
-    let document = deps.store.document(slug)?;
-    let heads = match document.state() {
-        State::Live(v) => vec![head(v)],
-        State::Forked(heads) => heads.into_iter().map(head).collect(),
-        State::Absent | State::Tombstoned(_) => return Err(load::not_live(slug, &document)),
+/// A document's current text, or every head of a fork; or one stored
+/// version, named by its id.
+pub fn show(deps: &Deps, name: &str, kind: Option<Kind>) -> Result<Shown, Failure> {
+    // A stored version stands on its own; its entry's followups belong to
+    // the document as it is now.
+    let (slug, heads) = match load::named(deps, name, kind)? {
+        load::Named::Version(v) => (v.slug.clone(), vec![head(&v)]),
+        load::Named::Slug(slug, document) => {
+            let heads = match document.state() {
+                State::Live(v) => vec![head(v)],
+                State::Forked(heads) => heads.into_iter().map(head).collect(),
+                State::Absent | State::Tombstoned(_) => {
+                    return Err(load::not_live(&slug, &document));
+                }
+            };
+            (slug, heads)
+        }
     };
-    let followups = if slug.kind() == Kind::Entry {
+    let slug = &slug;
+    let followups = if slug.kind() == Kind::Entry && heads.len() == 1 {
         let today = deps.clock.today();
         load::followups(deps.store)?
             .iter()
@@ -141,17 +152,14 @@ pub fn log(deps: &Deps, n: usize, machine_name: Option<&str>) -> Result<Log, Fai
     // Stamps resolve to the second, so a document's own order, newest
     // first, breaks a tie between its versions.
     let mut rows = Vec::new();
-    for kind in Kind::ALL {
-        for slug in deps.store.slugs(kind)? {
-            let document = deps.store.document(&slug)?;
-            for (place, v) in document.history().into_iter().enumerate() {
-                if only.as_ref().is_none_or(|m| &v.block.machine == m) {
-                    let row = LogRow {
-                        stamp: stamp(v),
-                        slug: slug.path().to_owned(),
-                    };
-                    rows.push((std::cmp::Reverse(instant(v)), place, row));
-                }
+    for (slug, document) in load::documents(deps.store)? {
+        for (place, v) in document.history().into_iter().enumerate() {
+            if only.as_ref().is_none_or(|m| &v.block.machine == m) {
+                let row = LogRow {
+                    stamp: stamp(v),
+                    slug: slug.path().to_owned(),
+                };
+                rows.push((std::cmp::Reverse(instant(v)), place, row));
             }
         }
     }
@@ -628,32 +636,90 @@ pub fn check(deps: &Deps) -> Result<Check, Failure> {
 }
 
 /// The draft against the version it was checked out from.
-pub fn diff(deps: &Deps, slug: &Slug) -> Result<Diff, Failure> {
-    let draft = load::draft(deps, slug)?;
-    let document = deps.store.document(slug)?;
-    let missing = draft.parents.iter().find(|p| document.get(p).is_none());
-    if let Some(p) = missing {
-        return Err(Failure::Refused(format!(
-            "draft parent {} is not in the store",
-            p.short()
-        )));
+fn at(v: &Version) -> Side {
+    Side {
+        name: format!("{}@{}", v.slug, v.id.short()),
+        text: v.content_text(),
     }
-    let before = match draft.parents.as_slice() {
-        [parent] => document
-            .get(parent)
-            .map(Version::content_text)
-            .unwrap_or_default(),
-        _ => String::new(),
+}
+
+/// A draft against the version it came from, when given a slug; a stored
+/// version against its parent, when given an id; or two stored versions,
+/// the earlier on the left whichever was named first.
+pub fn diff(
+    deps: &Deps,
+    name: &str,
+    other: Option<&str>,
+    kind: Option<Kind>,
+) -> Result<Diff, Failure> {
+    let first = load::named(deps, name, kind)?;
+    let second = other.map(|o| load::named(deps, o, kind)).transpose()?;
+    let (slug, before, after) = match (first, second) {
+        (load::Named::Slug(slug, document), None) => {
+            let draft = load::draft(deps, &slug)?;
+            let missing = draft.parents.iter().find(|p| document.get(p).is_none());
+            if let Some(p) = missing {
+                return Err(Failure::Refused(format!(
+                    "draft parent {} is not in the store",
+                    p.short()
+                )));
+            }
+            let before = match draft.parents.as_slice() {
+                [parent] => document
+                    .get(parent)
+                    .map(Version::content_text)
+                    .unwrap_or_default(),
+                _ => String::new(),
+            };
+            let after = crate::domain::frontmatter::emit(&draft.fields, &draft.body);
+            let before = Side {
+                name: format!("{slug} (store)"),
+                text: before,
+            };
+            let after = Side {
+                name: format!("{slug} (draft)"),
+                text: after,
+            };
+            (slug, before, after)
+        }
+        (load::Named::Slug(slug, _), Some(_)) | (_, Some(load::Named::Slug(slug, _))) => {
+            return Err(Failure::Usage(format!(
+                "{slug} is a document; two sides of a diff are version ids"
+            )));
+        }
+        (load::Named::Version(v), None) => {
+            let document = deps.store.document(&v.slug)?;
+            let parent = v.block.parents.first().and_then(|p| document.get(p));
+            let before = parent.map_or_else(
+                || Side {
+                    name: "(none)".to_owned(),
+                    text: String::new(),
+                },
+                at,
+            );
+            let after = at(&v);
+            (v.slug, before, after)
+        }
+        (load::Named::Version(a), Some(load::Named::Version(b))) => {
+            // Within one document the chain says which came first, since
+            // stamps resolve to the second; across documents only the
+            // instant can.
+            let a_is_older = if a.slug == b.slug {
+                let order = deps.store.document(&a.slug)?.history_ids();
+                let place = |id: &VersionId| order.iter().position(|o| o == id);
+                place(&a.id) >= place(&b.id)
+            } else {
+                instant(&a) <= instant(&b)
+            };
+            let (older, newer) = if a_is_older { (a, b) } else { (b, a) };
+            let (before, after) = (at(&older), at(&newer));
+            (newer.slug, before, after)
+        }
     };
-    let after = crate::domain::frontmatter::emit(&draft.fields, &draft.body);
-    let text = similar::TextDiff::from_lines(&before, &after)
-        .unified_diff()
-        .context_radius(3)
-        .header(&format!("{slug} (store)"), &format!("{slug} (draft)"))
-        .to_string();
     Ok(Diff {
         slug: slug.path().to_owned(),
-        text,
+        before,
+        after,
     })
 }
 
@@ -771,7 +837,7 @@ mod tests {
         assert_eq!(open.open, 2);
         assert_eq!(open.due, 1);
         assert_eq!(open.without_recheck, 1);
-        let shown = show(&d, &Slug::parse("2026-09/2026-09-01-first").unwrap()).unwrap();
+        let shown = show(&d, "2026-09/2026-09-01-first", None).unwrap();
         assert_eq!(shown.followups.len(), 2);
         assert!(!shown.forked);
         let lantern = where_(&d, Some("lantern"), None).unwrap().claims;

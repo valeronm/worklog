@@ -28,6 +28,14 @@ impl VersionId {
         &self.0
     }
 
+    /// Whether `text` could be the start of an id: lowercase hex, and long
+    /// enough not to match by accident.
+    #[must_use]
+    pub fn is_prefix(text: &str) -> bool {
+        (6..=64).contains(&text.len())
+            && text.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+    }
+
     /// Enough of the hash to tell versions of one document apart on a line.
     #[must_use]
     pub fn short(&self) -> &str {
@@ -373,6 +381,12 @@ impl Document {
     #[must_use]
     pub fn get(&self, id: &VersionId) -> Option<&Version> {
         self.versions.iter().find(|v| &v.id == id)
+    }
+
+    /// The ids in `history` order, newest first, owned so the document can go.
+    #[must_use]
+    pub fn history_ids(&self) -> Vec<VersionId> {
+        self.history().into_iter().map(|v| v.id.clone()).collect()
     }
 
     /// Versions no sibling names as a parent, sorted by id.

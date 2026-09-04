@@ -123,15 +123,17 @@ pub fn history(h: &History) -> String {
     out
 }
 
-/// No id: the line names what changed and who, and `history` on the slug
-/// has the ids.
 pub fn log(l: &Log) -> String {
     let mut out = String::new();
     for v in &l.versions {
         let _ = writeln!(
             out,
-            "{}  {}  {}  {}",
-            v.stamp.written, v.stamp.machine, v.stamp.operation, v.slug
+            "{}  {}  {}  {}  {}",
+            short(&v.stamp.id),
+            v.stamp.written,
+            v.stamp.machine,
+            v.stamp.operation,
+            v.slug
         );
     }
     out
@@ -375,6 +377,108 @@ pub fn drafts(d: &DraftList) -> String {
     out
 }
 
-pub fn diff(d: &Diff) -> String {
-    d.text.clone()
+/// How one side of a change is painted: the line's tint, the stronger
+/// tint of a word that differs, and the colour of its number and sign.
+struct Tint {
+    line: &'static str,
+    word: &'static str,
+    mark: &'static str,
+}
+
+/// Tuned for a dark terminal, from an editor's diff view.
+const REMOVED: Tint = Tint {
+    line: "\x1b[48;2;61;1;0m",
+    word: "\x1b[48;2;92;2;0m",
+    mark: "\x1b[38;2;220;90;90m",
+};
+const ADDED: Tint = Tint {
+    line: "\x1b[48;2;2;40;0m",
+    word: "\x1b[48;2;4;71;0m",
+    mark: "\x1b[38;2;80;200;80m",
+};
+const DIM: &str = "\x1b[2m";
+const UNCHANGED: Tint = Tint {
+    line: "",
+    word: "",
+    mark: DIM,
+};
+
+/// A unified diff of the two sides, three lines of context. Painted, which
+/// the caller decides from where stdout goes, it is what an editor shows:
+/// a removed or added line on a faint tint running to the edge, the words
+/// that differ on a stronger tint where a removed line pairs with an added
+/// one, and the line's number and sign in the hue.
+pub fn diff(d: &Diff, paint: bool) -> String {
+    use similar::ChangeTag;
+    const RESET: &str = "\x1b[0m";
+    const TO_EDGE: &str = "\x1b[K";
+    let diff = similar::TextDiff::from_lines(&d.before.text, &d.after.text);
+    let mut unified = diff.unified_diff();
+    unified.context_radius(3);
+    if !paint {
+        return unified.header(&d.before.name, &d.after.name).to_string();
+    }
+    let mut out = String::new();
+    let _ = writeln!(out, "{DIM}--- {}{RESET}", d.before.name);
+    let _ = writeln!(out, "{DIM}+++ {}{RESET}", d.after.name);
+    for hunk in unified.iter_hunks() {
+        let _ = writeln!(out, "{DIM}{}{RESET}", hunk.header());
+        for op in hunk.ops() {
+            for change in diff.iter_inline_changes(op) {
+                let (sign, tint, index) = match change.tag() {
+                    ChangeTag::Delete => ('-', &REMOVED, change.old_index()),
+                    ChangeTag::Insert => ('+', &ADDED, change.new_index()),
+                    ChangeTag::Equal => (' ', &UNCHANGED, change.new_index()),
+                };
+                let number = index.map_or(String::new(), |i| (i + 1).to_string());
+                let _ = write!(
+                    out,
+                    "{}{}{number:>4} {sign}{RESET}{}",
+                    tint.line, tint.mark, tint.line
+                );
+                for (emphasised, piece) in change.iter_strings_lossy() {
+                    let piece = piece.strip_suffix('\n').unwrap_or(&piece);
+                    if emphasised {
+                        let _ = write!(out, "{}{piece}{}", tint.word, tint.line);
+                    } else {
+                        out.push_str(piece);
+                    }
+                }
+                let _ = writeln!(out, "{TO_EDGE}{RESET}");
+            }
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::output::Side;
+
+    fn two_sides() -> Diff {
+        Diff {
+            slug: "lantern".into(),
+            before: Side {
+                name: "lantern@aaaaaaaaaaaa".into(),
+                text: "---\nsummary: s\n---\n\nthe relay pin is fixed\n".into(),
+            },
+            after: Side {
+                name: "lantern@bbbbbbbbbbbb".into(),
+                text: "---\nsummary: s\n---\n\nthe relay pin is free\n".into(),
+            },
+        }
+    }
+
+    #[test]
+    fn plain_is_a_unified_diff_and_painted_marks_the_word() {
+        let plain = diff(&two_sides(), false);
+        assert!(plain.starts_with("--- lantern@aaaaaaaaaaaa\n+++ lantern@bbbbbbbbbbbb\n@@ "));
+        assert!(plain.contains("-the relay pin is fixed\n+the relay pin is free\n"));
+        assert!(!plain.contains('\x1b'));
+        let painted = diff(&two_sides(), true);
+        assert!(painted.contains(&format!("{}fixed{}", REMOVED.word, REMOVED.line)));
+        assert!(painted.contains(&format!("{}free{}", ADDED.word, ADDED.line)));
+        assert!(painted.contains("   5 -"), "{painted}");
+    }
 }

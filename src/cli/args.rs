@@ -140,7 +140,8 @@ pub enum HookWhat {
 
 #[derive(Subcommand)]
 pub enum ReadCommand {
-    /// Print a document as it stands, or every head of a fork
+    /// Print a document as it stands, or every head of a fork; or one
+    /// stored version, given its id or a prefix of it
     Show(SlugArg),
     /// Every version of a document, newest first
     History(SlugArg),
@@ -212,8 +213,13 @@ pub enum ReadCommand {
     Forks,
     /// Every rule the store has to keep
     Check,
-    /// The draft against the version it came from
-    Diff(SlugArg),
+    /// A slug: the draft against the version it came from. An id: that
+    /// version against its parent. Two ids: between them, earlier first
+    Diff {
+        #[command(flatten)]
+        first: SlugArg,
+        other: Option<String>,
+    },
     /// Every draft on this machine
     Drafts,
 }

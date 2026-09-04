@@ -23,7 +23,7 @@ regex = "1"
 serde = { version = "1", features = ["derive"] }
 # preserve_order so a settings file written back keeps its key order.
 serde_json = { version = "1", features = ["preserve_order"] }
-similar = "2"
+similar = { version = "2", features = ["inline"] }
 
 [dev-dependencies]
 assert_cmd = "2"

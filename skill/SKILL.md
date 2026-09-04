@@ -198,7 +198,10 @@ topic's directories, `--machine <name>` another host's.
   whatever their kind, so what other machines wrote since is one call;
   `--machine <name>` for one host's writes.
 - `worklog show <slug>` prints a document as it stands; `worklog history
-  <slug>` its versions.
+  <slug>` its versions. A version id, or a prefix of one as `history` and
+  `log` print them, names one stored version anywhere in the store:
+  `worklog show <id>` prints it, `worklog diff <id>` what it changed
+  against its parent, `worklog diff <id> <id>` between any two.
 
 Answer a "what did we do about X" question by reading the matching
 documents and reconstructing what changed, when and why, citing slugs. If

@@ -357,6 +357,32 @@ fn save_refuses_stale_unchanged_and_broken_drafts() {
     assert!(!path.exists());
     let shown = s.ok(&["show", "lantern"]);
     assert!(shown.contains("Written on m2."), "{shown}");
+    // An id, or a prefix of one, names a stored version on its own.
+    let history = s.ok(&["history", "lantern"]);
+    let ids: Vec<&str> = history
+        .lines()
+        .map(|l| l.split("  ").next().unwrap())
+        .collect();
+    assert_eq!(ids.len(), 2);
+    let first = s.ok(&["show", ids[1]]);
+    assert!(first.contains("What to know first."), "{first}");
+    let change = s.ok(&["diff", ids[0]]);
+    assert!(
+        change.contains("-What to know first.\n+Written on m2.\n"),
+        "{change}"
+    );
+    let between = s.ok(&["diff", ids[0], ids[1]]);
+    assert_eq!(
+        between, change,
+        "earlier on the left whichever is named first"
+    );
+    let log = s.ok(&["log", "100"]);
+    assert!(
+        log.lines().any(|l| l.starts_with(ids[0])),
+        "log carries the id: {log}"
+    );
+    let err = s.run(&["diff", "lantern", ids[0]]);
+    assert_eq!(err.status.code(), Some(2));
 }
 
 #[test]

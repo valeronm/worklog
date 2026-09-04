@@ -47,6 +47,13 @@ fn slug(arg: &SlugArg) -> Result<crate::domain::slug::Slug, Failure> {
     slug_arg(&arg.slug, arg.kind.map(Kind::from))
 }
 
+/// Colour only on a terminal, and never with `NO_COLOR` set, so a pipe
+/// gets plain bytes.
+fn paint() -> bool {
+    use std::io::IsTerminal as _;
+    std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none()
+}
+
 fn cwd() -> Result<std::path::PathBuf, Failure> {
     std::env::current_dir().map_err(|e| Failure::Refused(format!("no working directory: {e}")))
 }
@@ -86,7 +93,7 @@ fn note_empty(empty: bool, what: &str, scope: Option<String>, joint: &str) {
 fn dispatch_read(deps: &Deps, json: bool, command: ReadCommand) -> Result<Rendered, Failure> {
     match command {
         ReadCommand::Show(arg) => {
-            let out = read::show(deps, &slug(&arg)?)?;
+            let out = read::show(deps, &arg.slug, arg.kind.map(Kind::from))?;
             rendered(json, &out, || render::shown(&out))
         }
         ReadCommand::History(arg) => {
@@ -168,9 +175,14 @@ fn dispatch_read(deps: &Deps, json: bool, command: ReadCommand) -> Result<Render
             }
             Ok(r)
         }
-        ReadCommand::Diff(arg) => {
-            let out = read::diff(deps, &slug(&arg)?)?;
-            rendered(json, &out, || render::diff(&out))
+        ReadCommand::Diff { first, other } => {
+            let out = read::diff(
+                deps,
+                &first.slug,
+                other.as_deref(),
+                first.kind.map(Kind::from),
+            )?;
+            rendered(json, &out, || render::diff(&out, paint()))
         }
         ReadCommand::Drafts => {
             let out = write::drafts(deps)?;
