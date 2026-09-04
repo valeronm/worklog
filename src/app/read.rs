@@ -15,8 +15,8 @@ use crate::domain::version::{State, Version, VersionId};
 use super::load::{self, Doc, Loaded};
 use super::output::{
     Check, Claimed, Context, Count, Diff, FactListing, FollowupItem, Followups, Fork, Forks, Group,
-    Head, History, HistoryRow, Hit, Listing, Log, LogRow, MachineUsage, Problem, Row, Search,
-    Shown, Side, Stamp, Tags, TopicRow, Topics, Usage, Where,
+    Head, History, HistoryRow, Hit, Listing, Log, LogRow, MachineUsage, Problem, Renamed, Row,
+    Search, Shown, Side, Stamp, Tags, TopicRow, Topics, Usage, Where,
 };
 use super::{Deps, Failure, machine};
 use crate::domain::machine::MachineName;
@@ -106,6 +106,7 @@ pub fn show(deps: &Deps, name: &str, kind: Option<Kind>) -> Result<Shown, Failur
     let (slug, heads) = match load::named(deps, name, kind)? {
         load::Named::Version(v) => (v.slug.clone(), vec![head(&v)]),
         load::Named::Slug(slug, document) => {
+            let (slug, document) = load::follow(deps.store, slug, document)?;
             let heads = match document.state() {
                 State::Live(v) => vec![head(v)],
                 State::Forked(heads) => heads.into_iter().map(head).collect(),
@@ -136,21 +137,33 @@ pub fn show(deps: &Deps, name: &str, kind: Option<Kind>) -> Result<Shown, Failur
     })
 }
 
+/// Newest first, from the slug a rename moved the document to, back into
+/// every document it was moved from.
 pub fn history(deps: &Deps, slug: &Slug) -> Result<History, Failure> {
     let document = deps.store.document(slug)?;
     if document.versions.is_empty() {
         return Err(Failure::Refused(format!("no {}: {slug}", slug.kind())));
     }
+    let (_, mut document) = load::follow(deps.store, slug.clone(), document)?;
+    let mut versions = Vec::new();
+    loop {
+        let ordered = document.history();
+        versions.extend(ordered.iter().map(|v| HistoryRow {
+            stamp: stamp(v),
+            slug: v.slug.path().to_owned(),
+            parents: v.block.parents.iter().map(ToString::to_string).collect(),
+        }));
+        // The oldest version has no parent in its document, so a parent it
+        // names sits in the document a rename moved it from.
+        let Some(oldest) = ordered.last() else { break };
+        let Some((_, previous)) = load::parent(deps.store, oldest)? else {
+            break;
+        };
+        document = previous;
+    }
     Ok(History {
         slug: slug.path().to_owned(),
-        versions: document
-            .history()
-            .into_iter()
-            .map(|v| HistoryRow {
-                stamp: stamp(v),
-                parents: v.block.parents.iter().map(ToString::to_string).collect(),
-            })
-            .collect(),
+        versions,
     })
 }
 
@@ -665,7 +678,7 @@ pub fn check(deps: &Deps) -> Result<Check, Failure> {
         for target in links::targets(&version.content_text()) {
             out.links += 1;
             match Slug::parse(&target) {
-                Ok(target) if loaded.is_present(&target) => {}
+                Ok(target) if loaded.reaches(&target) => {}
                 Ok(target) => problem(slug, format!("broken link: [[{target}]]")),
                 Err(_) => problem(slug, format!("link names no document shape: [[{target}]]")),
             }
@@ -693,7 +706,7 @@ pub fn diff(
 ) -> Result<Diff, Failure> {
     let first = load::named(deps, name, kind)?;
     let second = other.map(|o| load::named(deps, o, kind)).transpose()?;
-    let (slug, before, after) = match (first, second) {
+    let (slug, before, after, renamed) = match (first, second) {
         (load::Named::Slug(slug, document), None) => {
             let draft = load::draft(deps, &slug)?;
             let missing = draft.parents.iter().find(|p| document.get(p).is_none());
@@ -719,7 +732,7 @@ pub fn diff(
                 name: format!("{slug} (draft)"),
                 text: after,
             };
-            (slug, before, after)
+            (slug, before, after, None)
         }
         (load::Named::Slug(slug, _), Some(_)) | (_, Some(load::Named::Slug(slug, _))) => {
             return Err(Failure::Usage(format!(
@@ -727,17 +740,20 @@ pub fn diff(
             )));
         }
         (load::Named::Version(v), None) => {
-            let document = deps.store.document(&v.slug)?;
-            let parent = v.block.parents.first().and_then(|p| document.get(p));
-            let before = parent.map_or_else(
+            let parent = load::parent(deps.store, &v)?.map(|(parent, _)| parent);
+            let before = parent.as_ref().map_or_else(
                 || Side {
                     name: "(none)".to_owned(),
                     text: String::new(),
                 },
                 at,
             );
+            let renamed = v.rename_sides(parent.as_ref()).map(|(from, to)| Renamed {
+                from: from.map(|f| f.path().to_owned()),
+                to: to.path().to_owned(),
+            });
             let after = at(&v);
-            (v.slug, before, after)
+            (v.slug, before, after, renamed)
         }
         (load::Named::Version(a), Some(load::Named::Version(b))) => {
             // Within one document the chain says which came first
@@ -752,13 +768,14 @@ pub fn diff(
             };
             let (older, newer) = if a_is_older { (a, b) } else { (b, a) };
             let (before, after) = (at(&older), at(&newer));
-            (newer.slug, before, after)
+            (newer.slug, before, after, None)
         }
     };
     Ok(Diff {
         slug: slug.path().to_owned(),
         before,
         after,
+        renamed,
     })
 }
 

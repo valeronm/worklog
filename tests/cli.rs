@@ -95,6 +95,11 @@ impl Scratch {
     }
 }
 
+/// A field of a `history` or `log` line, which are two spaces apart.
+fn column(line: &str, n: usize) -> &str {
+    line.split("  ").nth(n).expect("the column")
+}
+
 fn set_summary(text: &str, summary: &str) -> String {
     text.replace("summary:\n", &format!("summary: {summary}\n"))
 }
@@ -421,10 +426,7 @@ fn save_refuses_stale_unchanged_and_broken_drafts() {
     assert!(shown.contains("Written on m2."), "{shown}");
     // An id, or a prefix of one, names a stored version on its own.
     let history = s.ok(&["history", "lantern"]);
-    let ids: Vec<&str> = history
-        .lines()
-        .map(|l| l.split("  ").next().unwrap())
-        .collect();
+    let ids: Vec<&str> = history.lines().map(|l| column(l, 0)).collect();
     assert_eq!(ids.len(), 2);
     let first = s.ok(&["show", ids[1]]);
     assert!(first.contains("What to know first."), "{first}");
@@ -532,15 +534,64 @@ fn claims_are_commands_on_the_machine_topic() {
 #[test]
 fn rename_and_tombstone() {
     let s = seeded();
+    s.write(
+        &["new", "entry", "relay-notes", "--date", "2026-09-02"],
+        |t| set_summary(t, "Read up on the relay") + "See [[lantern/relay-pin-is-fixed]].\n",
+    );
+    s.ok(&["verify", "lantern/relay-pin-is-fixed"]);
     let out = s.ok(&["rename", "lantern/relay-pin-is-fixed", "lantern/relay-pin"]);
     assert!(
         out.contains("moved to lantern/relay-pin; the old slug's tombstone is "),
         "{out}"
     );
-    let err = s.refused(&["show", "lantern/relay-pin-is-fixed"]);
+    // The old name reads as the new document, and a link to it still lands.
+    assert_eq!(
+        s.ok(&["show", "lantern/relay-pin-is-fixed"]),
+        s.ok(&["show", "lantern/relay-pin"])
+    );
+    assert!(s.ok(&["check"]).contains("0 problems"));
+    // Either name's history is the whole chain, with the rows written
+    // under the other name marked.
+    let history = s.ok(&["history", "lantern/relay-pin"]);
+    let lines: Vec<&str> = history.lines().collect();
+    let operations: Vec<&str> = lines.iter().map(|l| column(l, 3)).collect();
+    assert_eq!(
+        operations,
+        ["rename", "rename", "verify", "new"],
+        "{history}"
+    );
+    assert!(!lines[0].contains("  as "), "{history}");
+    assert!(
+        lines[1..]
+            .iter()
+            .all(|l| l.ends_with("  as lantern/relay-pin-is-fixed")),
+        "{history}"
+    );
+    let history = s.ok(&["history", "lantern/relay-pin-is-fixed"]);
+    let lines: Vec<&str> = history.lines().collect();
+    assert!(lines[0].ends_with("  as lantern/relay-pin"), "{history}");
+    assert!(lines[1..].iter().all(|l| !l.contains("  as ")), "{history}");
+    // Either half of the rename diffs as the move, not as the body leaving.
+    for line in &lines[..2] {
+        let diff = s.ok(&["diff", column(line, 0)]);
+        assert!(
+            diff.ends_with("\nrenamed from lantern/relay-pin-is-fixed to lantern/relay-pin\n"),
+            "{diff}"
+        );
+        assert_eq!(diff.lines().count(), 3, "{diff}");
+    }
+    let err = s.refused(&["checkout", "lantern/relay-pin-is-fixed"]);
     assert!(err.contains("renamed to lantern/relay-pin"), "{err}");
-    s.ok(&["show", "lantern/relay-pin"]);
     s.ok(&["tombstone", "lantern/relay-pin"]);
+    let err = s.refused(&["show", "lantern/relay-pin-is-fixed"]);
+    assert!(err.contains("removed"), "{err}");
+    let run = s.run(&["check"]);
+    assert_eq!(run.status.code(), Some(1));
+    let check = String::from_utf8_lossy(&run.stdout);
+    assert!(
+        check.contains("broken link: [[lantern/relay-pin-is-fixed]]"),
+        "{check}"
+    );
     let err = s.refused(&["new", "fact", "lantern/relay-pin"]);
     assert!(err.contains("never reused"), "{err}");
     let facts = s.run(&["facts", "lantern"]);

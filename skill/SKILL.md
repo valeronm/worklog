@@ -198,10 +198,14 @@ topic's directories, `--machine <name>` another host's.
   whatever their kind, so what other machines wrote since is one call;
   `--machine <name>` for one host's writes.
 - `worklog show <slug>` prints a document as it stands; `worklog history
-  <slug>` its versions. A version id, or a prefix of one as `history` and
+  <slug>` its versions, back through any rename with the versions written
+  under the old slug marked `as <old-slug>`. A renamed slug still reads:
+  `show`, `history` and `[[links]]` follow the move, while a write to it
+  refuses and names the new slug. A version id, or a prefix of one as `history` and
   `log` print them, names one stored version anywhere in the store:
   `worklog show <id>` prints it, `worklog diff <id>` what it changed
-  against its parent, `worklog diff <id> <id>` between any two.
+  against its parent, where a rename's two versions report the move rather
+  than a text diff, and `worklog diff <id> <id>` between any two.
 
 Answer a "what did we do about X" question by reading the matching
 documents and reconstructing what changed, when and why, citing slugs. If
@@ -220,7 +224,7 @@ because it failed to resolve: the target may be alive under another name
 or on a machine that has not synced.
 
 `worklog check` verifies every link, recheck and reference across the store
-and exits 1 on a problem; run it after a rename or tombstone.
+and exits 1 on a problem; run it after a tombstone.
 
 A document with two current versions is a fork, made by two machines
 writing from the same parent before syncing. `worklog forks` lists them,

@@ -348,10 +348,26 @@ impl Version {
 
     #[must_use]
     pub fn is_tombstone(&self) -> bool {
-        matches!(
-            self.block.operation,
-            Operation::Tombstone | Operation::Rename
-        ) && self.body.is_empty()
+        match self.block.operation {
+            Operation::Tombstone => true,
+            Operation::Rename => self.block.superseded_by.is_some(),
+            _ => false,
+        }
+    }
+
+    /// The slugs a rename moved the document between, for either version
+    /// it wrote: the tombstone names its successor, the moved version's
+    /// parent is the tombstone. A moved version without a parent knows
+    /// only where it landed.
+    #[must_use]
+    pub fn rename_sides(&self, parent: Option<&Version>) -> Option<(Option<Slug>, Slug)> {
+        if self.block.operation != Operation::Rename {
+            return None;
+        }
+        Some(match &self.block.superseded_by {
+            Some(to) => (Some(self.slug.clone()), to.clone()),
+            None => (parent.map(|p| p.slug.clone()), self.slug.clone()),
+        })
     }
 }
 
@@ -414,6 +430,15 @@ impl Document {
             [head] if head.is_tombstone() => State::Tombstoned(head),
             [head] => State::Live(head),
             _ => State::Forked(heads),
+        }
+    }
+
+    /// The slug a rename moved the document to.
+    #[must_use]
+    pub fn renamed_to(&self) -> Option<&Slug> {
+        match self.state() {
+            State::Tombstoned(v) => v.block.superseded_by.as_ref(),
+            _ => None,
         }
     }
 

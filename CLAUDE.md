@@ -25,7 +25,10 @@ wants something new from outside adds it to a port, not to a parameter.
 - A file is written under a dotted name and renamed into place, so a file
   sync never ships a partial version.
 - Nothing is edited in place. A command that needs to change a document
-  writes a new version naming the old one as parent. The one file that is
+  writes a new version naming the old one as parent. A parent sits in the
+  same document except after `rename`, whose moved first version names the
+  old slug's tombstone, so `history` can walk back across the move and a
+  parent lookup must be ready to read another document. The one file that is
   edited is a draft, and drafts live outside the store. A draft is the
   document's own text and nothing else; the versions it came from sit in
   a file beside it, so an editor cannot touch what `save` relies on.

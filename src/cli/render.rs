@@ -132,9 +132,14 @@ pub fn shown(s: &Shown) -> String {
 pub fn history(h: &History) -> String {
     let mut out = String::new();
     for v in &h.versions {
+        let (sep, moved) = if v.slug == h.slug {
+            ("", "")
+        } else {
+            ("  as ", v.slug.as_str())
+        };
         let _ = writeln!(
             out,
-            "{}  {}  {}  {}  parents: {}",
+            "{}  {}  {}  {}  parents: {}{sep}{moved}",
             short(&v.stamp.id),
             millis(&v.stamp.written),
             v.stamp.machine,
@@ -449,15 +454,26 @@ pub fn diff(d: &Diff, paint: bool) -> String {
     use similar::ChangeTag;
     const RESET: &str = "\x1b[0m";
     const TO_EDGE: &str = "\x1b[K";
+    let (dim, reset) = if paint { (DIM, RESET) } else { ("", "") };
+    let mut out = String::new();
+    let _ = writeln!(out, "{dim}--- {}{reset}", d.before.name);
+    let _ = writeln!(out, "{dim}+++ {}{reset}", d.after.name);
+    // A rename copies the content, so its versions report the move rather
+    // than a body leaving and returning.
+    if let Some(renamed) = &d.renamed {
+        let _ = match &renamed.from {
+            Some(from) => writeln!(out, "renamed from {from} to {}", renamed.to),
+            None => writeln!(out, "renamed to {}", renamed.to),
+        };
+        return out;
+    }
     let diff = similar::TextDiff::from_lines(&d.before.text, &d.after.text);
     let mut unified = diff.unified_diff();
     unified.context_radius(3);
     if !paint {
-        return unified.header(&d.before.name, &d.after.name).to_string();
+        out.push_str(&unified.to_string());
+        return out;
     }
-    let mut out = String::new();
-    let _ = writeln!(out, "{DIM}--- {}{RESET}", d.before.name);
-    let _ = writeln!(out, "{DIM}+++ {}{RESET}", d.after.name);
     for hunk in unified.iter_hunks() {
         let _ = writeln!(out, "{DIM}{}{RESET}", hunk.header());
         for op in hunk.ops() {
@@ -504,6 +520,7 @@ mod tests {
                 name: "lantern@bbbbbbbbbbbb".into(),
                 text: "---\nsummary: s\n---\n\nthe relay pin is free\n".into(),
             },
+            renamed: None,
         }
     }
 

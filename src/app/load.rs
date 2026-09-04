@@ -43,6 +43,8 @@ pub struct Loaded {
     pub broken: Vec<(Slug, String)>,
     /// Every document with a live head or a fork.
     present: BTreeSet<Slug>,
+    /// Each renamed slug and the one its tombstone names.
+    renamed: BTreeMap<Slug, Slug>,
     /// Indexes into `facts`, by topic.
     facts_by_topic: BTreeMap<String, Vec<usize>>,
 }
@@ -75,6 +77,46 @@ pub fn live(store: &dyn Store, slug: &Slug) -> Result<Version, Failure> {
         Some(v) => Ok(v.clone()),
         None => Err(not_live(slug, &document)),
     }
+}
+
+/// The document a slug reaches through any renames, and the slug it
+/// landed on, whatever state that document is in.
+pub fn follow(
+    store: &dyn Store,
+    mut slug: Slug,
+    mut document: Document,
+) -> Result<(Slug, Document), Failure> {
+    // Slugs are never reused, so a rename chain cannot loop.
+    while let Some(to) = document.renamed_to().cloned() {
+        document = store.document(&to)?;
+        slug = to;
+    }
+    Ok((slug, document))
+}
+
+/// A version's first parent with the document holding it: its own, or
+/// after a rename another of the same kind.
+pub fn parent(
+    store: &dyn Store,
+    version: &Version,
+) -> Result<Option<(Version, Document)>, Failure> {
+    let Some(id) = version.block.parents.first() else {
+        return Ok(None);
+    };
+    let own = store.document(&version.slug)?;
+    if let Some(found) = own.get(id) {
+        return Ok(Some((found.clone(), own)));
+    }
+    for slug in store.slugs(version.slug.kind())? {
+        if slug == version.slug {
+            continue;
+        }
+        let document = store.document(&slug)?;
+        if let Some(found) = document.get(id) {
+            return Ok(Some((found.clone(), document)));
+        }
+    }
+    Ok(None)
 }
 
 /// Every document in the store, whatever its kind.
@@ -138,13 +180,6 @@ pub fn draft(deps: &Deps, slug: &Slug) -> Result<Draft, Failure> {
         .ok_or_else(|| Failure::Refused(format!("no draft: {slug}")))
 }
 
-/// The head moved out of the document, if it has exactly one and it lives.
-fn take_head(mut document: Document) -> Option<Version> {
-    let id = document.current()?.id.clone();
-    let index = document.versions.iter().position(|v| v.id == id)?;
-    Some(document.versions.swap_remove(index))
-}
-
 /// Every live document of a kind, with its forks and broken files noted.
 fn load_kind<T>(
     store: &dyn Store,
@@ -155,16 +190,26 @@ fn load_kind<T>(
     let mut docs = Vec::new();
     for slug in store.slugs(kind)? {
         let document = store.document(&slug)?;
-        if let State::Forked(heads) = document.state() {
-            // A fork is still a document a link or a claim can name; only
-            // its content is undecided.
-            loaded.present.insert(slug.clone());
-            loaded
-                .forks
-                .push((slug, heads.iter().map(|h| h.id.clone()).collect()));
-            continue;
-        }
-        let Some(version) = take_head(document) else {
+        let head = match document.state() {
+            State::Forked(heads) => {
+                // A fork is still a document a link or a claim can name;
+                // only its content is undecided.
+                loaded.present.insert(slug.clone());
+                loaded
+                    .forks
+                    .push((slug, heads.iter().map(|h| h.id.clone()).collect()));
+                continue;
+            }
+            State::Tombstoned(tombstone) => {
+                if let Some(to) = &tombstone.block.superseded_by {
+                    loaded.renamed.insert(slug, to.clone());
+                }
+                continue;
+            }
+            State::Absent => continue,
+            State::Live(v) => v.id.clone(),
+        };
+        let Some(version) = document.versions.into_iter().find(|v| v.id == head) else {
             continue;
         };
         loaded.present.insert(slug.clone());
@@ -239,6 +284,13 @@ impl Loaded {
     #[must_use]
     pub fn is_present(&self, slug: &Slug) -> bool {
         self.present.contains(slug)
+    }
+
+    /// A slug that reaches a present document, through any renames.
+    #[must_use]
+    pub fn reaches(&self, slug: &Slug) -> bool {
+        std::iter::successors(Some(slug), |at| self.renamed.get(*at))
+            .any(|at| self.present.contains(at))
     }
 
     /// A topic that exists, forked or not.

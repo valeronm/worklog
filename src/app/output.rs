@@ -56,6 +56,8 @@ pub struct Shown {
 pub struct HistoryRow {
     #[serde(flatten)]
     pub stamp: Stamp,
+    /// The slug this version was written under.
+    pub slug: String,
     pub parents: Vec<String>,
 }
 
@@ -244,6 +246,14 @@ pub struct Diff {
     pub slug: String,
     pub before: Side,
     pub after: Side,
+    /// The move, when the version was written by a rename.
+    pub renamed: Option<Renamed>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Renamed {
+    pub from: Option<String>,
+    pub to: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
