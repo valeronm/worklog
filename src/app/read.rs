@@ -286,9 +286,7 @@ pub fn where_(deps: &Deps, topic: &str, machine_name: Option<&str>) -> Result<Wh
         Some(m) => m.to_owned(),
         None => machine(deps)?.to_string(),
     };
-    let (_, machine_topic) = loaded
-        .machine_topic(&machine_name)
-        .ok_or_else(|| Failure::Refused(format!("no topic carries `machine: {machine_name}`")))?;
+    let machine_topic = &load::machine_topic(loaded.topics.values(), &machine_name)?.data;
     let paths = |map: &[(String, Vec<String>)]| {
         map.iter()
             .filter(|(t, _)| t == topic)
@@ -299,7 +297,6 @@ pub fn where_(deps: &Deps, topic: &str, machine_name: Option<&str>) -> Result<Wh
         topic: topic.to_owned(),
         machine: machine_name,
         dirs: paths(&machine_topic.claims),
-        families: paths(&machine_topic.families),
     })
 }
 
@@ -628,7 +625,6 @@ mod tests {
                 ("lantern", &["~/projects/lantern"]),
                 ("atlas", &["~/projects/Android/atlas"]),
             ],
-            &[],
             &[],
         )
         .unwrap();

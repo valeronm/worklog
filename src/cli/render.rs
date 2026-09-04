@@ -178,10 +178,7 @@ pub fn where_(w: &Where) -> String {
     for dir in &w.dirs {
         let _ = writeln!(out, "{dir}");
     }
-    for family in &w.families {
-        let _ = writeln!(out, "{family} — the directories sharing this prefix");
-    }
-    if w.dirs.is_empty() && w.families.is_empty() {
+    if w.dirs.is_empty() {
         let _ = writeln!(
             out,
             "no directory on {} — a device, not a checkout",

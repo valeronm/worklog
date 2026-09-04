@@ -80,17 +80,22 @@ fn split_recheck(text: &str) -> (String, Option<String>) {
     (rest.trim().to_owned(), Some(value))
 }
 
-fn topics_of(projects: &[LegacyProject]) -> Vec<(String, Topic)> {
+/// The old map's family prefixes have no counterpart: a claim is a
+/// directory, so each repo a prefix covered is claimed by hand.
+fn topics_of(projects: &[LegacyProject], report: &mut Report) -> Vec<(String, Topic)> {
     let claims: Vec<(String, Vec<String>)> = projects
         .iter()
         .filter(|p| !p.dirs.is_empty())
         .map(|p| (p.name.clone(), p.dirs.clone()))
         .collect();
-    let families: Vec<(String, Vec<String>)> = projects
-        .iter()
-        .filter(|p| !p.families.is_empty())
-        .map(|p| (p.name.clone(), p.families.clone()))
-        .collect();
+    for p in projects {
+        for prefix in &p.families {
+            report.notes.push(format!(
+                "{}: family prefix {prefix} dropped; `worklog claim {}` in each directory it covered",
+                p.name, p.name
+            ));
+        }
+    }
     projects
         .iter()
         .map(|p| {
@@ -98,19 +103,17 @@ fn topics_of(projects: &[LegacyProject]) -> Vec<(String, Topic)> {
                 .machine
                 .as_deref()
                 .and_then(|m| MachineName::parse(m).ok());
-            // Every host gets every claim, as the old map applied them: a
-            // path absent from a host never matches there.
-            let (claims, families) = if machine.is_some() {
-                (claims.clone(), families.clone())
-            } else {
-                (vec![], vec![])
-            };
             let topic = Topic {
                 summary: p.description.clone().unwrap_or_else(|| p.name.clone()),
                 includes: vec![],
+                // Every host gets every claim, as the old map applied
+                // them: a path absent from a host never matches there.
+                claims: if machine.is_some() {
+                    claims.clone()
+                } else {
+                    vec![]
+                },
                 machine,
-                claims,
-                families,
                 unclaimed: vec![],
             };
             (p.name.clone(), topic)
@@ -262,7 +265,7 @@ pub fn migrate(
         }
     }
     let mut report = Report::default();
-    for (name, topic) in topics_of(&legacy::read_projects(projects)?) {
+    for (name, topic) in topics_of(&legacy::read_projects(projects)?, &mut report) {
         let slug = match Slug::of_kind(Kind::Topic, &name) {
             Ok(slug) => slug,
             Err(e) => {

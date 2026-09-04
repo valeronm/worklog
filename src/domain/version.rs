@@ -53,11 +53,13 @@ pub enum Operation {
     Tombstone,
     Rename,
     Resolve,
+    Claim,
+    Unclaim,
     Migrate,
 }
 
 impl Operation {
-    pub const ALL: [Operation; 10] = [
+    pub const ALL: [Operation; 12] = [
         Operation::New,
         Operation::Save,
         Operation::Done,
@@ -67,6 +69,8 @@ impl Operation {
         Operation::Tombstone,
         Operation::Rename,
         Operation::Resolve,
+        Operation::Claim,
+        Operation::Unclaim,
         Operation::Migrate,
     ];
 
@@ -82,6 +86,8 @@ impl Operation {
             Operation::Tombstone => "tombstone",
             Operation::Rename => "rename",
             Operation::Resolve => "resolve",
+            Operation::Claim => "claim",
+            Operation::Unclaim => "unclaim",
             Operation::Migrate => "migrate",
         }
     }

@@ -30,7 +30,9 @@ pub struct Reached {
 /// A topic by slug; `None` for a name no topic carries.
 pub type Lookup<'a> = dyn Fn(&str) -> Option<&'a Topic> + 'a;
 
-fn expand(path: &str, home: &str) -> String {
+/// A claim as a path on this host: `~` stands for home.
+#[must_use]
+pub fn expand(path: &str, home: &str) -> String {
     match path.strip_prefix("~/") {
         Some(rest) => format!("{}/{rest}", home.trim_end_matches('/')),
         None if path == "~" => home.trim_end_matches('/').to_owned(),
@@ -38,12 +40,22 @@ fn expand(path: &str, home: &str) -> String {
     }
 }
 
-/// How much of `cwd` a claim covers, or nothing.
-fn matched(cwd: &str, claim: &str, family: bool, home: &str) -> Option<usize> {
-    let claim = expand(claim, home);
-    if family {
-        return cwd.starts_with(&claim).then_some(claim.len());
+/// A path as a claim is spelled: `~/…` under home, so the same claim
+/// reads alike on every host.
+#[must_use]
+pub fn contract(path: &str, home: &str) -> String {
+    let home = home.trim_end_matches('/');
+    match path.strip_prefix(home) {
+        Some("") => "~".to_owned(),
+        Some(rest) if rest.starts_with('/') => format!("~{rest}"),
+        _ => path.to_owned(),
     }
+}
+
+/// How much of `cwd` a claim covers, or nothing: the claimed directory
+/// itself and everything under it.
+fn matched(cwd: &str, claim: &str, home: &str) -> Option<usize> {
+    let claim = expand(claim, home);
     let dir = claim.trim_end_matches('/');
     (cwd == dir || cwd.starts_with(&format!("{dir}/"))).then_some(dir.len())
 }
@@ -100,11 +112,9 @@ pub fn resolve(
     if let Some((machine_slug, machine)) = machine {
         // Longest match per topic, then topics by match length, then name.
         let mut best: Vec<(&str, usize, &str)> = Vec::new();
-        let claims = machine.claims.iter().map(|(t, paths)| (t, paths, false));
-        let families = machine.families.iter().map(|(t, paths)| (t, paths, true));
-        for (topic, paths, family) in claims.chain(families) {
+        for (topic, paths) in &machine.claims {
             for path in paths {
-                let Some(len) = matched(cwd, path, family, home) else {
+                let Some(len) = matched(cwd, path, home) else {
                     continue;
                 };
                 match best.iter_mut().find(|(t, _, _)| *t == topic) {
@@ -166,8 +176,10 @@ mod tests {
         topics.insert(
             "host".into(),
             Topic {
-                claims: vec![("atlas".into(), vec!["~/projects/Android/atlas".into()])],
-                families: vec![("lab".into(), vec!["~/projects/lab-".into()])],
+                claims: vec![
+                    ("atlas".into(), vec!["~/projects/Android/atlas".into()]),
+                    ("lab".into(), vec!["~/projects/lab".into()]),
+                ],
                 unclaimed: vec!["personal".into()],
                 ..topic(&[])
             },
@@ -227,9 +239,9 @@ mod tests {
     }
 
     #[test]
-    fn families_match_by_prefix_and_dirs_by_segment() {
+    fn a_claim_covers_what_is_under_it_by_segment() {
         let topics = store();
-        let reached = resolve_in(&topics, "/home/u/projects/lab-sensors");
+        let reached = resolve_in(&topics, "/home/u/projects/lab/sensors");
         assert_eq!(names(&reached)[0], ("lab", 0));
         let reached = resolve_in(&topics, "/home/u/projects/Android/atlas-old");
         assert_eq!(
@@ -246,6 +258,19 @@ mod tests {
             names(&reached),
             [("atlas", 0), ("android", 1), ("phone-a", 2), ("phone-b", 2)]
         );
+    }
+
+    #[test]
+    fn a_claim_spells_home_as_tilde_both_ways() {
+        for (path, claim) in [
+            ("/home/u/projects/x", "~/projects/x"),
+            ("/home/u", "~"),
+            ("/home/user2/x", "/home/user2/x"),
+            ("/opt/x", "/opt/x"),
+        ] {
+            assert_eq!(contract(path, "/home/u/"), claim);
+            assert_eq!(expand(claim, "/home/u"), path);
+        }
     }
 
     #[test]

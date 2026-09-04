@@ -118,7 +118,6 @@ pub struct Where {
     pub topic: String,
     pub machine: String,
     pub dirs: Vec<String>,
-    pub families: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

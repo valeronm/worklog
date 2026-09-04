@@ -6,9 +6,10 @@ use crate::domain::entry::Entry;
 use crate::domain::fact::Fact;
 use crate::domain::followup::{Followup, FollowupState, NotOpen};
 use crate::domain::frontmatter::Fields;
+use crate::domain::graph;
 use crate::domain::recheck::Recheck;
 use crate::domain::slug::{Kind, Slug};
-use crate::domain::topic::Topic;
+use crate::domain::topic::{ClaimError, Topic};
 use crate::domain::version::{Operation, State, Version, VersionBlock, VersionId};
 
 use super::load;
@@ -461,6 +462,49 @@ pub fn rename(deps: &Deps, from: &Slug, to: &str) -> Result<Written, Failure> {
     })
 }
 
+/// A claim or its removal on this machine's topic. `path` is absolute;
+/// `change` gets it spelled as the store spells claims.
+fn reclaim(
+    deps: &Deps,
+    topic: &str,
+    path: &str,
+    change: impl FnOnce(&mut Topic, &str) -> Result<(), ClaimError>,
+    operation: Operation,
+) -> Result<Written, Failure> {
+    let topics = load::topics(deps.store)?;
+    if !topics.iter().any(|t| t.slug.path() == topic) {
+        // The precise refusal: absent, removed, or forked.
+        load::live(deps.store, &Slug::of_kind(Kind::Topic, topic)?)?;
+    }
+    let name = machine(deps)?;
+    let mut doc = load::machine_topic(&topics, name.as_str())?.clone();
+    change(&mut doc.data, &graph::contract(path, &deps.home))
+        .map_err(|e| Failure::at(&doc.slug, e))?;
+    let body = std::mem::take(&mut doc.version.body);
+    amend(deps, &doc.version, operation, doc.data.to_fields(), body)
+}
+
+/// Claims a directory for a topic on this machine.
+pub fn claim(deps: &Deps, topic: &str, path: &str) -> Result<Written, Failure> {
+    reclaim(
+        deps,
+        topic,
+        path,
+        |t, p| t.claim(topic, p),
+        Operation::Claim,
+    )
+}
+
+pub fn unclaim(deps: &Deps, topic: &str, path: &str) -> Result<Written, Failure> {
+    reclaim(
+        deps,
+        topic,
+        path,
+        |t, p| t.unclaim(topic, p),
+        Operation::Unclaim,
+    )
+}
+
 #[cfg(any(test, feature = "testing"))]
 pub use seeding::*;
 
@@ -504,20 +548,16 @@ mod seeding {
         summary: &str,
         machine: &str,
         claims: &[(&str, &[&str])],
-        families: &[(&str, &[&str])],
         unclaimed: &[&str],
     ) -> Result<Version, Failure> {
-        let map = |m: &[(&str, &[&str])]| {
-            m.iter()
-                .map(|(t, paths)| ((*t).to_owned(), owned(paths)))
-                .collect()
-        };
         let topic = Topic {
             summary: summary.into(),
             includes: vec![],
             machine: Some(MachineName::parse(machine)?),
-            claims: map(claims),
-            families: map(families),
+            claims: claims
+                .iter()
+                .map(|(t, paths)| ((*t).to_owned(), owned(paths)))
+                .collect(),
             unclaimed: owned(unclaimed),
         };
         first_version(
@@ -763,6 +803,34 @@ mod tests {
         tombstone(&d, &moved).unwrap();
         assert!(
             matches!(new_fact(&d, "lantern/relay-pin", false), Err(Failure::Refused(m)) if m.contains("never reused"))
+        );
+    }
+
+    #[test]
+    fn claims_land_on_the_machine_topic() {
+        let w = World::new("m1");
+        let d = w.deps();
+        put_topic(&d, "lantern", "A Rust app", &[], None).unwrap();
+        let dir = "/home/u/projects/lantern";
+        assert!(
+            matches!(claim(&d, "lantern", dir), Err(Failure::Refused(m)) if m.contains("machine: m1"))
+        );
+        put_machine_topic(&d, "desk", "This machine", "m1", &[], &[]).unwrap();
+        assert!(
+            matches!(claim(&d, "nowhere", dir), Err(Failure::Refused(m)) if m.contains("no topic"))
+        );
+        claim(&d, "lantern", dir).unwrap();
+        let desk = current(&w, &Slug::parse("desk").unwrap());
+        assert_eq!(desk.block.operation, Operation::Claim);
+        let topic = Topic::from_fields(&desk.fields).unwrap();
+        assert_eq!(
+            topic.claims[0].1,
+            ["~/projects/lantern"],
+            "spelled as a claim"
+        );
+        unclaim(&d, "lantern", dir).unwrap();
+        assert!(
+            matches!(unclaim(&d, "lantern", dir), Err(Failure::Refused(m)) if m.contains("does not claim"))
         );
     }
 

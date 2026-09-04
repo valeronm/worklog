@@ -250,6 +250,18 @@ pub enum WriteCommand {
     },
     /// Open a draft holding every head of a fork
     Resolve(SlugArg),
+    /// Claim a directory for a topic on this machine
+    Claim(ClaimArg),
+    /// Drop a claim from this machine
+    Unclaim(ClaimArg),
+}
+
+/// A claim named on the command line.
+#[derive(Args)]
+pub struct ClaimArg {
+    pub topic: String,
+    /// The directory, the working directory when not given
+    pub dir: Option<PathBuf>,
 }
 
 #[derive(Subcommand)]

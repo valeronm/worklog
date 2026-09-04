@@ -398,6 +398,27 @@ fn a_fork_is_reported_everywhere_and_resolved_by_hand() {
 }
 
 #[test]
+fn claims_are_commands_on_the_machine_topic() {
+    let s = seeded();
+    let ctx = s.ok(&["context", "Documents"]);
+    assert!(!ctx.contains("phone — this directory"), "{ctx}");
+    s.ok(&["claim", "phone", "Documents"]);
+    assert_eq!(s.ok(&["where", "phone"]), "~/Documents\n");
+    let ctx = s.ok(&["context", "Documents"]);
+    assert!(ctx.contains("phone — this directory:"), "{ctx}");
+    let err = s.refused(&["claim", "phone", "Documents"]);
+    assert!(err.contains("already claims"), "{err}");
+    s.ok(&["unclaim", "phone", "Documents"]);
+    let err = s.refused(&["unclaim", "phone", "Documents"]);
+    assert!(err.contains("does not claim"), "{err}");
+    let history = s.ok(&["history", "host"]);
+    assert!(
+        history.lines().next().unwrap().contains("unclaim"),
+        "{history}"
+    );
+}
+
+#[test]
 fn rename_and_tombstone() {
     let s = seeded();
     let out = s.ok(&["rename", "lantern/relay-pin-is-fixed", "lantern/relay-pin"]);

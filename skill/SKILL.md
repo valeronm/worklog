@@ -153,8 +153,8 @@ Writing one well:
 A topic's document carries a `summary` other sessions see, `includes`, the
 topics loaded along with it, and a free body for what to know before
 touching the subject at all. A machine topic carries `machine: <name>`,
-`claims` mapping topics to that host's directories, `families` for path
-prefixes, and `unclaimed` for topics loaded only in unclaimed directories.
+`claims` mapping topics to that host's directories, and `unclaimed` for
+topics loaded only in unclaimed directories.
 `worklog topics` lists them; `worklog where <topic>` shows a topic's
 directories on this machine.
 
@@ -162,6 +162,18 @@ Write a topic's summary from the subject itself, its README or what the
 device is, not from its facts: facts cluster in whatever corner needed
 writing down, and the summary is all a session in another directory ever
 sees of the topic, so it decides whether the topic is opened at all.
+
+## Setting up a project
+
+A checkout `context` reaches nothing in is unclaimed. Two commands make it
+a project:
+
+1. `worklog new topic <name>`; give the draft a `summary` written from the
+   repo, and `includes` for the topics it shares; `worklog save <name>`.
+2. `worklog claim <name>` from inside the checkout, or with the directory
+   as a second argument. A claim covers the directory and everything
+   under it, so a parent holding several checkouts of one topic is claimed
+   once. `worklog unclaim <name> [<dir>]` takes it back.
 
 ## Search and recall
 

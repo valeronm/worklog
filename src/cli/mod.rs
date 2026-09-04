@@ -18,7 +18,7 @@ use crate::app::{Deps, Failure, migrate, read, slug_arg, write};
 use crate::domain::slug::Kind;
 use crate::fs::{FileIdentity, FsDrafts, FsStore, Paths, SystemClock};
 
-use args::{Cli, Command, NewWhat, ReadCommand, SlugArg, StoreCommand, WriteCommand};
+use args::{ClaimArg, Cli, Command, NewWhat, ReadCommand, SlugArg, StoreCommand, WriteCommand};
 
 /// One command's stdout, and the exit code `check` sets on problems.
 struct Rendered {
@@ -47,14 +47,17 @@ fn slug(arg: &SlugArg) -> Result<crate::domain::slug::Slug, Failure> {
     slug_arg(&arg.slug, arg.kind.map(Kind::from))
 }
 
-/// The directory a context is asked for, resolved so claims match it.
-fn directory(dir: Option<String>) -> Result<String, Failure> {
+fn cwd() -> Result<std::path::PathBuf, Failure> {
+    std::env::current_dir().map_err(|e| Failure::Refused(format!("no working directory: {e}")))
+}
+
+/// A directory named on the command line, or the working directory,
+/// resolved so a claim and a context agree on it.
+fn directory(dir: Option<std::path::PathBuf>) -> Result<String, Failure> {
     let path = match dir {
-        Some(dir) => {
-            std::fs::canonicalize(&dir).map_err(|e| Failure::Usage(format!("{dir}: {e}")))?
-        }
-        None => std::env::current_dir()
-            .map_err(|e| Failure::Refused(format!("no working directory: {e}")))?,
+        Some(dir) => std::fs::canonicalize(&dir)
+            .map_err(|e| Failure::Usage(format!("{}: {e}", dir.display())))?,
+        None => cwd()?,
     };
     Ok(path.display().to_string())
 }
@@ -135,7 +138,7 @@ fn dispatch_read(deps: &Deps, json: bool, command: ReadCommand) -> Result<Render
             rendered(json, &out, || render::followups(&out))
         }
         ReadCommand::Context { dir } => {
-            let out = read::context(deps, &directory(dir)?)?;
+            let out = read::context(deps, &directory(dir.map(Into::into))?)?;
             rendered(json, &out, || render::context(&out))
         }
         ReadCommand::Forks => {
@@ -244,6 +247,14 @@ fn dispatch_write(deps: &Deps, json: bool, command: WriteCommand) -> Result<Rend
         WriteCommand::Resolve(arg) => {
             let out = write::resolve(deps, &slug(&arg)?)?;
             rendered(json, &out, || render::draft_ref(&out))
+        }
+        WriteCommand::Claim(ClaimArg { topic, dir }) => {
+            let out = write::claim(deps, &topic, &directory(dir)?)?;
+            rendered(json, &out, || render::written(&out))
+        }
+        WriteCommand::Unclaim(ClaimArg { topic, dir }) => {
+            let out = write::unclaim(deps, &topic, &directory(dir)?)?;
+            rendered(json, &out, || render::written(&out))
         }
     }
 }

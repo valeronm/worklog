@@ -33,6 +33,8 @@ so the same store serves machines with different layouts.
 
 ```
 worklog init desk --store ~/sync/worklog   # once per host
+worklog new topic lantern                  # what the project is; then save
+worklog claim lantern                      # this checkout is lantern, on this host
 worklog context                            # the index a session opens with
 worklog new entry lamp-driver              # prints a draft path to edit
 worklog save 2026-09/2026-09-04-lamp-driver

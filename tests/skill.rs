@@ -92,6 +92,8 @@ fn the_skill_covers_the_commands_a_session_uses() {
         "forks",
         "resolve",
         "drafts",
+        "claim",
+        "unclaim",
     ] {
         assert!(
             m.contains(needed),

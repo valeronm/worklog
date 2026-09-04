@@ -133,6 +133,33 @@ pub fn followups(store: &dyn Store) -> Result<Vec<Doc<Followup>>, Failure> {
     Ok(docs)
 }
 
+/// Every live topic, without the rest of the store.
+pub fn topics(store: &dyn Store) -> Result<Vec<Doc<Topic>>, Failure> {
+    let mut scratch = Loaded::default();
+    load_kind(store, Kind::Topic, Topic::from_fields, &mut scratch)
+}
+
+/// The topic bound to this host among `topics`, or the refusal naming
+/// what to create.
+pub fn machine_topic<'a>(
+    topics: impl IntoIterator<Item = &'a Doc<Topic>>,
+    machine: &str,
+) -> Result<&'a Doc<Topic>, Failure> {
+    topics
+        .into_iter()
+        .find(|doc| {
+            doc.data
+                .machine
+                .as_ref()
+                .is_some_and(|m| m.as_str() == machine)
+        })
+        .ok_or_else(|| {
+            Failure::Refused(format!(
+                "no topic carries `machine: {machine}`; `worklog new topic <name>` with that line first"
+            ))
+        })
+}
+
 pub fn load(store: &dyn Store) -> Result<Loaded, Failure> {
     let mut loaded = Loaded::default();
     loaded.entries = load_kind(store, Kind::Entry, Entry::from_fields, &mut loaded)?;
