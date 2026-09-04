@@ -31,14 +31,21 @@ pub struct Report {
     pub notes: Vec<String>,
 }
 
-/// `[[2026-08-29-name]]` named an entry by file name; the slug now carries
-/// the year directory.
+/// The old store linked an entry by its file name, `[[<date>-<name>]]`;
+/// the slug is built the way `Slug::entry` builds every entry slug.
 fn rewrite_links(text: &str) -> String {
     static ENTRY_LINK: LazyLock<regex::Regex> = LazyLock::new(|| {
-        regex::Regex::new(r"\[\[(\d{4})(-\d{2}-\d{2}-[A-Za-z0-9._-]+)\]\]")
+        regex::Regex::new(r"\[\[(\d{4}-\d{2}-\d{2})-([A-Za-z0-9._-]+)\]\]")
             .expect("a literal pattern")
     });
-    ENTRY_LINK.replace_all(text, "[[$1/$1$2]]").into_owned()
+    ENTRY_LINK
+        .replace_all(text, |caps: &regex::Captures| {
+            match Slug::entry(&caps[1], &caps[2]) {
+                Ok(slug) => format!("[[{slug}]]"),
+                Err(_) => caps[0].to_owned(),
+            }
+        })
+        .into_owned()
 }
 
 fn kebab(text: &str, words: usize) -> String {
@@ -292,10 +299,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn links_gain_the_year_directory() {
+    fn links_become_entry_slugs() {
         assert_eq!(
             rewrite_links("see [[2026-08-29-x]] and [[lantern/relay]] and `[[2026-01-01-x]]`"),
-            "see [[2026/2026-08-29-x]] and [[lantern/relay]] and `[[2026/2026-01-01-x]]`"
+            "see [[2026-08/2026-08-29-x]] and [[lantern/relay]] and `[[2026-01/2026-01-01-x]]`"
         );
     }
 

@@ -35,3 +35,10 @@ curl -fsSL -o "$tmp/$asset.sha256" "$base/$asset.sha256"
 mkdir -p "$prefix"
 install -m 0755 "$tmp/$asset" "$prefix/worklog"
 echo "worklog $tag installed to $prefix/worklog"
+
+# The agent skill describes the commands of the binary it shipped with, so a
+# host that has one gets the new one; a host that never opted in is left alone.
+if [ -f "$HOME/.claude/skills/worklog/SKILL.md" ]; then
+  "$prefix/worklog" skill install >/dev/null
+  echo "agent skill updated in $HOME/.claude/skills/worklog"
+fi

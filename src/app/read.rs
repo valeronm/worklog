@@ -382,10 +382,31 @@ fn open_work(loaded: &Loaded, topics: &[&str], today: &str, closed_too: bool) ->
     out
 }
 
-pub fn followups(deps: &Deps, topic: Option<&str>, all: bool) -> Result<Followups, Failure> {
+/// Open work about a topic, or arising in one entry when `about` is an
+/// entry slug; everything when nothing is named.
+pub fn followups(deps: &Deps, about: Option<&str>, all: bool) -> Result<Followups, Failure> {
     let loaded = load::load(deps.store)?;
-    let topics: Vec<&str> = topic.into_iter().collect();
-    Ok(open_work(&loaded, &topics, &deps.clock.today(), all))
+    let today = deps.clock.today();
+    let entry = about
+        .and_then(|a| Slug::parse(a).ok())
+        .filter(|s| s.kind() == Kind::Entry);
+    let Some(entry) = entry else {
+        let topics: Vec<&str> = about.into_iter().collect();
+        return Ok(open_work(&loaded, &topics, &today, all));
+    };
+    let mut out = open_work(&loaded, &[], &today, all);
+    out.items
+        .retain(|item| item.entry.as_deref() == Some(entry.path()));
+    let open: Vec<&FollowupItem> = out
+        .items
+        .iter()
+        .filter(|i| i.state.as_deref() == Some("open"))
+        .collect();
+    out.open = open.len();
+    out.entries = usize::from(!open.is_empty());
+    out.due = open.iter().filter(|i| i.due).count();
+    out.without_recheck = open.iter().filter(|i| i.recheck.is_none()).count();
+    Ok(out)
 }
 
 pub fn forks(deps: &Deps) -> Result<Forks, Failure> {
@@ -629,7 +650,7 @@ mod tests {
         .unwrap();
         write::put_entry(
             deps,
-            "2026/2026-09-01-first",
+            "2026-09/2026-09-01-first",
             "2026-09-01",
             "Did the first thing",
             &["lantern"],
@@ -638,7 +659,7 @@ mod tests {
         write::put_followup(
             deps,
             "2026-09-01-port",
-            "2026/2026-09-01-first",
+            "2026-09/2026-09-01-first",
             "Port it",
             &["lantern"],
             Some("2026-09-03 a month"),
@@ -647,7 +668,7 @@ mod tests {
         write::put_followup(
             deps,
             "2026-09-01-later",
-            "2026/2026-09-01-first",
+            "2026-09/2026-09-01-first",
             "Later",
             &["Lantern"],
             None,
@@ -695,11 +716,14 @@ mod tests {
         assert_eq!(hits.hits[0].row.slug, "lantern/relay-pin-is-fixed");
         assert!(search(&d, "fix.d", false).unwrap().hits.is_empty());
         assert_eq!(search(&d, "fix.d", true).unwrap().hits.len(), 1);
+        let by_entry = followups(&d, Some("2026-09/2026-09-01-first"), false).unwrap();
+        assert_eq!(by_entry.items.len(), 2);
+        assert_eq!((by_entry.open, by_entry.entries, by_entry.due), (2, 1, 1));
         let open = followups(&d, Some("lantern"), false).unwrap();
         assert_eq!(open.open, 2);
         assert_eq!(open.due, 1);
         assert_eq!(open.without_recheck, 1);
-        let shown = show(&d, &Slug::parse("2026/2026-09-01-first").unwrap()).unwrap();
+        let shown = show(&d, &Slug::parse("2026-09/2026-09-01-first").unwrap()).unwrap();
         assert_eq!(shown.followups.len(), 2);
         assert!(!shown.forked);
         assert_eq!(

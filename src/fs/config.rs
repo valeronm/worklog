@@ -5,7 +5,7 @@ use crate::domain::frontmatter::{self, Fields};
 use crate::domain::machine::MachineName;
 use crate::domain::ports::{Identity, StoreError};
 
-use super::{corrupt, io_error};
+use super::{corrupt, io_error, write_file};
 
 /// What `init` records for a host: its name and where its store is.
 ///
@@ -40,13 +40,10 @@ impl Config {
     }
 
     pub fn write(&self, path: &Path) -> Result<(), StoreError> {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).map_err(|e| io_error(parent, &e))?;
-        }
         let mut fields = Fields::default();
         fields.push_scalar("machine", self.machine.as_str());
         fields.push_scalar("store", &self.store.display().to_string());
-        fs::write(path, frontmatter::emit_fields(&fields)).map_err(|e| io_error(path, &e))
+        write_file(path, &frontmatter::emit_fields(&fields))
     }
 }
 

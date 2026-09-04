@@ -41,7 +41,8 @@ nothing reads a store before it exists.
 
 Slug shapes decide the kind (`domain::slug`), so a bare slug names one
 document across the store. A topic needs a letter so it cannot be confused
-with an entry's year directory. An idea is a fact with `idea: true`, not a
+with an entry's month directory, `2026-09`, which holds the month's entries
+so no directory grows past a few dozen children. An idea is a fact with `idea: true`, not a
 kind of its own, so it becomes a fact by a field change and keeps its links.
 The fact-level key is `idea` rather than `kind` because `kind` is taken by
 the document header.
@@ -67,6 +68,19 @@ counts, must-act-on items first. `tests/cli.rs` pins the shape.
 stdout carries data only; refusals and notes go to stderr. Exit 1 is a
 refusal or a store problem, 2 a usage error. Shell completions parse
 `worklog topics` and `worklog tags`, so those two shapes stay stable.
+
+## The skill
+
+`skill/SKILL.md` is compiled into the binary so the skill a session reads
+is the one written for the commands it has, and `tests/skill.rs` holds the
+two to each other. The session hook is merged into the agent's settings
+file rather than written over it, because that file is the user's and holds
+other hooks; a scripted `init` touches neither the skill nor the settings
+unless told to, since a script writing into `~/.claude` unasked is the
+kind of surprise the store exists to avoid. The skill is public and written
+for a stranger: it holds how to use the store, including the follow-up
+triage put to the user and the offer to log after work, and nothing about
+any one person's other tools.
 
 ## What stays out of the repo
 

@@ -135,7 +135,7 @@ mod tests {
 
     fn open() -> Followup {
         Followup {
-            entry: Slug::parse("2026/2026-09-02-rewrite").unwrap(),
+            entry: Slug::parse("2026-09/2026-09-02-rewrite").unwrap(),
             tags: vec!["worklog".into()],
             recheck: None,
             state: FollowupState::Open,

@@ -4,22 +4,24 @@ use crate::domain::ports::StoreError;
 
 use super::config::Config;
 
-/// Where the config, the drafts and the store live on this host.
+/// Where everything lives on this host: the config, the drafts, the
+/// store the config names, and the agent's own files.
 ///
-/// The config file is at a fixed place and names the store; until `init`
-/// has written it there is no store to read. `WORKLOG_HOME=<dir>` puts all
-/// three under one directory, which is how a test or a migration dry run
-/// keeps clear of the real ones.
+/// `WORKLOG_HOME=<dir>` puts the config, the drafts and the default store
+/// under one directory, which is how a test or a migration dry run keeps
+/// clear of the real ones; the agent's files follow `HOME` as always.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Paths {
     pub config: PathBuf,
     pub drafts: PathBuf,
-    /// `None` until `init` has run.
-    pub store: Option<PathBuf>,
     /// The store `init` records when not told otherwise.
     pub default_store: PathBuf,
     /// The user's home, for `~/` in claims.
     pub home: PathBuf,
+    /// The agent's settings file, where the session hook goes.
+    pub agent_settings: PathBuf,
+    /// The agent's skills directory, where the skill goes.
+    pub agent_skills: PathBuf,
 }
 
 impl Paths {
@@ -43,13 +45,19 @@ impl Paths {
                 home.join("worklog"),
             ),
         };
-        let store = Config::read(&config)?.map(|c| c.store);
+        let agent = home.join(".claude");
         Ok(Paths {
             config,
             drafts,
-            store,
             default_store,
+            agent_settings: agent.join("settings.json"),
+            agent_skills: agent.join("skills"),
             home,
         })
+    }
+
+    /// The store the config names, or `None` until `init` has run.
+    pub fn store(&self) -> Result<Option<PathBuf>, StoreError> {
+        Ok(Config::read(&self.config)?.map(|c| c.store))
     }
 }

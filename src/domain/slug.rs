@@ -38,7 +38,7 @@ impl fmt::Display for Kind {
 ///
 /// The shape of the path says the kind, so a bare slug names one document
 /// across the store: `lantern` is a topic, `lantern/name` a fact,
-/// `2026/2026-09-04-name` an entry and `2026-09-04-name` a followup.
+/// `2026-09/2026-09-04-name` an entry and `2026-09-04-name` a followup.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Slug {
     kind: Kind,
@@ -79,10 +79,6 @@ fn segment_ok(segment: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
 }
 
-fn is_year(text: &str) -> bool {
-    text.len() == 4 && text.bytes().all(|b| b.is_ascii_digit())
-}
-
 /// `YYYY-MM-DD` by shape alone; whether the day exists is not this type's business.
 #[must_use]
 pub fn is_date(text: &str) -> bool {
@@ -107,7 +103,9 @@ fn has_letter(text: &str) -> bool {
 
 fn shape(segments: &[&str]) -> Option<Kind> {
     match segments {
-        [year, name] if is_year(year) && is_dated_name(name) && name.starts_with(year) => {
+        // The month directory is the date's own prefix, so a valid name
+        // makes it `YYYY-MM` by construction.
+        [month, name] if month.len() == 7 && is_dated_name(name) && name.starts_with(month) => {
             Some(Kind::Entry)
         }
         [name] if is_dated_name(name) => Some(Kind::Followup),
@@ -147,11 +145,11 @@ impl Slug {
         }
     }
 
-    /// `<year>/<date>-<name>`; the date is checked by shape here and the
+    /// `<month>/<date>-<name>`; the date is checked by shape here and the
     /// entry's own `date` field has to equal it.
     pub fn entry(date: &str, name: &str) -> Result<Slug, SlugError> {
-        let year = date.get(..4).unwrap_or(date);
-        Slug::of_kind(Kind::Entry, &format!("{year}/{date}-{name}"))
+        let month = date.get(..7).unwrap_or(date);
+        Slug::of_kind(Kind::Entry, &format!("{month}/{date}-{name}"))
     }
 
     pub fn followup(date: &str, name: &str) -> Result<Slug, SlugError> {
@@ -224,7 +222,9 @@ mod tests {
             Kind::Fact
         );
         assert_eq!(
-            Slug::parse("2026/2026-09-04-lamp-driver").unwrap().kind(),
+            Slug::parse("2026-09/2026-09-04-lamp-driver")
+                .unwrap()
+                .kind(),
             Kind::Entry
         );
         assert_eq!(
@@ -234,8 +234,9 @@ mod tests {
     }
 
     #[test]
-    fn an_entry_year_must_match_its_date() {
-        assert!(Slug::parse("2025/2026-09-04-lamp-driver").is_err());
+    fn an_entry_month_must_match_its_date() {
+        assert!(Slug::parse("2026-08/2026-09-04-lamp-driver").is_err());
+        assert!(Slug::parse("2026/2026-09-04-lamp-driver").is_err());
     }
 
     #[test]
@@ -265,7 +266,7 @@ mod tests {
         let fact = Slug::parse("lantern/ec-firmware").unwrap();
         assert_eq!(fact.topic(), Some("lantern"));
         assert_eq!(fact.name(), "ec-firmware");
-        let entry = Slug::parse("2026/2026-09-04-lamp-driver").unwrap();
+        let entry = Slug::parse("2026-09/2026-09-04-lamp-driver").unwrap();
         assert_eq!(entry.date(), Some("2026-09-04"));
         assert_eq!(entry.name(), "2026-09-04-lamp-driver");
     }

@@ -156,7 +156,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = FsStore::new(dir.path().to_path_buf());
         let topic = version("lantern", "\nt\n");
-        let entry = version("2026/2026-09-04-x", "\ne\n");
+        let entry = version("2026-09/2026-09-04-x", "\ne\n");
         store.put(&topic).unwrap();
         store.put(&entry).unwrap();
         store.put(&entry).unwrap();
@@ -167,7 +167,7 @@ mod tests {
         assert_eq!(doc.versions, vec![entry.clone()]);
         assert!(
             dir.path()
-                .join("entry/2026/2026-09-04-x")
+                .join("entry/2026-09/2026-09-04-x")
                 .join(format!("{}.md", entry.id))
                 .exists()
         );

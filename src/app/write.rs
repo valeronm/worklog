@@ -710,7 +710,7 @@ mod tests {
         put_topic(&d, "lantern", "A Rust app", &[], None).unwrap();
         put_entry(
             &d,
-            "2026/2026-09-01-first",
+            "2026-09/2026-09-01-first",
             "2026-09-01",
             "First",
             &["lantern"],
@@ -719,7 +719,7 @@ mod tests {
         let Made::Written(made) = new_followup(
             &d,
             "port",
-            "2026/2026-09-01-first",
+            "2026-09/2026-09-01-first",
             &NewFollowup {
                 summary: Some("Port it"),
                 recheck: Some("2026-10-01 why"),
@@ -732,7 +732,7 @@ mod tests {
         let slug = Slug::parse(&made.slug).unwrap();
         assert_eq!(slug.path(), "2026-09-04-port");
         recheck(&d, &slug, "touching lantern").unwrap();
-        done(&d, &slug, Some("dissolved by [[2026/2026-09-01-first]]")).unwrap();
+        done(&d, &slug, Some("dissolved by [[2026-09/2026-09-01-first]]")).unwrap();
         assert!(
             matches!(done(&d, &slug, None), Err(Failure::Refused(m)) if m.contains("already done"))
         );

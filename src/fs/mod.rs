@@ -24,6 +24,15 @@ pub(crate) fn io_error(location: &Path, error: &std::io::Error) -> StoreError {
     }
 }
 
+/// Writes a whole file, creating its directory, with the path in any
+/// refusal.
+pub(crate) fn write_file(path: &Path, text: &str) -> Result<(), StoreError> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| io_error(parent, &e))?;
+    }
+    std::fs::write(path, text).map_err(|e| io_error(path, &e))
+}
+
 pub(crate) fn corrupt(location: &Path, reason: impl std::fmt::Display) -> StoreError {
     StoreError::Corrupt {
         location: location.display().to_string(),

@@ -2,25 +2,35 @@
 //! to stderr; exit 1 is a refusal and 2 a usage error.
 
 pub mod args;
+pub mod hook;
 pub mod render;
+pub mod setup;
 
-use std::io::{IsTerminal, Write as _};
+pub use setup::SKILL;
+
+use std::io::Write as _;
 
 use clap::Parser;
 use serde::Serialize;
 
 use crate::app::write::{Made, NewFollowup};
 use crate::app::{Deps, Failure, migrate, read, slug_arg, write};
-use crate::domain::machine::MachineName;
 use crate::domain::slug::Kind;
-use crate::fs::{Config, FileIdentity, FsDrafts, FsStore, Paths, SystemClock};
+use crate::fs::{FileIdentity, FsDrafts, FsStore, Paths, SystemClock};
 
-use args::{Cli, Command, NewWhat, ReadCommand, SlugArg, WriteCommand};
+use args::{Cli, Command, NewWhat, ReadCommand, SlugArg, StoreCommand, WriteCommand};
 
 /// One command's stdout, and the exit code `check` sets on problems.
 struct Rendered {
     text: String,
     exit: i32,
+}
+
+/// A value as the JSON a command prints.
+fn pretty_json<T: Serialize>(value: &T) -> Result<String, Failure> {
+    serde_json::to_string_pretty(value)
+        .map(|s| s + "\n")
+        .map_err(|e| Failure::Refused(format!("cannot serialise output: {e}")))
 }
 
 /// The output as text, or as JSON when asked; only the one printed is built.
@@ -29,13 +39,7 @@ fn rendered<T: Serialize>(
     value: &T,
     text: impl FnOnce() -> String,
 ) -> Result<Rendered, Failure> {
-    let text = if json {
-        serde_json::to_string_pretty(value)
-            .map_err(|e| Failure::Refused(format!("cannot serialise output: {e}")))?
-            + "\n"
-    } else {
-        text()
-    };
+    let text = if json { pretty_json(value)? } else { text() };
     Ok(Rendered { text, exit: 0 })
 }
 
@@ -125,14 +129,9 @@ fn dispatch_read(deps: &Deps, json: bool, command: ReadCommand) -> Result<Render
             let out = read::where_(deps, &topic, machine.as_deref())?;
             rendered(json, &out, || render::where_(&out))
         }
-        ReadCommand::Followups { topic, all } => {
-            let out = read::followups(deps, topic.as_deref(), all)?;
-            note_empty(
-                out.items.is_empty(),
-                "no open follow-ups",
-                topic,
-                " tagged: ",
-            );
+        ReadCommand::Followups { about, all } => {
+            let out = read::followups(deps, about.as_deref(), all)?;
+            note_empty(out.items.is_empty(), "no open follow-ups", about, " for: ");
             rendered(json, &out, || render::followups(&out))
         }
         ReadCommand::Context { dir } => {
@@ -167,7 +166,8 @@ fn dispatch_write(deps: &Deps, json: bool, command: WriteCommand) -> Result<Rend
         WriteCommand::New { what } => {
             let out = match what {
                 NewWhat::Entry { name, date } => write::new_entry(deps, &name, date.as_deref())?,
-                NewWhat::Fact { slug, idea } => write::new_fact(deps, &slug, idea)?,
+                NewWhat::Fact { slug } => write::new_fact(deps, &slug, false)?,
+                NewWhat::Idea { slug } => write::new_fact(deps, &slug, true)?,
                 NewWhat::Topic { name } => write::new_topic(deps, &name)?,
                 NewWhat::Followup {
                     name,
@@ -274,78 +274,16 @@ fn migrate_command(
     })
 }
 
-/// One answer from the terminal, or the default on an empty line.
-fn ask(prompt: &str, default: &str) -> Result<String, Failure> {
-    eprint!("{prompt} [{default}]: ");
-    let mut line = String::new();
-    std::io::stdin()
-        .read_line(&mut line)
-        .map_err(|e| Failure::Refused(format!("cannot read the answer: {e}")))?;
-    let answer = line.trim();
-    Ok(if answer.is_empty() {
-        default.to_owned()
-    } else {
-        answer.to_owned()
-    })
-}
-
-/// The hostname as a default to offer, never as the identity itself.
-fn hostname() -> Option<String> {
-    let out = std::process::Command::new("uname")
-        .arg("-n")
-        .output()
-        .ok()?;
-    let name = String::from_utf8(out.stdout).ok()?;
-    let name = name.trim().trim_end_matches(".local").to_ascii_lowercase();
-    (!name.is_empty()).then_some(name)
-}
-
-/// Records the machine name and the store directory, once per host.
-fn init(paths: &Paths, machine: Option<&str>, store: Option<&str>) -> Result<(), Failure> {
-    if let Some(existing) = Config::read(&paths.config)? {
-        return Err(Failure::Refused(format!(
-            "this machine is already named {} with its store at {}",
-            existing.machine,
-            existing.store.display()
-        )));
-    }
-    let (machine, store) = match machine {
-        Some(machine) => (machine.to_owned(), store.map(str::to_owned)),
-        None if std::io::stdin().is_terminal() => {
-            let machine = ask("Machine name", &hostname().unwrap_or_default())?;
-            let store = ask(
-                "Store directory",
-                &paths.default_store.display().to_string(),
-            )?;
-            (machine, Some(store))
-        }
-        None => {
-            return Err(Failure::Usage(
-                "init needs a machine name when not run from a terminal".into(),
-            ));
-        }
-    };
-    let machine = MachineName::parse(&machine)?;
-    let store = match store.as_deref() {
-        Some(dir) => {
-            let dir = std::path::Path::new(dir);
-            if dir.is_absolute() {
-                dir.to_path_buf()
-            } else {
-                std::env::current_dir()
-                    .map_err(|e| Failure::Refused(format!("no working directory: {e}")))?
-                    .join(dir)
-            }
-        }
-        None => paths.default_store.clone(),
-    };
-    Config { machine, store }.write(&paths.config)?;
-    Ok(())
-}
-
 fn fail(e: &Failure) -> i32 {
     eprintln!("worklog: {e}");
     e.exit_code()
+}
+
+fn print(text: &str) {
+    let mut stdout = std::io::stdout().lock();
+    // A closed pipe downstream, `worklog list | head`, is not an error.
+    let _ = stdout.write_all(text.as_bytes());
+    let _ = stdout.flush();
 }
 
 /// Runs the command line and returns the process exit code.
@@ -364,25 +302,34 @@ pub fn run() -> i32 {
         Ok(paths) => paths,
         Err(e) => return fail(&e.into()),
     };
-    if let Command::Init { machine, store } = &cli.command {
-        return match init(&paths, machine.as_deref(), store.as_deref()) {
-            Ok(()) => 0,
-            Err(e) => fail(&e),
-        };
-    }
-    let Some(store) = paths.store else {
-        // The SessionStart hook runs `context` on a host that may not be
-        // set up yet, and a notice is what it should see, not a failure.
-        if matches!(cli.command, Command::Read(ReadCommand::Context { .. })) {
-            println!(
-                "No store on this machine: `worklog init <name> [--store <dir>]` before anything reaches a session."
-            );
-            return 0;
+    let command = match cli.command {
+        Command::Setup(command) => {
+            return match setup::run(&paths, &command) {
+                Ok(text) => {
+                    print(&text);
+                    0
+                }
+                Err(e) => fail(&e),
+            };
         }
-        eprintln!(
-            "worklog: no store on this machine: run `worklog init <name> [--store <dir>]` first"
-        );
-        return 1;
+        Command::Store(command) => command,
+    };
+    let store = match paths.store() {
+        Ok(Some(store)) => store,
+        Ok(None) => {
+            // The SessionStart hook runs `context` on a host that may not
+            // be set up yet, and a notice is what it should see, not a
+            // failure.
+            if matches!(command, StoreCommand::Read(ReadCommand::Context { .. })) {
+                print(
+                    "No store on this machine: `worklog init` before anything reaches a session.\n",
+                );
+                return 0;
+            }
+            eprintln!("worklog: no store on this machine: run `worklog init` first");
+            return 1;
+        }
+        Err(e) => return fail(&e.into()),
     };
     let store = FsStore::new(store);
     let drafts = FsDrafts::new(paths.drafts);
@@ -394,18 +341,16 @@ pub fn run() -> i32 {
         clock: &SystemClock,
         home: paths.home.display().to_string(),
     };
-    let result = match cli.command {
-        Command::Init { .. } => unreachable!("handled before the store was opened"),
-        Command::Read(command) => dispatch_read(&deps, cli.json, command),
-        Command::Write(command) => dispatch_write(&deps, cli.json, command),
-        Command::Migrate { entries, facts } => migrate_command(&deps, cli.json, &entries, &facts),
+    let result = match command {
+        StoreCommand::Read(command) => dispatch_read(&deps, cli.json, command),
+        StoreCommand::Write(command) => dispatch_write(&deps, cli.json, command),
+        StoreCommand::Migrate { entries, facts } => {
+            migrate_command(&deps, cli.json, &entries, &facts)
+        }
     };
     match result {
         Ok(r) => {
-            let mut stdout = std::io::stdout().lock();
-            // A closed pipe downstream, `worklog list | head`, is not an error.
-            let _ = stdout.write_all(r.text.as_bytes());
-            let _ = stdout.flush();
+            print(&r.text);
             r.exit
         }
         Err(e) => fail(&e),

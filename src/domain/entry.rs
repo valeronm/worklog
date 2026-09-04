@@ -1,7 +1,7 @@
 use super::frontmatter::{FieldError, Fields, checked_date};
 use super::machine::MachineName;
 
-/// What happened on a day. Written once; its follow-ups are documents of
+/// One piece of work as it was done, dated. Written once; its follow-ups are documents of
 /// their own that name it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Entry {

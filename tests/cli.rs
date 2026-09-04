@@ -119,7 +119,7 @@ fn seeded() -> Scratch {
     s.write(&["new", "fact", "lantern/relay-pin-is-fixed"], |t| {
         set_summary(t, "The relay pin is fixed on the board")
     });
-    s.write(&["new", "fact", "phone/beta-builds", "--idea"], |t| {
+    s.write(&["new", "idea", "phone/beta-builds"], |t| {
         set_summary(t, "Move the phone to beta builds")
     });
     s.write(
@@ -131,7 +131,7 @@ fn seeded() -> Scratch {
         "followup",
         "port",
         "--entry",
-        "2026/2026-09-01-lamp-driver",
+        "2026-09/2026-09-01-lamp-driver",
         "--summary",
         "Add the second relay",
         "--recheck",
@@ -159,9 +159,18 @@ fn init_is_once_and_writes_need_it() {
     let err = s.refused(&["init", "m2"]);
     assert!(err.contains("already named m1"), "{err}");
     let elsewhere = Scratch::new();
-    elsewhere.ok(&["init", "m3", "--store", "sync/worklog"]);
+    let written = elsewhere.ok(&["init", "m3", "--store", "sync/worklog", "--skill", "--hook"]);
     let config = fs::read_to_string(elsewhere.root.path().join("config")).unwrap();
     assert!(config.ends_with("/home/sync/worklog\n"), "{config}");
+    let agent = elsewhere.home().join(".claude");
+    let skill = fs::read_to_string(agent.join("skills/worklog/SKILL.md")).unwrap();
+    assert_eq!(skill, worklog::cli::SKILL);
+    assert_eq!(elsewhere.ok(&["skill", "show"]), skill);
+    let settings = fs::read_to_string(agent.join("settings.json")).unwrap();
+    assert!(settings.contains("\"SessionStart\""), "{settings}");
+    assert!(written.contains("settings.json"), "{written}");
+    // A scripted init without a choice touches nothing under ~/.claude.
+    assert!(!s.home().join(".claude").exists());
     // No terminal here, so a nameless init cannot ask and is a usage error.
     assert_eq!(Scratch::new().run(&["init"]).status.code(), Some(2));
     assert_eq!(s.run(&["bogus"]).status.code(), Some(2));
@@ -251,7 +260,7 @@ fn listings_keep_the_shapes_completions_parse() {
     let recent = s.ok(&["recent", "5"]);
     assert_eq!(
         recent,
-        "● 2026-09-01  Wired the lamp driver\n  2026/2026-09-01-lamp-driver\n"
+        "● 2026-09-01  Wired the lamp driver\n  2026-09/2026-09-01-lamp-driver\n"
     );
     let facts = s.ok(&["facts", "atlas", "--deep"]);
     assert!(facts.starts_with("Ideas — unbuilt"), "{facts}");
@@ -275,11 +284,11 @@ fn followup_lifecycle_and_check() {
     s.ok(&[
         "done",
         &slug,
-        "dissolved by [[2026/2026-09-01-lamp-driver]]",
+        "dissolved by [[2026-09/2026-09-01-lamp-driver]]",
     ]);
     let err = s.refused(&["done", &slug]);
     assert!(err.contains("already done"), "{err}");
-    let shown = s.ok(&["show", "2026/2026-09-01-lamp-driver"]);
+    let shown = s.ok(&["show", "2026-09/2026-09-01-lamp-driver"]);
     assert!(
         shown.ends_with(&format!(
             "## Follow-ups\n- [x] Add the second relay (touching lantern) — {slug}\n"

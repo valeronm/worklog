@@ -46,10 +46,11 @@ mod tests {
 
     #[test]
     fn finds_links_and_quotes_spans() {
-        let text = "see [[lantern/relay]] and [[2026/2026-09-04-x]], not `[[quoted]]`\n[[a]] [[b]]";
+        let text =
+            "see [[lantern/relay]] and [[2026-09/2026-09-04-x]], not `[[quoted]]`\n[[a]] [[b]]";
         assert_eq!(
             targets(text),
-            ["lantern/relay", "2026/2026-09-04-x", "a", "b"]
+            ["lantern/relay", "2026-09/2026-09-04-x", "a", "b"]
         );
     }
 

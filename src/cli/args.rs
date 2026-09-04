@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use crate::domain::slug::Kind;
@@ -47,18 +49,19 @@ pub struct SlugArg {
     pub kind: Option<KindArg>,
 }
 
-/// The commands, grouped by what they need: `Init` runs before a store
+/// The commands, grouped by what they need: setup runs before a store
 /// exists, reads never write, writes need the machine name.
 #[derive(Subcommand)]
 pub enum Command {
-    /// Name this machine and place its store; done once per host.
-    /// Without a name on a terminal, asks for both with defaults offered
-    Init {
-        machine: Option<String>,
-        /// The store directory, `~/worklog` when not given
-        #[arg(long)]
-        store: Option<String>,
-    },
+    #[command(flatten)]
+    Setup(SetupCommand),
+    #[command(flatten)]
+    Store(StoreCommand),
+}
+
+/// What needs the store open.
+#[derive(Subcommand)]
+pub enum StoreCommand {
     #[command(flatten)]
     Read(ReadCommand),
     #[command(flatten)]
@@ -72,6 +75,65 @@ pub enum Command {
         #[arg(long)]
         facts: String,
     },
+}
+
+/// What runs before a store is opened.
+#[derive(Subcommand)]
+pub enum SetupCommand {
+    /// Name this machine and place its store; done once per host.
+    /// Without a name on a terminal, asks for everything with defaults offered
+    Init {
+        machine: Option<String>,
+        /// The store directory, `~/worklog` when not given
+        #[arg(long)]
+        store: Option<String>,
+        /// Also install the agent skill
+        #[arg(long, conflicts_with = "no_skill")]
+        skill: bool,
+        /// Leave the agent skill alone, without asking
+        #[arg(long)]
+        no_skill: bool,
+        /// Also add the session hook to the agent's settings
+        #[arg(long, conflicts_with = "no_hook")]
+        hook: bool,
+        /// Leave the agent's settings alone, without asking
+        #[arg(long)]
+        no_hook: bool,
+    },
+    /// The agent skill that ships with this binary
+    Skill {
+        #[command(subcommand)]
+        what: SkillWhat,
+    },
+    /// The `SessionStart` hook that opens every session with `worklog context`
+    Hook {
+        #[command(subcommand)]
+        what: HookWhat,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum SkillWhat {
+    /// Write the skill where the agent reads it
+    Install {
+        /// Another skills directory than the agent's
+        #[arg(long)]
+        dir: Option<PathBuf>,
+    },
+    /// Print the skill
+    Show,
+}
+
+#[derive(Subcommand)]
+pub enum HookWhat {
+    /// Merge the hook into the settings file, once
+    Install {
+        /// Another settings file than the agent's
+        #[arg(long)]
+        settings: Option<PathBuf>,
+    },
+    /// Print the hook entry
+    Show,
 }
 
 #[derive(Subcommand)]
@@ -127,7 +189,8 @@ pub enum ReadCommand {
     },
     /// Open work, oldest first, with each item's recheck state
     Followups {
-        topic: Option<String>,
+        /// A topic, or an entry slug for the items that arose in it
+        about: Option<String>,
         /// Closed items too
         #[arg(long)]
         all: bool,
@@ -200,8 +263,10 @@ pub enum NewWhat {
     /// A fact under a topic, as `<topic>/<name>`
     Fact {
         slug: String,
-        #[arg(long)]
-        idea: bool,
+    },
+    /// An idea under a topic, as `<topic>/<name>`: a settled design not yet built
+    Idea {
+        slug: String,
     },
     Topic {
         name: String,

@@ -5,7 +5,7 @@ use crate::domain::draft::Draft;
 use crate::domain::ports::{Drafts, StoreError};
 use crate::domain::slug::Slug;
 
-use super::{corrupt, io_error};
+use super::{corrupt, io_error, write_file};
 
 /// `<root>/<kind>/<slug>.md`, one editable file per document being written.
 pub struct FsDrafts {
@@ -62,10 +62,7 @@ impl Drafts for FsDrafts {
 
     fn write(&self, draft: &Draft) -> Result<String, StoreError> {
         let path = self.path(&draft.slug);
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).map_err(|e| io_error(parent, &e))?;
-        }
-        fs::write(&path, draft.to_text()).map_err(|e| io_error(&path, &e))?;
+        write_file(&path, &draft.to_text())?;
         Ok(path.display().to_string())
     }
 

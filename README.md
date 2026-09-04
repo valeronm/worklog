@@ -12,7 +12,7 @@ Syncthing. Nothing in it is ever edited or deleted; a write is a new file.
 
 ```
 ~/worklog/
-  entry/2026/2026-09-04-lamp-driver/<hash>.md   what happened on a day
+  entry/2026-09/2026-09-04-lamp-driver/<hash>.md   one piece of work, dated
   fact/lantern/relay-pin-is-fixed/<hash>.md     what is true now
   followup/2026-09-04-port/<hash>.md            open work from an entry
   topic/lantern/<hash>.md                       what a subject is
@@ -35,11 +35,11 @@ so the same store serves machines with different layouts.
 worklog init desk --store ~/sync/worklog   # once per host
 worklog context                            # the index a session opens with
 worklog new entry lamp-driver              # prints a draft path to edit
-worklog save 2026/2026-09-04-lamp-driver
-worklog new followup port --entry 2026/2026-09-04-lamp-driver \
+worklog save 2026-09/2026-09-04-lamp-driver
+worklog new followup port --entry 2026-09/2026-09-04-lamp-driver \
     --summary "Add the second relay" --recheck "2026-10-01 the board is back"
 worklog followups lantern                  # open work with each item's state
-worklog done 2026-09-04-port "dissolved by [[2026/2026-09-10-relay-landed]]"
+worklog done 2026-09-04-port "dissolved by [[2026-09/2026-09-10-relay-landed]]"
 worklog check                              # every rule the store has to keep
 ```
 
@@ -58,6 +58,17 @@ curl -fsSL https://raw.githubusercontent.com/valeronm/worklog/main/packaging/get
 Downloads the release for this machine's architecture into `~/.local/bin`,
 verifying the checksum published beside it. Or build from source with a
 current stable Rust: `cargo install --path .`.
+
+The binary carries the agent skill that teaches a coding agent the store
+and its commands, and the SessionStart hook that opens every session with
+`worklog context`. An interactive `worklog init` offers both; `worklog init
+<name> --skill --hook` takes them outright, and `--no-skill` or `--no-hook`
+declines without a question. On their own, `worklog skill install` writes
+`~/.claude/skills/worklog/SKILL.md` and `worklog hook install` merges one
+entry into `~/.claude/settings.json`, once, keeping the rest of the file as
+it is; `show` on either prints what would be written. The installer above
+refreshes the skill on a host that has one, since the skill describes the
+commands of the binary it shipped with.
 
 ## Develop
 
