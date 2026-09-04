@@ -1,0 +1,105 @@
+name: build
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install the toolchain pinned in mise.toml
+        # so CI builds with the version a developer builds with
+        run: |
+          rust_version=$(sed -n 's/^rust = "\(.*\)"$/\1/p' mise.toml)
+          rustup toolchain install "$rust_version" --profile minimal --component clippy,rustfmt
+          rustup default "$rust_version"
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: ${{ hashFiles('mise.toml') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Static checks
+        # get.sh is fetched straight into a shell, so it gets the same
+        # scrutiny as the code.
+        run: |
+          cargo fmt --all --check
+          shellcheck packaging/get.sh
+          cargo clippy --all-targets --all-features -- -D warnings
+          cargo test
+
+  build:
+    needs: check
+    if: github.ref_type == 'tag'
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            asset: worklog-x86_64-linux
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            asset: worklog-aarch64-linux
+          - runner: macos-15
+            target: aarch64-apple-darwin
+            asset: worklog-aarch64-darwin
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install the toolchain pinned in mise.toml
+        run: |
+          rust_version=$(sed -n 's/^rust = "\(.*\)"$/\1/p' mise.toml)
+          rustup toolchain install "$rust_version" --profile minimal
+          rustup default "$rust_version"
+
+      - name: Build
+        # --locked so a release is built from the lockfile that was tested.
+        run: |
+          cargo build --release --locked --target ${{ matrix.target }}
+          mkdir dist
+          cp target/${{ matrix.target }}/release/worklog dist/${{ matrix.asset }}
+          cd dist
+          shasum -a 256 ${{ matrix.asset }} > ${{ matrix.asset }}.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create or update the release
+        # A moved tag rebuilds the release in place rather than failing on
+        # an asset that already exists.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" dist/* --clobber
+          else
+            gh release create "$tag" dist/* --title "$tag" --notes "worklog $tag"
+          fi

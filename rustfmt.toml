@@ -1,0 +1,4 @@
+# Pinned rather than left to `cargo fmt`, which infers it from the crate's
+# edition: the style guide is versioned separately from the language, so an
+# edition bump would silently reformat the tree.
+style_edition = "2024"

@@ -1,0 +1,32 @@
+[package]
+name = "worklog"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Append-only versioned store of work done, durable facts, follow-ups and topics"
+repository = "https://github.com/valeronm/worklog"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+
+[features]
+# In-memory ports for tests of the layers above the domain; never in the binary.
+testing = []
+
+[dependencies]
+blake3 = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+clap = { version = "4", features = ["derive"] }
+directories = "6"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+similar = "2"
+
+[dev-dependencies]
+assert_cmd = "2"
+tempfile = "3"
+
+[profile.release]
+lto = true
+strip = true
