@@ -44,8 +44,9 @@ Prose goes through a draft; the store is never edited directly.
    new idea <topic>/<name>`, `worklog new topic <name>`, or `worklog
    checkout <slug>` for an existing document. Each prints the draft path.
 2. Read the file at that path, then edit it: it lives outside the working
-   directory, and an edit tool refuses a file it has not read. Change only
-   the kind's own fields and the body; the `version` block is the tool's.
+   directory, and an edit tool refuses a file it has not read. The draft
+   is the document's own fields and body, the same text `show` prints;
+   what it came from is kept in a file beside it that is the tool's.
 3. `worklog diff <slug>` shows the draft against the store. Show it to the
    user before saving anything they have not seen.
 4. `worklog save <slug>` validates, stamps and stores it. A refusal names

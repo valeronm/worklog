@@ -1,12 +1,13 @@
-use super::frontmatter::{self, FieldError, Fields, ParseError, Value};
-use super::version::{self, Version, VersionError, VersionId};
+use super::frontmatter::{self, Fields, ParseError};
+use super::slug::Slug;
+use super::version::{Version, VersionError, VersionId};
 
 /// A document being written: the kind's own fields and the body, plus the
 /// versions it was checked out from. Everything else a version carries is
 /// stamped by `save`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Draft {
-    pub slug: super::slug::Slug,
+    pub slug: Slug,
     pub parents: Vec<VersionId>,
     pub fields: Fields,
     pub body: String,
@@ -17,38 +18,40 @@ const CONFLICT_SEPARATOR: &str = "=======";
 const CONFLICT_CLOSE: &str = ">>>>>>>";
 
 impl Draft {
+    /// The file a person edits: the kind's own fields and the body, the
+    /// same text `show` prints, so nothing in it belongs to the tool.
     #[must_use]
     pub fn to_text(&self) -> String {
-        let block = Value::Map(vec![(
-            "parents".to_owned(),
-            Value::List(self.parents.iter().map(ToString::to_string).collect()),
-        )]);
-        frontmatter::emit(
-            &version::envelope(&self.slug, &self.fields, block),
-            &self.body,
-        )
+        frontmatter::emit(&self.fields, &self.body)
     }
 
-    /// Reads a draft back after editing; only `parents` is accepted under
-    /// `version`, since a person can change nothing else there.
-    pub fn from_text(text: &str) -> Result<Draft, VersionError> {
+    /// Reads the edited file back; the slug and the parents are kept beside
+    /// it by whoever stores drafts, never in the text.
+    pub fn from_text(slug: Slug, parents: Vec<VersionId>, text: &str) -> Result<Draft, ParseError> {
         let split = frontmatter::parse(text)?;
-        let (slug, block, fields) = version::open_envelope(split.fields)?;
-        let parents = match block {
-            Value::Map(entries) => {
-                let block: Fields = entries.into_iter().collect();
-                block.reject_unknown(&["parents"])?;
-                version::parse_parents(&block)?
-            }
-            Value::Scalar(s) if s.is_empty() => Vec::new(),
-            _ => return Err(FieldError::Missing("version").into()),
-        };
         Ok(Draft {
             slug,
             parents,
-            fields,
+            fields: split.fields,
             body: split.body,
         })
+    }
+
+    /// The parents as stored beside the draft: one id per line.
+    #[must_use]
+    pub fn parents_text(&self) -> String {
+        self.parents.iter().fold(String::new(), |mut out, p| {
+            out.push_str(&p.to_string());
+            out.push('\n');
+            out
+        })
+    }
+
+    pub fn parse_parents(text: &str) -> Result<Vec<VersionId>, VersionError> {
+        text.lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(|l| VersionId::parse(l.trim()))
+            .collect()
     }
 
     /// A draft holding every head of a fork, for a person to reconcile:
@@ -94,15 +97,8 @@ impl Draft {
     }
 }
 
-impl From<ParseError> for FieldError {
-    fn from(e: ParseError) -> Self {
-        FieldError::invalid("frontmatter", e)
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::super::slug::Slug;
     use super::*;
 
     #[test]
@@ -116,17 +112,18 @@ mod tests {
             body: "\nbody\n".into(),
         };
         let text = draft.to_text();
-        assert!(text.contains("version:\n  parents: ["));
-        assert_eq!(Draft::from_text(&text).unwrap(), draft);
+        assert_eq!(text, "---\nsummary: s\n---\n\nbody\n");
+        let parents = Draft::parse_parents(&draft.parents_text()).unwrap();
+        assert_eq!(
+            Draft::from_text(draft.slug.clone(), parents, &text).unwrap(),
+            draft
+        );
     }
 
     #[test]
-    fn a_hand_edited_version_block_is_refused() {
-        let text = "---\nslug: lantern\nkind: topic\nsummary: s\nversion:\n  parents: []\n  machine: m\n---\n";
-        assert!(matches!(
-            Draft::from_text(text),
-            Err(VersionError::Field(FieldError::Unknown(_)))
-        ));
+    fn a_parents_file_holds_only_ids() {
+        assert_eq!(Draft::parse_parents("\n").unwrap(), vec![]);
+        assert!(Draft::parse_parents("not-an-id\n").is_err());
     }
 
     #[test]

@@ -78,12 +78,18 @@ impl Scratch {
         let path = self.ok(open);
         let path = Path::new(path.trim());
         let text = fs::read_to_string(path).expect("the draft");
+        assert!(!text.contains("\nslug: "), "no header in a draft: {text}");
         fs::write(path, edit(&text)).expect("the draft is writable");
-        let slug = text
-            .lines()
-            .find_map(|l| l.strip_prefix("slug: "))
-            .expect("a slug line")
-            .to_owned();
+        // `<root>/drafts/<kind>/<slug>.md` names the document.
+        let slug = path
+            .strip_prefix(self.root.path().join("drafts"))
+            .expect("under the drafts directory")
+            .with_extension("")
+            .components()
+            .skip(1)
+            .map(|c| c.as_os_str().to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join("/");
         self.ok(&["save", &slug]).trim().to_owned()
     }
 }

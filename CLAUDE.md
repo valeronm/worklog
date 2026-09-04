@@ -26,7 +26,9 @@ wants something new from outside adds it to a port, not to a parameter.
   sync never ships a partial version.
 - Nothing is edited in place. A command that needs to change a document
   writes a new version naming the old one as parent. The one file that is
-  edited is a draft, and drafts live outside the store.
+  edited is a draft, and drafts live outside the store. A draft is the
+  document's own text and nothing else; the versions it came from sit in
+  a file beside it, so an editor cannot touch what `save` relies on.
 - Forks are reported, never merged. `save` refuses a draft whose parent is
   no longer current, so a fork can arise only between machines that synced
   afterwards, and `resolve` hands both heads to a person.
