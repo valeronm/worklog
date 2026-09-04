@@ -5,8 +5,9 @@ use std::collections::BTreeMap;
 
 use super::draft::Draft;
 use super::machine::MachineName;
-use super::ports::{Clock, Drafts, Host, Identity, Store, StoreError};
+use super::ports::{Clock, Drafts, Host, Identity, Store, StoreError, Usage};
 use super::slug::{Kind, Slug};
+use super::usage::Invocation;
 use super::version::{Document, Version};
 
 #[derive(Default)]
@@ -138,5 +139,21 @@ impl Clock for FixedClock {
 
     fn now(&self) -> String {
         self.now.clone()
+    }
+}
+
+#[derive(Default)]
+pub struct MemoryUsage {
+    lines: RefCell<Vec<Invocation>>,
+}
+
+impl Usage for MemoryUsage {
+    fn record(&self, invocation: &Invocation) -> Result<(), StoreError> {
+        self.lines.borrow_mut().push(invocation.clone());
+        Ok(())
+    }
+
+    fn all(&self) -> Result<Vec<Invocation>, StoreError> {
+        Ok(self.lines.borrow().clone())
     }
 }

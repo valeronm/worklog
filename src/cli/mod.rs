@@ -14,9 +14,9 @@ use clap::Parser;
 use serde::Serialize;
 
 use crate::app::write::{Made, NewFollowup};
-use crate::app::{Deps, Failure, migrate, read, slug_arg, write};
+use crate::app::{Deps, Failure, migrate, read, slug_arg, usage, write};
 use crate::domain::slug::Kind;
-use crate::fs::{FileIdentity, FsDrafts, FsHost, FsStore, Paths, SystemClock};
+use crate::fs::{FileIdentity, FsDrafts, FsHost, FsStore, FsUsage, Paths, SystemClock};
 
 use args::{ClaimArg, Cli, Command, NewWhat, ReadCommand, SlugArg, StoreCommand, WriteCommand};
 
@@ -90,6 +90,10 @@ fn note_empty(empty: bool, what: &str, scope: Option<String>, joint: &str) {
     }
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "one arm per command, so the length is the number of commands"
+)]
 fn dispatch_read(deps: &Deps, json: bool, command: ReadCommand) -> Result<Rendered, Failure> {
     match command {
         ReadCommand::Show(arg) => {
@@ -174,6 +178,11 @@ fn dispatch_read(deps: &Deps, json: bool, command: ReadCommand) -> Result<Render
                 r.exit = 1;
             }
             Ok(r)
+        }
+        ReadCommand::Usage { machine, since } => {
+            let out = read::usage(deps, machine.as_deref(), since.as_deref())?;
+            note_empty(out.machines.is_empty(), "nothing logged", machine, " for: ");
+            rendered(json, &out, || render::usage(&out))
         }
         ReadCommand::Diff { first, other } => {
             let out = read::diff(
@@ -312,6 +321,74 @@ fn migrate_command(
     })
 }
 
+/// The command path the log names, matched rather than read off the
+/// arguments, so a command added without a name here does not compile.
+fn command_path(command: &StoreCommand) -> &'static str {
+    match command {
+        StoreCommand::Read(read) => match read {
+            ReadCommand::Show(_) => "show",
+            ReadCommand::History(_) => "history",
+            ReadCommand::List { .. } => "list",
+            ReadCommand::Recent { .. } => "recent",
+            ReadCommand::Log { .. } => "log",
+            ReadCommand::Search { .. } => "search",
+            ReadCommand::Tag { .. } => "tag",
+            ReadCommand::Tags => "tags",
+            ReadCommand::Facts { .. } => "facts",
+            ReadCommand::Ideas { .. } => "ideas",
+            ReadCommand::Topics => "topics",
+            ReadCommand::Where { .. } => "where",
+            ReadCommand::Followups { .. } => "followups",
+            ReadCommand::Context { .. } => "context",
+            ReadCommand::Forks => "forks",
+            ReadCommand::Check => "check",
+            ReadCommand::Usage { .. } => "usage",
+            ReadCommand::Diff { .. } => "diff",
+            ReadCommand::Drafts => "drafts",
+        },
+        StoreCommand::Write(write) => match write {
+            WriteCommand::New { what } => match what {
+                NewWhat::Entry { .. } => "new entry",
+                NewWhat::Fact { .. } => "new fact",
+                NewWhat::Idea { .. } => "new idea",
+                NewWhat::Topic { .. } => "new topic",
+                NewWhat::Followup { .. } => "new followup",
+            },
+            WriteCommand::Checkout(_) => "checkout",
+            WriteCommand::Save { .. } => "save",
+            WriteCommand::Discard(_) => "discard",
+            WriteCommand::Done { .. } => "done",
+            WriteCommand::Drop { .. } => "drop",
+            WriteCommand::Recheck { .. } => "recheck",
+            WriteCommand::Verify { .. } => "verify",
+            WriteCommand::Tombstone(_) => "tombstone",
+            WriteCommand::Rename { .. } => "rename",
+            WriteCommand::Resolve(_) => "resolve",
+            WriteCommand::Claim(_) => "claim",
+            WriteCommand::Unclaim(_) => "unclaim",
+        },
+        StoreCommand::Migrate { .. } => "migrate",
+    }
+}
+
+/// Everything on the command line but the command's own words, so a
+/// global flag counts wherever it was typed.
+fn arguments(argv: &[String], command: &str) -> Vec<String> {
+    let mut words = command.split(' ');
+    let mut word = words.next();
+    argv.iter()
+        .filter(|a| {
+            if word == Some(a.as_str()) {
+                word = words.next();
+                false
+            } else {
+                true
+            }
+        })
+        .cloned()
+        .collect()
+}
+
 fn fail(e: &Failure) -> i32 {
     eprintln!("worklog: {e}");
     e.exit_code()
@@ -327,6 +404,7 @@ fn print(text: &str) {
 /// Runs the command line and returns the process exit code.
 #[must_use]
 pub fn run() -> i32 {
+    let argv: Vec<String> = std::env::args().skip(1).collect();
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,
         Err(e) => {
@@ -369,6 +447,7 @@ pub fn run() -> i32 {
         }
         Err(e) => return fail(&e.into()),
     };
+    let usage = FsUsage::new(&store);
     let store = FsStore::new(store);
     let drafts = FsDrafts::new(paths.drafts);
     let identity = FileIdentity::new(paths.config);
@@ -378,8 +457,10 @@ pub fn run() -> i32 {
         identity: &identity,
         clock: &SystemClock,
         host: &FsHost,
+        usage: &usage,
         home: paths.home.display().to_string(),
     };
+    let path = command_path(&command);
     let result = match command {
         StoreCommand::Read(command) => dispatch_read(&deps, cli.json, command),
         StoreCommand::Write(command) => dispatch_write(&deps, cli.json, command),
@@ -387,10 +468,25 @@ pub fn run() -> i32 {
             migrate_command(&deps, cli.json, &entries, &facts)
         }
     };
+    let exit = match &result {
+        Ok(r) => r.exit,
+        Err(e) => e.exit_code(),
+    };
+    if let Ok(dir) = cwd() {
+        // A full disk is no reason for a command that worked to say
+        // otherwise, so the log's own failure goes unsaid.
+        let _ = usage::record(
+            &deps,
+            path,
+            arguments(&argv, path),
+            &dir.display().to_string(),
+            exit,
+        );
+    }
     match result {
         Ok(r) => {
             print(&r.text);
-            r.exit
+            exit
         }
         Err(e) => fail(&e),
     }

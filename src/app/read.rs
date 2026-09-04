@@ -14,9 +14,9 @@ use crate::domain::version::{State, Version, VersionId};
 
 use super::load::{self, Doc, Loaded};
 use super::output::{
-    Check, Claimed, Context, Diff, FactListing, FollowupItem, Followups, Fork, Forks, Group, Head,
-    History, HistoryRow, Hit, Listing, Log, LogRow, Problem, Row, Search, Shown, Side, Stamp, Tags,
-    TopicRow, Topics, Where,
+    Check, Claimed, CommandCount, Context, Diff, FactListing, FollowupItem, Followups, Fork, Forks,
+    Group, Head, History, HistoryRow, Hit, Listing, Log, LogRow, MachineUsage, Problem, Row,
+    Search, Shown, Side, Stamp, Tags, TopicRow, Topics, Usage, Where,
 };
 use super::{Deps, Failure, machine};
 use crate::domain::machine::MachineName;
@@ -87,6 +87,12 @@ fn tag_key(tag: &str) -> String {
 
 fn has_tag(tags: &[String], tag: &str) -> bool {
     tags.iter().any(|t| t.eq_ignore_ascii_case(tag))
+}
+
+fn most_used_first(counts: BTreeMap<String, usize>) -> Vec<(String, usize)> {
+    let mut ranked: Vec<(String, usize)> = counts.into_iter().collect();
+    ranked.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    ranked
 }
 
 /// A document's current text, or every head of a fork; or one stored
@@ -267,9 +273,9 @@ pub fn tags(deps: &Deps) -> Result<Tags, Failure> {
     for tag in all {
         *counts.entry(tag_key(tag)).or_default() += 1;
     }
-    let mut tags: Vec<(String, usize)> = counts.into_iter().collect();
-    tags.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
-    Ok(Tags { tags })
+    Ok(Tags {
+        tags: most_used_first(counts),
+    })
 }
 
 /// The topics a facts listing covers: one, one and its includes, or all.
@@ -542,6 +548,35 @@ pub fn context(deps: &Deps, directory: &str) -> Result<Context, Failure> {
             out.unreached
                 .push((slug.clone(), loaded.facts_of(slug).count()));
         }
+    }
+    Ok(out)
+}
+
+/// How often each command was run, by the machine that ran it. A date
+/// keeps to the lines written on it and after.
+pub fn usage(deps: &Deps, machine: Option<&str>, since: Option<&str>) -> Result<Usage, Failure> {
+    let only = machine.map(MachineName::parse).transpose()?;
+    let mut counted: BTreeMap<String, BTreeMap<String, usize>> = BTreeMap::new();
+    for run in deps.usage.all()? {
+        if only.as_ref().is_some_and(|m| &run.machine != m) {
+            continue;
+        }
+        if since.is_some_and(|day| run.written.as_str() < day) {
+            continue;
+        }
+        *counted
+            .entry(run.machine.to_string())
+            .or_default()
+            .entry(run.command)
+            .or_default() += 1;
+    }
+    let mut out = Usage::default();
+    for (machine, commands) in counted {
+        let commands: Vec<CommandCount> = most_used_first(commands)
+            .into_iter()
+            .map(|(command, count)| CommandCount { command, count })
+            .collect();
+        out.machines.push(MachineUsage { machine, commands });
     }
     Ok(out)
 }
@@ -853,6 +888,66 @@ mod tests {
             "{elsewhere:?}"
         );
         assert_eq!(check(&d).unwrap().problems, []);
+    }
+
+    #[test]
+    fn usage_counts_each_command_under_its_machine() {
+        use crate::domain::ports::Usage as _;
+        use crate::domain::usage::Invocation;
+
+        let w = World::new("m1");
+        for (machine, command, day) in [
+            ("desk", "context", "2026-09-01"),
+            ("desk", "context", "2026-09-02"),
+            ("desk", "show", "2026-09-02"),
+            ("phone", "context", "2026-09-02"),
+        ] {
+            w.usage
+                .record(&Invocation {
+                    written: format!("{day}T10:00:00.000001+01:00"),
+                    machine: MachineName::parse(machine).unwrap(),
+                    command: command.to_owned(),
+                    exit: 0,
+                    directory: "~/projects/lantern".into(),
+                    arguments: vec![],
+                })
+                .unwrap();
+        }
+        let d = &w.deps();
+        let all = usage(d, None, None).unwrap();
+        assert_eq!(all.machines.len(), 2);
+        assert_eq!(all.machines[0].machine, "desk");
+        assert_eq!(
+            all.machines[0].commands,
+            [
+                CommandCount {
+                    command: "context".into(),
+                    count: 2
+                },
+                CommandCount {
+                    command: "show".into(),
+                    count: 1
+                }
+            ]
+        );
+        let phone = usage(d, Some("phone"), None).unwrap();
+        assert_eq!(phone.machines.len(), 1);
+        assert_eq!(phone.machines[0].commands[0].count, 1);
+        let recent = usage(d, None, Some("2026-09-02")).unwrap();
+        assert_eq!(
+            recent.machines[0].commands,
+            [
+                CommandCount {
+                    command: "context".into(),
+                    count: 1
+                },
+                CommandCount {
+                    command: "show".into(),
+                    count: 1
+                },
+            ]
+        );
+        assert!(usage(d, Some("nobody"), None).unwrap().machines.is_empty());
     }
 
     #[test]

@@ -10,7 +10,7 @@ use std::fmt::Write as _;
 
 use crate::app::output::{
     Check, Context, Diff, DraftList, DraftRef, FactListing, FollowupItem, Followups, Forks,
-    History, Listing, Log, Row, Search, Shown, Tags, Topics, Where, Written,
+    History, Listing, Log, Row, Search, Shown, Tags, Topics, Usage, Where, Written,
 };
 
 pub const IDEAS_HEADING: &str = "Ideas — unbuilt, kept with their settled design:";
@@ -45,6 +45,10 @@ fn parents(ids: &[String]) -> String {
     } else {
         ids.iter().map(|p| short(p)).collect::<Vec<_>>().join(", ")
     }
+}
+
+fn count_line(out: &mut String, count: usize, name: &str) {
+    let _ = writeln!(out, "{count:>7} {name}");
 }
 
 fn row(out: &mut String, r: &Row) {
@@ -171,7 +175,7 @@ pub fn search(s: &Search) -> String {
 pub fn tags(t: &Tags) -> String {
     let mut out = String::new();
     for (tag, count) in &t.tags {
-        let _ = writeln!(out, "{count:>7} {tag}");
+        count_line(&mut out, *count, tag);
     }
     out
 }
@@ -364,6 +368,21 @@ pub fn check(c: &Check) -> String {
         c.problems.len(),
         c.forks.len()
     );
+    out
+}
+
+pub fn usage(u: &Usage) -> String {
+    let mut out = String::new();
+    for machine in &u.machines {
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        let runs: usize = machine.commands.iter().map(|c| c.count).sum();
+        let _ = writeln!(out, "{} — {runs} runs", machine.machine);
+        for c in &machine.commands {
+            count_line(&mut out, c.count, &c.command);
+        }
+    }
     out
 }
 

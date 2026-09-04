@@ -6,12 +6,14 @@ pub mod drafts;
 pub mod legacy;
 pub mod paths;
 pub mod store;
+pub mod usage;
 
 pub use clock::SystemClock;
 pub use config::{Config, FileIdentity};
 pub use drafts::FsDrafts;
 pub use paths::Paths;
 pub use store::FsStore;
+pub use usage::FsUsage;
 
 use std::path::Path;
 

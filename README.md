@@ -46,6 +46,7 @@ worklog new followup port --entry 2026-09/2026-09-04-lamp-driver \
 worklog followups lantern                  # open work with each item's state
 worklog done 2026-09-04-port "dissolved by [[2026-09/2026-09-10-relay-landed]]"
 worklog check                              # every rule the store has to keep
+worklog usage                              # how often each command ran, per machine
 ```
 
 Prose goes through a draft: `new` or `checkout` prints a file to edit,

@@ -197,6 +197,24 @@ pub struct Check {
     pub links: usize,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct Usage {
+    pub machines: Vec<MachineUsage>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct MachineUsage {
+    pub machine: String,
+    /// Most used first.
+    pub commands: Vec<CommandCount>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct CommandCount {
+    pub command: String,
+    pub count: usize,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Written {
     pub slug: String,

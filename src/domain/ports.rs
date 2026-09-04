@@ -6,6 +6,7 @@ use std::fmt;
 use super::draft::Draft;
 use super::machine::MachineName;
 use super::slug::{Kind, Slug};
+use super::usage::Invocation;
 use super::version::{Document, Version};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -50,6 +51,14 @@ pub trait Drafts {
     fn list(&self) -> Result<Vec<Draft>, StoreError>;
     /// Where the draft for the slug is or would be.
     fn location(&self, slug: &Slug) -> String;
+}
+
+/// The log of commands run, one file per machine so no two writers share
+/// one.
+pub trait Usage {
+    fn record(&self, invocation: &Invocation) -> Result<(), StoreError>;
+    /// Every line every machine has written here, in no order.
+    fn all(&self) -> Result<Vec<Invocation>, StoreError>;
 }
 
 /// The configured name of this machine, if `init` has run.

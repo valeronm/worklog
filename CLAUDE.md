@@ -34,6 +34,12 @@ wants something new from outside adds it to a port, not to a parameter.
   afterwards, and `resolve` hands both heads to a person.
 - Slugs are never reused: a tombstone stays a head forever.
 
+Beside the kind directories the store walks sits `usage`, a line per
+command run. It is not a document because a count is not immutable, and
+one file per machine and month is what lets a file sync carry it: the
+machine that owns a file is its only writer, so there is no conflict to
+report. A line a sync delivered half-written reads as nothing.
+
 The config file, `~/.config/worklog/config`, uses the same grammar without
 fences through `frontmatter::parse_fields`, so the tree has one syntax.
 `init` writes it once per host, asking on a terminal when given no name;

@@ -213,6 +213,16 @@ pub enum ReadCommand {
     Forks,
     /// Every rule the store has to keep
     Check,
+    /// How often each command was run, on this machine and on every
+    /// machine that syncs here
+    Usage {
+        /// Only what this machine ran
+        #[arg(long)]
+        machine: Option<String>,
+        /// Only from this day on, `YYYY-MM-DD`
+        #[arg(long)]
+        since: Option<String>,
+    },
     /// A slug: the draft against the version it came from. An id: that
     /// version against its parent. Two ids: between them, earlier first
     Diff {

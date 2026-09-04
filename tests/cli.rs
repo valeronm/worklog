@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::Output;
 
 use assert_cmd::Command;
+use worklog::domain::usage::Invocation;
 
 struct Scratch {
     root: tempfile::TempDir,
@@ -187,12 +188,53 @@ fn init_is_once_and_writes_need_it() {
 }
 
 #[test]
+fn every_run_is_logged_under_the_machine_that_ran_it() {
+    let s = seeded();
+    s.ok(&["facts", "lantern"]);
+    s.ok(&["facts", "lantern"]);
+    s.refused(&["show", "lantern/nothing"]);
+    let counted = s.ok(&["usage"]);
+    assert!(counted.starts_with("m1 — "), "{counted}");
+    assert!(counted.contains("      2 facts\n"), "{counted}");
+    let logs: Vec<PathBuf> = fs::read_dir(s.root.path().join("store/usage"))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .collect();
+    assert_eq!(logs.len(), 1, "one file per machine and month: {logs:?}");
+    let lines = fs::read_to_string(&logs[0]).unwrap();
+    let logged: Vec<Invocation> = lines.lines().filter_map(Invocation::parse_line).collect();
+    let refused = logged
+        .iter()
+        .find(|i| i.command == "show")
+        .expect("the refused run is logged");
+    assert_eq!(refused.machine.as_str(), "m1");
+    assert_eq!(refused.exit, 1);
+    assert_eq!(refused.arguments, ["lantern/nothing"]);
+    // A global flag belongs to the binary wherever it was typed.
+    s.ok(&["--json", "topics"]);
+    s.ok(&["topics", "--json"]);
+    let lines = fs::read_to_string(&logs[0]).unwrap();
+    let flagged: Vec<Vec<String>> = lines
+        .lines()
+        .filter_map(Invocation::parse_line)
+        .filter(|i| i.command == "topics")
+        .map(|i| i.arguments)
+        .collect();
+    assert_eq!(flagged, [["--json"], ["--json"]]);
+    assert!(s.ok(&["usage", "--machine", "m2"]).is_empty());
+    assert!(s.ok(&["usage", "--since", "2099-01-01"]).is_empty());
+}
+
+#[test]
 fn a_synced_store_gets_an_ignore_file_on_the_first_write() {
     let s = seeded();
     let store = s.root.path().join("store");
     fs::create_dir(store.join(".stfolder")).unwrap();
     s.ok(&["topics"]);
-    assert!(!store.join(".stignore").exists(), "a read writes nothing");
+    assert!(
+        !store.join(".stignore").exists(),
+        "a read stores no version"
+    );
     s.ok(&["verify", "lantern/relay-pin-is-fixed"]);
     assert_eq!(
         fs::read_to_string(store.join(".stignore")).unwrap(),

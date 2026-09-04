@@ -5,6 +5,7 @@ pub mod load;
 pub mod migrate;
 pub mod output;
 pub mod read;
+pub mod usage;
 pub mod write;
 
 #[cfg(any(test, feature = "testing"))]
@@ -13,7 +14,7 @@ pub mod testing;
 use std::fmt;
 
 use crate::domain::machine::{MachineName, MachineNameError};
-use crate::domain::ports::{Clock, Drafts, Host, Identity, Store, StoreError};
+use crate::domain::ports::{Clock, Drafts, Host, Identity, Store, StoreError, Usage};
 use crate::domain::recheck::RecheckError;
 use crate::domain::slug::{Kind, Slug, SlugError};
 
@@ -24,6 +25,7 @@ pub struct Deps<'a> {
     pub identity: &'a dyn Identity,
     pub clock: &'a dyn Clock,
     pub host: &'a dyn Host,
+    pub usage: &'a dyn Usage,
     /// The user's home, for `~/` in claims.
     pub home: String,
 }
