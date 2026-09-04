@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 
 use super::draft::Draft;
 use super::machine::MachineName;
-use super::ports::{Clock, Drafts, Identity, Store, StoreError};
+use super::ports::{Clock, Drafts, Host, Identity, Store, StoreError};
 use super::slug::{Kind, Slug};
 use super::version::{Document, Version};
 
@@ -97,6 +97,22 @@ impl FixedIdentity {
 impl Identity for FixedIdentity {
     fn machine(&self) -> Result<Option<MachineName>, StoreError> {
         Ok(self.0.borrow().clone())
+    }
+}
+
+/// A host on which the named directories exist and no others.
+pub struct FixedHost(pub RefCell<Vec<String>>);
+
+impl FixedHost {
+    #[must_use]
+    pub fn with(dirs: &[&str]) -> FixedHost {
+        FixedHost(RefCell::new(dirs.iter().map(|d| (*d).to_owned()).collect()))
+    }
+}
+
+impl Host for FixedHost {
+    fn dir_exists(&self, path: &str) -> bool {
+        self.0.borrow().iter().any(|d| d == path)
     }
 }
 

@@ -115,9 +115,17 @@ pub struct Topics {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Where {
-    pub topic: String,
     pub machine: String,
-    pub dirs: Vec<String>,
+    pub claims: Vec<Claimed>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Claimed {
+    pub topic: String,
+    pub dir: String,
+    /// Whether the directory is on this host; unknown for another
+    /// machine's layout.
+    pub exists: Option<bool>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

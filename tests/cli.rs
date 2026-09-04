@@ -408,6 +408,13 @@ fn claims_are_commands_on_the_machine_topic() {
     assert!(ctx.contains("phone — this directory:"), "{ctx}");
     let err = s.refused(&["claim", "phone", "Documents"]);
     assert!(err.contains("already claims"), "{err}");
+    fs::remove_dir(s.home().join("Documents")).unwrap();
+    assert_eq!(s.ok(&["where", "phone"]), "~/Documents (missing)\n");
+    let all = s.ok(&["where"]);
+    assert!(all.contains("phone    ~/Documents (missing)\n"), "{all}");
+    assert!(all.contains("lantern  ~/projects/lantern\n"), "{all}");
+    let elsewhere = s.ok(&["where", "--machine", "m1"]);
+    assert!(!elsewhere.contains("missing"), "{elsewhere}");
     s.ok(&["unclaim", "phone", "Documents"]);
     let err = s.refused(&["unclaim", "phone", "Documents"]);
     assert!(err.contains("does not claim"), "{err}");

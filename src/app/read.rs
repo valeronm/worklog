@@ -14,8 +14,8 @@ use crate::domain::version::{State, Version};
 
 use super::load::{self, Doc, Loaded};
 use super::output::{
-    Check, Context, Diff, FactListing, FollowupItem, Followups, Fork, Forks, Group, Head, History,
-    HistoryRow, Hit, Listing, Problem, Row, Search, Shown, Tags, TopicRow, Topics, Where,
+    Check, Claimed, Context, Diff, FactListing, FollowupItem, Followups, Fork, Forks, Group, Head,
+    History, HistoryRow, Hit, Listing, Problem, Row, Search, Shown, Tags, TopicRow, Topics, Where,
 };
 use super::{Deps, Failure, machine};
 
@@ -276,27 +276,40 @@ pub fn topics(deps: &Deps) -> Result<Topics, Failure> {
     })
 }
 
-/// Where a topic lives on this machine, or on the machine named.
-pub fn where_(deps: &Deps, topic: &str, machine_name: Option<&str>) -> Result<Where, Failure> {
+/// Where a topic, or every topic, lives on this machine or on the machine
+/// named. Only this machine's directories can be checked for existence.
+pub fn where_(
+    deps: &Deps,
+    topic: Option<&str>,
+    machine_name: Option<&str>,
+) -> Result<Where, Failure> {
     let loaded = load::load(deps.store)?;
-    if !loaded.has_topic(topic) {
+    if let Some(topic) = topic
+        && !loaded.has_topic(topic)
+    {
         return Err(Failure::Refused(format!("no topic: {topic}")));
     }
+    let here = machine_name.is_none();
     let machine_name = match machine_name {
         Some(m) => m.to_owned(),
         None => machine(deps)?.to_string(),
     };
     let machine_topic = &load::machine_topic(loaded.topics.values(), &machine_name)?.data;
-    let paths = |map: &[(String, Vec<String>)]| {
-        map.iter()
-            .filter(|(t, _)| t == topic)
-            .flat_map(|(_, paths)| paths.clone())
-            .collect::<Vec<_>>()
-    };
+    let claims = machine_topic
+        .claims
+        .iter()
+        .filter(|(t, _)| topic.is_none_or(|topic| t == topic))
+        .flat_map(|(t, dirs)| {
+            dirs.iter().map(|dir| Claimed {
+                topic: t.clone(),
+                dir: dir.clone(),
+                exists: here.then(|| deps.host.dir_exists(&graph::expand(dir, &deps.home))),
+            })
+        })
+        .collect();
     Ok(Where {
-        topic: topic.to_owned(),
         machine: machine_name,
-        dirs: paths(&machine_topic.claims),
+        claims,
     })
 }
 
@@ -722,9 +735,17 @@ mod tests {
         let shown = show(&d, &Slug::parse("2026-09/2026-09-01-first").unwrap()).unwrap();
         assert_eq!(shown.followups.len(), 2);
         assert!(!shown.forked);
-        assert_eq!(
-            where_(&d, "lantern", None).unwrap().dirs,
-            ["~/projects/lantern"]
+        let lantern = where_(&d, Some("lantern"), None).unwrap().claims;
+        assert_eq!(lantern.len(), 1);
+        assert_eq!(lantern[0].dir, "~/projects/lantern");
+        assert_eq!(lantern[0].exists, Some(true));
+        let all = where_(&d, None, None).unwrap().claims;
+        assert!(all.len() > 1, "{all:?}");
+        assert!(all.iter().any(|c| c.exists == Some(false)), "{all:?}");
+        let elsewhere = where_(&d, None, Some("m1")).unwrap().claims;
+        assert!(
+            elsewhere.iter().all(|c| c.exists.is_none()),
+            "{elsewhere:?}"
         );
         assert_eq!(check(&d).unwrap().problems, []);
     }

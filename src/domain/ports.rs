@@ -57,6 +57,11 @@ pub trait Identity {
     fn machine(&self) -> Result<Option<MachineName>, StoreError>;
 }
 
+/// What the host this runs on can answer about itself.
+pub trait Host {
+    fn dir_exists(&self, path: &str) -> bool;
+}
+
 pub trait Clock {
     /// `YYYY-MM-DD` in local time.
     fn today(&self) -> String;

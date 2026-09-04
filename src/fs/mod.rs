@@ -15,7 +15,15 @@ pub use store::FsStore;
 
 use std::path::Path;
 
-use crate::domain::ports::StoreError;
+use crate::domain::ports::{Host, StoreError};
+
+pub struct FsHost;
+
+impl Host for FsHost {
+    fn dir_exists(&self, path: &str) -> bool {
+        Path::new(path).is_dir()
+    }
+}
 
 pub(crate) fn io_error(location: &Path, error: &std::io::Error) -> StoreError {
     StoreError::Io {

@@ -173,17 +173,29 @@ pub fn topics(t: &Topics) -> String {
     out
 }
 
-pub fn where_(w: &Where) -> String {
+/// One topic's directories bare; every topic's with the topic in front.
+pub fn where_(w: &Where, topic: Option<&str>) -> String {
     let mut out = String::new();
-    for dir in &w.dirs {
-        let _ = writeln!(out, "{dir}");
+    let width = w.claims.iter().map(|c| c.topic.len()).max().unwrap_or(0);
+    for c in &w.claims {
+        if topic.is_none() {
+            let _ = write!(out, "{:width$}  ", c.topic);
+        }
+        let _ = write!(out, "{}", c.dir);
+        if c.exists == Some(false) {
+            let _ = write!(out, " (missing)");
+        }
+        let _ = writeln!(out);
     }
-    if w.dirs.is_empty() {
-        let _ = writeln!(
-            out,
-            "no directory on {} — a device, not a checkout",
-            w.machine
-        );
+    if w.claims.is_empty() {
+        let _ = match topic {
+            Some(_) => writeln!(
+                out,
+                "no directory on {} — a device, not a checkout",
+                w.machine
+            ),
+            None => writeln!(out, "no claims on {}", w.machine),
+        };
     }
     out
 }

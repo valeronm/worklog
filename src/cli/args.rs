@@ -180,9 +180,10 @@ pub enum ReadCommand {
     },
     /// Every topic with what it is
     Topics,
-    /// Where a topic lives on this machine
+    /// Where a topic lives on this machine, or every claim here, with a
+    /// directory this host lacks marked
     Where {
-        topic: String,
+        topic: Option<String>,
         /// Another machine's layout
         #[arg(long)]
         machine: Option<String>,

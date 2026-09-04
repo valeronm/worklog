@@ -156,7 +156,8 @@ touching the subject at all. A machine topic carries `machine: <name>`,
 `claims` mapping topics to that host's directories, and `unclaimed` for
 topics loaded only in unclaimed directories.
 `worklog topics` lists them; `worklog where <topic>` shows a topic's
-directories on this machine.
+directories on this machine, and `worklog where` alone every claim here,
+marking a directory this host lacks.
 
 Write a topic's summary from the subject itself, its README or what the
 device is, not from its facts: facts cluster in whatever corner needed

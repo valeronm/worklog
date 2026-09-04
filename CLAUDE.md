@@ -66,8 +66,10 @@ counts, must-act-on items first. `tests/cli.rs` pins the shape.
 ## Output contract
 
 stdout carries data only; refusals and notes go to stderr. Exit 1 is a
-refusal or a store problem, 2 a usage error. Shell completions parse
-`worklog topics` and `worklog tags`, so those two shapes stay stable.
+refusal or a store problem, 2 a usage error. A listing that reports a
+problem a person may act on, a fork, a claim on a directory this host
+lacks, still exits 0: the listing is the answer, and `check` is the
+command whose exit code means something.
 
 ## The skill
 

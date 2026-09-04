@@ -13,7 +13,7 @@ pub mod testing;
 use std::fmt;
 
 use crate::domain::machine::{MachineName, MachineNameError};
-use crate::domain::ports::{Clock, Drafts, Identity, Store, StoreError};
+use crate::domain::ports::{Clock, Drafts, Host, Identity, Store, StoreError};
 use crate::domain::recheck::RecheckError;
 use crate::domain::slug::{Kind, Slug, SlugError};
 
@@ -23,6 +23,7 @@ pub struct Deps<'a> {
     pub drafts: &'a dyn Drafts,
     pub identity: &'a dyn Identity,
     pub clock: &'a dyn Clock,
+    pub host: &'a dyn Host,
     /// The user's home, for `~/` in claims.
     pub home: String,
 }

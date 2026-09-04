@@ -1,6 +1,6 @@
 //! Every port at once, for a use-case test.
 
-use crate::domain::testing::{FixedClock, FixedIdentity, MemoryDrafts, MemoryStore};
+use crate::domain::testing::{FixedClock, FixedHost, FixedIdentity, MemoryDrafts, MemoryStore};
 
 use super::Deps;
 
@@ -9,6 +9,7 @@ pub struct World {
     pub drafts: MemoryDrafts,
     pub identity: FixedIdentity,
     pub clock: FixedClock,
+    pub host: FixedHost,
 }
 
 impl World {
@@ -27,6 +28,7 @@ impl World {
             drafts: MemoryDrafts::default(),
             identity: FixedIdentity::unset(),
             clock: FixedClock::on("2026-09-04"),
+            host: FixedHost::with(&["/home/u/projects/lantern"]),
         }
     }
 
@@ -37,6 +39,7 @@ impl World {
             drafts: &self.drafts,
             identity: &self.identity,
             clock: &self.clock,
+            host: &self.host,
             home: "/home/u".into(),
         }
     }

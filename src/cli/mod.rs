@@ -16,7 +16,7 @@ use serde::Serialize;
 use crate::app::write::{Made, NewFollowup};
 use crate::app::{Deps, Failure, migrate, read, slug_arg, write};
 use crate::domain::slug::Kind;
-use crate::fs::{FileIdentity, FsDrafts, FsStore, Paths, SystemClock};
+use crate::fs::{FileIdentity, FsDrafts, FsHost, FsStore, Paths, SystemClock};
 
 use args::{ClaimArg, Cli, Command, NewWhat, ReadCommand, SlugArg, StoreCommand, WriteCommand};
 
@@ -56,6 +56,17 @@ fn cwd() -> Result<std::path::PathBuf, Failure> {
 fn directory(dir: Option<std::path::PathBuf>) -> Result<String, Failure> {
     let path = match dir {
         Some(dir) => std::fs::canonicalize(&dir)
+            .map_err(|e| Failure::Usage(format!("{}: {e}", dir.display())))?,
+        None => cwd()?,
+    };
+    Ok(path.display().to_string())
+}
+
+/// A directory to unclaim, resolved without touching the filesystem: a
+/// claim outlives its directory, and the stale claim is the one to drop.
+fn named_directory(dir: Option<std::path::PathBuf>) -> Result<String, Failure> {
+    let path = match dir {
+        Some(dir) => std::path::absolute(&dir)
             .map_err(|e| Failure::Usage(format!("{}: {e}", dir.display())))?,
         None => cwd()?,
     };
@@ -129,8 +140,8 @@ fn dispatch_read(deps: &Deps, json: bool, command: ReadCommand) -> Result<Render
             rendered(json, &out, || render::topics(&out))
         }
         ReadCommand::Where { topic, machine } => {
-            let out = read::where_(deps, &topic, machine.as_deref())?;
-            rendered(json, &out, || render::where_(&out))
+            let out = read::where_(deps, topic.as_deref(), machine.as_deref())?;
+            rendered(json, &out, || render::where_(&out, topic.as_deref()))
         }
         ReadCommand::Followups { about, all } => {
             let out = read::followups(deps, about.as_deref(), all)?;
@@ -253,7 +264,7 @@ fn dispatch_write(deps: &Deps, json: bool, command: WriteCommand) -> Result<Rend
             rendered(json, &out, || render::written(&out))
         }
         WriteCommand::Unclaim(ClaimArg { topic, dir }) => {
-            let out = write::unclaim(deps, &topic, &directory(dir)?)?;
+            let out = write::unclaim(deps, &topic, &named_directory(dir)?)?;
             rendered(json, &out, || render::written(&out))
         }
     }
@@ -350,6 +361,7 @@ pub fn run() -> i32 {
         drafts: &drafts,
         identity: &identity,
         clock: &SystemClock,
+        host: &FsHost,
         home: paths.home.display().to_string(),
     };
     let result = match command {
