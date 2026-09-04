@@ -434,26 +434,29 @@ pub fn tombstone(deps: &Deps, slug: &Slug) -> Result<Written, Failure> {
 }
 
 /// A tombstone naming the new slug, and the new slug's first version with
-/// the same content.
+/// the same content, parented on the tombstone so a walk back from the new
+/// slug crosses the move.
 pub fn rename(deps: &Deps, from: &Slug, to: &str) -> Result<Written, Failure> {
     let to = Slug::of_kind(from.kind(), to)?;
     let version = load::live(deps.store, from)?;
     refuse_existing(deps, &to)?;
-    let moved = first_version(
-        deps,
-        to,
-        Operation::Rename,
-        version.fields.clone(),
-        version.body,
-    )?;
     let stone = store_version(
         deps,
         from.clone(),
         vec![version.id],
         Operation::Rename,
-        version.fields,
+        version.fields.clone(),
         String::new(),
-        Some(moved.slug.clone()),
+        Some(to.clone()),
+    )?;
+    let moved = store_version(
+        deps,
+        to,
+        vec![stone.id.clone()],
+        Operation::Rename,
+        version.fields,
+        version.body,
+        None,
     )?;
     Ok(Written {
         slug: moved.slug.path().to_owned(),
@@ -799,7 +802,15 @@ mod tests {
             matches!(load::live(&w.store, &fact), Err(Failure::Refused(m)) if m.contains("renamed"))
         );
         let moved = Slug::parse("lantern/relay-pin").unwrap();
-        assert!(load::live(&w.store, &moved).is_ok());
+        let head = current(&w, &moved);
+        assert_eq!(
+            head.block
+                .parents
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            [renamed.tombstone.clone().unwrap()]
+        );
         tombstone(&d, &moved).unwrap();
         assert!(
             matches!(new_fact(&d, "lantern/relay-pin", false), Err(Failure::Refused(m)) if m.contains("never reused"))
