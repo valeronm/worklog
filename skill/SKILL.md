@@ -68,9 +68,10 @@ stderr with exit 1; a usage error exits 2.
 
 1. `worklog new entry <kebab-name>`; edit the draft. `date` and `machine`
    are filled. Set `tags` from the vocabulary `worklog tags` shows, reusing
-   before inventing, and `summary` as one line, which is what every listing
-   shows. Body sections: **What / Why / Changes / Notes**. Record what was
-   non-obvious: decisions, gotchas, why not the other way. Never git state.
+   before inventing, `files_touched` to the real paths changed, if any, and
+   `summary` as one line, which is what every listing shows. Body sections:
+   **What / Why / Changes / Notes**. Record what was non-obvious: decisions,
+   gotchas, why not the other way. Never git state.
 2. `worklog diff` then `worklog save`.
 3. Open work from this session becomes followups, one each:
    `worklog new followup <name> --entry <entry-slug> --summary "…"
