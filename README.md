@@ -73,9 +73,10 @@ refreshes the skill on a host that has one, since the skill describes the
 commands of the binary it shipped with.
 
 `worklog completions <shell>` prints completions for the commands of the
-binary it runs from, so a shell sources them rather than keeping a copy:
-`worklog completions fish | source` in a fish completions file, or the
-bash or zsh output in the place that shell reads.
+binary it runs from. The installer writes the fish ones into the
+completions directory on a host that has one, and rewrites them with every
+install, so they never drift from the binary; another shell takes its
+output in the place it reads.
 
 ## Develop
 

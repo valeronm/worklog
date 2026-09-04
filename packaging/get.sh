@@ -42,3 +42,11 @@ if [ -f "$HOME/.claude/skills/worklog/SKILL.md" ]; then
   "$prefix/worklog" skill install >/dev/null
   echo "agent skill updated in $HOME/.claude/skills/worklog"
 fi
+
+# Completions are generated from the binary, so they are written where a
+# shell already looks for them and rewritten with every install.
+fish_completions="${XDG_CONFIG_HOME:-$HOME/.config}/fish/completions"
+if [ -d "$fish_completions" ]; then
+  "$prefix/worklog" completions fish > "$fish_completions/worklog.fish"
+  echo "fish completions written to $fish_completions/worklog.fish"
+fi
