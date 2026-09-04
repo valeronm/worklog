@@ -7,6 +7,10 @@ use crate::domain::version::{Document, Version, VersionId};
 
 use super::{corrupt, io_error};
 
+/// A version lands under this name before its rename; the folder's ignore
+/// file names the same prefix so a sync never ships it.
+const STAGING_PREFIX: &str = ".tmp-";
+
 /// `<root>/<kind>/<slug>/<hash>.md`, one file per version, never rewritten.
 pub struct FsStore {
     root: PathBuf,
@@ -28,6 +32,30 @@ impl FsStore {
     #[must_use]
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    /// A folder Syncthing manages carries its `.stfolder` marker, and its
+    /// ignore file is per host and never synced, so a folder without one
+    /// is given the patterns that keep Finder's metadata and a half-written
+    /// version from leaving this machine. A file already there is the
+    /// host's own and is left alone.
+    fn keep_sync_clean(&self) -> Result<(), StoreError> {
+        if !self.root.join(".stfolder").exists() {
+            return Ok(());
+        }
+        let ignore = self.root.join(".stignore");
+        let file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&ignore);
+        match file {
+            Ok(mut file) => {
+                use std::io::Write as _;
+                writeln!(file, ".DS_Store\n{STAGING_PREFIX}*").map_err(|e| io_error(&ignore, &e))
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+            Err(e) => Err(io_error(&ignore, &e)),
+        }
     }
 
     fn slug_dir(&self, slug: &Slug) -> PathBuf {
@@ -117,10 +145,11 @@ impl Store for FsStore {
         if target.exists() {
             return Ok(());
         }
+        self.keep_sync_clean()?;
         fs::create_dir_all(&dir).map_err(|e| io_error(&dir, &e))?;
         // Syncthing picks up a file as soon as it appears, so the bytes land
         // under a name it ignores and become the version in one rename.
-        let staging = dir.join(format!(".tmp-{}", version.id));
+        let staging = dir.join(format!("{STAGING_PREFIX}{}", version.id));
         fs::write(&staging, version.to_text()).map_err(|e| io_error(&staging, &e))?;
         fs::rename(&staging, &target).map_err(|e| io_error(&target, &e))?;
         Ok(())

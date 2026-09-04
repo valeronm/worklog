@@ -9,6 +9,9 @@ hold for the directory it is in, what is due, and what happened last time.
 
 One directory, meant to be shared between machines by a file sync such as
 Syncthing. Nothing in it is ever edited or deleted; a write is a new file.
+A folder Syncthing manages is given an ignore file for Finder's metadata
+and the tool's own staging files on the first write from a host, if it
+has none.
 
 ```
 ~/worklog/

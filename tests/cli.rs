@@ -187,6 +187,26 @@ fn init_is_once_and_writes_need_it() {
 }
 
 #[test]
+fn a_synced_store_gets_an_ignore_file_on_the_first_write() {
+    let s = seeded();
+    let store = s.root.path().join("store");
+    fs::create_dir(store.join(".stfolder")).unwrap();
+    s.ok(&["topics"]);
+    assert!(!store.join(".stignore").exists(), "a read writes nothing");
+    s.ok(&["verify", "lantern/relay-pin-is-fixed"]);
+    assert_eq!(
+        fs::read_to_string(store.join(".stignore")).unwrap(),
+        ".DS_Store\n.tmp-*\n"
+    );
+    fs::write(store.join(".stignore"), "mine\n").unwrap();
+    s.ok(&["claim", "phone", "Documents"]);
+    assert_eq!(
+        fs::read_to_string(store.join(".stignore")).unwrap(),
+        "mine\n"
+    );
+}
+
+#[test]
 fn store_layout_and_history() {
     let s = seeded();
     let dir = s.root.path().join("store/topic/lantern");
