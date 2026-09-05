@@ -1,7 +1,8 @@
 # Working on worklog
 
-Read README.md first for what the tool is. This file covers the constraints
-that are not visible from the code.
+Read README.md first for what the tool is, `docs/store.md` for the file
+format and `docs/documents.md` for the kinds. This file covers the
+constraints that are not visible from the code or those docs.
 
 ## Layers
 
@@ -19,68 +20,27 @@ port, not to a parameter.
 
 ## The store's invariants
 
-- A version file is named by the BLAKE3 hash of its bytes, and `fs::store`
-  refuses a file whose bytes are not what the writer would emit for their
-  content, so the frontmatter grammar in `domain::frontmatter` is the only
-  shape that exists. It is not YAML on purpose: a second writer with its
-  own quoting or ordering would produce files that hash differently for the
-  same content. Extend the grammar only if the writer and the reader change
-  together. A version with a key or an operation this binary does not
-  know in its block, or a field its kind does not know, still reads: the
-  block is kept as written so the bytes still hash, reads note it, and a
-  write of a new version of that document is refused. Nothing else is
-  tolerated, so a new envelope key, kind or slug shape still needs every
-  machine sharing the store upgraded first; `docs/release.md` has the
-  step.
-- A file is written under a dotted name and renamed into place, so a file
-  sync never ships a partial version.
-- Nothing is edited in place. A command that needs to change a document
-  writes a new version naming the old one as parent. A parent sits in the
-  same document except after `rename`, whose moved first version names the
-  old slug's tombstone as parent and the old slug in `renamed_from`, the
-  one way a parent lookup crosses documents. The one file that is edited
-  is a draft, and drafts live outside the store. A draft is the document's
-  own text and nothing else; the versions it came from sit in a file
-  beside it, so an editor cannot touch what `save` relies on.
-- Forks are reported, never merged. `save` refuses a draft whose parent is
-  no longer current, so a fork can arise only between machines that synced
-  afterwards, and `resolve` hands both heads to a person.
-- Slugs are never reused: a tombstone stays a head forever. A removed
-  document may be tombstoned again to replace its note; a renamed one may
-  not, since its tombstone points elsewhere.
+`docs/store.md` is the format, and `fs::store` is where a file outside it
+is refused. Extend the grammar only if the writer and the reader change
+together, and only by adding, since that is what an older binary
+tolerates; `docs/release.md` has the step for anything else.
 
-Beside the kind directories the store walks sits `usage`, a line per
-command run. It is not a document because a count is not immutable, and
-one file per machine and month is what lets a file sync carry it: the
-machine that owns a file is its only writer, so there is no conflict to
-report. A line a sync delivered half-written reads as nothing.
-
-The config file, `~/.config/worklog/config`, uses the same grammar without
-fences through `frontmatter::parse_fields`, so the tree has one syntax.
-`init` writes it once per host, asking on a terminal when given no name;
-nothing reads a store before it exists.
+`init` asks on a terminal when given no name; nothing reads a store
+before it exists.
 
 ## Documents
 
-Slug shapes decide the kind (`domain::slug`), so a bare slug names one
-document across the store. A topic needs a letter so it cannot be confused
-with an entry's month directory, `2026-09`, which holds the month's entries
-so no directory grows past a few dozen children. An idea is a fact with `idea: true`, not a
-kind of its own, so it becomes a fact by a field change and keeps its links.
-The fact-level key is `idea` rather than `kind` because `kind` is taken by
-the document header.
-
-Follow-ups are documents naming their entry, not lines in it, so an entry
-never changes when work is closed. `show` derives the Follow-ups section.
+`docs/documents.md` has the kinds, their slugs and their fields. An entry
+sits under a month directory so no directory grows past a few dozen
+children, and a topic needs a letter so it cannot be read as one. An
+idea is flagged by `idea` rather than `kind` because `kind` names the
+document.
 
 ## Retrieval
 
-`domain::graph::resolve` is the whole rule: a machine topic's claims match
-the directory closest first, its `unclaimed` topics load only when nothing
-matched, the machine topic always loads, and `includes` is walked
-breadth-first from each root, each topic once. Every claim loads; there is
-no shadowing of a wider claim by a narrower one, so a topic that should
-not reach every project must not be claimed for a wide directory.
+`domain::graph::resolve` is the whole rule, stated in `docs/documents.md`
+under Topic. Since every matching claim loads, a topic that should not
+reach every project must not be claimed for a wide directory.
 
 `context` is printed at session start and a session is shown only its
 first couple of kilobytes, so the text renderer keeps it to names and
