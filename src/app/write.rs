@@ -7,6 +7,7 @@ use crate::domain::fact::Fact;
 use crate::domain::followup::{Followup, FollowupState, NotOpen};
 use crate::domain::frontmatter::Fields;
 use crate::domain::graph;
+use crate::domain::kind_keys;
 use crate::domain::recheck::Recheck;
 use crate::domain::slug::{Kind, Slug};
 use crate::domain::topic::{ClaimError, Topic};
@@ -59,6 +60,7 @@ pub fn store_version(
         operation,
         superseded_by,
         renamed_from,
+        raw: None,
     };
     let version = Version::compose(slug, block, fields, body);
     deps.store.put(&version)?;
@@ -84,6 +86,7 @@ fn amend(
     fields: Fields,
     body: String,
 ) -> Result<Written, Failure> {
+    load::refuse_foreign(parent)?;
     let version = store_version(
         deps,
         parent.slug.clone(),
@@ -99,6 +102,9 @@ fn amend(
 
 /// The fields a kind accepts, or the refusal naming what it does not.
 fn validate(deps: &Deps, slug: &Slug, fields: &Fields) -> Result<(), Failure> {
+    fields
+        .reject_unknown(kind_keys(slug.kind()))
+        .map_err(|e| Failure::at(slug, e))?;
     match slug.kind() {
         Kind::Entry => {
             let entry = Entry::from_fields(fields).map_err(|e| Failure::at(slug, e))?;
@@ -256,7 +262,7 @@ pub fn new_followup(
 
 /// The current version as a draft, for editing.
 pub fn checkout(deps: &Deps, slug: &Slug) -> Result<DraftRef, Failure> {
-    let version = load::live(deps.store, slug)?;
+    let version = load::live_to_amend(deps.store, slug)?;
     open_draft(
         deps,
         &Draft {
@@ -275,6 +281,7 @@ pub fn resolve(deps: &Deps, slug: &Slug) -> Result<DraftRef, Failure> {
         return Err(Failure::Refused(format!("{slug} is not forked")));
     };
     let heads: Vec<Version> = heads.into_iter().cloned().collect();
+    heads.iter().try_for_each(load::refuse_foreign)?;
     open_draft(deps, &Draft::merging(&heads))
 }
 
@@ -291,6 +298,7 @@ pub fn save(deps: &Deps, slug: &Slug, dry_run: bool) -> Result<Written, Failure>
         State::Live(v) | State::Tombstoned(v) => vec![v],
         State::Forked(heads) => heads,
     };
+    heads.iter().try_for_each(|h| load::refuse_foreign(h))?;
     let operation = match (draft.parents.len(), heads.len()) {
         (0, 0) => Operation::New,
         (0, _) => return Err(Failure::at(slug, "exists; the draft names no parent")),
@@ -452,7 +460,7 @@ pub fn tombstone(deps: &Deps, slug: &Slug, note: Option<&str>) -> Result<Written
 /// slug crosses the move.
 pub fn rename(deps: &Deps, from: &Slug, to: &str) -> Result<Written, Failure> {
     let to = Slug::of_kind(from.kind(), to)?;
-    let version = load::live(deps.store, from)?;
+    let version = load::live_to_amend(deps.store, from)?;
     refuse_existing(deps, &to)?;
     let stone = store_version(
         deps,
@@ -676,6 +684,68 @@ mod tests {
 
     fn current(w: &World, slug: &Slug) -> Version {
         w.store.document(slug).unwrap().current().unwrap().clone()
+    }
+
+    /// A fact as a newer worklog would have written it, by editing the
+    /// text where that grammar differs; put as the document's only version.
+    fn from_the_future(w: &World, edit: fn(&str) -> String) -> Version {
+        let d = w.deps();
+        put_topic(&d, "lantern", "A lamp", &[], None).unwrap();
+        let scratch = World::new("m1");
+        let sd = scratch.deps();
+        put_topic(&sd, "lantern", "A lamp", &[], None).unwrap();
+        put_fact(
+            &sd,
+            "lantern/relay",
+            "The relay is fixed",
+            &["lantern"],
+            false,
+        )
+        .unwrap();
+        let written = current(&scratch, &Slug::parse("lantern/relay").unwrap()).to_text();
+        let foreign = Version::from_text(&edit(&written)).unwrap();
+        w.store.put(&foreign).unwrap();
+        foreign
+    }
+
+    #[test]
+    fn a_version_from_a_newer_worklog_refuses_every_write() {
+        let w = World::new("m1");
+        let foreign = from_the_future(&w, |t| t.replace("operation: new", "operation: pin"));
+        let d = w.deps();
+        let slug = Slug::parse("lantern/relay").unwrap();
+        assert!(load::live(&w.store, &slug).is_ok());
+        let refused = |r: Result<Written, Failure>| matches!(r, Err(Failure::Refused(m)) if m.contains("upgrade to change it"));
+        assert!(refused(verify(&d, &slug)));
+        assert!(refused(tombstone(&d, &slug, None)));
+        assert!(refused(rename(&d, &slug, "lantern/relay-pin")));
+        assert!(matches!(
+            checkout(&d, &slug),
+            Err(Failure::Refused(m)) if m.contains("operation `pin`")
+        ));
+        d.drafts
+            .write(&Draft {
+                slug: slug.clone(),
+                parents: vec![foreign.id.clone()],
+                fields: foreign.fields.clone(),
+                body: "\nedited\n".into(),
+            })
+            .unwrap();
+        assert!(refused(save(&d, &slug, false)));
+    }
+
+    #[test]
+    fn a_kind_field_from_a_newer_worklog_still_lists() {
+        let w = World::new("m1");
+        from_the_future(&w, |t| t.replace("summary:", "hue: 3\nsummary:"));
+        let loaded = load::load(&w.store).unwrap();
+        assert_eq!(loaded.facts.len(), 1);
+        assert_eq!(loaded.facts[0].foreign.as_deref(), Some("field `hue`"));
+        assert!(loaded.broken.is_empty());
+        assert!(matches!(
+            checkout(&w.deps(), &Slug::parse("lantern/relay").unwrap()),
+            Err(Failure::Refused(m)) if m.contains("field `hue`")
+        ));
     }
 
     #[test]

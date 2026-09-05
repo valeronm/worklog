@@ -17,7 +17,6 @@ pub const KEYS: [&str; 5] = ["date", "machine", "tags", "files_touched", "summar
 
 impl Entry {
     pub fn from_fields(fields: &Fields) -> Result<Entry, FieldError> {
-        fields.reject_unknown(&KEYS)?;
         let date = checked_date("date", fields.required("date")?)?;
         let machine = MachineName::parse(fields.required("machine")?)
             .map_err(|e| FieldError::invalid("machine", e))?;
@@ -59,7 +58,7 @@ mod tests {
     }
 
     #[test]
-    fn unknown_and_missing() {
+    fn missing_is_refused_and_unknown_is_left_to_the_keys() {
         let mut fields = Fields::default();
         fields.push_scalar("date", "2026-09-04");
         assert!(matches!(
@@ -68,7 +67,7 @@ mod tests {
         ));
         fields.push_scalar("scope", "machine");
         assert_eq!(
-            Entry::from_fields(&fields),
+            fields.reject_unknown(&KEYS),
             Err(FieldError::Unknown("scope".into()))
         );
     }

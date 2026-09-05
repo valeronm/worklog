@@ -21,9 +21,13 @@ wants something new from outside adds it to a port, not to a parameter.
   shape that exists. It is not YAML on purpose: a second writer with its
   own quoting or ordering would produce files that hash differently for the
   same content. Extend the grammar only if the writer and the reader change
-  together. An older binary reads a file carrying a field it does not know
-  as corrupt, so every machine sharing a store is upgraded before the first
-  write that uses a new field; `docs/release.md` has the step.
+  together. A version with a key or an operation this binary does not
+  know in its block, or a field its kind does not know, still reads: the
+  block is kept as written so the bytes still hash, reads note it, and a
+  write of a new version of that document is refused. Nothing else is
+  tolerated, so a new envelope key, kind or slug shape still needs every
+  machine sharing the store upgraded first; `docs/release.md` has the
+  step.
 - A file is written under a dotted name and renamed into place, so a file
   sync never ships a partial version.
 - Nothing is edited in place. A command that needs to change a document

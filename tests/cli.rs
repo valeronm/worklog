@@ -632,6 +632,38 @@ fn rename_and_tombstone() {
     );
 }
 
+#[test]
+fn a_version_from_a_newer_worklog_reads_and_refuses_edits() {
+    use worklog::domain::version::Version;
+    let s = seeded();
+    // The stored fact, as a newer worklog would have written a sibling.
+    let dir = s.root.path().join("store/fact/lantern/relay-pin-is-fixed");
+    let stored = fs::read_dir(&dir).unwrap().next().unwrap().unwrap().path();
+    let text = fs::read_to_string(stored)
+        .unwrap()
+        .replace("relay-pin-is-fixed", "from-the-future")
+        .replace("  operation: new\n", "  hue: 3\n  operation: new\n");
+    let foreign = Version::from_text(&text).unwrap();
+    let dir = s.root.path().join("store/fact/lantern/from-the-future");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join(format!("{}.md", foreign.id)), text).unwrap();
+    // Reads work and say so; the document lists like any other.
+    let run = s.run(&["show", "lantern/from-the-future"]);
+    assert!(run.status.success());
+    let err = String::from_utf8_lossy(&run.stderr);
+    assert!(err.contains("version field `hue`"), "{err}");
+    assert!(s.ok(&["facts", "lantern"]).contains("from-the-future"));
+    let check = s.ok(&["check"]);
+    assert!(
+        check.contains("notice: lantern/from-the-future:"),
+        "{check}"
+    );
+    // A write on it is refused; one elsewhere is not.
+    let err = s.refused(&["checkout", "lantern/from-the-future"]);
+    assert!(err.contains("upgrade to change it"), "{err}");
+    s.ok(&["verify", "lantern/relay-pin-is-fixed"]);
+}
+
 fn copy_dir(from: &Path, to: &Path) {
     fs::create_dir_all(to).unwrap();
     for entry in fs::read_dir(from).unwrap() {

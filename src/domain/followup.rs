@@ -62,7 +62,6 @@ impl fmt::Display for NotOpen {
 
 impl Followup {
     pub fn from_fields(fields: &Fields) -> Result<Followup, FieldError> {
-        fields.reject_unknown(&KEYS)?;
         let entry = Slug::of_kind(Kind::Entry, fields.required("entry")?)
             .map_err(|e| FieldError::invalid("entry", e))?;
         let recheck = fields

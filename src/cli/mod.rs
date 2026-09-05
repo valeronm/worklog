@@ -80,6 +80,13 @@ fn named_directory(dir: Option<std::path::PathBuf>) -> Result<String, Failure> {
     Ok(path.display().to_string())
 }
 
+/// A note on stderr that what was read was written by a newer worklog.
+fn note_foreign(note: Option<&str>) {
+    if let Some(note) = note {
+        eprintln!("worklog: {note}");
+    }
+}
+
 /// A note on stderr when a listing came back empty; stdout stays data.
 fn note_empty(empty: bool, what: &str, scope: Option<String>, joint: &str) {
     if empty {
@@ -98,10 +105,12 @@ fn dispatch_read(deps: &Deps, json: bool, command: ReadCommand) -> Result<Render
     match command {
         ReadCommand::Show(arg) => {
             let out = read::show(deps, &arg.slug, arg.kind.map(Kind::from))?;
+            note_foreign(out.foreign.as_deref());
             rendered(json, &out, || render::shown(&out))
         }
         ReadCommand::History(arg) => {
             let out = read::history(deps, &slug(&arg)?)?;
+            note_foreign(out.foreign.as_deref());
             rendered(json, &out, || render::history(&out))
         }
         ReadCommand::List { kind } => {

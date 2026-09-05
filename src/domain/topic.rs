@@ -56,7 +56,6 @@ fn map_of_lists(fields: &Fields, key: &str) -> Result<Vec<(String, Vec<String>)>
 
 impl Topic {
     pub fn from_fields(fields: &Fields) -> Result<Topic, FieldError> {
-        fields.reject_unknown(&KEYS)?;
         let machine = fields
             .optional("machine")
             .map(MachineName::parse)

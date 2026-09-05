@@ -16,7 +16,6 @@ pub const KEYS: [&str; 5] = ["tags", "idea", "recheck", "verified", "summary"];
 
 impl Fact {
     pub fn from_fields(fields: &Fields) -> Result<Fact, FieldError> {
-        fields.reject_unknown(&KEYS)?;
         let idea = match fields.optional("idea") {
             None => false,
             Some("true") => true,

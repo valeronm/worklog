@@ -50,6 +50,8 @@ impl fmt::Display for VersionId {
 }
 
 /// What made the version, so history and a fork report can name it.
+/// `Foreign` is a name outside the list, from a newer worklog; the name
+/// itself is in the block's raw entries.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Operation {
     New,
@@ -64,6 +66,7 @@ pub enum Operation {
     Claim,
     Unclaim,
     Migrate,
+    Foreign,
 }
 
 impl Operation {
@@ -97,6 +100,7 @@ impl Operation {
             Operation::Claim => "claim",
             Operation::Unclaim => "unclaim",
             Operation::Migrate => "migrate",
+            Operation::Foreign => "foreign",
         }
     }
 
@@ -122,6 +126,10 @@ pub struct VersionBlock {
     pub superseded_by: Option<Slug>,
     /// The old slug, on the first version a rename writes at the new one.
     pub renamed_from: Option<Slug>,
+    /// The block's entries as read, kept when one is outside this
+    /// worklog's grammar so the bytes re-emit as written; nothing writes a
+    /// block that has them.
+    pub raw: Option<Vec<(String, Value)>>,
 }
 
 /// What a tombstone says: where the document went, or why it ended.
@@ -243,7 +251,20 @@ pub fn parse_parents(block: &Fields) -> Result<Vec<VersionId>, VersionError> {
 }
 
 impl VersionBlock {
+    /// Every key `to_value` emits; a block with any other is kept raw.
+    const KNOWN: [&'static str; 6] = [
+        "parents",
+        "written",
+        "machine",
+        "operation",
+        "superseded_by",
+        "renamed_from",
+    ];
+
     fn to_value(&self) -> Value {
+        if let Some(raw) = &self.raw {
+            return Value::Map(raw.clone());
+        }
         let mut entries = vec![
             (
                 "parents".to_owned(),
@@ -270,14 +291,6 @@ impl VersionBlock {
 
     fn from_entries(entries: &[(String, Value)]) -> Result<VersionBlock, VersionError> {
         let sub: Fields = entries.iter().cloned().collect();
-        sub.reject_unknown(&[
-            "parents",
-            "written",
-            "machine",
-            "operation",
-            "superseded_by",
-            "renamed_from",
-        ])?;
         let parents = parse_parents(&sub)?;
         let written = sub
             .required("written")
@@ -290,12 +303,7 @@ impl VersionBlock {
         let operation = sub
             .required("operation")
             .map_err(|_| FieldError::Missing("version.operation"))?;
-        let operation = Operation::parse(operation).ok_or_else(|| {
-            invalid(
-                "version.operation",
-                format!("`{operation}` is no operation"),
-            )
-        })?;
+        let operation = Operation::parse(operation).unwrap_or(Operation::Foreign);
         let superseded_by = sub
             .optional("superseded_by")
             .map(Slug::parse)
@@ -313,6 +321,11 @@ impl VersionBlock {
             operation,
             superseded_by,
             renamed_from,
+            raw: (operation == Operation::Foreign
+                || entries
+                    .iter()
+                    .any(|(key, _)| !Self::KNOWN.contains(&key.as_str())))
+            .then(|| entries.to_vec()),
         })
     }
 }
@@ -380,12 +393,44 @@ impl Version {
         Ok(version)
     }
 
+    /// A foreign operation reads as a live head even if it ended the
+    /// document under a newer grammar.
     #[must_use]
     pub fn is_tombstone(&self) -> bool {
         match self.block.operation {
             Operation::Tombstone => true,
             Operation::Rename => self.block.superseded_by.is_some(),
             _ => false,
+        }
+    }
+
+    /// What in the version block this worklog does not know, when a newer
+    /// one wrote it; the version reads but cannot be amended.
+    #[must_use]
+    pub fn foreign_grammar(&self) -> Option<String> {
+        let raw = self.block.raw.as_ref()?;
+        if let Some((key, _)) = raw
+            .iter()
+            .find(|(key, _)| !VersionBlock::KNOWN.contains(&key.as_str()))
+        {
+            return Some(format!("version field `{key}`"));
+        }
+        Some(format!("operation `{}`", self.operation_name()))
+    }
+
+    /// The operation as the file names it, whether or not this worklog
+    /// knows it.
+    #[must_use]
+    pub fn operation_name(&self) -> &str {
+        match (self.block.operation, &self.block.raw) {
+            (Operation::Foreign, Some(raw)) => raw
+                .iter()
+                .find_map(|(key, value)| match (key.as_str(), value) {
+                    ("operation", Value::Scalar(name)) => Some(name.as_str()),
+                    _ => None,
+                })
+                .unwrap_or("foreign"),
+            (operation, _) => operation.as_str(),
         }
     }
 
@@ -540,6 +585,7 @@ mod tests {
             operation: op,
             superseded_by: None,
             renamed_from: None,
+            raw: None,
         }
     }
 
@@ -562,6 +608,29 @@ mod tests {
             "---\nslug: lantern\nkind: topic\nsummary: a topic\nversion:\n  parents: []\n"
         ));
         assert_eq!(Version::from_named_text(v.id.as_str(), &text).unwrap(), v);
+    }
+
+    #[test]
+    fn unknown_grammar_reads_and_re_emits_as_written() {
+        let v = topic("lantern", "\nbody\n", &[], Operation::New);
+        let text = v
+            .to_text()
+            .replace("  operation: new\n", "  hue: 3\n  operation: pin\n");
+        let read = Version::from_text(&text).unwrap();
+        assert_eq!(read.to_text(), text);
+        assert_eq!(read.block.operation, Operation::Foreign);
+        assert_eq!(read.operation_name(), "pin");
+        assert_eq!(
+            read.foreign_grammar().as_deref(),
+            Some("version field `hue`")
+        );
+        assert!(v.foreign_grammar().is_none());
+        let renamed_op =
+            Version::from_text(&v.to_text().replace("operation: new", "operation: pin")).unwrap();
+        assert_eq!(
+            renamed_op.foreign_grammar().as_deref(),
+            Some("operation `pin`")
+        );
     }
 
     #[test]

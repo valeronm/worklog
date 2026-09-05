@@ -165,6 +165,7 @@ mod tests {
                 operation: Operation::New,
                 superseded_by: None,
                 renamed_from: None,
+                raw: None,
             },
             fields,
             body.to_owned(),

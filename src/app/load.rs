@@ -7,6 +7,7 @@ use crate::domain::entry::Entry;
 use crate::domain::fact::Fact;
 use crate::domain::followup::Followup;
 use crate::domain::frontmatter::{FieldError, Fields};
+use crate::domain::kind_keys;
 use crate::domain::ports::Store;
 use crate::domain::slug::{Kind, Slug};
 use crate::domain::topic::Topic;
@@ -19,6 +20,8 @@ pub struct Doc<T> {
     pub slug: Slug,
     pub version: Version,
     pub data: T,
+    /// What a newer worklog wrote into it, which this one cannot amend.
+    pub foreign: Option<String>,
 }
 
 impl<T> Doc<T> {
@@ -60,6 +63,52 @@ pub struct Loaded {
     tombstones: BTreeMap<Slug, Stone>,
     /// Indexes into `facts`, by topic.
     facts_by_topic: BTreeMap<String, Vec<usize>>,
+}
+
+/// What in the version a newer worklog wrote: grammar in its block, or a
+/// field its kind does not know.
+#[must_use]
+pub fn foreign(version: &Version) -> Option<String> {
+    version
+        .foreign_grammar()
+        .or_else(|| unknown_key(version.slug.kind(), &version.fields))
+}
+
+fn unknown_key(kind: Kind, fields: &Fields) -> Option<String> {
+    match fields.reject_unknown(kind_keys(kind)) {
+        Err(FieldError::Unknown(key)) => Some(format!("field `{key}`")),
+        _ => None,
+    }
+}
+
+/// Without a grammar version the file could as well be damaged, so the
+/// sentence says both.
+#[must_use]
+pub fn foreign_reason(what: &str) -> String {
+    format!(
+        "carries grammar this worklog does not know ({what}): written by a newer worklog, or corrupted"
+    )
+}
+
+/// The note a read prints for a foreign version.
+#[must_use]
+pub fn foreign_note(version: &Version) -> Option<String> {
+    foreign(version).map(|what| format!("{} {}", version.slug, foreign_reason(&what)))
+}
+
+/// A version a newer worklog wrote cannot be amended here.
+pub fn refuse_foreign(version: &Version) -> Result<(), Failure> {
+    match foreign_note(version) {
+        Some(note) => Err(Failure::Refused(format!("{note}; upgrade to change it"))),
+        None => Ok(()),
+    }
+}
+
+/// The live version a command is about to amend.
+pub fn live_to_amend(store: &dyn Store, slug: &Slug) -> Result<Version, Failure> {
+    let version = live(store, slug)?;
+    refuse_foreign(&version)?;
+    Ok(version)
 }
 
 /// The refusal for a document that has no single live head.
@@ -137,6 +186,10 @@ pub fn documents(store: &dyn Store) -> Result<Vec<(Slug, Document)>, Failure> {
 /// prefix of one, or else a document by its slug, read along with it; a
 /// slug with only a draft names a document with no versions. A word that
 /// is both is refused rather than guessed.
+#[allow(
+    clippy::large_enum_variant,
+    reason = "one lives per lookup and none is stored, so a box would only add an allocation"
+)]
 pub enum Named {
     Version(Version),
     Slug(Slug, Document),
@@ -223,11 +276,15 @@ fn load_kind<T>(
         };
         loaded.present.insert(slug.clone());
         match parse(&version.fields) {
-            Ok(data) => docs.push(Doc {
-                slug,
-                version,
-                data,
-            }),
+            Ok(data) => {
+                let foreign = foreign(&version);
+                docs.push(Doc {
+                    slug,
+                    version,
+                    data,
+                    foreign,
+                });
+            }
             Err(e) => loaded.broken.push((slug, e.to_string())),
         }
     }
@@ -289,6 +346,18 @@ pub fn load(store: &dyn Store) -> Result<Loaded, Failure> {
 }
 
 impl Loaded {
+    /// Every document a newer worklog wrote into, with what it wrote.
+    pub fn foreign(&self) -> impl Iterator<Item = (&Slug, &str)> {
+        let docs = self
+            .entries
+            .iter()
+            .map(|d| (&d.slug, &d.foreign))
+            .chain(self.facts.iter().map(|d| (&d.slug, &d.foreign)))
+            .chain(self.topics.values().map(|d| (&d.slug, &d.foreign)))
+            .chain(self.followups.iter().map(|d| (&d.slug, &d.foreign)));
+        docs.filter_map(|(slug, what)| what.as_deref().map(|w| (slug, w)))
+    }
+
     /// A document with a live head or a fork, whatever its kind.
     #[must_use]
     pub fn is_present(&self, slug: &Slug) -> bool {

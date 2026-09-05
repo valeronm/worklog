@@ -142,6 +142,7 @@ mod tests {
                     operation: Operation::Save,
                     superseded_by: None,
                     renamed_from: None,
+                    raw: None,
                 },
                 fields,
                 body.to_owned(),

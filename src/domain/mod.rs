@@ -18,3 +18,14 @@ pub mod version;
 
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
+
+/// The fields a kind's front matter may carry.
+#[must_use]
+pub fn kind_keys(kind: slug::Kind) -> &'static [&'static str] {
+    match kind {
+        slug::Kind::Entry => &entry::KEYS,
+        slug::Kind::Fact => &fact::KEYS,
+        slug::Kind::Topic => &topic::KEYS,
+        slug::Kind::Followup => &followup::KEYS,
+    }
+}

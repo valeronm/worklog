@@ -65,6 +65,8 @@ State changes are commands and need no draft: `worklog done <followup>
 <why>` or `worklog recheck <slug> touching <topic>`, `worklog verify
 <fact>`, `worklog tombstone <slug> [note]`, `worklog rename <slug> <new>`.
 A tombstone's note says what ended the document, with a link to where.
+A document `show` notes as written by a newer worklog, or corrupted, reads
+but cannot be changed until the binary is upgraded.
 
 `--json` on any command returns the same data structured. Refusals go to
 stderr with exit 1; a usage error exits 2.

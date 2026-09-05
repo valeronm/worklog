@@ -50,6 +50,8 @@ pub struct Shown {
     pub heads: Vec<Head>,
     /// For an entry, the followups naming it.
     pub followups: Vec<FollowupItem>,
+    /// A note that a head was written by a newer worklog.
+    pub foreign: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -65,6 +67,8 @@ pub struct HistoryRow {
 pub struct History {
     pub slug: String,
     pub versions: Vec<HistoryRow>,
+    /// A note that a version was written by a newer worklog.
+    pub foreign: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

@@ -62,7 +62,7 @@ fn stamp(version: &Version) -> Stamp {
         id: version.id.to_string(),
         written: version.block.written.clone(),
         machine: version.block.machine.to_string(),
-        operation: version.block.operation.to_string(),
+        operation: version.operation_name().to_owned(),
     }
 }
 
@@ -103,18 +103,19 @@ fn most_used_first(counts: BTreeMap<String, usize>) -> Vec<Count> {
 pub fn show(deps: &Deps, name: &str, kind: Option<Kind>) -> Result<Shown, Failure> {
     // A stored version stands on its own; its entry's followups belong to
     // the document as it is now.
-    let (slug, heads) = match load::named(deps, name, kind)? {
-        load::Named::Version(v) => (v.slug.clone(), vec![head(&v)]),
+    let (slug, heads, foreign) = match load::named(deps, name, kind)? {
+        load::Named::Version(v) => (v.slug.clone(), vec![head(&v)], load::foreign_note(&v)),
         load::Named::Slug(slug, document) => {
             let (slug, document) = load::follow(deps.store, slug, document)?;
-            let heads = match document.state() {
-                State::Live(v) => vec![head(v)],
-                State::Forked(heads) => heads.into_iter().map(head).collect(),
+            let heads: Vec<&Version> = match document.state() {
+                State::Live(v) => vec![v],
+                State::Forked(heads) => heads,
                 State::Absent | State::Tombstoned(_) => {
                     return Err(load::not_live(&slug, &document));
                 }
             };
-            (slug, heads)
+            let foreign = heads.iter().find_map(|v| load::foreign_note(v));
+            (slug, heads.into_iter().map(head).collect(), foreign)
         }
     };
     let slug = &slug;
@@ -134,6 +135,7 @@ pub fn show(deps: &Deps, name: &str, kind: Option<Kind>) -> Result<Shown, Failur
         forked: heads.len() > 1,
         heads,
         followups,
+        foreign,
     })
 }
 
@@ -145,6 +147,7 @@ pub fn history(deps: &Deps, slug: &Slug) -> Result<History, Failure> {
         return Err(Failure::Refused(format!("no {}: {slug}", slug.kind())));
     }
     let (_, mut document) = load::follow(deps.store, slug.clone(), document)?;
+    let foreign = document.current().and_then(load::foreign_note);
     let mut versions = Vec::new();
     loop {
         let ordered = document.history();
@@ -161,6 +164,7 @@ pub fn history(deps: &Deps, slug: &Slug) -> Result<History, Failure> {
     Ok(History {
         slug: slug.path().to_owned(),
         versions,
+        foreign,
     })
 }
 
@@ -602,6 +606,10 @@ pub fn check(deps: &Deps) -> Result<Check, Failure> {
     let mut problem = |slug: &Slug, message: String| out.problems.push(Problem::at(slug, message));
     for (slug, reason) in &loaded.broken {
         problem(slug, reason.clone());
+    }
+    for (slug, what) in loaded.foreign() {
+        out.notices
+            .push(Problem::at(slug, load::foreign_reason(what)));
     }
     out.forks = loaded
         .forks
