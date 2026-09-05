@@ -1,8 +1,11 @@
 {% extends "base.html" %}
 {% import "macros.html" as m %}
 {% block title %}History of {{ slug.text }}{% endblock %}
+{% block nav %}{{ nav }}{% endblock %}
 {% block content %}
-<h1><span class="kind">history</span>{% call m::link(slug) %}{% endcall %}</h1>
+{% call m::crumbs(crumbs) %}{% endcall %}
+<h1>History</h1>
+{% call m::meta("of", slug_plain, history) %}{% endcall %}
 <table>
 <tr><th>Version</th><th>Written</th><th>Machine</th><th>Operation</th><th>Parents</th></tr>
 {% for v in versions %}

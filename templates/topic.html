@@ -1,9 +1,10 @@
 {% extends "base.html" %}
 {% import "macros.html" as m %}
 {% block title %}{{ name }}{% endblock %}
+{% block nav %}topics{% endblock %}
 {% block content %}
-<h1><span class="kind">topic</span>{{ name }}</h1>
-<p class="summary"><a href="{{ history_href }}">history</a></p>
+<h1>{{ summary|safe }}</h1>
+{% call m::meta("topic", name_link, history) %}{% endcall %}
 {% for h in heads %}{% call m::head(h) %}{% endcall %}{% endfor %}
 {% if !open.is_empty() %}
 <h2>Open</h2>

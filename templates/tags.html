@@ -1,12 +1,13 @@
 {% extends "base.html" %}
 {% import "macros.html" as m %}
 {% block title %}Tags{% endblock %}
+{% block nav %}tags{% endblock %}
 {% block content %}
-<h1>Tags</h1>
+<p class="summary">{{ tags.len() }} tags, most used first</p>
 <table>
-<tr><th>Tag</th><th>Documents</th></tr>
+<tr><th>Tag</th><th class="n">Documents</th><th>Topic</th></tr>
 {% for t in tags %}
-<tr><td>{% call m::link(t.link) %}{% endcall %}</td><td class="n">{{ t.count }}</td></tr>
+<tr><td>{% call m::link(t.link) %}{% endcall %}</td><td class="n">{{ t.count }}</td><td>{% if let Some(topic) = t.topic %}{% call m::link(topic) %}{% endcall %}{% endif %}</td></tr>
 {% endfor %}
 </table>
 {% endblock %}

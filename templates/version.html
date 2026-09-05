@@ -1,13 +1,14 @@
 {% extends "base.html" %}
 {% import "macros.html" as m %}
 {% block title %}{{ head.short }} of {{ slug.text }}{% endblock %}
+{% block nav %}{{ nav }}{% endblock %}
 {% block content %}
-<h1><span class="kind">version</span>{{ head.short }}</h1>
-<p class="summary">of {% call m::link(slug) %}{% endcall %} · <a href="{{ history_href }}">history</a></p>
+{% call m::crumbs(crumbs) %}{% endcall %}
+<h1>{{ head.summary|safe }}</h1>
+{% call m::meta("version", short_link, history) %}{% endcall %}
 <h2>Against its parent</h2>
-<p class="muted">{{ before }} → {{ after }}</p>
-<pre class="diff">{% for l in lines %}<span class="{{ l.class }}">{{ l.sign }}{{ l.text }}</span>
-{% endfor %}</pre>
+{% if parents.is_empty() %}<p class="muted">A first version: nothing came before it.</p>{% else %}<ul class="parents">{% for p in parents %}<li>{% call m::link(p) %}{% endcall %}</li>{% endfor %}</ul>{% endif %}
+<pre class="diff">{% for l in lines %}<span class="{{ l.class }}">{{ l.sign }}{{ l.text }}</span>{% endfor %}</pre>
 <h2>As written</h2>
 {% call m::head(head) %}{% endcall %}
 {% endblock %}

@@ -1,9 +1,9 @@
 {% extends "base.html" %}
 {% import "macros.html" as m %}
 {% block title %}Facts{% endblock %}
+{% block nav %}facts{% endblock %}
 {% block content %}
-<h1>Facts</h1>
-{% if facts.is_empty() && ideas.is_empty() %}<p class="muted">No facts yet.</p>{% endif %}
+<p class="summary">{{ facts.len() }} facts and {{ ideas.len() }} ideas, by topic</p>
 {% call m::items(facts) %}{% endcall %}
 {% call m::ideas(ideas) %}{% endcall %}
 {% endblock %}

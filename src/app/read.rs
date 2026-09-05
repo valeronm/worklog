@@ -69,6 +69,12 @@ fn stamp(version: &Version) -> Stamp {
 fn head(version: &Version) -> Head {
     Head {
         stamp: stamp(version),
+        parents: version
+            .block
+            .parents
+            .iter()
+            .map(ToString::to_string)
+            .collect(),
         text: version.content_text(),
     }
 }

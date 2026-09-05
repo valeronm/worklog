@@ -1,7 +1,9 @@
 {% extends "base.html" %}
 {% import "macros.html" as m %}
 {% block title %}Topics{% endblock %}
+{% block nav %}topics{% endblock %}
 {% block content %}
+<p class="summary">{{ topics.len() }} topics holding {{ facts }} facts and {{ ideas }} ideas</p>
 {% if !forks.is_empty() %}
 <h2 class="problem">Forks</h2>
 <p class="problem">{% call m::links(forks) %}{% endcall %} — two current versions each; <code>worklog resolve</code> settles one.</p>
@@ -10,15 +12,15 @@
 <h2>Due</h2>
 {% call m::open(due) %}{% endcall %}
 {% endif %}
-<h2>Topics</h2>
+{% if !due.is_empty() || !forks.is_empty() %}<h2>Topics</h2>{% endif %}
 <table>
-<tr><th>Topic</th><th>What it is</th><th>Facts</th><th>Ideas</th></tr>
+<tr><th>Topic</th><th>What it is</th><th class="n">Facts</th><th class="n">Ideas</th></tr>
 {% for t in topics %}
 <tr>
-  <td>{% call m::link(t.link) %}{% endcall %}{% if let Some(machine) = t.machine %} <span class="muted">machine {{ machine }}</span>{% endif %}</td>
-  <td>{{ t.summary }}{% if !t.includes.is_empty() %} <span class="muted">includes {% call m::links(t.includes) %}{% endcall %}</span>{% endif %}</td>
-  <td class="n">{{ t.facts }}</td>
-  <td class="n">{{ t.ideas }}</td>
+  <td>{% call m::link(t.link) %}{% endcall %}{% if let Some(machine) = t.machine %} <span class="label">machine{% if *machine != t.link.text %} {{ machine }}{% endif %}</span>{% endif %}</td>
+  <td>{{ t.summary|safe }}{% if !t.includes.is_empty() %} <span class="muted">includes {% call m::links(t.includes) %}{% endcall %}</span>{% endif %}</td>
+  <td class="n">{% if t.facts > 0 %}{{ t.facts }}{% endif %}</td>
+  <td class="n">{% if t.ideas > 0 %}{{ t.ideas }}{% endif %}</td>
 </tr>
 {% endfor %}
 </table>

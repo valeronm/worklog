@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 {% import "macros.html" as m %}
 {% block title %}Check{% endblock %}
+{% block nav %}check{% endblock %}
 {% block content %}
-<h1>Check</h1>
 <p class="summary">{{ documents }} documents, {{ links }} links{% if !forks.is_empty() %}, forks: {% call m::links(forks) %}{% endcall %}{% endif %}</p>
 {% if problems.is_empty() %}
 <p>Every rule the store has to keep holds.</p>

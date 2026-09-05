@@ -64,6 +64,38 @@ fn version_link(id: &str) -> Link {
     Link::to(short(id), format!("/version/{id}"))
 }
 
+/// Where a document's pages sit: the nav entry its kind falls under, and
+/// the trail between that section and the document, which is a fact's
+/// topic and nothing for the other kinds.
+struct Place {
+    nav: &'static str,
+    crumbs: Vec<Link>,
+}
+
+fn place(slug: &str) -> Place {
+    let parsed = Slug::parse(slug).ok();
+    let nav = match parsed.as_ref().map(Slug::kind) {
+        Some(Kind::Entry) => "entries",
+        Some(Kind::Followup) => "followups",
+        _ => "topics",
+    };
+    let crumbs = parsed
+        .as_ref()
+        .and_then(|s| s.topic().map(topic_link))
+        .into_iter()
+        .collect();
+    Place { nav, crumbs }
+}
+
+/// The topic named like a tag, when there is one.
+fn topic_named(topics: &Topics, name: &str) -> Option<Link> {
+    topics
+        .topics
+        .iter()
+        .any(|t| t.slug == name)
+        .then(|| topic_link(name))
+}
+
 pub struct Item {
     pub href: String,
     pub slug: String,
@@ -78,7 +110,7 @@ impl From<&Row> for Item {
             href: doc_href(&r.kind, &r.slug),
             slug: r.slug.clone(),
             date: r.date.clone(),
-            summary: r.summary.clone(),
+            summary: markdown::inline(&r.summary),
             tags: r.tags.iter().map(|t| tag_link(t)).collect(),
         }
     }
@@ -105,7 +137,7 @@ impl From<&FollowupItem> for Open {
             href: doc_href("", &i.slug),
             slug: i.slug.clone(),
             source: i.source.clone(),
-            summary: i.summary.clone(),
+            summary: markdown::inline(&i.summary),
             label: i.label.clone(),
             due: i.due,
             closed: i.state.as_deref().is_some_and(|s| s != "open"),
@@ -121,6 +153,8 @@ fn opens(items: &[FollowupItem]) -> Vec<Open> {
 pub struct Field {
     pub key: String,
     pub values: Vec<Link>,
+    /// Shown as chips rather than a comma list.
+    pub chips: bool,
 }
 
 fn field_value(key: &str, text: &str) -> Link {
@@ -137,6 +171,7 @@ fn fields(fields: &Fields) -> Vec<Field> {
         .iter()
         .map(|(key, value)| Field {
             key: key.to_owned(),
+            chips: key == "tags",
             values: match value {
                 Value::Scalar(s) => vec![field_value(key, s)],
                 Value::List(items) => items.iter().map(|s| field_value(key, s)).collect(),
@@ -156,13 +191,19 @@ fn fields(fields: &Fields) -> Vec<Field> {
         .collect()
 }
 
-/// One version's text as a page shows it: its fields, then its body.
+/// One version's text as a page shows it: its summary as the title, the
+/// other fields, then its body.
 pub struct HeadView {
     pub short: String,
     pub href: String,
     pub written: String,
+    pub written_full: String,
     pub machine: String,
     pub operation: String,
+    /// The summary as written, for a window title.
+    pub title: String,
+    /// The summary as inline HTML.
+    pub summary: String,
     pub fields: Vec<Field>,
     pub body: String,
 }
@@ -170,26 +211,43 @@ pub struct HeadView {
 impl From<&Head> for HeadView {
     fn from(h: &Head) -> HeadView {
         // A stored version passed the reader, so its text splits.
-        let (fields_, body) = match frontmatter::parse(&h.text) {
-            Ok(split) => (fields(&split.fields), markdown::to_html(&split.body)),
-            Err(_) => (Vec::new(), markdown::to_html(&h.text)),
+        let (title, fields_, body) = match frontmatter::parse(&h.text) {
+            Ok(mut split) => {
+                let title = split
+                    .fields
+                    .optional("summary")
+                    .unwrap_or_default()
+                    .to_owned();
+                split.fields.remove("summary");
+                (title, fields(&split.fields), markdown::to_html(&split.body))
+            }
+            Err(_) => (String::new(), Vec::new(), markdown::to_html(&h.text)),
         };
         HeadView {
             short: h.stamp.short().to_owned(),
             href: format!("/version/{}", h.stamp.id),
-            written: h.stamp.written_to_millis(),
+            written: h.stamp.written_to_minute(),
+            written_full: h.stamp.written_to_millis(),
             machine: h.stamp.machine.clone(),
             operation: h.stamp.operation.clone(),
+            summary: markdown::inline(&title),
+            title,
             fields: fields_,
             body,
         }
     }
 }
 
+/// The first head's summary, which names the page.
+fn summary_of(heads: &[HeadView]) -> String {
+    heads.first().map(|h| h.summary.clone()).unwrap_or_default()
+}
+
 /// The columns every listed version shows.
 pub struct VersionLine {
     pub version: Link,
     pub written: String,
+    pub written_full: String,
     pub machine: String,
     pub operation: String,
 }
@@ -198,7 +256,8 @@ impl From<&Stamp> for VersionLine {
     fn from(s: &Stamp) -> VersionLine {
         VersionLine {
             version: version_link(&s.id),
-            written: s.written_to_millis(),
+            written: s.written_to_minute(),
+            written_full: s.written_to_millis(),
             machine: s.machine.clone(),
             operation: s.operation.clone(),
         }
@@ -218,6 +277,8 @@ pub struct TopicLine {
 #[template(path = "home.html")]
 pub struct Home {
     pub topics: Vec<TopicLine>,
+    pub facts: usize,
+    pub ideas: usize,
     pub due: Vec<Open>,
     pub forks: Vec<Link>,
 }
@@ -225,13 +286,19 @@ pub struct Home {
 impl Home {
     #[must_use]
     pub fn new(topics: &Topics, open: &Followups, forks: &Forks) -> Home {
+        let (facts, ideas) = topics
+            .topics
+            .iter()
+            .fold((0, 0), |(f, i), t| (f + t.facts, i + t.ideas));
         Home {
+            facts,
+            ideas,
             topics: topics
                 .topics
                 .iter()
                 .map(|t| TopicLine {
                     link: topic_link(&t.slug),
-                    summary: t.summary.clone(),
+                    summary: markdown::inline(&t.summary),
                     machine: t.machine.clone(),
                     includes: t.includes.iter().map(|i| topic_link(i)).collect(),
                     facts: t.facts,
@@ -253,8 +320,10 @@ impl Home {
 #[template(path = "topic.html")]
 pub struct TopicPage {
     pub name: String,
+    pub name_link: Link,
+    pub summary: String,
     pub heads: Vec<HeadView>,
-    pub history_href: String,
+    pub history: Option<String>,
     pub facts: Vec<Item>,
     pub ideas: Vec<Item>,
     pub entries: Vec<Item>,
@@ -269,10 +338,13 @@ impl TopicPage {
         tagged: &Listing,
         open: &Followups,
     ) -> TopicPage {
+        let heads: Vec<HeadView> = shown.heads.iter().map(HeadView::from).collect();
         TopicPage {
             name: shown.slug.clone(),
-            heads: shown.heads.iter().map(HeadView::from).collect(),
-            history_href: history_href(&shown.slug),
+            name_link: Link::plain(&shown.slug),
+            summary: summary_of(&heads),
+            heads,
+            history: Some(history_href(&shown.slug)),
             facts: items(&facts.facts),
             ideas: items(&facts.ideas),
             entries: tagged
@@ -289,27 +361,34 @@ impl TopicPage {
 #[derive(Template)]
 #[template(path = "doc.html")]
 pub struct DocPage {
+    pub crumbs: Vec<Link>,
+    pub nav: &'static str,
     pub slug: String,
+    pub slug_text: Link,
     pub kind: String,
+    pub title: String,
+    pub summary: String,
     pub forked: bool,
-    pub topic: Option<Link>,
-    pub history_href: String,
+    pub history: Option<String>,
     pub heads: Vec<HeadView>,
     pub followups: Vec<Open>,
 }
 
 impl From<&Shown> for DocPage {
     fn from(s: &Shown) -> DocPage {
-        let topic = Slug::parse(&s.slug)
-            .ok()
-            .and_then(|slug| slug.topic().map(topic_link));
+        let heads: Vec<HeadView> = s.heads.iter().map(HeadView::from).collect();
+        let place = place(&s.slug);
         DocPage {
+            crumbs: place.crumbs,
+            nav: place.nav,
             slug: s.slug.clone(),
+            slug_text: Link::plain(&s.slug),
             kind: s.kind.clone(),
+            title: heads.first().map(|h| h.title.clone()).unwrap_or_default(),
+            summary: summary_of(&heads),
             forked: s.forked,
-            topic,
-            history_href: history_href(&s.slug),
-            heads: s.heads.iter().map(HeadView::from).collect(),
+            history: Some(history_href(&s.slug)),
+            heads,
             followups: opens(&s.followups),
         }
     }
@@ -325,14 +404,24 @@ pub struct HistoryLine {
 #[derive(Template)]
 #[template(path = "history.html")]
 pub struct HistoryPage {
+    pub crumbs: Vec<Link>,
+    pub nav: &'static str,
     pub slug: Link,
+    pub slug_plain: Link,
+    pub history: Option<String>,
     pub versions: Vec<HistoryLine>,
 }
 
 impl From<&History> for HistoryPage {
     fn from(h: &History) -> HistoryPage {
+        let mut place = place(&h.slug);
+        place.crumbs.push(slug_link(&h.slug));
         HistoryPage {
+            crumbs: place.crumbs,
+            nav: place.nav,
             slug: slug_link(&h.slug),
+            slug_plain: Link::plain(&h.slug),
+            history: None,
             versions: h
                 .versions
                 .iter()
@@ -355,11 +444,13 @@ pub struct DiffLine {
 #[derive(Template)]
 #[template(path = "version.html")]
 pub struct VersionPage {
+    pub crumbs: Vec<Link>,
+    pub nav: &'static str,
     pub slug: Link,
-    pub history_href: String,
+    pub short_link: Link,
+    pub history: Option<String>,
     pub head: HeadView,
-    pub before: String,
-    pub after: String,
+    pub parents: Vec<Link>,
     pub lines: Vec<DiffLine>,
 }
 
@@ -382,12 +473,17 @@ impl VersionPage {
                 }
             })
             .collect();
+        let mut place = place(slug);
+        place.crumbs.push(slug_link(slug));
+        place.crumbs.push(Link::to("History", history_href(slug)));
         VersionPage {
+            crumbs: place.crumbs,
+            nav: place.nav,
             slug: slug_link(slug),
-            history_href: history_href(slug),
+            short_link: Link::plain(head.stamp.short()),
+            history: None,
             head: HeadView::from(head),
-            before: diff.before.name.clone(),
-            after: diff.after.name.clone(),
+            parents: head.parents.iter().map(|p| version_link(p)).collect(),
             lines,
         }
     }
@@ -397,14 +493,34 @@ impl VersionPage {
 #[template(path = "listing.html")]
 pub struct ListingPage {
     pub title: String,
+    /// The nav entry this listing belongs under.
+    pub nav: &'static str,
+    /// A count line in place of a heading, on a page the nav already names.
+    pub summary: Option<String>,
+    /// The topic named like the tag, when the listing is a tag's.
+    pub topic: Option<Link>,
     pub rows: Vec<Item>,
 }
 
 impl ListingPage {
     #[must_use]
-    pub fn new(title: &str, listing: &Listing) -> ListingPage {
+    pub fn entries(listing: &Listing) -> ListingPage {
         ListingPage {
-            title: title.to_owned(),
+            title: "Entries".to_owned(),
+            nav: "entries",
+            summary: Some(format!("{} entries, newest first", listing.rows.len())),
+            topic: None,
+            rows: items(&listing.rows),
+        }
+    }
+
+    #[must_use]
+    pub fn tagged(tag: &str, listing: &Listing, topics: &Topics) -> ListingPage {
+        ListingPage {
+            title: format!("Tagged {tag}"),
+            nav: "tags",
+            summary: None,
+            topic: topic_named(topics, tag),
             rows: items(&listing.rows),
         }
     }
@@ -454,6 +570,7 @@ impl FollowupsPage {
 pub struct CountLine {
     pub link: Link,
     pub count: usize,
+    pub topic: Option<Link>,
 }
 
 #[derive(Template)]
@@ -462,8 +579,9 @@ pub struct TagsPage {
     pub tags: Vec<CountLine>,
 }
 
-impl From<&Tags> for TagsPage {
-    fn from(t: &Tags) -> TagsPage {
+impl TagsPage {
+    #[must_use]
+    pub fn new(t: &Tags, topics: &Topics) -> TagsPage {
         TagsPage {
             tags: t
                 .tags
@@ -471,6 +589,7 @@ impl From<&Tags> for TagsPage {
                 .map(|Count { name, count }| CountLine {
                     link: tag_link(name),
                     count: *count,
+                    topic: topic_named(topics, name),
                 })
                 .collect(),
         }

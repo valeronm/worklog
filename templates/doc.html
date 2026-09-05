@@ -1,9 +1,11 @@
 {% extends "base.html" %}
 {% import "macros.html" as m %}
-{% block title %}{{ slug }}{% endblock %}
+{% block title %}{{ title }}{% endblock %}
+{% block nav %}{{ nav }}{% endblock %}
 {% block content %}
-<h1><span class="kind">{{ kind }}</span>{{ slug }}</h1>
-<p class="summary">{% if let Some(t) = topic %}under {% call m::link(t) %}{% endcall %} · {% endif %}<a href="{{ history_href }}">history</a></p>
+{% call m::crumbs(crumbs) %}{% endcall %}
+<h1>{{ summary|safe }}</h1>
+{% call m::meta(kind, slug_text, history) %}{% endcall %}
 {% if forked %}
 <p class="problem">Two current versions: this document was written on two machines from the same parent. <code>worklog resolve {{ slug }}</code> settles one.</p>
 {% endif %}

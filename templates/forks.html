@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% import "macros.html" as m %}
 {% block title %}Forks{% endblock %}
+{% block nav %}check{% endblock %}
 {% block content %}
 <h1>Forks</h1>
 {% if forks.is_empty() %}

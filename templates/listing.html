@@ -1,7 +1,9 @@
 {% extends "base.html" %}
 {% import "macros.html" as m %}
 {% block title %}{{ title }}{% endblock %}
+{% block nav %}{{ nav }}{% endblock %}
 {% block content %}
-<h1>{{ title }}</h1>
+{% if let Some(s) = summary %}<p class="summary">{{ s }}</p>{% else %}<h1>{{ title }}</h1>{% endif %}
+{% if let Some(t) = topic %}<p class="summary">Also a topic: {% call m::link(t) %}{% endcall %}</p>{% endif %}
 {% if rows.is_empty() %}<p class="muted">Nothing here.</p>{% else %}{% call m::items(rows) %}{% endcall %}{% endif %}
 {% endblock %}

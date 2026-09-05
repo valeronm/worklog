@@ -41,6 +41,15 @@ impl Stamp {
         short(&self.id)
     }
 
+    /// The stamp to the minute, in the offset it was written with.
+    #[must_use]
+    pub fn written_to_minute(&self) -> String {
+        chrono::DateTime::parse_from_rfc3339(&self.written).map_or_else(
+            |_| self.written.clone(),
+            |t| t.format("%Y-%m-%d %H:%M").to_string(),
+        )
+    }
+
     /// A stamp carries microseconds so two versions of one command can be
     /// ordered, which is finer than a line needs to show.
     #[must_use]
@@ -72,6 +81,7 @@ pub fn short(id: &str) -> &str {
 pub struct Head {
     #[serde(flatten)]
     pub stamp: Stamp,
+    pub parents: Vec<String>,
     pub text: String,
 }
 

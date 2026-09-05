@@ -1,9 +1,9 @@
 {% extends "base.html" %}
 {% import "macros.html" as m %}
 {% block title %}Log{% endblock %}
+{% block nav %}log{% endblock %}
 {% block content %}
-<h1>Log</h1>
-<p class="summary">The newest versions written anywhere in the store, from any machine.</p>
+<p class="summary">{{ versions.len() }} newest versions, from every machine</p>
 <table>
 <tr><th>Version</th><th>Written</th><th>Machine</th><th>Operation</th><th>Document</th></tr>
 {% for v in versions %}
