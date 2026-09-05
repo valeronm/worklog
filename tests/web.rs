@@ -37,18 +37,31 @@ fn run(root: &Path, args: &[&str]) -> String {
     String::from_utf8(out.stdout).expect("utf-8 stdout")
 }
 
-fn seeded(root: &Path) {
-    fs::create_dir_all(root.join("home")).unwrap();
-    run(root, &["init", "desk"]);
-    let path = run(root, &["new", "topic", "lantern"]);
+fn saved(root: &Path, kind: &str, slug: &str, summary: &str) {
+    let path = run(root, &["new", kind, slug]);
     let path = Path::new(path.trim());
     let text = fs::read_to_string(path).unwrap();
     fs::write(
         path,
-        text.replace("summary:\n", "summary: A Rust app that dims a lamp\n"),
+        text.replace("summary:\n", &format!("summary: {summary}\n")),
     )
     .unwrap();
-    run(root, &["save", "lantern"]);
+    run(root, &["save", slug]);
+}
+
+fn seeded(root: &Path) {
+    fs::create_dir_all(root.join("home")).unwrap();
+    run(root, &["init", "desk"]);
+    saved(root, "topic", "lantern", "A Rust app that dims a lamp");
+    saved(root, "fact", "lantern/relay-pin", "The relay sits on pin 4");
+    run(
+        root,
+        &[
+            "tombstone",
+            "lantern/relay-pin",
+            "folded into [[lantern/relay-timing]]",
+        ],
+    );
 }
 
 fn serve(root: &Path) -> Served {
@@ -113,6 +126,15 @@ fn the_served_pages_are_the_store() {
 
     let (status, _) = get(&served, "/topic/nothing");
     assert_eq!(status, 404);
+
+    // A removed document is its tombstone, the note linked like a body.
+    let (status, body) = get(&served, "/doc/lantern/relay-pin");
+    assert_eq!(status, 200);
+    assert!(body.contains("Removed."), "{body}");
+    assert!(
+        body.contains("<a href=\"/doc/lantern/relay-timing\">lantern/relay-timing</a>"),
+        "{body}"
+    );
 
     let usage = run(root.path(), &["usage"]);
     assert!(

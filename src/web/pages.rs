@@ -369,6 +369,8 @@ pub struct DocPage {
     pub title: String,
     pub summary: String,
     pub forked: bool,
+    /// The head is a tombstone, its body the note saying why.
+    pub removed: bool,
     /// A note that a head was written by a newer worklog.
     pub foreign: Option<String>,
     pub history: Option<String>,
@@ -389,6 +391,7 @@ impl From<&Shown> for DocPage {
             title: heads.first().map(|h| h.title.clone()).unwrap_or_default(),
             summary: summary_of(&heads),
             forked: s.forked,
+            removed: s.removed.is_some(),
             foreign: s.foreign.clone(),
             history: Some(history_href(&s.slug)),
             heads,

@@ -604,10 +604,14 @@ fn rename_and_tombstone() {
         "lantern/relay-pin",
         "moved into the board's README",
     ]);
-    let err = s.refused(&["show", "lantern/relay-pin-is-fixed"]);
+    assert_eq!(
+        s.ok(&["show", "lantern/relay-pin-is-fixed"]),
+        "lantern/relay-pin was removed: moved into the board's README\n"
+    );
+    let json = s.ok(&["show", "--json", "lantern/relay-pin"]);
     assert!(
-        err.ends_with("lantern/relay-pin was removed: moved into the board's README\n"),
-        "{err}"
+        json.contains("\"removed\": \"moved into the board's README\""),
+        "{json}"
     );
     s.write(&["new", "fact", "lantern/relay-timing"], |t| {
         set_summary(t, "The relay settles in a millisecond") + "After [[lantern/relay-pin]].\n"

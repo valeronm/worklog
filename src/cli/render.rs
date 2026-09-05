@@ -72,18 +72,28 @@ fn followup_line(out: &mut String, item: &FollowupItem) {
 
 pub fn shown(s: &Shown) -> String {
     let mut out = String::new();
-    for head in &s.heads {
-        if s.forked {
-            let _ = writeln!(
-                out,
-                "==== head {} — {} on {} by {}",
-                head.stamp.short(),
-                head.stamp.operation,
-                head.stamp.machine,
-                head.stamp.written_to_millis()
-            );
+    match &s.removed {
+        Some(note) if note.is_empty() => {
+            let _ = writeln!(out, "{} was removed", s.slug);
         }
-        out.push_str(&head.text);
+        Some(note) => {
+            let _ = writeln!(out, "{} was removed: {note}", s.slug);
+        }
+        None => {
+            for head in &s.heads {
+                if s.forked {
+                    let _ = writeln!(
+                        out,
+                        "==== head {} — {} on {} by {}",
+                        head.stamp.short(),
+                        head.stamp.operation,
+                        head.stamp.machine,
+                        head.stamp.written_to_millis()
+                    );
+                }
+                out.push_str(&head.text);
+            }
+        }
     }
     if !s.followups.is_empty() {
         if !out.ends_with('\n') {

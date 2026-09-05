@@ -85,12 +85,15 @@ pub struct Head {
     pub text: String,
 }
 
-/// A document as it stands: one head, or every head of a fork.
+/// A document as it stands: one head, every head of a fork, or the
+/// tombstone of a removed one.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Shown {
     pub slug: String,
     pub kind: String,
     pub forked: bool,
+    /// The one head is a tombstone, and this is its note saying why.
+    pub removed: Option<String>,
     pub heads: Vec<Head>,
     /// For an entry, the followups naming it.
     pub followups: Vec<FollowupItem>,

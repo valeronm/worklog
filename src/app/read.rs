@@ -10,7 +10,7 @@ use crate::domain::links;
 use crate::domain::recheck::Recheck;
 use crate::domain::slug::{Kind, Slug};
 use crate::domain::topic::Topic;
-use crate::domain::version::{State, Version, VersionId};
+use crate::domain::version::{State, Tombstone, Version, VersionId};
 
 use super::load::{self, Doc, Loaded};
 use super::output::{
@@ -109,19 +109,26 @@ fn most_used_first(counts: BTreeMap<String, usize>) -> Vec<Count> {
 pub fn show(deps: &Deps, name: &str, kind: Option<Kind>) -> Result<Shown, Failure> {
     // A stored version stands on its own; its entry's followups belong to
     // the document as it is now.
-    let (slug, heads, foreign) = match load::named(deps, name, kind)? {
-        load::Named::Version(v) => (v.slug.clone(), vec![head(&v)], load::foreign_note(&v)),
+    let (slug, heads, removed, foreign) = match load::named(deps, name, kind)? {
+        load::Named::Version(v) => (v.slug.clone(), vec![head(&v)], None, load::foreign_note(&v)),
         load::Named::Slug(slug, document) => {
             let (slug, document) = load::follow(deps.store, slug, document)?;
-            let heads: Vec<&Version> = match document.state() {
-                State::Live(v) => vec![v],
-                State::Forked(heads) => heads,
-                State::Absent | State::Tombstoned(_) => {
-                    return Err(load::not_live(&slug, &document));
-                }
-            };
+            let (heads, removed): (Vec<&Version>, Option<String>) =
+                match (document.state(), document.tombstone()) {
+                    (State::Live(v), _) => (vec![v], None),
+                    (State::Forked(heads), _) => (heads, None),
+                    (State::Tombstoned(v), Some(Tombstone::Removed { note })) => {
+                        (vec![v], Some(note.unwrap_or_default().to_owned()))
+                    }
+                    _ => return Err(load::not_live(&slug, &document)),
+                };
             let foreign = heads.iter().find_map(|v| load::foreign_note(v));
-            (slug, heads.into_iter().map(head).collect(), foreign)
+            (
+                slug,
+                heads.into_iter().map(head).collect(),
+                removed,
+                foreign,
+            )
         }
     };
     let slug = &slug;
@@ -139,6 +146,7 @@ pub fn show(deps: &Deps, name: &str, kind: Option<Kind>) -> Result<Shown, Failur
         slug: slug.path().to_owned(),
         kind: slug.kind().dir().to_owned(),
         forked: heads.len() > 1,
+        removed,
         heads,
         followups,
         foreign,
@@ -976,6 +984,29 @@ mod tests {
             "{elsewhere:?}"
         );
         assert_eq!(check(&d).unwrap().problems, []);
+    }
+
+    #[test]
+    fn show_hands_over_a_tombstone_and_follows_a_rename() {
+        let w = World::new("m1");
+        let d = w.deps();
+        seed(&d);
+        let fact = Slug::parse("lantern/relay-pin-is-fixed").unwrap();
+        write::rename(&d, &fact, "lantern/relay-pin").unwrap();
+        let moved = Slug::parse("lantern/relay-pin").unwrap();
+        write::tombstone(&d, &moved, "folded into [[lantern/relay-timing]]").unwrap();
+        let shown = show(&d, "lantern/relay-pin-is-fixed", None).unwrap();
+        assert_eq!(shown.slug, "lantern/relay-pin");
+        assert_eq!(
+            shown.removed.as_deref(),
+            Some("folded into [[lantern/relay-timing]]")
+        );
+        assert_eq!(shown.heads.len(), 1);
+        assert_eq!(shown.heads[0].stamp.operation, "tombstone");
+        assert!(matches!(
+            show(&d, "lantern/nothing", None),
+            Err(Failure::Refused(_))
+        ));
     }
 
     #[test]
