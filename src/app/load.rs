@@ -132,8 +132,9 @@ pub fn documents(store: &dyn Store) -> Result<Vec<(Slug, Document)>, Failure> {
 }
 
 /// What a command-line word names: a stored version, by an id or a
-/// prefix of one, or else a document by its slug, read along with it. A
-/// word that is both is refused rather than guessed.
+/// prefix of one, or else a document by its slug, read along with it; a
+/// slug with only a draft names a document with no versions. A word that
+/// is both is refused rather than guessed.
 pub enum Named {
     Version(Version),
     Slug(Slug, Document),
@@ -159,7 +160,8 @@ pub fn named(deps: &Deps, text: &str, kind: Option<Kind>) -> Result<Named, Failu
     let document = match super::slug_arg(text, kind) {
         Ok(slug) => {
             let document = deps.store.document(&slug)?;
-            (!document.versions.is_empty()).then_some((slug, document))
+            let named = !document.versions.is_empty() || deps.drafts.read(&slug)?.is_some();
+            named.then_some((slug, document))
         }
         Err(e) if found.is_empty() => return Err(e),
         Err(_) => None,

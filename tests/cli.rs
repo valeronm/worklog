@@ -440,6 +440,15 @@ fn save_refuses_stale_unchanged_and_broken_drafts() {
         between, change,
         "earlier on the left whichever is named first"
     );
+    // A draft for a document the store does not hold yet diffs against nothing.
+    s.ok(&["new", "fact", "lantern/fresh"]);
+    let fresh = s.ok(&["diff", "lantern/fresh"]);
+    assert!(
+        fresh.starts_with("--- lantern/fresh (store)\n+++ lantern/fresh (draft)\n"),
+        "{fresh}"
+    );
+    let err = s.refused(&["show", "lantern/fresh"]);
+    assert!(err.contains("no fact: lantern/fresh"), "{err}");
     let log = s.ok(&["log", "100"]);
     assert!(
         log.lines().any(|l| l.starts_with(ids[0])),
