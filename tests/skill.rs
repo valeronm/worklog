@@ -102,6 +102,69 @@ fn the_skill_covers_the_commands_a_session_uses() {
     }
 }
 
+/// Whether each positional of a command path is required, in order.
+fn positionals(path: &str) -> Option<Vec<bool>> {
+    let mut command = Cli::command();
+    for name in path.split(' ') {
+        command = command.find_subcommand(name)?.clone();
+    }
+    Some(
+        command
+            .get_positionals()
+            .map(clap::Arg::is_required_set)
+            .collect(),
+    )
+}
+
+/// Every code span quoting a full command line, as its path and the
+/// arguments shown: `<x>` and a bare word supply a value, `[x]` shows one
+/// as optional. A span with a flag is left alone.
+fn quoted_lines(parents: &BTreeSet<String>) -> Vec<(String, Vec<bool>)> {
+    let mut lines = Vec::new();
+    for span in SKILL.split('`').skip(1).step_by(2) {
+        let Some(rest) = span.strip_prefix("worklog ") else {
+            continue;
+        };
+        let words: Vec<&str> = rest.split_whitespace().collect();
+        if words.iter().any(|w| w.starts_with("--")) {
+            continue;
+        }
+        let depth = match words.get(1) {
+            Some(second) if parents.contains(words[0]) && !second.starts_with(['<', '[']) => 2,
+            _ => 1,
+        };
+        let path = words[..depth].join(" ");
+        let shown: Vec<bool> = words[depth..].iter().map(|w| w.starts_with('[')).collect();
+        if !shown.is_empty() {
+            lines.push((path, shown));
+        }
+    }
+    lines
+}
+
+#[test]
+fn the_skill_quotes_arguments_as_the_cli_takes_them() {
+    let (_, parents) = commands();
+    for (path, shown) in quoted_lines(&parents) {
+        let Some(required) = positionals(&path) else {
+            continue;
+        };
+        let missing = required.iter().skip(shown.len()).any(|r| *r);
+        assert!(
+            !missing,
+            "the skill quotes `worklog {path}` with {} arguments, fewer than it requires",
+            shown.len()
+        );
+        for (i, optional) in shown.iter().enumerate() {
+            assert!(
+                !(*optional && required.get(i).copied().unwrap_or(false)),
+                "the skill shows argument {} of `worklog {path}` as optional; the CLI requires it",
+                i + 1
+            );
+        }
+    }
+}
+
 #[test]
 fn the_skill_has_frontmatter() {
     assert!(SKILL.starts_with("---\nname: worklog\ndescription: "));
