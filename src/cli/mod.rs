@@ -282,7 +282,7 @@ fn dispatch_write(deps: &Deps, json: bool, command: WriteCommand) -> Result<Rend
             rendered(json, &out, || render::written(&out))
         }
         WriteCommand::Tombstone { slug: arg, note } => {
-            let out = write::tombstone(deps, &slug(&arg)?, note.as_deref())?;
+            let out = write::tombstone(deps, &slug(&arg)?, &note)?;
             rendered(json, &out, || render::written(&out))
         }
         WriteCommand::Rename { slug: arg, new } => {

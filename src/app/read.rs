@@ -1008,6 +1008,55 @@ mod tests {
     }
 
     #[test]
+    fn check_lists_a_linked_tombstone_that_says_nothing() {
+        use crate::domain::ports::Store;
+        use crate::domain::version::Operation;
+        let w = World::new("m1");
+        let d = w.deps();
+        write::put_topic(&d, "lantern", "A lamp", &[], None).unwrap();
+        write::put_fact(
+            &d,
+            "lantern/relay",
+            "The relay is fixed",
+            &["lantern"],
+            false,
+        )
+        .unwrap();
+        write::put_fact(
+            &d,
+            "lantern/timing",
+            "After [[lantern/relay]]",
+            &["lantern"],
+            false,
+        )
+        .unwrap();
+        let slug = Slug::parse("lantern/relay").unwrap();
+        let head = w.store.document(&slug).unwrap().current().unwrap().clone();
+        // The tombstone an older binary wrote: no note in its body.
+        write::store_version(
+            &d,
+            slug,
+            vec![head.id.clone()],
+            Operation::Tombstone,
+            head.fields,
+            String::new(),
+            None,
+            None,
+        )
+        .unwrap();
+        let report = check(&d).unwrap();
+        let notices: Vec<&str> = report.notices.iter().map(|n| n.message.as_str()).collect();
+        assert_eq!(
+            notices,
+            [
+                "links a removed document: [[lantern/relay]]",
+                "removed with no note saying why, linked from 1"
+            ]
+        );
+        assert!(report.problems.is_empty());
+    }
+
+    #[test]
     fn check_reports_dangling_references() {
         let w = World::new("m1");
         let d = w.deps();

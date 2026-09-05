@@ -11,7 +11,9 @@ use crate::domain::kind_keys;
 use crate::domain::recheck::Recheck;
 use crate::domain::slug::{Kind, Slug};
 use crate::domain::topic::{ClaimError, Topic};
-use crate::domain::version::{Operation, State, Version, VersionBlock, VersionId, with_note};
+use crate::domain::version::{
+    Operation, State, Version, VersionBlock, VersionId, note_body, with_note,
+};
 
 use super::load;
 use super::output::{DraftList, DraftRef, Written};
@@ -437,22 +439,18 @@ pub fn verify(deps: &Deps, slug: &Slug) -> Result<Written, Failure> {
 }
 
 /// Removes a document, the note as the tombstone's body saying why. An
-/// already removed document accepts a note; a renamed one does not.
-pub fn tombstone(deps: &Deps, slug: &Slug, note: Option<&str>) -> Result<Written, Failure> {
+/// already removed document takes a note again; a renamed one does not.
+pub fn tombstone(deps: &Deps, slug: &Slug, note: &str) -> Result<Written, Failure> {
+    let body = note_body(note)
+        .ok_or_else(|| Failure::Usage("a tombstone's note cannot be blank".into()))?;
     let document = deps.store.document(slug)?;
     let version = match document.state() {
         State::Live(v) => v.clone(),
-        State::Tombstoned(v) if note.is_some() && v.block.superseded_by.is_none() => v.clone(),
+        State::Tombstoned(v) if v.block.superseded_by.is_none() => v.clone(),
         _ => return Err(load::not_live(slug, &document)),
     };
     let fields = version.fields.clone();
-    amend(
-        deps,
-        &version,
-        Operation::Tombstone,
-        fields,
-        with_note(String::new(), note),
-    )
+    amend(deps, &version, Operation::Tombstone, fields, body)
 }
 
 /// A tombstone naming the new slug, and the new slug's first version with
@@ -717,7 +715,7 @@ mod tests {
         assert!(load::live(&w.store, &slug).is_ok());
         let refused = |r: Result<Written, Failure>| matches!(r, Err(Failure::Refused(m)) if m.contains("upgrade to change it"));
         assert!(refused(verify(&d, &slug)));
-        assert!(refused(tombstone(&d, &slug, None)));
+        assert!(refused(tombstone(&d, &slug, "gone")));
         assert!(refused(rename(&d, &slug, "lantern/relay-pin")));
         assert!(matches!(
             checkout(&d, &slug),
@@ -899,19 +897,20 @@ mod tests {
                 .collect::<Vec<_>>(),
             [renamed.tombstone.clone().unwrap()]
         );
-        tombstone(&d, &moved, None).unwrap();
+        assert!(matches!(tombstone(&d, &moved, " "), Err(Failure::Usage(_))));
+        tombstone(&d, &moved, "superseded by the board revision").unwrap();
         assert!(
             matches!(new_fact(&d, "lantern/relay-pin", false), Err(Failure::Refused(m)) if m.contains("never reused"))
         );
-        // A removed document takes a note afterwards, and only once removed.
-        assert!(matches!(
-            tombstone(&d, &moved, None),
-            Err(Failure::Refused(m)) if m.contains("was removed")
-        ));
-        tombstone(&d, &moved, Some("superseded by the board revision")).unwrap();
         assert!(matches!(
             load::live(&w.store, &moved),
             Err(Failure::Refused(m)) if m.ends_with("was removed: superseded by the board revision")
+        ));
+        // A removed document takes its note again; a renamed one takes none.
+        tombstone(&d, &moved, "and the README").unwrap();
+        assert!(matches!(
+            tombstone(&d, &fact, "gone"),
+            Err(Failure::Refused(m)) if m.contains("renamed to")
         ));
     }
 

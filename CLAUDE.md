@@ -42,8 +42,8 @@ wants something new from outside adds it to a port, not to a parameter.
   no longer current, so a fork can arise only between machines that synced
   afterwards, and `resolve` hands both heads to a person.
 - Slugs are never reused: a tombstone stays a head forever. A removed
-  document's tombstone may gain one more version, carrying the note that
-  says why.
+  document may be tombstoned again to replace its note; a renamed one may
+  not, since its tombstone points elsewhere.
 
 Beside the kind directories the store walks sits `usage`, a line per
 command run. It is not a document because a count is not immutable, and

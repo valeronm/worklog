@@ -153,6 +153,14 @@ pub fn with_note(mut body: String, note: Option<&str>) -> String {
     body
 }
 
+/// A body that is the note alone, or nothing for a blank one, so what
+/// `Version::note` reads back is what was said.
+#[must_use]
+pub fn note_body(note: &str) -> Option<String> {
+    let note = note.trim();
+    (!note.is_empty()).then(|| format!("{note}\n"))
+}
+
 /// One immutable file of the store.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Version {

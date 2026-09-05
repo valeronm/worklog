@@ -591,11 +591,24 @@ fn rename_and_tombstone() {
     }
     let err = s.refused(&["checkout", "lantern/relay-pin-is-fixed"]);
     assert!(err.contains("renamed to lantern/relay-pin"), "{err}");
-    // A link to a removed document lands on its tombstone. An entry's link
-    // is a citation; a fact's is a notice, as is a tombstone with no note.
-    s.ok(&["tombstone", "lantern/relay-pin"]);
+    // A tombstone says why. A link to a removed document lands on it: an
+    // entry's link is a citation, a fact's is a notice.
+    assert_eq!(
+        s.run(&["tombstone", "lantern/relay-pin", " "])
+            .status
+            .code(),
+        Some(2)
+    );
+    s.ok(&[
+        "tombstone",
+        "lantern/relay-pin",
+        "moved into the board's README",
+    ]);
     let err = s.refused(&["show", "lantern/relay-pin-is-fixed"]);
-    assert!(err.ends_with("lantern/relay-pin was removed\n"), "{err}");
+    assert!(
+        err.ends_with("lantern/relay-pin was removed: moved into the board's README\n"),
+        "{err}"
+    );
     s.write(&["new", "fact", "lantern/relay-timing"], |t| {
         set_summary(t, "The relay settles in a millisecond") + "After [[lantern/relay-pin]].\n"
     });
@@ -607,22 +620,9 @@ fn rename_and_tombstone() {
         "{check}"
     );
     assert!(
-        check.contains(
-            "notice: lantern/relay-pin: removed with no note saying why, linked from 2\n"
-        ),
+        check.ends_with("0 problems, 0 forks, 1 notices\n"),
         "{check}"
     );
-    assert!(
-        check.ends_with("0 problems, 0 forks, 2 notices\n"),
-        "{check}"
-    );
-    s.ok(&[
-        "tombstone",
-        "lantern/relay-pin",
-        "moved into the board's README",
-    ]);
-    let check = s.ok(&["check"]);
-    assert!(check.ends_with("0 forks, 1 notices\n"), "{check}");
     let err = s.refused(&["new", "fact", "lantern/relay-pin"]);
     assert!(err.contains("never reused"), "{err}");
     let facts = s.ok(&["facts", "lantern"]);

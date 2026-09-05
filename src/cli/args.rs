@@ -271,8 +271,8 @@ pub enum WriteCommand {
     Tombstone {
         #[command(flatten)]
         slug: SlugArg,
-        /// Why, naming what ended it
-        note: Option<String>,
+        /// Why, naming what ended it and linking to where
+        note: String,
     },
     /// Move a document to a new slug
     Rename {

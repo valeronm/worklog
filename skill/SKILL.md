@@ -63,8 +63,10 @@ in between: `discard`, `checkout` again, carry the edits over, `save`.
 State changes are commands and need no draft: `worklog done <followup>
 [note]`, `worklog drop <followup> [note]`, `worklog recheck <slug> <date>
 <why>` or `worklog recheck <slug> touching <topic>`, `worklog verify
-<fact>`, `worklog tombstone <slug> [note]`, `worklog rename <slug> <new>`.
-A tombstone's note says what ended the document, with a link to where.
+<fact>`, `worklog tombstone <slug> <note>`, `worklog rename <slug> <new>`.
+A tombstone's note names what ended the document and links to where: the
+entry that built an idea, the fact or repo file that now holds a claim, the
+entry that found a fact false. A `drop` note names why the work fell away.
 A document `show` notes as written by a newer worklog, or corrupted, reads
 but cannot be changed until the binary is upgraded.
 
@@ -239,7 +241,7 @@ or on a machine that has not synced.
 and exits 1 on a problem. A link to a removed document lands on its
 tombstone. From an entry that is a citation; from anything live it is a
 notice, since the live document has gone stale, as is a linked tombstone
-with no note. A notice never changes the exit code.
+from before the note was required. A notice never changes the exit code.
 
 A document with two current versions is a fork, made by two machines
 writing from the same parent before syncing. `worklog forks` lists them,
