@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% import "macros.html" as m %}
+{% block title %}Log{% endblock %}
+{% block content %}
+<h1>Log</h1>
+<p class="summary">The newest versions written anywhere in the store, from any machine.</p>
+<table>
+<tr><th>Version</th><th>Written</th><th>Machine</th><th>Operation</th><th>Document</th></tr>
+{% for v in versions %}
+<tr>
+  {% call m::stamp(v.line) %}{% endcall %}
+  <td>{% call m::link(v.slug) %}{% endcall %}</td>
+</tr>
+{% endfor %}
+</table>
+{% endblock %}

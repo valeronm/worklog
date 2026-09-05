@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% import "macros.html" as m %}
+{% block title %}{{ head.short }} of {{ slug.text }}{% endblock %}
+{% block content %}
+<h1><span class="kind">version</span>{{ head.short }}</h1>
+<p class="summary">of {% call m::link(slug) %}{% endcall %} · <a href="{{ history_href }}">history</a></p>
+<h2>Against its parent</h2>
+<p class="muted">{{ before }} → {{ after }}</p>
+<pre class="diff">{% for l in lines %}<span class="{{ l.class }}">{{ l.sign }}{{ l.text }}</span>
+{% endfor %}</pre>
+<h2>As written</h2>
+{% call m::head(head) %}{% endcall %}
+{% endblock %}

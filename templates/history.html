@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% import "macros.html" as m %}
+{% block title %}History of {{ slug.text }}{% endblock %}
+{% block content %}
+<h1><span class="kind">history</span>{% call m::link(slug) %}{% endcall %}</h1>
+<table>
+<tr><th>Version</th><th>Written</th><th>Machine</th><th>Operation</th><th>Parents</th></tr>
+{% for v in versions %}
+<tr>
+  {% call m::stamp(v.line) %}{% endcall %}
+  <td>{% if v.parents.is_empty() %}<span class="muted">none</span>{% else %}{% call m::links(v.parents) %}{% endcall %}{% endif %}{% if let Some(from) = v.moved_from %} <span class="muted">as {% call m::link(from) %}{% endcall %}</span>{% endif %}</td>
+</tr>
+{% endfor %}
+</table>
+{% endblock %}

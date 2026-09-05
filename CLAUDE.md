@@ -10,8 +10,12 @@ no file, clock, environment or process. `tests/layers.rs` reads the sources
 and fails on an I/O import, because the boundary is what makes every rule
 testable with the in-memory ports in `domain::testing`. `app` is one use
 case per command over the ports and never prints. `fs` implements the ports
-on a directory tree. `cli` parses arguments and renders. A use case that
-wants something new from outside adds it to a port, not to a parameter.
+on a directory tree. `cli` parses arguments and renders. `web` is a second
+renderer over the reads, one request being one use case, and the layer
+test keeps it from reaching `fs`: a page that needs data no read returns
+gets a read use case, which `--json` then has too, never logic in a
+handler. A use case that wants something new from outside adds it to a
+port, not to a parameter.
 
 ## The store's invariants
 

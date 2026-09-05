@@ -1,0 +1,47 @@
+{% macro link(l) %}{% if let Some(h) = l.href %}<a href="{{ h }}">{{ l.text }}</a>{% else %}{{ l.text }}{% endif %}{% endmacro %}
+
+{% macro links(list) %}{% for l in list.iter() %}{% if !loop.first %}, {% endif %}{% call link(l) %}{% endcall %}{% endfor %}{% endmacro %}
+
+{% macro item(r) %}<span class="date">{{ r.date }}</span> <a href="{{ r.href }}">{{ r.summary }}</a>
+    <span class="slug">{{ r.slug }}</span>{% if !r.tags.is_empty() %} <span class="tags">{% call links(r.tags) %}{% endcall %}</span>{% endif %}{% endmacro %}
+
+{% macro items(rows) %}
+<ul class="items">
+{% for r in rows.iter() %}
+  <li>{% call item(r) %}{% endcall %}</li>
+{% endfor %}
+</ul>
+{% endmacro %}
+
+{% macro ideas(rows) %}
+{% if !rows.is_empty() %}
+<h2>Ideas — unbuilt, kept with their settled design</h2>
+{% call items(rows) %}{% endcall %}
+{% endif %}
+{% endmacro %}
+
+{% macro open(list) %}
+<ul class="items">
+{% for o in list.iter() %}
+  <li class="{% if o.due %}due {% endif %}{% if o.closed %}closed{% endif %}"><span class="label">{{ o.label }}</span> <a href="{{ o.href }}">{{ o.summary }}</a>
+    <span class="slug">{{ o.slug }}{% if let Some(e) = o.entry %} — in {% call link(e) %}{% endcall %}{% else %} — {{ o.source }}{% endif %}</span></li>
+{% endfor %}
+</ul>
+{% endmacro %}
+
+{% macro stamp(v) %}<td>{% call link(v.version) %}{% endcall %}</td>
+  <td>{{ v.written }}</td>
+  <td>{{ v.machine }}</td>
+  <td>{{ v.operation }}</td>{% endmacro %}
+
+{% macro head(h) %}
+<article class="head">
+  <p class="stamp"><a href="{{ h.href }}">{{ h.short }}</a> · {{ h.operation }} on {{ h.machine }} · {{ h.written }}</p>
+  <dl class="fields">
+  {% for f in h.fields %}
+    <dt>{{ f.key }}</dt><dd>{% call links(f.values) %}{% endcall %}</dd>
+  {% endfor %}
+  </dl>
+  <div class="body">{{ h.body|safe }}</div>
+</article>
+{% endmacro %}

@@ -336,11 +336,18 @@ pub fn topics(deps: &Deps) -> Result<Topics, Failure> {
         topics: loaded
             .topics
             .values()
-            .map(|t| TopicRow {
-                slug: t.slug.path().to_owned(),
-                summary: t.data.summary.clone(),
-                machine: t.data.machine.as_ref().map(ToString::to_string),
-                includes: t.data.includes.clone(),
+            .map(|t| {
+                let name = t.slug.path();
+                let (ideas, facts): (Vec<_>, Vec<_>) =
+                    loaded.facts_of(name).partition(|f| f.data.idea);
+                TopicRow {
+                    slug: name.to_owned(),
+                    summary: t.data.summary.clone(),
+                    machine: t.data.machine.as_ref().map(ToString::to_string),
+                    includes: t.data.includes.clone(),
+                    facts: facts.len(),
+                    ideas: ideas.len(),
+                }
             })
             .collect(),
     })

@@ -34,6 +34,40 @@ pub struct Stamp {
     pub operation: String,
 }
 
+impl Stamp {
+    /// Enough of the id to tell versions of one document apart.
+    #[must_use]
+    pub fn short(&self) -> &str {
+        short(&self.id)
+    }
+
+    /// A stamp carries microseconds so two versions of one command can be
+    /// ordered, which is finer than a line needs to show.
+    #[must_use]
+    pub fn written_to_millis(&self) -> String {
+        let stamp = &self.written;
+        let Some(dot) = stamp.find('.') else {
+            return stamp.to_owned();
+        };
+        let first_digit = dot + 1;
+        let digits = stamp[first_digit..]
+            .bytes()
+            .take_while(u8::is_ascii_digit)
+            .count();
+        format!(
+            "{}{}",
+            &stamp[..first_digit + digits.min(3)],
+            &stamp[first_digit + digits..]
+        )
+    }
+}
+
+/// Enough of a version id to tell versions of one document apart.
+#[must_use]
+pub fn short(id: &str) -> &str {
+    id.get(..12).unwrap_or(id)
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Head {
     #[serde(flatten)]
@@ -138,6 +172,8 @@ pub struct TopicRow {
     pub summary: String,
     pub machine: Option<String>,
     pub includes: Vec<String>,
+    pub facts: usize,
+    pub ideas: usize,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
@@ -276,4 +312,35 @@ pub struct Renamed {
 pub struct Side {
     pub name: String,
     pub text: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Stamp;
+
+    fn stamped(written: &str) -> Stamp {
+        Stamp {
+            id: "a".repeat(64),
+            written: written.to_owned(),
+            machine: "desk".to_owned(),
+            operation: "new".to_owned(),
+        }
+    }
+
+    #[test]
+    fn a_stamp_shows_three_fraction_digits_at_most() {
+        assert_eq!(
+            stamped("2026-09-04T10:00:00.123456+01:00").written_to_millis(),
+            "2026-09-04T10:00:00.123+01:00"
+        );
+        assert_eq!(
+            stamped("2026-09-04T10:00:00.12+01:00").written_to_millis(),
+            "2026-09-04T10:00:00.12+01:00"
+        );
+        assert_eq!(
+            stamped("2026-09-04T10:00:00+01:00").written_to_millis(),
+            "2026-09-04T10:00:00+01:00"
+        );
+        assert_eq!(stamped("").short(), "aaaaaaaaaaaa");
+    }
 }

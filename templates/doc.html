@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% import "macros.html" as m %}
+{% block title %}{{ slug }}{% endblock %}
+{% block content %}
+<h1><span class="kind">{{ kind }}</span>{{ slug }}</h1>
+<p class="summary">{% if let Some(t) = topic %}under {% call m::link(t) %}{% endcall %} · {% endif %}<a href="{{ history_href }}">history</a></p>
+{% if forked %}
+<p class="problem">Two current versions: this document was written on two machines from the same parent. <code>worklog resolve {{ slug }}</code> settles one.</p>
+{% endif %}
+{% for h in heads %}{% call m::head(h) %}{% endcall %}{% endfor %}
+{% if !followups.is_empty() %}
+<h2>Follow-ups</h2>
+{% call m::open(followups) %}{% endcall %}
+{% endif %}
+{% endblock %}

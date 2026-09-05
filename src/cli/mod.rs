@@ -17,6 +17,7 @@ use crate::app::write::{Made, NewFollowup};
 use crate::app::{Deps, Failure, migrate, read, slug_arg, usage, write};
 use crate::domain::slug::Kind;
 use crate::fs::{FileIdentity, FsDrafts, FsHost, FsStore, FsUsage, Paths, SystemClock};
+use crate::web;
 
 use args::{ClaimArg, Cli, Command, NewWhat, ReadCommand, SlugArg, StoreCommand, WriteCommand};
 
@@ -376,6 +377,7 @@ fn command_path(command: &StoreCommand) -> &'static str {
             WriteCommand::Claim(_) => "claim",
             WriteCommand::Unclaim(_) => "unclaim",
         },
+        StoreCommand::Serve { .. } => "serve",
         StoreCommand::Migrate { .. } => "migrate",
     }
 }
@@ -470,9 +472,38 @@ pub fn run() -> i32 {
         home: paths.home.display().to_string(),
     };
     let path = command_path(&command);
+    let record = |exit: i32| {
+        if let Ok(dir) = cwd() {
+            // A full disk is no reason for a command that worked to say
+            // otherwise, so the log's own failure goes unsaid.
+            let _ = usage::record(
+                &deps,
+                path,
+                arguments(&argv, path),
+                &dir.display().to_string(),
+                exit,
+            );
+        }
+    };
     let result = match command {
         StoreCommand::Read(command) => dispatch_read(&deps, cli.json, command),
         StoreCommand::Write(command) => dispatch_write(&deps, cli.json, command),
+        StoreCommand::Serve { bind } => {
+            // The server ends only with the process, so its one usage
+            // line is written before the first request.
+            return match web::Server::bind(&bind) {
+                Ok(server) => {
+                    eprintln!("worklog: serving on http://{}/", server.address());
+                    record(0);
+                    server.run(&deps);
+                    0
+                }
+                Err(e) => {
+                    record(e.exit_code());
+                    fail(&e)
+                }
+            };
+        }
         StoreCommand::Migrate { entries, facts } => {
             migrate_command(&deps, cli.json, &entries, &facts)
         }
@@ -481,17 +512,7 @@ pub fn run() -> i32 {
         Ok(r) => r.exit,
         Err(e) => e.exit_code(),
     };
-    if let Ok(dir) = cwd() {
-        // A full disk is no reason for a command that worked to say
-        // otherwise, so the log's own failure goes unsaid.
-        let _ = usage::record(
-            &deps,
-            path,
-            arguments(&argv, path),
-            &dir.display().to_string(),
-            exit,
-        );
-    }
+    record(exit);
     match result {
         Ok(r) => {
             print(&r.text);

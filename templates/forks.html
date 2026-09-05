@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% import "macros.html" as m %}
+{% block title %}Forks{% endblock %}
+{% block content %}
+<h1>Forks</h1>
+{% if forks.is_empty() %}
+<p>No document has two current versions; nothing to fork.</p>
+{% else %}
+<p class="summary">Each was written on two machines from the same parent. <code>worklog resolve &lt;slug&gt;</code> settles one.</p>
+<table>
+<tr><th>Document</th><th>Heads</th></tr>
+{% for f in forks %}
+<tr><td>{% call m::link(f.slug) %}{% endcall %}</td><td>{% call m::links(f.heads) %}{% endcall %}</td></tr>
+{% endfor %}
+</table>
+{% endif %}
+{% endblock %}

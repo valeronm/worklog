@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}worklog{% endblock %} · worklog</title>
+<style>
+:root { color-scheme: light dark; --muted: #777; --line: #ddd; --due: #b3261e; --add: #e6ffec; --del: #ffebe9; --code: #f4f4f4; }
+@media (prefers-color-scheme: dark) { :root { --muted: #999; --line: #333; --due: #f28b82; --add: #12361b; --del: #4a1a1a; --code: #1e1e1e; } }
+body { font: 16px/1.5 system-ui, sans-serif; max-width: 62rem; margin: 0 auto; padding: 0 1rem 3rem; }
+nav { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; padding: .75rem 0; border-bottom: 1px solid var(--line); margin-bottom: 1.5rem; }
+nav a { text-decoration: none; }
+nav .brand { font-weight: 600; }
+nav form { margin-left: auto; }
+nav input { font: inherit; padding: .2rem .5rem; }
+h1 { font-size: 1.5rem; margin: 0 0 .25rem; }
+h1 .kind { font-weight: normal; color: var(--muted); font-size: 1rem; margin-right: .5rem; }
+h2 { font-size: 1.1rem; margin: 1.75rem 0 .5rem; }
+p.summary { margin: 0 0 1rem; color: var(--muted); }
+ul.items { list-style: none; padding: 0; margin: 0; }
+ul.items li { padding: .3rem 0; border-bottom: 1px solid var(--line); }
+ul.items li.due .label { color: var(--due); font-weight: 600; }
+ul.items li.closed { color: var(--muted); }
+.date, .label, .slug, .tags, .stamp, .muted { color: var(--muted); font-size: .85rem; }
+.date, .label { font-variant-numeric: tabular-nums; margin-right: .4rem; }
+.slug { display: block; font-family: ui-monospace, monospace; }
+table { border-collapse: collapse; width: 100%; }
+td, th { text-align: left; padding: .3rem .6rem .3rem 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-weight: 600; font-size: .85rem; color: var(--muted); }
+td.n { text-align: right; font-variant-numeric: tabular-nums; }
+article.head { margin-bottom: 2rem; }
+article.head + article.head { border-top: 3px double var(--line); padding-top: 1rem; }
+dl.fields { display: grid; grid-template-columns: max-content 1fr; gap: .1rem 1rem; margin: .5rem 0 1rem; font-size: .9rem; }
+dl.fields dt { color: var(--muted); }
+dl.fields dd { margin: 0; }
+.body h1, .body h2, .body h3 { font-size: 1.1rem; margin: 1.25rem 0 .4rem; }
+.body pre, .body code { font-family: ui-monospace, monospace; font-size: .9em; background: var(--code); }
+.body pre { padding: .6rem; overflow-x: auto; }
+.body code { padding: 0 .2em; }
+pre.diff { font-family: ui-monospace, monospace; font-size: .85rem; line-height: 1.4; overflow-x: auto; margin: 0; }
+pre.diff span { display: block; white-space: pre; }
+pre.diff .added { background: var(--add); }
+pre.diff .removed { background: var(--del); }
+.problem { color: var(--due); }
+</style>
+</head>
+<body>
+<nav>
+  <a class="brand" href="/">worklog</a>
+  <a href="/entries">Entries</a>
+  <a href="/facts">Facts</a>
+  <a href="/followups">Follow-ups</a>
+  <a href="/tags">Tags</a>
+  <a href="/log">Log</a>
+  <a href="/check">Check</a>
+  <form action="/search" method="get"><input type="search" name="q" placeholder="Search" value="{% block query %}{% endblock %}"></form>
+</nav>
+<main>
+{% block content %}{% endblock %}
+</main>
+</body>
+</html>

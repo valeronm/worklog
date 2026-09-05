@@ -57,6 +57,13 @@ dissolved the followup, and `tombstone` requires one saying what ended the
 document. `--json` on any command gives the same data structured.
 `worklog --help` lists everything.
 
+`worklog serve` answers on `127.0.0.1:8080`, or `--bind` elsewhere, with
+the store as read-only pages: topics with their facts, entries and open
+work, every document with its history and each version's diff against its
+parent, listings, search and `check`. Nothing is cached; a page is what
+the command would print at that moment, so a machine holding a synced copy
+of the store can serve it.
+
 ## Install
 
 ```

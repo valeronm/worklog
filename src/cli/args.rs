@@ -66,6 +66,12 @@ pub enum StoreCommand {
     Read(ReadCommand),
     #[command(flatten)]
     Write(WriteCommand),
+    /// The store as read-only web pages, until killed
+    Serve {
+        /// The address to listen on
+        #[arg(long, default_value = "127.0.0.1:8080")]
+        bind: String,
+    },
     /// One-time move of the file-per-document store into this empty one
     Migrate {
         /// The old worklog directory with its year subdirectories

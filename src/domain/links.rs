@@ -5,14 +5,39 @@ fn link_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '/' | '-')
 }
 
-fn strip_code_spans(line: &str) -> String {
-    let mut out = String::with_capacity(line.len());
-    let mut in_span = false;
-    for c in line.chars() {
-        if c == '`' {
-            in_span = !in_span;
-        } else if !in_span {
-            out.push(c);
+/// The text with every link replaced by what `make` returns for its
+/// target; code spans and everything else pass through as they are.
+pub fn linked(text: &str, mut make: impl FnMut(&str) -> String) -> String {
+    let mut out = String::with_capacity(text.len());
+    for line in text.split_inclusive('\n') {
+        let mut rest = line;
+        let mut in_span = false;
+        loop {
+            let tick = rest.find('`');
+            let open = if in_span { None } else { rest.find("[[") };
+            match (tick, open) {
+                (Some(t), o) if o.is_none_or(|o| t < o) => {
+                    out.push_str(&rest[..=t]);
+                    in_span = !in_span;
+                    rest = &rest[t + 1..];
+                }
+                (_, Some(o)) => {
+                    out.push_str(&rest[..o]);
+                    let after = &rest[o + 2..];
+                    let end = after.find(|c: char| !link_char(c)).unwrap_or(after.len());
+                    if end > 0 && after[end..].starts_with("]]") {
+                        out.push_str(&make(&after[..end]));
+                        rest = &after[end + 2..];
+                    } else {
+                        out.push_str("[[");
+                        rest = after;
+                    }
+                }
+                _ => {
+                    out.push_str(rest);
+                    break;
+                }
+            }
         }
     }
     out
@@ -22,21 +47,10 @@ fn strip_code_spans(line: &str) -> String {
 #[must_use]
 pub fn targets(text: &str) -> Vec<String> {
     let mut found = Vec::new();
-    for line in text.lines() {
-        let line = strip_code_spans(line);
-        let mut rest = line.as_str();
-        while let Some(start) = rest.find("[[") {
-            let after = &rest[start + 2..];
-            let end = after.find(|c: char| !link_char(c));
-            match end {
-                Some(end) if after[end..].starts_with("]]") && end > 0 => {
-                    found.push(after[..end].to_owned());
-                    rest = &after[end + 2..];
-                }
-                _ => rest = after,
-            }
-        }
-    }
+    linked(text, |target| {
+        found.push(target.to_owned());
+        String::new()
+    });
     found
 }
 
@@ -57,5 +71,14 @@ mod tests {
     #[test]
     fn malformed_brackets_are_not_links() {
         assert_eq!(targets("[[]] [[has space]] [[ok]]"), ["ok"]);
+    }
+
+    #[test]
+    fn replaces_links_and_keeps_everything_else() {
+        let text = "see [[a/b]], not `[[q]]` or [[bad one]]\n[[c]]";
+        assert_eq!(
+            linked(text, |t| format!("<{t}>")),
+            "see <a/b>, not `[[q]]` or [[bad one]]\n<c>"
+        );
     }
 }

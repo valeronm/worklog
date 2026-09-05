@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% import "macros.html" as m %}
+{% block title %}Search{% endblock %}
+{% block query %}{{ term }}{% endblock %}
+{% block content %}
+<h1>Search</h1>
+<form action="/search" method="get"><input type="search" name="q" value="{{ term }}" autofocus> <button>Find</button></form>
+{% if term.is_empty() %}
+<p class="muted">Documents whose text holds the term, facts first.</p>
+{% else if hits.is_empty() %}
+<p class="muted">No documents match.</p>
+{% else %}
+<ul class="items">
+{% for h in hits %}
+  <li>{% call m::item(h.item) %}{% endcall %}
+    {% for (n, line) in h.lines %}<span class="slug">{{ n }}: {{ line }}</span>{% endfor %}</li>
+{% endfor %}
+</ul>
+{% endif %}
+{% endblock %}

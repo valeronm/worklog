@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% import "macros.html" as m %}
+{% block title %}Follow-ups{% endblock %}
+{% block content %}
+<h1>Follow-ups</h1>
+<p class="summary">{{ open }} open in {{ entries }} entries, {{ due }} due, {{ without_recheck }} without recheck ·
+{% if all %}<a href="/followups">open only</a>{% else %}<a href="/followups?all">closed too</a>{% endif %}</p>
+{% if items.is_empty() %}<p class="muted">Nothing open.</p>{% else %}{% call m::open(items) %}{% endcall %}{% endif %}
+{% endblock %}

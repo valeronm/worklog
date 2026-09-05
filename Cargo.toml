@@ -14,16 +14,19 @@ pedantic = { level = "warn", priority = -1 }
 testing = []
 
 [dependencies]
+askama = "0.16"
 blake3 = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
 directories = "6"
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
 regex = "1"
 serde = { version = "1", features = ["derive"] }
 # preserve_order so a settings file written back keeps its key order.
 serde_json = { version = "1", features = ["preserve_order"] }
 similar = { version = "2", features = ["inline"] }
+tiny_http = "0.12"
 
 [dev-dependencies]
 assert_cmd = "2"
