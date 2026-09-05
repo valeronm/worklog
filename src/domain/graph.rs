@@ -1,10 +1,5 @@
-//! Which topics a session in a directory on a host is about.
-//!
-//! The host's machine topic says where the topics live. The directory's
-//! claims are matched closest first, then, only if none matched, the
-//! machine's `unclaimed` topics; the machine topic itself always loads.
-//! From every root the `includes` edges are walked breadth-first, each
-//! topic once, in the order the roots were found.
+//! Which topics a session in a directory on a host is about, by the rule
+//! `docs/documents.md` states under Topic.
 
 use super::topic::Topic;
 

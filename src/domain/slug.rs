@@ -42,10 +42,8 @@ impl fmt::Display for Kind {
 }
 
 /// A document's identity: its kind and its path under the kind directory.
-///
 /// The shape of the path says the kind, so a bare slug names one document
-/// across the store: `lantern` is a topic, `lantern/name` a fact,
-/// `2026-09/2026-09-04-name` an entry and `2026-09-04-name` a followup.
+/// across the store; `docs/documents.md` has the shapes.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Slug {
     kind: Kind,

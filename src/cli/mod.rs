@@ -1,5 +1,5 @@
-//! Argument parsing and rendering. stdout carries data only; diagnostics go
-//! to stderr; exit 1 is a refusal and 2 a usage error.
+//! Argument parsing and rendering, under the output contract CLAUDE.md
+//! states.
 
 pub mod args;
 pub mod hook;

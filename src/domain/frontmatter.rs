@@ -1,23 +1,7 @@
-//! The frontmatter grammar. It is deliberately not YAML: a file's name is
-//! the hash of its bytes, so the writer has to be the only shape the reader
-//! accepts, and a grammar this small has nothing a second writer could vary.
-//!
-//! ```text
-//! ---
-//! key: scalar
-//! key: [item, item]
-//! key:
-//!   sub: scalar
-//!   sub: [item]
-//! ---
-//! body
-//! ```
-//!
-//! Keys are `[A-Za-z_][A-Za-z0-9_-]*`. A scalar is the rest of the line,
-//! trimmed, so it holds no newline and no leading or trailing space. A list
-//! item holds no comma. A `#` line at the top level is skipped when read and
-//! never written. One level of nesting, and the nested values are scalars
-//! or lists.
+//! The frontmatter grammar, stated in `docs/store.md`. It is deliberately
+//! not YAML: a file's name is the hash of its bytes, so the writer has to
+//! be the only shape the reader accepts, and a grammar this small has
+//! nothing a second writer could vary.
 
 use std::fmt;
 

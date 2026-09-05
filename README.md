@@ -9,9 +9,6 @@ hold for the directory it is in, what is due, and what happened last time.
 
 One directory, meant to be shared between machines by a file sync such as
 Syncthing. Nothing in it is ever edited or deleted; a write is a new file.
-A folder Syncthing manages is given an ignore file for Finder's metadata
-and the tool's own staging files on the first write from a host, if it
-has none.
 
 ```
 ~/worklog/
@@ -21,12 +18,10 @@ has none.
   topic/lantern/<hash>.md                       what a subject is
 ```
 
-Every file is one version of one document, named by the BLAKE3 hash of its
-bytes. Its frontmatter names the document, the versions it follows, when
-and on which machine it was written. The current version is the one no
-other names as a parent. Two machines writing from the same parent make a
-fork, which every command reports and `worklog resolve` lets a person
-settle; nothing merges on its own.
+Every file is one version of one document, named by the hash of its
+bytes and naming the versions it follows. Two machines writing from the
+same parent make a fork, which every command reports and a person
+settles; nothing merges on its own.
 
 A topic says what a subject is and which other topics a session about it
 also needs. A machine's own topic says where the topics live on that host,
