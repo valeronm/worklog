@@ -38,7 +38,11 @@ record something.
 
 ## Writing anything
 
-Prose goes through a draft; the store is never edited directly.
+Prose goes through a draft; the store is never edited directly. The
+records are the agent's own: write them without putting the text to the
+user for approval, and answer for their content afterwards through `show`
+and `history`. What the user decides is what happens next, the triage
+under Open work; never the text of a record.
 
 1. `worklog new entry <name>`, `worklog new fact <topic>/<name>`, `worklog
    new idea <topic>/<name>`, `worklog new topic <name>`, or `worklog
@@ -47,8 +51,8 @@ Prose goes through a draft; the store is never edited directly.
    directory, and an edit tool refuses a file it has not read. The draft
    is the document's own fields and body, the same text `show` prints;
    what it came from is kept in a file beside it that is the tool's.
-3. `worklog diff <slug>` shows the draft against the store. Show it to the
-   user before saving anything they have not seen.
+3. `worklog diff <slug>` shows the draft against the store; read it once
+   to check the edit landed as meant.
 4. `worklog save <slug>` validates, stamps and stores it. A refusal names
    what is wrong; the draft stays for another edit. `worklog discard
    <slug>` drops it.
@@ -127,6 +131,10 @@ Which store holds it:
   not the repo's business: which checkout answers a question, a device
   quirk and the setting that works around it, a decision and the reasoning
   that would otherwise be re-argued, a correction that generalises.
+- A fact also holds what a session learned that the code and its history
+  cannot give back: a measurement, what an experiment ruled out, an answer
+  that took the session to find. Left in the conversation it is found again
+  by doing the work again.
 - An entry holds what is worth having because it happened on a date. Work
   about nothing durable, a form filed, a machine reimaged, a question
   answered once, is an entry and stops there.
