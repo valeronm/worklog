@@ -268,7 +268,12 @@ pub enum WriteCommand {
     /// Record that a fact was confirmed today
     Verify { slug: String },
     /// Remove a document; its slug is never reused
-    Tombstone(SlugArg),
+    Tombstone {
+        #[command(flatten)]
+        slug: SlugArg,
+        /// Why, naming what ended it
+        note: Option<String>,
+    },
     /// Move a document to a new slug
     Rename {
         #[command(flatten)]

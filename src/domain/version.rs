@@ -124,6 +124,27 @@ pub struct VersionBlock {
     pub renamed_from: Option<Slug>,
 }
 
+/// What a tombstone says: where the document went, or why it ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tombstone<'a> {
+    RenamedTo(&'a Slug),
+    Removed { note: Option<&'a str> },
+}
+
+/// The body with the note as its last line, the form `Version::note`
+/// reads back.
+#[must_use]
+pub fn with_note(mut body: String, note: Option<&str>) -> String {
+    if let Some(note) = note {
+        if !body.is_empty() && !body.ends_with('\n') {
+            body.push('\n');
+        }
+        body.push_str(note.trim());
+        body.push('\n');
+    }
+    body
+}
+
 /// One immutable file of the store.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Version {
@@ -368,6 +389,12 @@ impl Version {
         }
     }
 
+    /// The body as a note: what a tombstone says about why, or nothing.
+    #[must_use]
+    pub fn note(&self) -> Option<&str> {
+        Some(self.body.trim()).filter(|n| !n.is_empty())
+    }
+
     /// The slugs a rename moved the document between, for either version
     /// it wrote: the tombstone names its successor, the moved version its
     /// predecessor.
@@ -449,10 +476,22 @@ impl Document {
     /// The slug a rename moved the document to.
     #[must_use]
     pub fn renamed_to(&self) -> Option<&Slug> {
-        match self.state() {
-            State::Tombstoned(v) => v.block.superseded_by.as_ref(),
+        match self.tombstone() {
+            Some(Tombstone::RenamedTo(to)) => Some(to),
             _ => None,
         }
+    }
+
+    /// What the tombstone at the head says, when the head is one.
+    #[must_use]
+    pub fn tombstone(&self) -> Option<Tombstone<'_>> {
+        let State::Tombstoned(v) = self.state() else {
+            return None;
+        };
+        Some(match &v.block.superseded_by {
+            Some(to) => Tombstone::RenamedTo(to),
+            None => Tombstone::Removed { note: v.note() },
+        })
     }
 
     /// The single live head.

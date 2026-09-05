@@ -37,7 +37,9 @@ wants something new from outside adds it to a port, not to a parameter.
 - Forks are reported, never merged. `save` refuses a draft whose parent is
   no longer current, so a fork can arise only between machines that synced
   afterwards, and `resolve` hands both heads to a person.
-- Slugs are never reused: a tombstone stays a head forever.
+- Slugs are never reused: a tombstone stays a head forever. A removed
+  document's tombstone may gain one more version, carrying the note that
+  says why.
 
 Beside the kind directories the store walks sits `usage`, a line per
 command run. It is not a document because a count is not immutable, and
@@ -82,7 +84,10 @@ stdout carries data only; refusals and notes go to stderr. Exit 1 is a
 refusal or a store problem, 2 a usage error. A listing that reports a
 problem a person may act on, a fork, a claim on a directory this host
 lacks, still exits 0: the listing is the answer, and `check` is the
-command whose exit code means something.
+command whose exit code means something. `check` exits 1 on a problem, a
+rule the store must keep; a notice is a judgement call, printed with a
+`notice:` prefix and counted in the summary, and never moves the exit
+code.
 
 ## The skill
 

@@ -52,7 +52,8 @@ worklog usage                              # how often each command ran, per mac
 Prose goes through a draft: `new` or `checkout` prints a file to edit,
 `diff` shows it against the store, `save` validates it and writes the
 version. State changes such as `done`, `recheck`, `verify`, `tombstone` and
-`rename` write a version directly. `--json` on any command gives the same
+`rename` write a version directly; `done` and `tombstone` take a note
+saying what dissolved or ended the document. `--json` on any command gives the same
 data structured. `worklog --help` lists everything.
 
 ## Install

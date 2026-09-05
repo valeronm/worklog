@@ -12,6 +12,13 @@ pub enum Kind {
 impl Kind {
     pub const ALL: [Kind; 4] = [Kind::Entry, Kind::Fact, Kind::Topic, Kind::Followup];
 
+    /// An entry is what was true on its date, so its links cite; every
+    /// other kind is live and rests on what it links.
+    #[must_use]
+    pub fn cites(self) -> bool {
+        matches!(self, Kind::Entry)
+    }
+
     #[must_use]
     pub fn dir(self) -> &'static str {
         match self {

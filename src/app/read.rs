@@ -1,6 +1,6 @@
 //! The read use cases. None writes anything.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::domain::entry::Entry;
 use crate::domain::fact::Fact;
@@ -599,12 +599,7 @@ pub fn usage(deps: &Deps, machine: Option<&str>, since: Option<&str>) -> Result<
 pub fn check(deps: &Deps) -> Result<Check, Failure> {
     let loaded = load::load(deps.store)?;
     let mut out = Check::default();
-    let mut problem = |slug: &Slug, message: String| {
-        out.problems.push(Problem {
-            slug: slug.path().to_owned(),
-            message,
-        });
-    };
+    let mut problem = |slug: &Slug, message: String| out.problems.push(Problem::at(slug, message));
     for (slug, reason) in &loaded.broken {
         problem(slug, reason.clone());
     }
@@ -662,6 +657,13 @@ pub fn check(deps: &Deps) -> Result<Check, Failure> {
             problem(&f.slug, format!("touching no topic: {t}"));
         }
     }
+    check_links(&loaded, &mut out);
+    Ok(out)
+}
+
+/// Every link in every live document and every tombstone's note, since
+/// the link to where a document ended is the one a reader follows.
+fn check_links(loaded: &Loaded, out: &mut Check) {
     let linked: Vec<(&Slug, &Version)> = loaded
         .entries
         .iter()
@@ -670,18 +672,58 @@ pub fn check(deps: &Deps) -> Result<Check, Failure> {
         .chain(loaded.topics.values().map(|d| (&d.slug, &d.version)))
         .chain(loaded.followups.iter().map(|d| (&d.slug, &d.version)))
         .collect();
-    out.documents = linked.len();
-    for (slug, version) in linked {
-        for target in links::targets(&version.content_text()) {
+    let noted: Vec<(&Slug, &str)> = loaded
+        .removed()
+        .filter_map(|(slug, note)| note.map(|n| (slug, n)))
+        .collect();
+    out.documents = linked.len() + noted.len();
+    let mut inbound: BTreeMap<Slug, usize> = BTreeMap::new();
+    let mut stale: BTreeSet<(Slug, Slug)> = BTreeSet::new();
+    let mut scan = |slug: &Slug, text: &str| {
+        for target in links::targets(text) {
             out.links += 1;
-            match Slug::parse(&target) {
-                Ok(target) if loaded.reaches(&target) => {}
-                Ok(target) => problem(slug, format!("broken link: [[{target}]]")),
-                Err(_) => problem(slug, format!("link names no document shape: [[{target}]]")),
+            let Ok(target) = Slug::parse(&target) else {
+                out.problems.push(Problem::at(
+                    slug,
+                    format!("link names no document shape: [[{target}]]"),
+                ));
+                continue;
+            };
+            match loaded.landing(&target) {
+                load::Landing::Present => {}
+                load::Landing::Removed(removed) => {
+                    *inbound.entry(removed.clone()).or_default() += 1;
+                    if !slug.kind().cites() {
+                        stale.insert((slug.clone(), target));
+                    }
+                }
+                load::Landing::Missing => {
+                    out.problems
+                        .push(Problem::at(slug, format!("broken link: [[{target}]]")));
+                }
             }
         }
+    };
+    for (slug, version) in &linked {
+        scan(slug, &version.content_text());
     }
-    Ok(out)
+    for (slug, note) in noted {
+        scan(slug, note);
+    }
+    for (slug, target) in stale {
+        out.notices.push(Problem::at(
+            &slug,
+            format!("links a removed document: [[{target}]]"),
+        ));
+    }
+    for (removed, note) in loaded.removed() {
+        if let (None, Some(links)) = (note, inbound.get(removed)) {
+            out.notices.push(Problem::at(
+                removed,
+                format!("removed with no note saying why, linked from {links}"),
+            ));
+        }
+    }
 }
 
 /// The draft against the version it was checked out from.

@@ -272,8 +272,8 @@ fn dispatch_write(deps: &Deps, json: bool, command: WriteCommand) -> Result<Rend
             let out = write::verify(deps, &slug_arg(&slug, Some(Kind::Fact))?)?;
             rendered(json, &out, || render::written(&out))
         }
-        WriteCommand::Tombstone(arg) => {
-            let out = write::tombstone(deps, &slug(&arg)?)?;
+        WriteCommand::Tombstone { slug: arg, note } => {
+            let out = write::tombstone(deps, &slug(&arg)?, note.as_deref())?;
             rendered(json, &out, || render::written(&out))
         }
         WriteCommand::Rename { slug: arg, new } => {
@@ -361,7 +361,7 @@ fn command_path(command: &StoreCommand) -> &'static str {
             WriteCommand::Drop { .. } => "drop",
             WriteCommand::Recheck { .. } => "recheck",
             WriteCommand::Verify { .. } => "verify",
-            WriteCommand::Tombstone(_) => "tombstone",
+            WriteCommand::Tombstone { .. } => "tombstone",
             WriteCommand::Rename { .. } => "rename",
             WriteCommand::Resolve(_) => "resolve",
             WriteCommand::Claim(_) => "claim",

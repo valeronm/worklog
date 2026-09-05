@@ -199,9 +199,21 @@ pub struct Problem {
     pub message: String,
 }
 
+impl Problem {
+    #[must_use]
+    pub fn at(slug: &crate::domain::slug::Slug, message: String) -> Problem {
+        Problem {
+            slug: slug.path().to_owned(),
+            message,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct Check {
     pub problems: Vec<Problem>,
+    /// Worth a look and no problem: the exit code ignores them.
+    pub notices: Vec<Problem>,
     pub forks: Vec<String>,
     pub documents: usize,
     pub links: usize,

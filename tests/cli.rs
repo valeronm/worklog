@@ -376,7 +376,7 @@ fn followup_lifecycle_and_check() {
     assert!(String::from_utf8_lossy(&run.stderr).contains("no open follow-ups"));
     assert_eq!(
         s.ok(&["check"]),
-        "check: 10 documents, 1 links, 0 problems, 0 forks\n"
+        "check: 10 documents, 1 links, 0 problems, 0 forks, 0 notices\n"
     );
     s.ok(&["verify", "lantern/relay-pin-is-fixed"]);
     let shown = s.ok(&["show", "lantern/relay-pin-is-fixed"]);
@@ -591,21 +591,45 @@ fn rename_and_tombstone() {
     }
     let err = s.refused(&["checkout", "lantern/relay-pin-is-fixed"]);
     assert!(err.contains("renamed to lantern/relay-pin"), "{err}");
+    // A link to a removed document lands on its tombstone. An entry's link
+    // is a citation; a fact's is a notice, as is a tombstone with no note.
     s.ok(&["tombstone", "lantern/relay-pin"]);
     let err = s.refused(&["show", "lantern/relay-pin-is-fixed"]);
-    assert!(err.contains("removed"), "{err}");
-    let run = s.run(&["check"]);
-    assert_eq!(run.status.code(), Some(1));
-    let check = String::from_utf8_lossy(&run.stdout);
+    assert!(err.ends_with("lantern/relay-pin was removed\n"), "{err}");
+    s.write(&["new", "fact", "lantern/relay-timing"], |t| {
+        set_summary(t, "The relay settles in a millisecond") + "After [[lantern/relay-pin]].\n"
+    });
+    let check = s.ok(&["check"]);
     assert!(
-        check.contains("broken link: [[lantern/relay-pin-is-fixed]]"),
+        check.contains(
+            "notice: lantern/relay-timing: links a removed document: [[lantern/relay-pin]]\n"
+        ),
         "{check}"
     );
+    assert!(
+        check.contains(
+            "notice: lantern/relay-pin: removed with no note saying why, linked from 2\n"
+        ),
+        "{check}"
+    );
+    assert!(
+        check.ends_with("0 problems, 0 forks, 2 notices\n"),
+        "{check}"
+    );
+    s.ok(&[
+        "tombstone",
+        "lantern/relay-pin",
+        "moved into the board's README",
+    ]);
+    let check = s.ok(&["check"]);
+    assert!(check.ends_with("0 forks, 1 notices\n"), "{check}");
     let err = s.refused(&["new", "fact", "lantern/relay-pin"]);
     assert!(err.contains("never reused"), "{err}");
-    let facts = s.run(&["facts", "lantern"]);
-    assert!(facts.stdout.is_empty());
-    assert!(String::from_utf8_lossy(&facts.stderr).contains("no facts for: lantern"));
+    let facts = s.ok(&["facts", "lantern"]);
+    assert!(
+        facts.contains("relay-timing") && !facts.contains("relay-pin\n"),
+        "{facts}"
+    );
 }
 
 fn copy_dir(from: &Path, to: &Path) {

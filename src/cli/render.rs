@@ -365,13 +365,17 @@ pub fn check(c: &Check) -> String {
     for f in &c.forks {
         let _ = writeln!(out, "{f}: forked");
     }
+    for n in &c.notices {
+        let _ = writeln!(out, "notice: {}: {}", n.slug, n.message);
+    }
     let _ = writeln!(
         out,
-        "check: {} documents, {} links, {} problems, {} forks",
+        "check: {} documents, {} links, {} problems, {} forks, {} notices",
         c.documents,
         c.links,
         c.problems.len(),
-        c.forks.len()
+        c.forks.len(),
+        c.notices.len()
     );
     out
 }

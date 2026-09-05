@@ -10,7 +10,7 @@ use crate::domain::frontmatter::{FieldError, Fields};
 use crate::domain::ports::Store;
 use crate::domain::slug::{Kind, Slug};
 use crate::domain::topic::Topic;
-use crate::domain::version::{Document, State, Version, VersionId};
+use crate::domain::version::{Document, State, Tombstone, Version, VersionId};
 
 use super::{Deps, Failure};
 
@@ -30,6 +30,19 @@ impl<T> Doc<T> {
     }
 }
 
+/// A tombstone's content, owned so the index outlives the documents.
+enum Stone {
+    RenamedTo(Slug),
+    Removed { note: Option<String> },
+}
+
+/// Where a link lands, through any renames.
+pub enum Landing<'a> {
+    Present,
+    Removed(&'a Slug),
+    Missing,
+}
+
 #[derive(Default)]
 pub struct Loaded {
     /// Newest first.
@@ -43,8 +56,8 @@ pub struct Loaded {
     pub broken: Vec<(Slug, String)>,
     /// Every document with a live head or a fork.
     present: BTreeSet<Slug>,
-    /// Each renamed slug and the one its tombstone names.
-    renamed: BTreeMap<Slug, Slug>,
+    /// What the tombstone at each tombstoned slug says.
+    tombstones: BTreeMap<Slug, Stone>,
     /// Indexes into `facts`, by topic.
     facts_by_topic: BTreeMap<String, Vec<usize>>,
 }
@@ -55,10 +68,14 @@ pub fn not_live(slug: &Slug, document: &Document) -> Failure {
     match document.state() {
         State::Absent => Failure::Refused(format!("no {}: {slug}", slug.kind())),
         State::Live(_) => unreachable!("a live document needs no refusal"),
-        State::Tombstoned(v) => match &v.block.superseded_by {
-            Some(new) => Failure::Refused(format!("{slug} was renamed to {new}")),
-            None => Failure::Refused(format!("{slug} was removed")),
-        },
+        State::Tombstoned(_) => Failure::Refused(match document.tombstone() {
+            Some(Tombstone::RenamedTo(new)) => format!("{slug} was renamed to {new}"),
+            Some(Tombstone::Removed { note: Some(why) }) => {
+                let first = why.lines().next().unwrap_or_default();
+                format!("{slug} was removed: {first}")
+            }
+            _ => format!("{slug} was removed"),
+        }),
         State::Forked(heads) => Failure::Refused(format!(
             "{slug} is forked: {} — `worklog resolve {slug}`",
             heads
@@ -187,10 +204,15 @@ fn load_kind<T>(
                     .push((slug, heads.iter().map(|h| h.id.clone()).collect()));
                 continue;
             }
-            State::Tombstoned(tombstone) => {
-                if let Some(to) = &tombstone.block.superseded_by {
-                    loaded.renamed.insert(slug, to.clone());
-                }
+            State::Tombstoned(_) => {
+                let what = match document.tombstone() {
+                    Some(Tombstone::RenamedTo(to)) => Stone::RenamedTo(to.clone()),
+                    Some(Tombstone::Removed { note }) => Stone::Removed {
+                        note: note.map(str::to_owned),
+                    },
+                    None => unreachable!("a tombstoned document has a tombstone"),
+                };
+                loaded.tombstones.insert(slug, what);
                 continue;
             }
             State::Absent => continue,
@@ -276,8 +298,33 @@ impl Loaded {
     /// A slug that reaches a present document, through any renames.
     #[must_use]
     pub fn reaches(&self, slug: &Slug) -> bool {
-        std::iter::successors(Some(slug), |at| self.renamed.get(*at))
-            .any(|at| self.present.contains(at))
+        matches!(self.landing(slug), Landing::Present)
+    }
+
+    #[must_use]
+    pub fn landing(&self, slug: &Slug) -> Landing<'_> {
+        // Slugs are never reused, so a rename chain cannot loop.
+        let mut at = slug;
+        loop {
+            if self.present.contains(at) {
+                return Landing::Present;
+            }
+            match self.tombstones.get_key_value(at) {
+                Some((_, Stone::RenamedTo(to))) => at = to,
+                Some((removed, Stone::Removed { .. })) => return Landing::Removed(removed),
+                None => return Landing::Missing,
+            }
+        }
+    }
+
+    /// The removed documents with the note each tombstone carries.
+    pub fn removed(&self) -> impl Iterator<Item = (&Slug, Option<&str>)> {
+        self.tombstones
+            .iter()
+            .filter_map(|(slug, stone)| match stone {
+                Stone::Removed { note } => Some((slug, note.as_deref())),
+                Stone::RenamedTo(_) => None,
+            })
     }
 
     /// A topic that exists, forked or not.

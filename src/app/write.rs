@@ -10,7 +10,7 @@ use crate::domain::graph;
 use crate::domain::recheck::Recheck;
 use crate::domain::slug::{Kind, Slug};
 use crate::domain::topic::{ClaimError, Topic};
-use crate::domain::version::{Operation, State, Version, VersionBlock, VersionId};
+use crate::domain::version::{Operation, State, Version, VersionBlock, VersionId, with_note};
 
 use super::load;
 use super::output::{DraftList, DraftRef, Written};
@@ -383,14 +383,7 @@ fn close(
 ) -> Result<Written, Failure> {
     let (version, followup) = followup_of(deps, slug)?;
     let closed = transition(&followup).map_err(|e| Failure::at(slug, e))?;
-    let mut body = version.body.clone();
-    if let Some(note) = note {
-        if !body.ends_with('\n') {
-            body.push('\n');
-        }
-        body.push_str(note.trim());
-        body.push('\n');
-    }
+    let body = with_note(version.body.clone(), note);
     amend(deps, &version, operation, closed.to_fields(), body)
 }
 
@@ -435,10 +428,23 @@ pub fn verify(deps: &Deps, slug: &Slug) -> Result<Written, Failure> {
     amend(deps, &version, Operation::Verify, fields, body)
 }
 
-pub fn tombstone(deps: &Deps, slug: &Slug) -> Result<Written, Failure> {
-    let version = load::live(deps.store, slug)?;
+/// Removes a document, the note as the tombstone's body saying why. An
+/// already removed document accepts a note; a renamed one does not.
+pub fn tombstone(deps: &Deps, slug: &Slug, note: Option<&str>) -> Result<Written, Failure> {
+    let document = deps.store.document(slug)?;
+    let version = match document.state() {
+        State::Live(v) => v.clone(),
+        State::Tombstoned(v) if note.is_some() && v.block.superseded_by.is_none() => v.clone(),
+        _ => return Err(load::not_live(slug, &document)),
+    };
     let fields = version.fields.clone();
-    amend(deps, &version, Operation::Tombstone, fields, String::new())
+    amend(
+        deps,
+        &version,
+        Operation::Tombstone,
+        fields,
+        with_note(String::new(), note),
+    )
 }
 
 /// A tombstone naming the new slug, and the new slug's first version with
@@ -823,10 +829,20 @@ mod tests {
                 .collect::<Vec<_>>(),
             [renamed.tombstone.clone().unwrap()]
         );
-        tombstone(&d, &moved).unwrap();
+        tombstone(&d, &moved, None).unwrap();
         assert!(
             matches!(new_fact(&d, "lantern/relay-pin", false), Err(Failure::Refused(m)) if m.contains("never reused"))
         );
+        // A removed document takes a note afterwards, and only once removed.
+        assert!(matches!(
+            tombstone(&d, &moved, None),
+            Err(Failure::Refused(m)) if m.contains("was removed")
+        ));
+        tombstone(&d, &moved, Some("superseded by the board revision")).unwrap();
+        assert!(matches!(
+            load::live(&w.store, &moved),
+            Err(Failure::Refused(m)) if m.ends_with("was removed: superseded by the board revision")
+        ));
     }
 
     #[test]

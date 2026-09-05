@@ -59,7 +59,8 @@ in between: `discard`, `checkout` again, carry the edits over, `save`.
 State changes are commands and need no draft: `worklog done <followup>
 [note]`, `worklog drop <followup> [note]`, `worklog recheck <slug> <date>
 <why>` or `worklog recheck <slug> touching <topic>`, `worklog verify
-<fact>`, `worklog tombstone <slug>`, `worklog rename <slug> <new>`.
+<fact>`, `worklog tombstone <slug> [note]`, `worklog rename <slug> <new>`.
+A tombstone's note says what ended the document, with a link to where.
 
 `--json` on any command returns the same data structured. Refusals go to
 stderr with exit 1; a usage error exits 2.
@@ -225,7 +226,10 @@ because it failed to resolve: the target may be alive under another name
 or on a machine that has not synced.
 
 `worklog check` verifies every link, recheck and reference across the store
-and exits 1 on a problem; run it after a tombstone.
+and exits 1 on a problem. A link to a removed document lands on its
+tombstone. From an entry that is a citation; from anything live it is a
+notice, since the live document has gone stale, as is a linked tombstone
+with no note. A notice never changes the exit code.
 
 A document with two current versions is a fork, made by two machines
 writing from the same parent before syncing. `worklog forks` lists them,
