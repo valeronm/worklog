@@ -9,7 +9,7 @@
   color-scheme: light dark;
   --bg: #f6f7f9; --panel: #ffffff; --ink: #161a22; --muted: #6a7280; --line: #e3e6eb;
   --accent: #0e7c86; --accent-ink: #0a5f67; --accent-wash: #e6f4f5; --chip-hover: #0a5f67; --chip-hover-ink: #ffffff;
-  --due: #b42318; --due-wash: #fde8e6;
+  --due: #b42318; --due-wash: #fde8e6; --notice: #9a6700;
   --add: #e3f6e9; --del: #fbe7e7; --code: #eef0f3;
   --mono: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -17,7 +17,7 @@
 @media (prefers-color-scheme: dark) { :root {
   --bg: #0f1115; --panel: #161a22; --ink: #e6e8ee; --muted: #8b93a3; --line: #262b36;
   --accent: #5fd0d8; --accent-ink: #8fe1e7; --accent-wash: #12343a; --chip-hover: #5fd0d8; --chip-hover-ink: #0f1115;
-  --due: #f58a7f; --due-wash: #3a1b18;
+  --due: #f58a7f; --due-wash: #3a1b18; --notice: #e3b341;
   --add: #12361b; --del: #4a1a1a; --code: #1c2028;
 } }
 * { box-sizing: border-box; }
@@ -52,7 +52,7 @@ h1 { font-size: 1.7rem; font-weight: 700; letter-spacing: -.02em; line-height: 1
 .meta .kind { display: inline-block; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; margin-right: .6rem; }
 h2 { font-size: .82rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 2.4rem 0 .6rem; }
 main > h2:first-child { margin-top: 0; }
-h2.problem { color: var(--due); }
+.notice { color: var(--notice); }
 p.summary { margin: 0 0 1.25rem; color: var(--muted); }
 .muted { color: var(--muted); }
 .problem { color: var(--due); }

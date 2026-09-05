@@ -5,7 +5,7 @@ use askama::Template;
 
 use crate::app::output::{
     Check, Count, Diff, FactListing, FollowupItem, Followups, Forks, Head, History, Listing, Log,
-    Row, Search, Shown, Stamp, Tags, Topics, short,
+    Problem, Row, Search, Shown, Stamp, Tags, Topics, short,
 };
 use crate::domain::frontmatter::{self, Fields, Value};
 use crate::domain::slug::{Kind, Slug};
@@ -369,6 +369,8 @@ pub struct DocPage {
     pub title: String,
     pub summary: String,
     pub forked: bool,
+    /// A note that a head was written by a newer worklog.
+    pub foreign: Option<String>,
     pub history: Option<String>,
     pub heads: Vec<HeadView>,
     pub followups: Vec<Open>,
@@ -387,6 +389,7 @@ impl From<&Shown> for DocPage {
             title: heads.first().map(|h| h.title.clone()).unwrap_or_default(),
             summary: summary_of(&heads),
             forked: s.forked,
+            foreign: s.foreign.clone(),
             history: Some(history_href(&s.slug)),
             heads,
             followups: opens(&s.followups),
@@ -409,6 +412,8 @@ pub struct HistoryPage {
     pub slug: Link,
     pub slug_plain: Link,
     pub history: Option<String>,
+    /// A note that the head was written by a newer worklog.
+    pub foreign: Option<String>,
     pub versions: Vec<HistoryLine>,
 }
 
@@ -422,6 +427,7 @@ impl From<&History> for HistoryPage {
             slug: slug_link(&h.slug),
             slug_plain: Link::plain(&h.slug),
             history: None,
+            foreign: h.foreign.clone(),
             versions: h
                 .versions
                 .iter()
@@ -650,15 +656,28 @@ impl From<&Log> for LogPage {
     }
 }
 
-pub struct ProblemLine {
+/// What `check` says about one document, a problem or a notice.
+pub struct MessageLine {
     pub slug: Link,
     pub message: String,
+}
+
+fn message_lines(problems: &[Problem]) -> Vec<MessageLine> {
+    problems
+        .iter()
+        .map(|p| MessageLine {
+            slug: slug_link(&p.slug),
+            message: p.message.clone(),
+        })
+        .collect()
 }
 
 #[derive(Template)]
 #[template(path = "check.html")]
 pub struct CheckPage {
-    pub problems: Vec<ProblemLine>,
+    pub problems: Vec<MessageLine>,
+    /// Worth a look and no problem.
+    pub notices: Vec<MessageLine>,
     pub forks: Vec<Link>,
     pub documents: usize,
     pub links: usize,
@@ -667,14 +686,8 @@ pub struct CheckPage {
 impl From<&Check> for CheckPage {
     fn from(c: &Check) -> CheckPage {
         CheckPage {
-            problems: c
-                .problems
-                .iter()
-                .map(|p| ProblemLine {
-                    slug: slug_link(&p.slug),
-                    message: p.message.clone(),
-                })
-                .collect(),
+            problems: message_lines(&c.problems),
+            notices: message_lines(&c.notices),
             forks: c.forks.iter().map(|f| slug_link(f)).collect(),
             documents: c.documents,
             links: c.links,

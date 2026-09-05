@@ -7,10 +7,10 @@
 {% if problems.is_empty() %}
 <p>Every rule the store has to keep holds.</p>
 {% else %}
-<ul class="items">
-{% for p in problems %}
-  <li class="problem">{% call m::link(p.slug) %}{% endcall %}: {{ p.message }}</li>
-{% endfor %}
-</ul>
+{% call m::messages(problems, "problem") %}{% endcall %}
+{% endif %}
+{% if !notices.is_empty() %}
+<h2>Notices</h2>
+{% call m::messages(notices, "notice") %}{% endcall %}
 {% endif %}
 {% endblock %}

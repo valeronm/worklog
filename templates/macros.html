@@ -4,6 +4,10 @@
 
 {% macro meta(kind, name, history) %}<p class="meta"><span class="kind">{{ kind }}</span>{% call link(name) %}{% endcall %}{% if let Some(h) = history %} · <a href="{{ h }}">history</a>{% endif %}</p>{% endmacro %}
 
+{% macro notice(text) %}{% if let Some(t) = text %}<p class="notice">{{ t }}</p>{% endif %}{% endmacro %}
+
+{% macro messages(list, class) %}<ul class="items">{% for p in list.iter() %}<li class="{{ class }}">{% call link(p.slug) %}{% endcall %}: {{ p.message }}</li>{% endfor %}</ul>{% endmacro %}
+
 {% macro links(list) %}{% for l in list.iter() %}{% if !loop.first %}, {% endif %}{% call link(l) %}{% endcall %}{% endfor %}{% endmacro %}
 
 {% macro chips(list) %}<span class="tags">{% for l in list.iter() %}{% call link(l) %}{% endcall %}{% endfor %}</span>{% endmacro %}
