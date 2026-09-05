@@ -94,29 +94,14 @@ pub fn follow(
     Ok((slug, document))
 }
 
-/// A version's first parent with the document holding it: its own, or
-/// after a rename another of the same kind.
-pub fn parent(
-    store: &dyn Store,
-    version: &Version,
-) -> Result<Option<(Version, Document)>, Failure> {
+/// A version's first parent, which sits in its own document or, for the
+/// version a rename moved, in the old slug's.
+pub fn parent(store: &dyn Store, version: &Version) -> Result<Option<Version>, Failure> {
     let Some(id) = version.block.parents.first() else {
         return Ok(None);
     };
-    let own = store.document(&version.slug)?;
-    if let Some(found) = own.get(id) {
-        return Ok(Some((found.clone(), own)));
-    }
-    for slug in store.slugs(version.slug.kind())? {
-        if slug == version.slug {
-            continue;
-        }
-        let document = store.document(&slug)?;
-        if let Some(found) = document.get(id) {
-            return Ok(Some((found.clone(), document)));
-        }
-    }
-    Ok(None)
+    let holder = version.block.renamed_from.as_ref().unwrap_or(&version.slug);
+    Ok(store.document(holder)?.get(id).cloned())
 }
 
 /// Every document in the store, whatever its kind.

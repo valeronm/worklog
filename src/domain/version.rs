@@ -120,6 +120,8 @@ pub struct VersionBlock {
     pub operation: Operation,
     /// The new slug, on the tombstone a rename leaves behind.
     pub superseded_by: Option<Slug>,
+    /// The old slug, on the first version a rename writes at the new one.
+    pub renamed_from: Option<Slug>,
 }
 
 /// One immutable file of the store.
@@ -239,6 +241,9 @@ impl VersionBlock {
         if let Some(slug) = &self.superseded_by {
             entries.push(("superseded_by".to_owned(), Value::Scalar(slug.to_string())));
         }
+        if let Some(slug) = &self.renamed_from {
+            entries.push(("renamed_from".to_owned(), Value::Scalar(slug.to_string())));
+        }
         Value::Map(entries)
     }
 
@@ -250,6 +255,7 @@ impl VersionBlock {
             "machine",
             "operation",
             "superseded_by",
+            "renamed_from",
         ])?;
         let parents = parse_parents(&sub)?;
         let written = sub
@@ -269,16 +275,23 @@ impl VersionBlock {
                 format!("`{operation}` is no operation"),
             )
         })?;
-        let superseded_by = match sub.optional("superseded_by") {
-            Some(text) => Some(Slug::parse(text).map_err(|e| invalid("version.superseded_by", e))?),
-            None => None,
-        };
+        let superseded_by = sub
+            .optional("superseded_by")
+            .map(Slug::parse)
+            .transpose()
+            .map_err(|e| invalid("version.superseded_by", e))?;
+        let renamed_from = sub
+            .optional("renamed_from")
+            .map(Slug::parse)
+            .transpose()
+            .map_err(|e| invalid("version.renamed_from", e))?;
         Ok(VersionBlock {
             parents,
             written: written.to_owned(),
             machine,
             operation,
             superseded_by,
+            renamed_from,
         })
     }
 }
@@ -356,18 +369,18 @@ impl Version {
     }
 
     /// The slugs a rename moved the document between, for either version
-    /// it wrote: the tombstone names its successor, the moved version's
-    /// parent is the tombstone. A moved version without a parent knows
-    /// only where it landed.
+    /// it wrote: the tombstone names its successor, the moved version its
+    /// predecessor.
     #[must_use]
-    pub fn rename_sides(&self, parent: Option<&Version>) -> Option<(Option<Slug>, Slug)> {
+    pub fn rename_sides(&self) -> Option<(&Slug, &Slug)> {
         if self.block.operation != Operation::Rename {
             return None;
         }
-        Some(match &self.block.superseded_by {
-            Some(to) => (Some(self.slug.clone()), to.clone()),
-            None => (parent.map(|p| p.slug.clone()), self.slug.clone()),
-        })
+        if let Some(to) = &self.block.superseded_by {
+            return Some((&self.slug, to));
+        }
+        let from = self.block.renamed_from.as_ref()?;
+        Some((from, &self.slug))
     }
 }
 
@@ -487,6 +500,7 @@ mod tests {
             machine: MachineName::parse("m1").unwrap(),
             operation: op,
             superseded_by: None,
+            renamed_from: None,
         }
     }
 

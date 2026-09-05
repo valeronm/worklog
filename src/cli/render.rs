@@ -461,10 +461,7 @@ pub fn diff(d: &Diff, paint: bool) -> String {
     // A rename copies the content, so its versions report the move rather
     // than a body leaving and returning.
     if let Some(renamed) = &d.renamed {
-        let _ = match &renamed.from {
-            Some(from) => writeln!(out, "renamed from {from} to {}", renamed.to),
-            None => writeln!(out, "renamed to {}", renamed.to),
-        };
+        let _ = writeln!(out, "renamed from {} to {}", renamed.from, renamed.to);
         return out;
     }
     let diff = similar::TextDiff::from_lines(&d.before.text, &d.after.text);

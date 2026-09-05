@@ -141,6 +141,7 @@ mod tests {
                     machine: MachineName::parse("m").unwrap(),
                     operation: Operation::Save,
                     superseded_by: None,
+                    renamed_from: None,
                 },
                 fields,
                 body.to_owned(),

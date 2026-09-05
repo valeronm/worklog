@@ -252,7 +252,7 @@ pub struct Diff {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Renamed {
-    pub from: Option<String>,
+    pub from: String,
     pub to: String,
 }
 

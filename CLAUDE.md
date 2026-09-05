@@ -21,17 +21,19 @@ wants something new from outside adds it to a port, not to a parameter.
   shape that exists. It is not YAML on purpose: a second writer with its
   own quoting or ordering would produce files that hash differently for the
   same content. Extend the grammar only if the writer and the reader change
-  together.
+  together. An older binary reads a file carrying a field it does not know
+  as corrupt, so every machine sharing a store is upgraded before the first
+  write that uses a new field; `docs/release.md` has the step.
 - A file is written under a dotted name and renamed into place, so a file
   sync never ships a partial version.
 - Nothing is edited in place. A command that needs to change a document
   writes a new version naming the old one as parent. A parent sits in the
   same document except after `rename`, whose moved first version names the
-  old slug's tombstone, so `history` can walk back across the move and a
-  parent lookup must be ready to read another document. The one file that is
-  edited is a draft, and drafts live outside the store. A draft is the
-  document's own text and nothing else; the versions it came from sit in
-  a file beside it, so an editor cannot touch what `save` relies on.
+  old slug's tombstone as parent and the old slug in `renamed_from`, the
+  one way a parent lookup crosses documents. The one file that is edited
+  is a draft, and drafts live outside the store. A draft is the document's
+  own text and nothing else; the versions it came from sit in a file
+  beside it, so an editor cannot touch what `save` relies on.
 - Forks are reported, never merged. `save` refuses a draft whose parent is
   no longer current, so a fork can arise only between machines that synced
   afterwards, and `resolve` hands both heads to a person.

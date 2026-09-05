@@ -153,13 +153,10 @@ pub fn history(deps: &Deps, slug: &Slug) -> Result<History, Failure> {
             slug: v.slug.path().to_owned(),
             parents: v.block.parents.iter().map(ToString::to_string).collect(),
         }));
-        // The oldest version has no parent in its document, so a parent it
-        // names sits in the document a rename moved it from.
-        let Some(oldest) = ordered.last() else { break };
-        let Some((_, previous)) = load::parent(deps.store, oldest)? else {
+        let Some(from) = ordered.last().and_then(|v| v.block.renamed_from.as_ref()) else {
             break;
         };
-        document = previous;
+        document = deps.store.document(from)?;
     }
     Ok(History {
         slug: slug.path().to_owned(),
@@ -740,7 +737,7 @@ pub fn diff(
             )));
         }
         (load::Named::Version(v), None) => {
-            let parent = load::parent(deps.store, &v)?.map(|(parent, _)| parent);
+            let parent = load::parent(deps.store, &v)?;
             let before = parent.as_ref().map_or_else(
                 || Side {
                     name: "(none)".to_owned(),
@@ -748,8 +745,8 @@ pub fn diff(
                 },
                 at,
             );
-            let renamed = v.rename_sides(parent.as_ref()).map(|(from, to)| Renamed {
-                from: from.map(|f| f.path().to_owned()),
+            let renamed = v.rename_sides().map(|(from, to)| Renamed {
+                from: from.path().to_owned(),
                 to: to.path().to_owned(),
             });
             let after = at(&v);

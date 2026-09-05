@@ -38,6 +38,10 @@ fn draft_ref(deps: &Deps, draft: &Draft) -> DraftRef {
 }
 
 /// Stamps and stores a version; the caller has checked the parents.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the parts of a version the caller decides; the rest are stamped here"
+)]
 pub fn store_version(
     deps: &Deps,
     slug: Slug,
@@ -46,6 +50,7 @@ pub fn store_version(
     fields: Fields,
     body: String,
     superseded_by: Option<Slug>,
+    renamed_from: Option<Slug>,
 ) -> Result<Version, Failure> {
     let block = VersionBlock {
         parents,
@@ -53,6 +58,7 @@ pub fn store_version(
         machine: machine(deps)?,
         operation,
         superseded_by,
+        renamed_from,
     };
     let version = Version::compose(slug, block, fields, body);
     deps.store.put(&version)?;
@@ -67,7 +73,7 @@ pub fn first_version(
     fields: Fields,
     body: String,
 ) -> Result<Version, Failure> {
-    store_version(deps, slug, vec![], operation, fields, body, None)
+    store_version(deps, slug, vec![], operation, fields, body, None, None)
 }
 
 /// A version following `parent`, for the commands that change one thing.
@@ -85,6 +91,7 @@ fn amend(
         operation,
         fields,
         body,
+        None,
         None,
     )?;
     Ok(written(&version))
@@ -327,6 +334,7 @@ pub fn save(deps: &Deps, slug: &Slug, dry_run: bool) -> Result<Written, Failure>
         draft.fields,
         draft.body,
         None,
+        None,
     )?;
     deps.drafts.delete(slug)?;
     Ok(written(&version))
@@ -448,6 +456,7 @@ pub fn rename(deps: &Deps, from: &Slug, to: &str) -> Result<Written, Failure> {
         version.fields.clone(),
         String::new(),
         Some(to.clone()),
+        None,
     )?;
     let moved = store_version(
         deps,
@@ -457,6 +466,7 @@ pub fn rename(deps: &Deps, from: &Slug, to: &str) -> Result<Written, Failure> {
         version.fields,
         version.body,
         None,
+        Some(from.clone()),
     )?;
     Ok(Written {
         slug: moved.slug.path().to_owned(),
@@ -727,6 +737,7 @@ mod tests {
             fields,
             "\nm2 again\n".into(),
             None,
+            None,
         )
         .unwrap();
         assert!(matches!(
@@ -803,6 +814,7 @@ mod tests {
         );
         let moved = Slug::parse("lantern/relay-pin").unwrap();
         let head = current(&w, &moved);
+        assert_eq!(head.block.renamed_from, Some(fact.clone()));
         assert_eq!(
             head.block
                 .parents

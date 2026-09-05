@@ -21,6 +21,9 @@ installs it.
 4. Watch the `build` workflow. A failed tag build leaves no release; fix on
    `main`, move the tag, push it again, and the release job rebuilds in
    place.
+5. If the release adds a field to the version grammar, install it on every
+   machine sharing a store before the first write that uses the field: an
+   older binary reads such a file as corrupt.
 
 Nothing checks that the tag matches `Cargo.toml`; `worklog --version`
 reports the manifest, so a mismatch is visible but not fatal.
