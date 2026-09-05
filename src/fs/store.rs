@@ -18,15 +18,23 @@ pub struct FsStore {
 
 /// The writer names a file `<version id>.md` and nothing else counts as a
 /// version.
-fn version_name(name: &str) -> Option<&str> {
-    name.strip_suffix(".md")
-        .filter(|hash| VersionId::parse(hash).is_ok())
+fn version_name(name: &str) -> Option<VersionId> {
+    VersionId::parse(name.strip_suffix(".md")?).ok()
 }
 
 impl FsStore {
     #[must_use]
     pub fn new(root: PathBuf) -> FsStore {
         FsStore { root }
+    }
+
+    /// Every slug of the kind with the version ids under it, from the
+    /// directory names alone.
+    fn versions_by_slug(&self, kind: Kind) -> Result<Vec<(Slug, Vec<VersionId>)>, StoreError> {
+        let mut found = Vec::new();
+        walk(&self.root.join(kind.dir()), "", kind, &mut found)?;
+        found.sort();
+        Ok(found)
     }
 
     #[must_use]
@@ -64,9 +72,14 @@ impl FsStore {
 }
 
 /// Directories under `dir` holding version files, as paths relative to
-/// the kind directory.
-fn walk(dir: &Path, relative: &str, kind: Kind, found: &mut Vec<Slug>) -> Result<(), StoreError> {
-    let mut holds_versions = false;
+/// the kind directory, each with the ids its files are named by.
+fn walk(
+    dir: &Path,
+    relative: &str,
+    kind: Kind,
+    found: &mut Vec<(Slug, Vec<VersionId>)>,
+) -> Result<(), StoreError> {
+    let mut ids = Vec::new();
     let mut subdirs = Vec::new();
     for entry in super::entries(dir)? {
         let entry = entry.map_err(|e| io_error(dir, &e))?;
@@ -77,12 +90,15 @@ fn walk(dir: &Path, relative: &str, kind: Kind, found: &mut Vec<Slug>) -> Result
             if !name.starts_with('.') {
                 subdirs.push(name.into_owned());
             }
-        } else if version_name(&name).is_some() {
-            holds_versions = true;
+        } else if let Some(id) = version_name(&name) {
+            ids.push(id);
         }
     }
-    if holds_versions {
-        found.push(Slug::of_kind(kind, relative).map_err(|e| corrupt(dir, e))?);
+    if !ids.is_empty() {
+        found.push((
+            Slug::of_kind(kind, relative).map_err(|e| corrupt(dir, e))?,
+            ids,
+        ));
     }
     subdirs.sort();
     for sub in subdirs {
@@ -98,9 +114,24 @@ fn walk(dir: &Path, relative: &str, kind: Kind, found: &mut Vec<Slug>) -> Result
 
 impl Store for FsStore {
     fn slugs(&self, kind: Kind) -> Result<Vec<Slug>, StoreError> {
+        Ok(self
+            .versions_by_slug(kind)?
+            .into_iter()
+            .map(|(slug, _)| slug)
+            .collect())
+    }
+
+    fn by_id_prefix(&self, prefix: &str) -> Result<Vec<(Slug, VersionId)>, StoreError> {
         let mut found = Vec::new();
-        walk(&self.root.join(kind.dir()), "", kind, &mut found)?;
-        found.sort();
+        for kind in Kind::ALL {
+            for (slug, ids) in self.versions_by_slug(kind)? {
+                found.extend(
+                    ids.into_iter()
+                        .filter(|id| id.as_str().starts_with(prefix))
+                        .map(|id| (slug.clone(), id)),
+                );
+            }
+        }
         Ok(found)
     }
 
@@ -111,12 +142,13 @@ impl Store for FsStore {
             let entry = entry.map_err(|e| io_error(&dir, &e))?;
             let name = entry.file_name();
             let name = name.to_string_lossy();
-            let Some(hash) = version_name(&name) else {
+            let Some(id) = version_name(&name) else {
                 continue;
             };
             let path = entry.path();
             let text = fs::read_to_string(&path).map_err(|e| io_error(&path, &e))?;
-            let version = Version::from_named_text(hash, &text).map_err(|e| corrupt(&path, e))?;
+            let version =
+                Version::from_named_text(id.as_str(), &text).map_err(|e| corrupt(&path, e))?;
             if version.slug != *slug {
                 return Err(corrupt(
                     &path,
@@ -213,5 +245,27 @@ mod tests {
             store.document(&topic.slug),
             Err(StoreError::Corrupt { .. })
         ));
+    }
+
+    #[test]
+    fn a_lookup_by_id_reads_no_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = FsStore::new(dir.path().to_path_buf());
+        let topic = version("lantern", "\nt\n");
+        store.put(&topic).unwrap();
+        fs::write(
+            dir.path()
+                .join("topic/lantern")
+                .join(format!("{}.md", topic.id)),
+            "---\nslug: lantern\n---\n",
+        )
+        .unwrap();
+        // The damaged document elsewhere in the store is no obstacle to
+        // finding another by its id and reading it.
+        let fact = version("lantern/relay", "\nf\n");
+        store.put(&fact).unwrap();
+        let hits = store.by_id_prefix(&fact.id.as_str()[..12]).unwrap();
+        assert_eq!(hits, [(fact.slug.clone(), fact.id.clone())]);
+        assert_eq!(store.document(&fact.slug).unwrap().versions, [fact]);
     }
 }

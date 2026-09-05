@@ -7,7 +7,7 @@ use super::draft::Draft;
 use super::machine::MachineName;
 use super::slug::{Kind, Slug};
 use super::usage::Invocation;
-use super::version::{Document, Version};
+use super::version::{Document, Version, VersionId};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StoreError {
@@ -40,6 +40,10 @@ pub trait Store {
     fn document(&self, slug: &Slug) -> Result<Document, StoreError>;
     /// Adds a version; a version already present is not an error.
     fn put(&self, version: &Version) -> Result<(), StoreError>;
+    /// Every version whose id starts with `prefix`, as its slug and its
+    /// full id, in no particular order. The caller passes a text
+    /// `VersionId::is_prefix` accepts, since an empty one matches all.
+    fn by_id_prefix(&self, prefix: &str) -> Result<Vec<(Slug, VersionId)>, StoreError>;
 }
 
 /// Drafts being edited on this machine, never synced.

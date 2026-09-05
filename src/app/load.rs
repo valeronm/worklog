@@ -196,20 +196,18 @@ pub enum Named {
 }
 
 pub fn named(deps: &Deps, text: &str, kind: Option<Kind>) -> Result<Named, Failure> {
-    let mut found = Vec::new();
+    let mut found = None;
     if VersionId::is_prefix(text) {
-        for (_, document) in documents(deps.store)? {
-            found.extend(
-                document
-                    .versions
-                    .into_iter()
-                    .filter(|v| v.id.as_str().starts_with(text)),
-            );
-            if found.len() > 1 {
-                return Err(Failure::Refused(format!(
-                    "{text} is a prefix of more than one version; give more of it"
-                )));
-            }
+        let hits = deps.store.by_id_prefix(text)?;
+        if hits.len() > 1 {
+            return Err(Failure::Refused(format!(
+                "{text} is a prefix of more than one version; give more of it"
+            )));
+        }
+        // A hit the document then lacks was written between the two
+        // reads, and reads as nothing named.
+        if let [(slug, id)] = &hits[..] {
+            found = deps.store.document(slug)?.get(id).cloned();
         }
     }
     let document = match super::slug_arg(text, kind) {
@@ -218,10 +216,10 @@ pub fn named(deps: &Deps, text: &str, kind: Option<Kind>) -> Result<Named, Failu
             let named = !document.versions.is_empty() || deps.drafts.read(&slug)?.is_some();
             named.then_some((slug, document))
         }
-        Err(e) if found.is_empty() => return Err(e),
+        Err(e) if found.is_none() => return Err(e),
         Err(_) => None,
     };
-    match (found.pop(), document) {
+    match (found, document) {
         (Some(version), None) => Ok(Named::Version(version)),
         (None, Some((slug, document))) => Ok(Named::Slug(slug, document)),
         (None, None) => Err(Failure::Refused(format!("no version or document: {text}"))),

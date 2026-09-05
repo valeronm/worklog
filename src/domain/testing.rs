@@ -8,7 +8,7 @@ use super::machine::MachineName;
 use super::ports::{Clock, Drafts, Host, Identity, Store, StoreError, Usage};
 use super::slug::{Kind, Slug};
 use super::usage::Invocation;
-use super::version::{Document, Version};
+use super::version::{Document, Version, VersionId};
 
 #[derive(Default)]
 pub struct MemoryStore {
@@ -34,6 +34,20 @@ impl Store for MemoryStore {
                 .cloned()
                 .unwrap_or_default(),
         ))
+    }
+
+    fn by_id_prefix(&self, prefix: &str) -> Result<Vec<(Slug, VersionId)>, StoreError> {
+        Ok(self
+            .versions
+            .borrow()
+            .iter()
+            .flat_map(|(slug, versions)| {
+                versions
+                    .iter()
+                    .filter(|v| v.id.as_str().starts_with(prefix))
+                    .map(|v| (slug.clone(), v.id.clone()))
+            })
+            .collect())
     }
 
     fn put(&self, version: &Version) -> Result<(), StoreError> {
