@@ -2,6 +2,7 @@
 //! states.
 
 pub mod args;
+pub mod help;
 pub mod hook;
 pub mod render;
 pub mod setup;
@@ -11,7 +12,7 @@ pub use setup::SKILL;
 
 use std::io::Write as _;
 
-use clap::Parser;
+use clap::{CommandFactory as _, FromArgMatches as _};
 use serde::Serialize;
 
 use crate::app::write::{Made, NewFollowup};
@@ -418,7 +419,10 @@ fn print(text: &str) {
 #[must_use]
 pub fn run() -> i32 {
     let argv: Vec<String> = std::env::args().skip(1).collect();
-    let cli = match Cli::try_parse() {
+    let parsed = help::grouped(Cli::command())
+        .try_get_matches()
+        .and_then(|m| Cli::from_arg_matches(&m));
+    let cli = match parsed {
         Ok(cli) => cli,
         Err(e) => {
             // clap prints help and version to stdout with exit 0, and a

@@ -888,3 +888,21 @@ fn copy_dir(from: &Path, to: &Path) {
         }
     }
 }
+
+#[test]
+fn help_lists_every_command_under_its_heading() {
+    let scratch = Scratch::new();
+    let text = scratch.ok(&["--help"]);
+    let section = |heading: &str| {
+        let start = text
+            .find(&format!("\n{heading}:\n"))
+            .unwrap_or_else(|| panic!("{heading} in {text}"));
+        let body = &text[start + heading.len() + 2..];
+        body[..body.find("\n\n").unwrap_or(body.len())].to_string()
+    };
+    assert!(section("Setup").contains("\n  init "));
+    assert!(section("Reads").contains("\n  show "));
+    assert!(section("Writes").contains("\n  new "));
+    assert!(section("Other").contains("\n  serve "));
+    assert_eq!(text.matches("\n  show ").count(), 1);
+}
