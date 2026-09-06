@@ -11,6 +11,7 @@ pub mod links;
 pub mod machine;
 pub mod ports;
 pub mod recheck;
+pub mod release;
 pub mod slug;
 pub mod topic;
 pub mod usage;

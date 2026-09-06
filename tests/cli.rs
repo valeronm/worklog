@@ -33,10 +33,14 @@ impl Scratch {
     }
 
     fn run(&self, args: &[&str]) -> Output {
-        Command::cargo_bin("worklog")
-            .expect("the binary")
+        self.run_binary(Command::cargo_bin("worklog").expect("the binary"), args)
+    }
+
+    fn run_binary(&self, mut command: Command, args: &[&str]) -> Output {
+        command
             .env("WORKLOG_HOME", self.root.path())
             .env("HOME", self.home())
+            .env_remove("XDG_CONFIG_HOME")
             .current_dir(self.home())
             .args(args)
             .output()
@@ -250,6 +254,19 @@ fn agents_refresh_brings_up_only_what_is_there() {
     assert!(!codex.join("skills").exists());
     assert!(!claude.join("settings.json").exists());
     assert_eq!(s.ok(&["agents", "refresh"]), "");
+    // Completions go where fish reads them, and only where fish is.
+    let fish = s.home().join(".config/fish/completions");
+    fs::create_dir_all(&fish).unwrap();
+    let completions = fish.join("worklog.fish");
+    assert_eq!(
+        s.ok(&["agents", "refresh"]),
+        format!("{}\n", completions.display())
+    );
+    assert!(
+        fs::read_to_string(&completions)
+            .unwrap()
+            .contains("complete -c worklog")
+    );
 }
 
 #[test]
@@ -300,6 +317,87 @@ fn installs_refuse_a_host_without_an_agent() {
     assert!(!s.root.path().join("config").exists());
     assert!(!s.home().join(".claude").exists());
     assert!(!s.home().join(".codex").exists());
+}
+
+/// A release directory with one asset for this target under the tag.
+fn published(dir: &Path, tag: &str, bytes: &[u8], checksum_of: &[u8]) {
+    let asset = worklog::domain::release::asset().expect("a release is built for this target");
+    fs::create_dir_all(dir).unwrap();
+    fs::write(dir.join("latest"), format!("{tag}\n")).unwrap();
+    fs::write(dir.join(asset), bytes).unwrap();
+    fs::write(
+        dir.join(format!("{asset}.sha256")),
+        worklog::domain::release::checksum_file(asset, checksum_of),
+    )
+    .unwrap();
+}
+
+#[test]
+fn upgrade_replaces_the_binary_only_with_a_newer_release() {
+    let s = Scratch::new();
+    let releases = s.root.path().join("releases");
+    let built = assert_cmd::cargo::cargo_bin("worklog");
+    let bytes = fs::read(&built).unwrap();
+    let prefix = s.home().join(".local/bin");
+    fs::create_dir_all(&prefix).unwrap();
+    let installed = prefix.join("worklog");
+    fs::copy(&built, &installed).unwrap();
+    let fish = s.home().join(".config/fish/completions");
+    fs::create_dir_all(&fish).unwrap();
+    let current = worklog::domain::release::current().to_string();
+    let upgrade = |args: &[&str]| {
+        let mut command = Command::new(&installed);
+        command.env("WORKLOG_RELEASES", &releases);
+        s.run_binary(command, args)
+    };
+
+    // The one release that is fetched is the real binary, so the finish
+    // runs a freshly replaced executable; the rest stop at the compare.
+    published(&releases, "v9.9.9", &bytes, &bytes);
+    let out = upgrade(&["upgrade", "--check"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        format!("current: {current}\nlatest: 9.9.9\n")
+    );
+    let out = upgrade(&["upgrade"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        format!(
+            "{}\n{}\n",
+            installed.display(),
+            fish.join("worklog.fish").display()
+        )
+    );
+    let note = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        note.contains(&format!("upgraded {current} to 9.9.9")),
+        "{note}"
+    );
+    assert!(!prefix.join("worklog.new").exists());
+
+    published(&releases, &format!("v{current}"), b"", b"");
+    let out = upgrade(&["upgrade"]);
+    assert!(out.status.success());
+    let note = String::from_utf8_lossy(&out.stderr);
+    assert!(note.contains("already at"), "{note}");
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        format!("{}\n", fish.join("worklog.fish").display())
+    );
+    assert_eq!(upgrade(&["upgrade", "--check"]).status.code(), Some(0));
+
+    published(&releases, "v9.9.9", b"tampered", b"");
+    let out = upgrade(&["upgrade"]);
+    assert_eq!(out.status.code(), Some(1));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("checksum"), "{err}");
+    assert_eq!(fs::read(&installed).unwrap(), bytes);
 }
 
 #[test]

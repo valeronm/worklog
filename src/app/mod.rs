@@ -5,6 +5,7 @@ pub mod load;
 pub mod migrate;
 pub mod output;
 pub mod read;
+pub mod upgrade;
 pub mod usage;
 pub mod write;
 

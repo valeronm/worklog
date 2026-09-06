@@ -108,14 +108,21 @@ pub enum SetupCommand {
     },
     /// Shell completions for the commands of this binary, to source
     Completions { shell: clap_complete::Shell },
+    /// Put the latest release in the place of this binary when it is
+    /// newer, and bring the completions and the agents up to it
+    Upgrade {
+        /// Only say whether a newer release exists; exit 1 when one does
+        #[arg(long)]
+        check: bool,
+    },
 }
 
 #[derive(Subcommand)]
 pub enum AgentsWhat {
     /// Write the skill and merge the hook, once, for every agent present
     Install,
-    /// Bring the skill and the hook up to this binary wherever an agent
-    /// already has them
+    /// Bring the skill, the hook and the fish completions up to this
+    /// binary wherever they already are
     Refresh,
     /// Remove the skill and the hook from every agent that has them
     Uninstall,

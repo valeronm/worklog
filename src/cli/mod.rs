@@ -5,6 +5,7 @@ pub mod args;
 pub mod hook;
 pub mod render;
 pub mod setup;
+pub mod upgrade;
 
 pub use setup::SKILL;
 
@@ -21,7 +22,8 @@ use crate::web;
 
 use args::{ClaimArg, Cli, Command, NewWhat, ReadCommand, SlugArg, StoreCommand, WriteCommand};
 
-/// One command's stdout, and the exit code `check` sets on problems.
+/// One command's stdout, and the exit code `check` sets on problems and
+/// `upgrade --check` on a newer release.
 struct Rendered {
     text: String,
     exit: i32,
@@ -432,9 +434,9 @@ pub fn run() -> i32 {
     let command = match cli.command {
         Command::Setup(command) => {
             return match setup::run(&paths, &command) {
-                Ok(text) => {
+                Ok(Rendered { text, exit }) => {
                     print(&text);
-                    0
+                    exit
                 }
                 Err(e) => fail(&e),
             };

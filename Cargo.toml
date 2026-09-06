@@ -25,12 +25,22 @@ regex = "1"
 serde = { version = "1", features = ["derive"] }
 # preserve_order so a settings file written back keeps its key order.
 serde_json = { version = "1", features = ["preserve_order"] }
+# The release checksums are shasum's, not the store's blake3.
+sha2 = "0.10"
 similar = { version = "2", features = ["inline"] }
 tiny_http = "0.12"
+# gzip off: the release assets are binaries, and the redirect it reads
+# for the tag carries no body.
+ureq = { version = "3", default-features = false, features = ["rustls"] }
 
 [dev-dependencies]
 assert_cmd = "2"
 tempfile = "3"
+
+# The upgrade scenario hashes a debug binary; unoptimised sha2 makes that
+# the slowest test by far.
+[profile.dev.package.sha2]
+opt-level = 3
 
 [profile.release]
 lto = true

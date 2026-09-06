@@ -1,19 +1,25 @@
 //! The ports implemented on a directory tree.
 
 pub mod agent;
+pub mod binary;
 pub mod clock;
 pub mod config;
 pub mod drafts;
 pub mod legacy;
 pub mod paths;
+pub mod releases;
+pub mod shell;
 pub mod store;
 pub mod usage;
 
 pub use agent::Agent;
+pub use binary::FsBinary;
 pub use clock::SystemClock;
 pub use config::{Config, FileIdentity};
 pub use drafts::FsDrafts;
 pub use paths::Paths;
+pub use releases::DirReleases;
+pub use shell::Shell;
 pub use store::FsStore;
 pub use usage::FsUsage;
 
@@ -30,10 +36,7 @@ impl Host for FsHost {
 }
 
 pub(crate) fn io_error(location: &Path, error: &std::io::Error) -> StoreError {
-    StoreError::Io {
-        location: location.display().to_string(),
-        reason: error.to_string(),
-    }
+    StoreError::io(location.display(), error)
 }
 
 /// An outcome at a path that is not there reads as `None` rather than as

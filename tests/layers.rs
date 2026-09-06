@@ -46,10 +46,18 @@ fn the_domain_does_no_io() {
             "std::io",
             "std::net",
             "crate::fs",
+            "crate::net",
             "crate::cli",
             "crate::app",
+            "ureq",
         ],
     );
+}
+
+/// A use case reaches the network only through the `Releases` port.
+#[test]
+fn the_app_reaches_no_network() {
+    reaches_nothing_in("app", &["std::net", "crate::net", "ureq"]);
 }
 
 /// The pages are a rendering of the reads; what they need from the host
@@ -63,6 +71,7 @@ fn the_web_reads_only_through_app() {
             "std::env",
             "std::process",
             "crate::fs",
+            "crate::net",
             "crate::cli",
         ],
     );

@@ -22,6 +22,15 @@ pub enum StoreError {
     },
 }
 
+impl StoreError {
+    pub fn io(location: impl fmt::Display, reason: impl fmt::Display) -> StoreError {
+        StoreError::Io {
+            location: location.to_string(),
+            reason: reason.to_string(),
+        }
+    }
+}
+
 impl fmt::Display for StoreError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -80,4 +89,23 @@ pub trait Clock {
     fn today(&self) -> String;
     /// RFC 3339 with the local offset.
     fn now(&self) -> String;
+}
+
+/// Where releases of this binary are published.
+pub trait Releases {
+    /// The tag of the latest release.
+    fn latest(&self) -> Result<String, StoreError>;
+    /// An asset of the release the tag names, whole.
+    fn fetch(&self, tag: &str, asset: &str) -> Result<Vec<u8>, StoreError>;
+}
+
+/// The executable this process runs from.
+pub trait Binary {
+    /// Puts the bytes in the place of the running binary and returns where
+    /// that is.
+    fn replace(&self, bytes: &[u8]) -> Result<String, StoreError>;
+    /// Has the binary now in place, which after `replace` is not this
+    /// process, bring what this host takes from it up to itself, and
+    /// returns what it wrote, one path per line.
+    fn refresh(&self) -> Result<String, StoreError>;
 }

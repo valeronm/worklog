@@ -4,8 +4,9 @@
 //!
 //! `domain` holds the model and its rules and touches nothing outside memory;
 //! `app` is one use case per command over the ports the domain declares;
-//! `fs` implements those ports on a directory tree; `cli` parses arguments
-//! and renders outputs; `web` renders the reads as pages.
+//! `fs` implements those ports on a directory tree and `net` the one that
+//! reaches the network; `cli` parses arguments and renders outputs; `web`
+//! renders the reads as pages.
 
 #![allow(
     clippy::missing_errors_doc,
@@ -20,4 +21,5 @@ pub mod app;
 pub mod cli;
 pub mod domain;
 pub mod fs;
+pub mod net;
 pub mod web;

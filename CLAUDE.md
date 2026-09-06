@@ -11,9 +11,12 @@ no file, clock, environment or process. `tests/layers.rs` reads the sources
 and fails on an I/O import, because the boundary is what makes every rule
 testable with the in-memory ports in `domain::testing`. `app` is one use
 case per command over the ports and never prints. `fs` implements the ports
-on a directory tree. `cli` parses arguments and renders. `web` is a second
-renderer over the reads, one request being one use case, and the layer
-test keeps it from reaching `fs`: a page that needs data no read returns
+on a directory tree, and `net` the one port that reaches the network, the
+releases `upgrade` reads; `WORKLOG_RELEASES=<dir>` swaps in the `fs`
+implementation so no test touches it. `cli` parses arguments and renders.
+`web` is a second renderer over the reads, one request being one use
+case, and the layer test keeps it from reaching `fs` or `net`: a page
+that needs data no read returns
 gets a read use case, which `--json` then has too, never logic in a
 handler. A use case that wants something new from outside adds it to a
 port, not to a parameter.
@@ -70,8 +73,9 @@ recognition must keep. The file is kept as data, so key order survives a
 write and formatting does not. A scripted `init` touches neither the skill
 nor the hooks file unless told to, since a script writing into an agent's
 home unasked is the kind of surprise the store exists to avoid, and a
-refresh writes only where an agent already has the thing, which is what
-lets the installer run it on every host. The skill is public and written
+refresh writes only where the thing already is, a fish completions
+directory included, which is what lets the installer and `upgrade` run it
+on every host without a network. The skill is public and written
 for a stranger: it holds how to use the store, including the follow-up
 triage put to the user and the offer to log after work, and nothing about
 any one person's other tools.

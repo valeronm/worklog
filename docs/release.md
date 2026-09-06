@@ -29,4 +29,7 @@ installs it.
    before the first write.
 
 Nothing checks that the tag matches `Cargo.toml`; `worklog --version`
-reports the manifest, so a mismatch is visible but not fatal.
+reports the manifest, so a mismatch is visible but not fatal. The tag must
+be a plain `vX.Y.Z`, since `worklog upgrade` reads it as three numbers to
+decide whether the release is newer than the binary, and refuses any
+other shape.

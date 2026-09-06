@@ -8,6 +8,7 @@ use crate::app::Failure;
 use crate::domain::machine::MachineName;
 use crate::fs::{Agent, Config, Paths};
 
+use super::Rendered;
 use super::args::{AgentsWhat, Cli, SetupCommand};
 use super::hook;
 
@@ -97,6 +98,24 @@ fn refresh_agent(agent: &Agent) -> Result<String, Failure> {
     Ok(written)
 }
 
+/// Brings everything on this host that comes from the binary up to it:
+/// each agent's skill and hook, and each present shell's completions.
+pub(super) fn refresh(paths: &Paths) -> Result<String, Failure> {
+    let mut written = each_agent(&paths.agents, refresh_agent)?;
+    for shell in paths.present_shells() {
+        let file = shell.write_completions(&completions(shell.kind))?;
+        written.push_str(&line(&file));
+    }
+    Ok(written)
+}
+
+fn completions(shell: clap_complete::Shell) -> String {
+    use clap::CommandFactory as _;
+    let mut out = Vec::new();
+    clap_complete::generate(shell, &mut Cli::command(), "worklog", &mut out);
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 fn each_agent<'a>(
     agents: impl IntoIterator<Item = &'a Agent>,
     change: impl Fn(&Agent) -> Result<String, Failure>,
@@ -184,8 +203,9 @@ fn init(
 }
 
 /// Runs a setup command and returns what it prints.
-pub fn run(paths: &Paths, command: &SetupCommand) -> Result<String, Failure> {
-    match command {
+pub(super) fn run(paths: &Paths, command: &SetupCommand) -> Result<Rendered, Failure> {
+    let text = match command {
+        SetupCommand::Upgrade { check } => return super::upgrade::run(paths, *check),
         SetupCommand::Init {
             machine,
             store,
@@ -197,20 +217,16 @@ pub fn run(paths: &Paths, command: &SetupCommand) -> Result<String, Failure> {
                 (_, true) => Some(false),
                 _ => None,
             };
-            init(paths, machine.as_deref(), store.as_deref(), choice)
+            init(paths, machine.as_deref(), store.as_deref(), choice)?
         }
         SetupCommand::Agents { what } => match what {
             AgentsWhat::Install => {
-                each_agent(any_or_refuse(paths, paths.present_agents())?, install_agent)
+                each_agent(any_or_refuse(paths, paths.present_agents())?, install_agent)?
             }
-            AgentsWhat::Refresh => each_agent(&paths.agents, refresh_agent),
-            AgentsWhat::Uninstall => each_agent(&paths.agents, uninstall_agent),
+            AgentsWhat::Refresh => refresh(paths)?,
+            AgentsWhat::Uninstall => each_agent(&paths.agents, uninstall_agent)?,
         },
-        SetupCommand::Completions { shell } => {
-            use clap::CommandFactory as _;
-            let mut out = Vec::new();
-            clap_complete::generate(*shell, &mut Cli::command(), "worklog", &mut out);
-            Ok(String::from_utf8_lossy(&out).into_owned())
-        }
-    }
+        SetupCommand::Completions { shell } => completions(*shell),
+    };
+    Ok(Rendered { text, exit: 0 })
 }

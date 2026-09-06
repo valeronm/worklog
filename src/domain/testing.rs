@@ -1,11 +1,11 @@
 //! In-memory ports for tests of the layers above the domain.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 
 use super::draft::Draft;
 use super::machine::MachineName;
-use super::ports::{Clock, Drafts, Host, Identity, Store, StoreError, Usage};
+use super::ports::{Binary, Clock, Drafts, Host, Identity, Releases, Store, StoreError, Usage};
 use super::slug::{Kind, Slug};
 use super::usage::Invocation;
 use super::version::{Document, Version, VersionId};
@@ -169,5 +169,43 @@ impl Usage for MemoryUsage {
 
     fn all(&self) -> Result<Vec<Invocation>, StoreError> {
         Ok(self.lines.borrow().clone())
+    }
+}
+
+/// One published release, its assets by name.
+pub struct MemoryReleases {
+    pub latest: String,
+    pub assets: BTreeMap<String, Vec<u8>>,
+}
+
+impl Releases for MemoryReleases {
+    fn latest(&self) -> Result<String, StoreError> {
+        Ok(self.latest.clone())
+    }
+
+    fn fetch(&self, _tag: &str, asset: &str) -> Result<Vec<u8>, StoreError> {
+        self.assets
+            .get(asset)
+            .cloned()
+            .ok_or_else(|| StoreError::io(asset, "no such asset"))
+    }
+}
+
+/// A binary that remembers what replaced it and whether it was refreshed.
+#[derive(Default)]
+pub struct MemoryBinary {
+    pub replaced_with: RefCell<Option<Vec<u8>>>,
+    pub refreshed: Cell<bool>,
+}
+
+impl Binary for MemoryBinary {
+    fn replace(&self, bytes: &[u8]) -> Result<String, StoreError> {
+        *self.replaced_with.borrow_mut() = Some(bytes.to_vec());
+        Ok("/home/u/.local/bin/worklog".into())
+    }
+
+    fn refresh(&self) -> Result<String, StoreError> {
+        self.refreshed.set(true);
+        Ok("/home/u/.config/fish/completions/worklog.fish\n".into())
     }
 }

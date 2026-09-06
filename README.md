@@ -69,6 +69,10 @@ Downloads the release for this machine's architecture into `~/.local/bin`,
 verifying the checksum published beside it. Or build from source with a
 current stable Rust: `cargo install --path .`.
 
+From then on `worklog upgrade` does the same from the binary itself when
+a newer release exists, verified the same way, and either way brings the
+completions and the agents up to the binary in place.
+
 The binary carries the agent skill that teaches a coding agent the store
 and its commands, and the SessionStart hook that opens every session with
 `worklog context`. `worklog init` offers them on a terminal and places
@@ -79,17 +83,16 @@ into `~/.claude/settings.json` or `~/.codex/hooks.json`, keeping the rest
 of the file as it is.
 
 `worklog agents uninstall` takes both away again and leaves whatever else
-the files hold. `worklog agents refresh` brings both up to the binary that
-runs it, only where an agent already has them: the skill describes the
-commands of the binary it shipped with, and the hook names the binary's
-path, which an install to a new place leaves stale. The installer above
-runs it after every install.
+the files hold. `worklog agents refresh` brings everything this host takes
+from the binary up to the one that runs it, only where it already is: the
+skill describes the commands of the binary it shipped with, the hook names
+the binary's path, which an install to a new place leaves stale, and the
+fish completions are the binary's commands too. The installer and
+`upgrade` run it, so none of these drift from the binary.
 
 `worklog completions <shell>` prints completions for the commands of the
-binary it runs from. The installer writes the fish ones into the
-completions directory on a host that has one, and rewrites them with every
-install, so they never drift from the binary; another shell takes its
-output in the place it reads.
+binary it runs from, for a shell other than fish to take in the place it
+reads.
 
 ## Develop
 
