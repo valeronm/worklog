@@ -146,13 +146,28 @@ pub struct Search {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct Tags {
     /// Most used first.
-    pub tags: Vec<Count>,
+    pub tags: Vec<TagCount>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct TagCount {
+    pub name: String,
+    pub count: usize,
+    /// Whether a topic has this name too.
+    pub topic: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Count {
     pub name: String,
     pub count: usize,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct Tagged {
+    /// Whether a topic has the tag's name too.
+    pub topic: bool,
+    pub rows: Vec<Row>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

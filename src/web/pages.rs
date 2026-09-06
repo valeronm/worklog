@@ -4,8 +4,8 @@
 use askama::Template;
 
 use crate::app::output::{
-    Check, Count, Diff, FactListing, FollowupItem, Followups, Forks, Head, History, Listing, Log,
-    Problem, Row, Search, Shown, Stamp, Tags, Topics, short,
+    Check, Diff, FactListing, FollowupItem, Followups, Forks, Head, History, Listing, Log, Problem,
+    Row, Search, Shown, Stamp, Tagged, Tags, Topics, short,
 };
 use crate::domain::frontmatter::{self, Fields, Value};
 use crate::domain::slug::{Kind, Slug};
@@ -85,15 +85,6 @@ fn place(slug: &str) -> Place {
         .into_iter()
         .collect();
     Place { nav, crumbs }
-}
-
-/// The topic named like a tag, when there is one.
-fn topic_named(topics: &Topics, name: &str) -> Option<Link> {
-    topics
-        .topics
-        .iter()
-        .any(|t| t.slug == name)
-        .then(|| topic_link(name))
 }
 
 pub struct Item {
@@ -332,12 +323,7 @@ pub struct TopicPage {
 
 impl TopicPage {
     #[must_use]
-    pub fn new(
-        shown: &Shown,
-        facts: &FactListing,
-        tagged: &Listing,
-        open: &Followups,
-    ) -> TopicPage {
+    pub fn new(shown: &Shown, facts: &FactListing, tagged: &Tagged, open: &Followups) -> TopicPage {
         let heads: Vec<HeadView> = shown.heads.iter().map(HeadView::from).collect();
         TopicPage {
             name: shown.slug.clone(),
@@ -524,13 +510,13 @@ impl ListingPage {
     }
 
     #[must_use]
-    pub fn tagged(tag: &str, listing: &Listing, topics: &Topics) -> ListingPage {
+    pub fn tagged(tag: &str, tagged: &Tagged) -> ListingPage {
         ListingPage {
             title: format!("Tagged {tag}"),
             nav: "tags",
             summary: None,
-            topic: topic_named(topics, tag),
-            rows: items(&listing.rows),
+            topic: tagged.topic.then(|| topic_link(tag)),
+            rows: items(&tagged.rows),
         }
     }
 }
@@ -588,17 +574,16 @@ pub struct TagsPage {
     pub tags: Vec<CountLine>,
 }
 
-impl TagsPage {
-    #[must_use]
-    pub fn new(t: &Tags, topics: &Topics) -> TagsPage {
+impl From<&Tags> for TagsPage {
+    fn from(t: &Tags) -> TagsPage {
         TagsPage {
             tags: t
                 .tags
                 .iter()
-                .map(|Count { name, count }| CountLine {
-                    link: tag_link(name),
-                    count: *count,
-                    topic: topic_named(topics, name),
+                .map(|tag| CountLine {
+                    link: tag_link(&tag.name),
+                    count: tag.count,
+                    topic: tag.topic.then(|| topic_link(&tag.name)),
                 })
                 .collect(),
         }

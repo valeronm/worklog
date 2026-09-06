@@ -16,7 +16,7 @@ use super::load::{self, Doc, Loaded};
 use super::output::{
     Check, Claimed, Context, Count, Diff, FactListing, FollowupItem, Followups, Fork, Forks, Group,
     Head, History, HistoryRow, Hit, Listing, Log, LogRow, MachineUsage, Problem, Renamed, Row,
-    Search, Shown, Side, Stamp, Tags, TopicRow, Topics, Usage, Where,
+    Search, Shown, Side, Stamp, TagCount, Tagged, Tags, TopicRow, Topics, Usage, Where,
 };
 use super::{Deps, Failure, machine};
 use crate::domain::machine::MachineName;
@@ -95,13 +95,18 @@ fn has_tag(tags: &[String], tag: &str) -> bool {
     tags.iter().any(|t| t.eq_ignore_ascii_case(tag))
 }
 
-fn most_used_first(counts: BTreeMap<String, usize>) -> Vec<Count> {
-    let mut ranked: Vec<Count> = counts
-        .into_iter()
-        .map(|(name, count)| Count { name, count })
-        .collect();
-    ranked.sort_by(|a, b| b.count.cmp(&a.count).then(a.name.cmp(&b.name)));
+/// Counts ranked most used first, names breaking ties, each made into
+/// what the listing holds.
+fn most_used_first<T>(
+    counts: BTreeMap<String, usize>,
+    make: impl Fn(String, usize) -> T,
+) -> Vec<T> {
+    let mut ranked: Vec<(String, usize)> = counts.into_iter().collect();
+    ranked.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
     ranked
+        .into_iter()
+        .map(|(name, count)| make(name, count))
+        .collect()
 }
 
 /// A document's current text, or every head of a fork; or one stored
@@ -274,7 +279,7 @@ pub fn search(deps: &Deps, term: &str, regex: bool) -> Result<Search, Failure> {
 }
 
 /// Facts first, then entries, carrying the tag.
-pub fn tag(deps: &Deps, tag: &str) -> Result<Listing, Failure> {
+pub fn tag(deps: &Deps, tag: &str) -> Result<Tagged, Failure> {
     let loaded = load::load(deps.store)?;
     let mut rows: Vec<Row> = loaded
         .facts
@@ -289,7 +294,10 @@ pub fn tag(deps: &Deps, tag: &str) -> Result<Listing, Failure> {
             .filter(|e| has_tag(&e.data.tags, tag))
             .map(entry_row),
     );
-    Ok(Listing { rows })
+    Ok(Tagged {
+        topic: loaded.has_topic(tag),
+        rows,
+    })
 }
 
 /// Every tag with how often entries and facts carry it, most used first.
@@ -305,7 +313,11 @@ pub fn tags(deps: &Deps) -> Result<Tags, Failure> {
         *counts.entry(tag_key(tag)).or_default() += 1;
     }
     Ok(Tags {
-        tags: most_used_first(counts),
+        tags: most_used_first(counts, |name, count| TagCount {
+            topic: loaded.has_topic(&name),
+            name,
+            count,
+        }),
     })
 }
 
@@ -614,7 +626,7 @@ pub fn usage(deps: &Deps, machine: Option<&str>, since: Option<&str>) -> Result<
     for (machine, commands) in counted {
         out.machines.push(MachineUsage {
             machine,
-            commands: most_used_first(commands),
+            commands: most_used_first(commands, |name, count| Count { name, count }),
         });
     }
     Ok(out)
@@ -860,6 +872,14 @@ mod tests {
         }
     }
 
+    fn tag_counted(name: &str, count: usize, topic: bool) -> TagCount {
+        TagCount {
+            name: name.to_owned(),
+            count,
+            topic,
+        }
+    }
+
     fn seed(deps: &Deps) {
         write::put_topic(deps, "lantern", "A Rust app", &[], None).unwrap();
         write::put_topic(deps, "android", "The toolchain", &["phone"], None).unwrap();
@@ -947,10 +967,16 @@ mod tests {
         let d = w.deps();
         seed(&d);
         assert_eq!(recent(&d, 5).unwrap().rows.len(), 1);
-        assert_eq!(tag(&d, "lantern").unwrap().rows.len(), 2);
+        let tagged = tag(&d, "lantern").unwrap();
+        assert_eq!(tagged.rows.len(), 2);
+        assert!(tagged.topic);
+        assert!(!tag(&d, "rust").unwrap().topic);
         assert_eq!(
             tags(&d).unwrap().tags,
-            [counted("lantern", 2), counted("android", 1)]
+            [
+                tag_counted("lantern", 2, true),
+                tag_counted("android", 1, true)
+            ]
         );
         let listing = facts(&d, Some("atlas"), true).unwrap();
         assert!(listing.facts.is_empty());

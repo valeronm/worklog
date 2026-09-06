@@ -117,9 +117,7 @@ fn route(deps: &Deps, path: &str, query: &Query) -> Result<String, Problem> {
         return topic(deps, name);
     }
     if let Some(tag) = path.strip_prefix("/tag/") {
-        let out = read::tag(deps, tag)?;
-        let topics = read::topics(deps)?;
-        return Ok(ListingPage::tagged(tag, &out, &topics).render()?);
+        return Ok(ListingPage::tagged(tag, &read::tag(deps, tag)?).render()?);
     }
     if let Some(rest) = path.strip_prefix("/doc/") {
         return match rest.strip_suffix("/history") {
@@ -141,7 +139,7 @@ fn route(deps: &Deps, path: &str, query: &Query) -> Result<String, Problem> {
             let all = query.get("all").is_some();
             Ok(FollowupsPage::new(&read::followups(deps, None, all)?, all).render()?)
         }
-        "/tags" => Ok(TagsPage::new(&read::tags(deps)?, &read::topics(deps)?).render()?),
+        "/tags" => Ok(TagsPage::from(&read::tags(deps)?).render()?),
         "/search" => {
             let term = query.get("q").unwrap_or("").trim();
             if term.is_empty() {

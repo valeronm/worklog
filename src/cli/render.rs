@@ -33,8 +33,12 @@ fn row(out: &mut String, r: &Row) {
 }
 
 pub fn listing(l: &Listing) -> String {
+    rows(&l.rows)
+}
+
+pub fn rows(rows: &[Row]) -> String {
     let mut out = String::new();
-    for r in &l.rows {
+    for r in rows {
         row(&mut out, r);
     }
     out

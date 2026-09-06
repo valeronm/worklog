@@ -141,7 +141,7 @@ fn dispatch_read(deps: &Deps, json: bool, command: ReadCommand) -> Result<Render
         ReadCommand::Tag { tag } => {
             let out = read::tag(deps, &tag)?;
             note_empty(out.rows.is_empty(), "nothing tagged", Some(tag), ": ");
-            rendered(json, &out, || render::listing(&out))
+            rendered(json, &out, || render::rows(&out.rows))
         }
         ReadCommand::Tags => {
             let out = read::tags(deps)?;
