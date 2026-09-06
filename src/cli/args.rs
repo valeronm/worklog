@@ -99,10 +99,10 @@ pub enum SetupCommand {
         /// Leave the agent skill alone, without asking
         #[arg(long)]
         no_skill: bool,
-        /// Also add the session hook to the agent's settings
+        /// Also add the session hook to each agent's hooks file
         #[arg(long, conflicts_with = "no_hook")]
         hook: bool,
-        /// Leave the agent's settings alone, without asking
+        /// Leave the agents' hooks files alone, without asking
         #[arg(long)]
         no_hook: bool,
     },
@@ -134,9 +134,9 @@ pub enum SkillWhat {
 
 #[derive(Subcommand)]
 pub enum HookWhat {
-    /// Merge the hook into the settings file, once
+    /// Merge the hook into each agent's hooks file, once
     Install {
-        /// Another settings file than the agent's
+        /// One hooks file to merge into, instead of the agents' own
         #[arg(long)]
         settings: Option<PathBuf>,
     },

@@ -25,6 +25,13 @@ impl Scratch {
         self.root.path().join("home")
     }
 
+    /// An agent's home directory, created so the agent counts as present.
+    fn agent_home(&self, dir: &str) -> PathBuf {
+        let home = self.home().join(dir);
+        fs::create_dir_all(&home).unwrap();
+        home
+    }
+
     fn run(&self, args: &[&str]) -> Output {
         Command::cargo_bin("worklog")
             .expect("the binary")
@@ -171,25 +178,79 @@ fn init_is_once_and_writes_need_it() {
     let err = s.refused(&["init", "m2"]);
     assert!(err.contains("already named m1"), "{err}");
     let elsewhere = Scratch::new();
+    let claude = elsewhere.agent_home(".claude");
+    let codex = elsewhere.agent_home(".codex");
     let written = elsewhere.ok(&["init", "m3", "--store", "sync/worklog", "--skill", "--hook"]);
     let config = fs::read_to_string(elsewhere.root.path().join("config")).unwrap();
     assert!(config.ends_with("/home/sync/worklog\n"), "{config}");
-    let agent = elsewhere.home().join(".claude");
-    let skill = fs::read_to_string(agent.join("skills/worklog/SKILL.md")).unwrap();
+    let skill = fs::read_to_string(claude.join("skills/worklog/SKILL.md")).unwrap();
     assert_eq!(skill, worklog::cli::SKILL);
+    let codex_skill = fs::read_to_string(codex.join("skills/worklog/SKILL.md")).unwrap();
+    assert_eq!(codex_skill, skill);
     assert_eq!(elsewhere.ok(&["skill", "show"]), skill);
     let completions = elsewhere.ok(&["completions", "fish"]);
     assert!(completions.contains("complete -c worklog"), "{completions}");
     assert!(completions.contains("unclaim"), "{completions}");
-    let settings = fs::read_to_string(agent.join("settings.json")).unwrap();
-    assert!(settings.contains("\"SessionStart\""), "{settings}");
-    assert!(written.contains("settings.json"), "{written}");
+    for hooks in [claude.join("settings.json"), codex.join("hooks.json")] {
+        let text = fs::read_to_string(&hooks).unwrap();
+        assert!(text.contains("\"SessionStart\""), "{text}");
+        assert!(written.contains(&hooks.display().to_string()), "{written}");
+    }
     // A scripted init without a choice touches nothing under ~/.claude.
     assert!(!s.home().join(".claude").exists());
     // No terminal here, so a nameless init cannot ask and is a usage error.
     assert_eq!(Scratch::new().run(&["init"]).status.code(), Some(2));
     assert_eq!(s.run(&["bogus"]).status.code(), Some(2));
     assert_eq!(s.run(&["show"]).status.code(), Some(2));
+}
+
+#[test]
+fn skill_install_reaches_claude_and_codex() {
+    let s = Scratch::new();
+    let claude = s.agent_home(".claude");
+    let codex = s.agent_home(".codex");
+    let written = s.ok(&["skill", "install"]);
+    for path in [
+        claude.join("skills/worklog/SKILL.md"),
+        codex.join("skills/worklog/SKILL.md"),
+    ] {
+        assert_eq!(fs::read_to_string(&path).unwrap(), worklog::cli::SKILL);
+        assert!(written.contains(&path.display().to_string()), "{written}");
+    }
+}
+
+#[test]
+fn hook_install_reaches_the_agents_that_are_present() {
+    let s = Scratch::new();
+    let hooks = s.agent_home(".codex").join("hooks.json");
+    let written = s.ok(&["hook", "install"]);
+    assert_eq!(written, format!("{}\n", hooks.display()));
+    let text = fs::read_to_string(&hooks).unwrap();
+    assert!(text.contains("\"SessionStart\""), "{text}");
+    assert!(!s.home().join(".claude").exists());
+    let again = s.ok(&["hook", "install"]);
+    assert!(again.contains("already runs worklog context"), "{again}");
+    assert_eq!(fs::read_to_string(&hooks).unwrap(), text);
+}
+
+#[test]
+fn installs_refuse_a_host_without_an_agent() {
+    let s = Scratch::new();
+    let err = s.refused(&["skill", "install"]);
+    assert!(
+        err.contains("no Claude Code or Codex skills directory found"),
+        "{err}"
+    );
+    let err = s.refused(&["hook", "install"]);
+    assert!(
+        err.contains("no Claude Code or Codex hooks file found"),
+        "{err}"
+    );
+    let err = s.refused(&["init", "m1", "--hook"]);
+    assert!(err.contains("hooks file found"), "{err}");
+    assert!(!s.root.path().join("config").exists());
+    assert!(!s.home().join(".claude").exists());
+    assert!(!s.home().join(".codex").exists());
 }
 
 #[test]

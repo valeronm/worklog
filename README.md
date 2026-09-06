@@ -73,10 +73,13 @@ The binary carries the agent skill that teaches a coding agent the store
 and its commands, and the SessionStart hook that opens every session with
 `worklog context`. An interactive `worklog init` offers both; `worklog init
 <name> --skill --hook` takes them outright, and `--no-skill` or `--no-hook`
-declines without a question. On their own, `worklog skill install` writes
-`~/.claude/skills/worklog/SKILL.md` and `worklog hook install` merges one
-entry into `~/.claude/settings.json`, once, keeping the rest of the file as
-it is; `show` on either prints what would be written. The installer above
+declines without a question. Both reach every agent whose home exists,
+Claude Code under `~/.claude` and Codex under `~/.codex`. On their own,
+`worklog skill install` writes `skills/worklog/SKILL.md` under each, and
+`--dir` chooses another skills directory instead; `worklog hook install`
+merges one entry into `~/.claude/settings.json` and `~/.codex/hooks.json`,
+once, keeping the rest of each file as it is, and `--settings` names one
+file instead; `show` on either prints what would be written. The installer above
 refreshes the skill on a host that has one, since the skill describes the
 commands of the binary it shipped with.
 

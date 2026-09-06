@@ -11,7 +11,7 @@ pub mod usage;
 pub use clock::SystemClock;
 pub use config::{Config, FileIdentity};
 pub use drafts::FsDrafts;
-pub use paths::Paths;
+pub use paths::{Agent, Paths};
 pub use store::FsStore;
 pub use usage::FsUsage;
 

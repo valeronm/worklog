@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use crate::app::Failure;
 use crate::domain::machine::MachineName;
-use crate::fs::{Config, Paths, write_file};
+use crate::fs::{Agent, Config, Paths, write_file};
 
 use super::args::{Cli, HookWhat, SetupCommand, SkillWhat};
 use super::hook::{self, Merged};
@@ -54,22 +54,72 @@ fn hostname() -> Option<String> {
     (!name.is_empty()).then_some(name)
 }
 
-/// Writes the skill into a skills directory and returns the file.
-pub fn install_skill(skills: &Path) -> Result<PathBuf, Failure> {
+/// Writes the skill into one skills directory and returns the file, on
+/// its own line.
+fn install_skill(skills: &Path) -> Result<String, Failure> {
     let file = skills.join("worklog").join("SKILL.md");
     write_file(&file, SKILL)?;
-    Ok(file)
+    Ok(format!("{}\n", file.display()))
 }
 
-/// Merges the hook into a settings file and says what happened.
-fn install_hook(settings: &Path) -> Result<String, Failure> {
-    Ok(match hook::install(settings)? {
-        Merged::Added(_) => format!("{}\n", settings.display()),
+/// Merges the hook into a hooks file and says what happened.
+fn install_hook(hooks: &Path) -> Result<String, Failure> {
+    Ok(match hook::install(hooks)? {
+        Merged::Added(_) => format!("{}\n", hooks.display()),
         Merged::Present => format!(
             "{}: a SessionStart hook already runs worklog context\n",
-            settings.display()
+            hooks.display()
         ),
     })
+}
+
+/// Where an install goes on each agent, and the flag that names one
+/// place instead.
+struct Target {
+    what: &'static str,
+    flag: &'static str,
+}
+
+const SKILLS: Target = Target {
+    what: "skills directory",
+    flag: "--dir",
+};
+
+const HOOKS: Target = Target {
+    what: "hooks file",
+    flag: "--settings",
+};
+
+fn agent_names<'a>(agents: impl IntoIterator<Item = &'a Agent>, joint: &str) -> String {
+    agents
+        .into_iter()
+        .map(|agent| agent.name)
+        .collect::<Vec<_>>()
+        .join(joint)
+}
+
+/// The refusal for an install on a host with none of the agents.
+fn no_agent(paths: &Paths, target: &Target) -> Failure {
+    Failure::Refused(format!(
+        "no {} {} found; use {} to choose one",
+        agent_names(&paths.agents, " or "),
+        target.what,
+        target.flag
+    ))
+}
+
+/// Installs on every agent present and returns what each said, or
+/// refuses when there is none.
+fn install_on_present(
+    paths: &Paths,
+    target: &Target,
+    install: impl Fn(&Agent) -> Result<String, Failure>,
+) -> Result<String, Failure> {
+    let agents = paths.present_agents();
+    if agents.is_empty() {
+        return Err(no_agent(paths, target));
+    }
+    agents.into_iter().map(install).collect()
 }
 
 /// Records the machine name and the store directory, once per host, and
@@ -106,16 +156,28 @@ fn init(
             ));
         }
     };
+    let agents = paths.present_agents();
+    let names = agent_names(agents.iter().copied(), " and ");
+    let may_ask = interactive && !agents.is_empty();
     let install_skill_too = consent(
         skill,
-        interactive,
-        "Install the agent skill for Claude Code?",
+        may_ask,
+        &format!("Install the agent skill for {names}?"),
     )?;
     let install_hook_too = consent(
         hook,
-        interactive,
-        "Add the SessionStart hook to Claude Code's settings?",
+        may_ask,
+        &format!("Add the SessionStart hook for {names}?"),
     )?;
+    // An install with nowhere to go refuses before the config is written.
+    if agents.is_empty() {
+        if install_skill_too {
+            return Err(no_agent(paths, &SKILLS));
+        }
+        if install_hook_too {
+            return Err(no_agent(paths, &HOOKS));
+        }
+    }
     let machine = MachineName::parse(&machine)?;
     let store = match store.as_deref() {
         Some(dir) if Path::new(dir).is_absolute() => PathBuf::from(dir),
@@ -127,12 +189,14 @@ fn init(
     Config { machine, store }.write(&paths.config)?;
     let mut written = format!("{}\n", paths.config.display());
     if install_skill_too {
-        let file = install_skill(&paths.agent_skills)?;
-        written.push_str(&file.display().to_string());
-        written.push('\n');
+        written.push_str(&install_on_present(paths, &SKILLS, |a| {
+            install_skill(&a.skills)
+        })?);
     }
     if install_hook_too {
-        written.push_str(&install_hook(&paths.agent_settings)?);
+        written.push_str(&install_on_present(paths, &HOOKS, |a| {
+            install_hook(&a.hooks)
+        })?);
     }
     Ok(written)
 }
@@ -162,10 +226,10 @@ pub fn run(paths: &Paths, command: &SetupCommand) -> Result<String, Failure> {
         ),
         SetupCommand::Skill { what } => match what {
             SkillWhat::Show => Ok(SKILL.to_owned()),
-            SkillWhat::Install { dir } => {
-                let file = install_skill(dir.as_deref().unwrap_or(&paths.agent_skills))?;
-                Ok(format!("{}\n", file.display()))
-            }
+            SkillWhat::Install { dir } => match dir {
+                Some(dir) => install_skill(dir),
+                None => install_on_present(paths, &SKILLS, |a| install_skill(&a.skills)),
+            },
         },
         SetupCommand::Completions { shell } => {
             use clap::CommandFactory as _;
@@ -175,9 +239,10 @@ pub fn run(paths: &Paths, command: &SetupCommand) -> Result<String, Failure> {
         }
         SetupCommand::Hook { what } => match what {
             HookWhat::Show => super::pretty_json(&hook::entry()?),
-            HookWhat::Install { settings } => {
-                install_hook(settings.as_deref().unwrap_or(&paths.agent_settings))
-            }
+            HookWhat::Install { settings } => match settings {
+                Some(hooks) => install_hook(hooks),
+                None => install_on_present(paths, &HOOKS, |a| install_hook(&a.hooks)),
+            },
         },
     }
 }

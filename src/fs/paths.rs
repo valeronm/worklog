@@ -18,10 +18,36 @@ pub struct Paths {
     pub default_store: PathBuf,
     /// The user's home, for `~/` in claims.
     pub home: PathBuf,
-    /// The agent's settings file, where the session hook goes.
-    pub agent_settings: PathBuf,
-    /// The agent's skills directory, where the skill goes.
-    pub agent_skills: PathBuf,
+    /// The agents that take the skill and the session hook.
+    pub agents: Vec<Agent>,
+}
+
+/// An agent with a user-wide home directory that holds its skills and the
+/// file its hooks are read from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Agent {
+    pub name: &'static str,
+    pub home: PathBuf,
+    pub skills: PathBuf,
+    pub hooks: PathBuf,
+}
+
+impl Agent {
+    fn new(name: &'static str, home: PathBuf, hooks: &str) -> Agent {
+        Agent {
+            name,
+            skills: home.join("skills"),
+            hooks: home.join(hooks),
+            home,
+        }
+    }
+
+    /// Whether the agent is on this host, by its home directory, so that
+    /// an install never creates one for an agent that is not.
+    #[must_use]
+    pub fn is_present(&self) -> bool {
+        self.home.is_dir()
+    }
 }
 
 impl Paths {
@@ -45,15 +71,22 @@ impl Paths {
                 home.join("worklog"),
             ),
         };
-        let agent = home.join(".claude");
         Ok(Paths {
             config,
             drafts,
             default_store,
-            agent_settings: agent.join("settings.json"),
-            agent_skills: agent.join("skills"),
+            agents: vec![
+                Agent::new("Claude Code", home.join(".claude"), "settings.json"),
+                Agent::new("Codex", home.join(".codex"), "hooks.json"),
+            ],
             home,
         })
+    }
+
+    /// The agents on this host.
+    #[must_use]
+    pub fn present_agents(&self) -> Vec<&Agent> {
+        self.agents.iter().filter(|a| a.is_present()).collect()
     }
 
     /// The store the config names, or `None` until `init` has run.

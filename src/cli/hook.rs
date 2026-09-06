@@ -1,5 +1,7 @@
-//! The `SessionStart` hook: one entry in the agent's settings file that runs
-//! `worklog context` when a session opens.
+//! The `SessionStart` hook: one entry in an agent's hooks file that runs
+//! `worklog context` when a session opens. Claude Code's `settings.json`
+//! and Codex's `hooks.json` hold hooks in the same shape, so one entry and
+//! one merge serve both.
 
 use std::path::Path;
 
@@ -18,7 +20,7 @@ fn command() -> Result<String, Failure> {
     Ok(format!("\"{}\" context 2>/dev/null || true", exe.display()))
 }
 
-/// The hook entry as the settings file holds it.
+/// The hook entry as a hooks file holds it.
 pub fn entry() -> Result<Value, Failure> {
     Ok(json!({
         "hooks": [{ "type": "command", "command": command()? }]
@@ -49,14 +51,14 @@ fn any_runs_context(session_start: &Value) -> bool {
     })
 }
 
-/// What merging the hook into a settings document came to.
+/// What merging the hook into a hooks document came to.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Merged {
     Added(Value),
     Present,
 }
 
-/// Adds the hook to a settings document unless one is there. Pure: the
+/// Adds the hook to a hooks document unless one is there. Pure: the
 /// caller reads and writes the file.
 pub fn merge(mut root: Value, entry: Value) -> Result<Merged, String> {
     let Some(object) = root.as_object_mut() else {
@@ -81,11 +83,11 @@ pub fn merge(mut root: Value, entry: Value) -> Result<Merged, String> {
     Ok(Merged::Added(root))
 }
 
-/// Merges the hook into the settings file, keeping the rest of it as it
+/// Merges the hook into a hooks file, keeping the rest of it as it
 /// is, and says whether anything was written.
-pub fn install(settings: &Path) -> Result<Merged, Failure> {
-    let refuse = |reason: String| Failure::Refused(format!("{}: {reason}", settings.display()));
-    let text = match std::fs::read_to_string(settings) {
+pub fn install(hooks: &Path) -> Result<Merged, Failure> {
+    let refuse = |reason: String| Failure::Refused(format!("{}: {reason}", hooks.display()));
+    let text = match std::fs::read_to_string(hooks) {
         Ok(text) => text,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => "{}".to_owned(),
         Err(e) => return Err(refuse(e.to_string())),
@@ -96,7 +98,7 @@ pub fn install(settings: &Path) -> Result<Merged, Failure> {
     if let Merged::Added(root) = &merged {
         let mut out = serde_json::to_string_pretty(root).map_err(|e| refuse(e.to_string()))?;
         out.push('\n');
-        write_file(settings, &out)?;
+        write_file(hooks, &out)?;
     }
     Ok(merged)
 }
