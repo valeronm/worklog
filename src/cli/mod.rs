@@ -27,7 +27,7 @@ struct Rendered {
     exit: i32,
 }
 
-/// A value as the JSON a command prints.
+/// A value as the JSON a command prints or a hooks file holds.
 fn pretty_json<T: Serialize>(value: &T) -> Result<String, Failure> {
     serde_json::to_string_pretty(value)
         .map(|s| s + "\n")

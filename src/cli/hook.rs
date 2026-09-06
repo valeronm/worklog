@@ -1,14 +1,12 @@
 //! The `SessionStart` hook: one entry in an agent's hooks file that runs
 //! `worklog context` when a session opens. Claude Code's `settings.json`
 //! and Codex's `hooks.json` hold hooks in the same shape, so one entry and
-//! one merge serve both.
-
-use std::path::Path;
+//! one set of edits serve both.
 
 use serde_json::{Map, Value, json};
 
 use crate::app::Failure;
-use crate::fs::write_file;
+use crate::fs::Agent;
 
 /// The command the hook runs. The binary's own path rather than a bare
 /// name, since a hook runs with whatever PATH the agent was started with;
@@ -21,7 +19,7 @@ fn command() -> Result<String, Failure> {
 }
 
 /// The hook entry as a hooks file holds it.
-pub fn entry() -> Result<Value, Failure> {
+fn entry() -> Result<Value, Failure> {
     Ok(json!({
         "hooks": [{ "type": "command", "command": command()? }]
     }))
@@ -51,56 +49,113 @@ fn any_runs_context(session_start: &Value) -> bool {
     })
 }
 
-/// What merging the hook into a hooks document came to.
-#[derive(Debug, PartialEq, Eq)]
-pub enum Merged {
-    Added(Value),
-    Present,
-}
-
-/// Adds the hook to a hooks document unless one is there. Pure: the
-/// caller reads and writes the file.
-pub fn merge(mut root: Value, entry: Value) -> Result<Merged, String> {
-    let Some(object) = root.as_object_mut() else {
-        return Err("the top level is not an object".into());
-    };
+/// The `hooks.SessionStart` entries of a document, the path to them made
+/// where missing; a change that then finds nothing to do returns `None`
+/// and the made path is never written.
+fn entries(root: &mut Value) -> Result<&mut Vec<Value>, String> {
+    let object = root
+        .as_object_mut()
+        .ok_or("the top level is not an object")?;
     let hooks = object
         .entry("hooks")
-        .or_insert_with(|| Value::Object(Map::new()));
-    let Some(hooks) = hooks.as_object_mut() else {
-        return Err("`hooks` is not an object".into());
-    };
-    let session_start = hooks
+        .or_insert_with(|| Value::Object(Map::new()))
+        .as_object_mut()
+        .ok_or("`hooks` is not an object")?;
+    hooks
         .entry("SessionStart")
-        .or_insert_with(|| Value::Array(Vec::new()));
-    let Some(entries) = session_start.as_array_mut() else {
-        return Err("`hooks.SessionStart` is not an array".into());
-    };
-    if entries.iter().any(any_runs_context) {
-        return Ok(Merged::Present);
-    }
-    entries.push(entry);
-    Ok(Merged::Added(root))
+        .or_insert_with(|| Value::Array(Vec::new()))
+        .as_array_mut()
+        .ok_or_else(|| "`hooks.SessionStart` is not an array".into())
 }
 
-/// Merges the hook into a hooks file, keeping the rest of it as it
-/// is, and says whether anything was written.
-pub fn install(hooks: &Path) -> Result<Merged, Failure> {
-    let refuse = |reason: String| Failure::Refused(format!("{}: {reason}", hooks.display()));
-    let text = match std::fs::read_to_string(hooks) {
-        Ok(text) => text,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => "{}".to_owned(),
-        Err(e) => return Err(refuse(e.to_string())),
-    };
-    let root: Value =
-        serde_json::from_str(&text).map_err(|e| refuse(format!("not readable as JSON, {e}")))?;
-    let merged = merge(root, entry()?).map_err(refuse)?;
-    if let Merged::Added(root) = &merged {
-        let mut out = serde_json::to_string_pretty(root).map_err(|e| refuse(e.to_string()))?;
-        out.push('\n');
-        write_file(hooks, &out)?;
+/// Adds the hook to a hooks document and returns it, or `None` when one is
+/// there.
+fn merge(mut root: Value, entry: Value) -> Result<Option<Value>, String> {
+    let entries = entries(&mut root)?;
+    if entries.iter().any(any_runs_context) {
+        return Ok(None);
     }
-    Ok(merged)
+    entries.push(entry);
+    Ok(Some(root))
+}
+
+/// Takes every entry that runs `worklog context` out of a hooks document
+/// and returns it, or `None` when there is none. A `SessionStart` left
+/// empty goes with them, and a `hooks` left empty with that, since
+/// `merge` is what made them.
+fn remove(mut root: Value) -> Result<Option<Value>, String> {
+    let entries = entries(&mut root)?;
+    let before = entries.len();
+    entries.retain(|group| !any_runs_context(group));
+    if entries.len() == before {
+        return Ok(None);
+    }
+    if entries.is_empty()
+        && let Some(hooks) = root["hooks"].as_object_mut()
+    {
+        hooks.remove("SessionStart");
+        if hooks.is_empty()
+            && let Some(object) = root.as_object_mut()
+        {
+            object.remove("hooks");
+        }
+    }
+    Ok(Some(root))
+}
+
+/// Puts the current entry in the place of every entry that runs `worklog
+/// context`, so a hook that names a binary since moved names this one,
+/// and returns the document, or `None` when there is none or none differ.
+fn replace(mut root: Value, entry: &Value) -> Result<Option<Value>, String> {
+    let entries = entries(&mut root)?;
+    let mut changed = false;
+    for group in entries.iter_mut().filter(|g| any_runs_context(g)) {
+        if group != entry {
+            *group = entry.clone();
+            changed = true;
+        }
+    }
+    Ok(changed.then_some(root))
+}
+
+/// Applies a change to an agent's hooks document, an absent file being an
+/// empty one, writes it back when the change returns one, and says
+/// whether it did.
+fn edit(
+    agent: &Agent,
+    change: impl FnOnce(Value) -> Result<Option<Value>, String>,
+) -> Result<bool, Failure> {
+    let refuse = |reason: String| Failure::Refused(format!("{}: {reason}", agent.hooks.display()));
+    let text = agent.read_hooks()?.unwrap_or_else(|| "{}".to_owned());
+    let root =
+        serde_json::from_str(&text).map_err(|e| refuse(format!("not readable as JSON, {e}")))?;
+    match change(root).map_err(refuse)? {
+        Some(root) => {
+            agent.write_hooks(&super::pretty_json(&root)?)?;
+            Ok(true)
+        }
+        None => Ok(false),
+    }
+}
+
+/// Merges the hook into the agent's hooks file and says whether it was
+/// written.
+pub fn install(agent: &Agent) -> Result<bool, Failure> {
+    let entry = entry()?;
+    edit(agent, |root| merge(root, entry))
+}
+
+/// Takes the hook out of the agent's hooks file and says whether it was
+/// written.
+pub fn uninstall(agent: &Agent) -> Result<bool, Failure> {
+    edit(agent, remove)
+}
+
+/// Brings the hook in the agent's hooks file up to this binary and says
+/// whether it was written.
+pub fn refresh(agent: &Agent) -> Result<bool, Failure> {
+    let entry = entry()?;
+    edit(agent, |root| replace(root, &entry))
 }
 
 #[cfg(test)]
@@ -126,18 +181,13 @@ mod tests {
 
     #[test]
     fn merges_once_and_keeps_the_rest() {
-        let added = merge(json!({}), probe()).unwrap();
-        let Merged::Added(root) = added else {
-            panic!("an empty document gains the hook")
-        };
+        let root = merge(json!({}), probe()).unwrap().expect("gained");
         assert_eq!(root["hooks"]["SessionStart"].as_array().unwrap().len(), 1);
-        assert_eq!(merge(root, probe()).unwrap(), Merged::Present);
+        assert_eq!(merge(root, probe()).unwrap(), None);
         let existing =
             serde_json::from_str::<Value>(r#"{"zeta": 1, "hooks": {"Stop": []}, "alpha": 2}"#)
                 .unwrap();
-        let Merged::Added(root) = merge(existing, probe()).unwrap() else {
-            panic!("a document without the hook gains it")
-        };
+        let root = merge(existing, probe()).unwrap().expect("gained");
         let keys: Vec<&str> = root
             .as_object()
             .unwrap()
@@ -152,15 +202,40 @@ mod tests {
     }
 
     #[test]
-    fn install_leaves_a_settled_file_untouched() {
-        let dir = tempfile::tempdir().unwrap();
-        let settings = dir.path().join(".claude/settings.json");
-        assert!(matches!(install(&settings).unwrap(), Merged::Added(_)));
-        let text = std::fs::read_to_string(&settings).unwrap();
-        assert!(text.ends_with("}\n"));
-        assert_eq!(install(&settings).unwrap(), Merged::Present);
-        assert_eq!(std::fs::read_to_string(&settings).unwrap(), text);
-        std::fs::write(&settings, "not json").unwrap();
-        assert!(matches!(install(&settings), Err(Failure::Refused(m)) if m.contains("JSON")));
+    fn removes_only_the_hook_and_what_it_made() {
+        let root = merge(json!({"hooks": {"Stop": []}}), probe())
+            .unwrap()
+            .expect("gained");
+        let root = remove(root).unwrap().expect("lost");
+        assert_eq!(root, json!({"hooks": {"Stop": []}}));
+        assert_eq!(remove(root).unwrap(), None);
+        assert_eq!(remove(json!({})).unwrap(), None);
+        let root = merge(json!({"model": "x"}), probe())
+            .unwrap()
+            .expect("gained");
+        assert_eq!(remove(root).unwrap(), Some(json!({"model": "x"})));
+        let theirs = json!({ "hooks": [{ "type": "command", "command": "date" }] });
+        let both = json!({"hooks": {"SessionStart": [theirs.clone(), probe()]}});
+        let root = remove(both).unwrap().expect("lost");
+        assert_eq!(root, json!({"hooks": {"SessionStart": [theirs]}}));
+        assert!(remove(json!({"hooks": {"SessionStart": {}}})).is_err());
+    }
+
+    #[test]
+    fn replaces_the_hook_in_place_and_only_when_it_differs() {
+        let theirs = json!({ "hooks": [{ "type": "command", "command": "date" }] });
+        let stale = json!({ "hooks": [{ "type": "command", "command": "/old/worklog context" }] });
+        let root = json!({"hooks": {"SessionStart": [stale, theirs.clone()], "Stop": []}});
+        let root = replace(root, &probe()).unwrap().expect("replaced");
+        assert_eq!(
+            root,
+            json!({"hooks": {"SessionStart": [probe(), theirs], "Stop": []}})
+        );
+        assert_eq!(replace(root, &probe()).unwrap(), None);
+        assert_eq!(replace(json!({}), &probe()).unwrap(), None);
+        assert_eq!(
+            replace(json!({"hooks": {"Stop": []}}), &probe()).unwrap(),
+            None
+        );
     }
 }

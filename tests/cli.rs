@@ -180,22 +180,21 @@ fn init_is_once_and_writes_need_it() {
     let elsewhere = Scratch::new();
     let claude = elsewhere.agent_home(".claude");
     let codex = elsewhere.agent_home(".codex");
-    let written = elsewhere.ok(&["init", "m3", "--store", "sync/worklog", "--skill", "--hook"]);
+    let written = elsewhere.ok(&["init", "m3", "--store", "sync/worklog", "--agents"]);
     let config = fs::read_to_string(elsewhere.root.path().join("config")).unwrap();
     assert!(config.ends_with("/home/sync/worklog\n"), "{config}");
-    let skill = fs::read_to_string(claude.join("skills/worklog/SKILL.md")).unwrap();
-    assert_eq!(skill, worklog::cli::SKILL);
-    let codex_skill = fs::read_to_string(codex.join("skills/worklog/SKILL.md")).unwrap();
-    assert_eq!(codex_skill, skill);
-    assert_eq!(elsewhere.ok(&["skill", "show"]), skill);
+    for placed in [
+        claude.join("skills/worklog/SKILL.md"),
+        claude.join("settings.json"),
+        codex.join("skills/worklog/SKILL.md"),
+        codex.join("hooks.json"),
+    ] {
+        assert!(placed.is_file(), "{}", placed.display());
+        assert!(written.contains(&placed.display().to_string()), "{written}");
+    }
     let completions = elsewhere.ok(&["completions", "fish"]);
     assert!(completions.contains("complete -c worklog"), "{completions}");
     assert!(completions.contains("unclaim"), "{completions}");
-    for hooks in [claude.join("settings.json"), codex.join("hooks.json")] {
-        let text = fs::read_to_string(&hooks).unwrap();
-        assert!(text.contains("\"SessionStart\""), "{text}");
-        assert!(written.contains(&hooks.display().to_string()), "{written}");
-    }
     // A scripted init without a choice touches nothing under ~/.claude.
     assert!(!s.home().join(".claude").exists());
     // No terminal here, so a nameless init cannot ask and is a usage error.
@@ -205,49 +204,99 @@ fn init_is_once_and_writes_need_it() {
 }
 
 #[test]
-fn skill_install_reaches_claude_and_codex() {
+fn agents_install_reaches_the_agents_that_are_present() {
     let s = Scratch::new();
-    let claude = s.agent_home(".claude");
     let codex = s.agent_home(".codex");
-    let written = s.ok(&["skill", "install"]);
-    for path in [
-        claude.join("skills/worklog/SKILL.md"),
-        codex.join("skills/worklog/SKILL.md"),
-    ] {
-        assert_eq!(fs::read_to_string(&path).unwrap(), worklog::cli::SKILL);
-        assert!(written.contains(&path.display().to_string()), "{written}");
-    }
-}
-
-#[test]
-fn hook_install_reaches_the_agents_that_are_present() {
-    let s = Scratch::new();
-    let hooks = s.agent_home(".codex").join("hooks.json");
-    let written = s.ok(&["hook", "install"]);
-    assert_eq!(written, format!("{}\n", hooks.display()));
+    let skill = codex.join("skills/worklog/SKILL.md");
+    let hooks = codex.join("hooks.json");
+    let written = s.ok(&["agents", "install"]);
+    assert_eq!(
+        written,
+        format!("{}\n{}\n", skill.display(), hooks.display())
+    );
+    assert_eq!(fs::read_to_string(&skill).unwrap(), worklog::cli::SKILL);
     let text = fs::read_to_string(&hooks).unwrap();
     assert!(text.contains("\"SessionStart\""), "{text}");
     assert!(!s.home().join(".claude").exists());
-    let again = s.ok(&["hook", "install"]);
+    let again = s.ok(&["agents", "install"]);
     assert!(again.contains("already runs worklog context"), "{again}");
     assert_eq!(fs::read_to_string(&hooks).unwrap(), text);
 }
 
 #[test]
+fn agents_refresh_brings_up_only_what_is_there() {
+    let s = Scratch::new();
+    let claude = s.agent_home(".claude");
+    let codex = s.agent_home(".codex");
+    assert_eq!(s.ok(&["agents", "refresh"]), "");
+    assert!(!claude.join("skills").exists());
+    let stale = claude.join("skills/worklog/SKILL.md");
+    fs::create_dir_all(stale.parent().unwrap()).unwrap();
+    fs::write(&stale, "an older skill\n").unwrap();
+    let hooks = codex.join("hooks.json");
+    fs::write(
+        &hooks,
+        r#"{"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "/gone/worklog context"}]}, {"hooks": [{"type": "command", "command": "date"}]}]}}"#,
+    )
+    .unwrap();
+    let written = s.ok(&["agents", "refresh"]);
+    assert_eq!(
+        written,
+        format!("{}\n{}\n", stale.display(), hooks.display())
+    );
+    assert_eq!(fs::read_to_string(&stale).unwrap(), worklog::cli::SKILL);
+    let text = fs::read_to_string(&hooks).unwrap();
+    assert!(!text.contains("/gone/"), "{text}");
+    assert!(!codex.join("skills").exists());
+    assert!(!claude.join("settings.json").exists());
+    assert_eq!(s.ok(&["agents", "refresh"]), "");
+}
+
+#[test]
+fn agents_uninstall_takes_back_only_what_install_placed() {
+    let s = Scratch::new();
+    let claude = s.agent_home(".claude");
+    let codex = s.agent_home(".codex");
+    assert_eq!(s.ok(&["agents", "uninstall"]), "");
+    let settings = claude.join("settings.json");
+    fs::write(&settings, "{\"model\": \"x\", \"hooks\": {\"Stop\": []}}\n").unwrap();
+    let other_skill = claude.join("skills/other/SKILL.md");
+    fs::create_dir_all(other_skill.parent().unwrap()).unwrap();
+    fs::write(&other_skill, "theirs\n").unwrap();
+    s.ok(&["agents", "install"]);
+    let removed = s.ok(&["agents", "uninstall"]);
+    assert_eq!(
+        removed,
+        format!(
+            "{}\n{}\n{}\n{}\n",
+            claude.join("skills/worklog").display(),
+            settings.display(),
+            codex.join("skills/worklog").display(),
+            codex.join("hooks.json").display()
+        )
+    );
+    assert!(!claude.join("skills/worklog").exists());
+    assert_eq!(fs::read_to_string(&other_skill).unwrap(), "theirs\n");
+    let text = fs::read_to_string(&settings).unwrap();
+    assert!(!text.contains("worklog"), "{text}");
+    assert!(text.contains("\"model\": \"x\""), "{text}");
+    assert_eq!(
+        fs::read_to_string(codex.join("hooks.json")).unwrap(),
+        "{}\n"
+    );
+    assert_eq!(s.ok(&["agents", "uninstall"]), "");
+    fs::write(&settings, "not json").unwrap();
+    let err = s.refused(&["agents", "install"]);
+    assert!(err.contains("not readable as JSON"), "{err}");
+}
+
+#[test]
 fn installs_refuse_a_host_without_an_agent() {
     let s = Scratch::new();
-    let err = s.refused(&["skill", "install"]);
-    assert!(
-        err.contains("no Claude Code or Codex skills directory found"),
-        "{err}"
-    );
-    let err = s.refused(&["hook", "install"]);
-    assert!(
-        err.contains("no Claude Code or Codex hooks file found"),
-        "{err}"
-    );
-    let err = s.refused(&["init", "m1", "--hook"]);
-    assert!(err.contains("hooks file found"), "{err}");
+    let err = s.refused(&["agents", "install"]);
+    assert!(err.contains("no Claude Code or Codex home"), "{err}");
+    let err = s.refused(&["init", "m1", "--agents"]);
+    assert!(err.contains("no Claude Code or Codex home"), "{err}");
     assert!(!s.root.path().join("config").exists());
     assert!(!s.home().join(".claude").exists());
     assert!(!s.home().join(".codex").exists());

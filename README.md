@@ -71,17 +71,19 @@ current stable Rust: `cargo install --path .`.
 
 The binary carries the agent skill that teaches a coding agent the store
 and its commands, and the SessionStart hook that opens every session with
-`worklog context`. An interactive `worklog init` offers both; `worklog init
-<name> --skill --hook` takes them outright, and `--no-skill` or `--no-hook`
-declines without a question. Both reach every agent whose home exists,
-Claude Code under `~/.claude` and Codex under `~/.codex`. On their own,
-`worklog skill install` writes `skills/worklog/SKILL.md` under each, and
-`--dir` chooses another skills directory instead; `worklog hook install`
-merges one entry into `~/.claude/settings.json` and `~/.codex/hooks.json`,
-once, keeping the rest of each file as it is, and `--settings` names one
-file instead; `show` on either prints what would be written. The installer above
-refreshes the skill on a host that has one, since the skill describes the
-commands of the binary it shipped with.
+`worklog context`. `worklog init` offers them on a terminal and places
+them only when told to. `worklog agents install` places them for every
+agent whose home exists, Claude Code under `~/.claude` and Codex under
+`~/.codex`: the skill under the agent's skills, and one hook entry merged
+into `~/.claude/settings.json` or `~/.codex/hooks.json`, keeping the rest
+of the file as it is.
+
+`worklog agents uninstall` takes both away again and leaves whatever else
+the files hold. `worklog agents refresh` brings both up to the binary that
+runs it, only where an agent already has them: the skill describes the
+commands of the binary it shipped with, and the hook names the binary's
+path, which an install to a new place leaves stale. The installer above
+runs it after every install.
 
 `worklog completions <shell>` prints completions for the commands of the
 binary it runs from. The installer writes the fish ones into the

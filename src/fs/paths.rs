@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use crate::domain::ports::StoreError;
 
+use super::agent::Agent;
 use super::config::Config;
 
 /// Where everything lives on this host: the config, the drafts, the
@@ -20,34 +21,6 @@ pub struct Paths {
     pub home: PathBuf,
     /// The agents that take the skill and the session hook.
     pub agents: Vec<Agent>,
-}
-
-/// An agent with a user-wide home directory that holds its skills and the
-/// file its hooks are read from.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Agent {
-    pub name: &'static str,
-    pub home: PathBuf,
-    pub skills: PathBuf,
-    pub hooks: PathBuf,
-}
-
-impl Agent {
-    fn new(name: &'static str, home: PathBuf, hooks: &str) -> Agent {
-        Agent {
-            name,
-            skills: home.join("skills"),
-            hooks: home.join(hooks),
-            home,
-        }
-    }
-
-    /// Whether the agent is on this host, by its home directory, so that
-    /// an install never creates one for an agent that is not.
-    #[must_use]
-    pub fn is_present(&self) -> bool {
-        self.home.is_dir()
-    }
 }
 
 impl Paths {

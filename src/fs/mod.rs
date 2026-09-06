@@ -1,5 +1,6 @@
 //! The ports implemented on a directory tree.
 
+pub mod agent;
 pub mod clock;
 pub mod config;
 pub mod drafts;
@@ -8,10 +9,11 @@ pub mod paths;
 pub mod store;
 pub mod usage;
 
+pub use agent::Agent;
 pub use clock::SystemClock;
 pub use config::{Config, FileIdentity};
 pub use drafts::FsDrafts;
-pub use paths::{Agent, Paths};
+pub use paths::Paths;
 pub use store::FsStore;
 pub use usage::FsUsage;
 
@@ -34,22 +36,30 @@ pub(crate) fn io_error(location: &Path, error: &std::io::Error) -> StoreError {
     }
 }
 
-/// A directory nothing has written yet reads as empty rather than as a
-/// failure, since every one of them is created by its first write.
+/// An outcome at a path that is not there reads as `None` rather than as
+/// a failure, since every file and directory here is created by its first
+/// write.
+pub(crate) fn optional<T>(at: &Path, result: std::io::Result<T>) -> Result<Option<T>, StoreError> {
+    match result {
+        Ok(value) => Ok(Some(value)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(io_error(at, &e)),
+    }
+}
+
+pub(crate) fn read_optional(path: &Path) -> Result<Option<String>, StoreError> {
+    optional(path, std::fs::read_to_string(path))
+}
+
 pub(crate) fn entries(
     dir: &Path,
 ) -> Result<impl Iterator<Item = std::io::Result<std::fs::DirEntry>>, StoreError> {
-    match std::fs::read_dir(dir) {
-        Ok(entries) => Ok(Some(entries)),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(io_error(dir, &e)),
-    }
-    .map(|found| found.into_iter().flatten())
+    optional(dir, std::fs::read_dir(dir)).map(|found| found.into_iter().flatten())
 }
 
 /// Writes a whole file, creating its directory, with the path in any
 /// refusal.
-pub(crate) fn write_file(path: &Path, text: &str) -> Result<(), StoreError> {
+fn write_file(path: &Path, text: &str) -> Result<(), StoreError> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| io_error(parent, &e))?;
     }

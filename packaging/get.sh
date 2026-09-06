@@ -36,20 +36,19 @@ mkdir -p "$prefix"
 install -m 0755 "$tmp/$asset" "$prefix/worklog"
 echo "worklog $tag installed to $prefix/worklog"
 
-# The agent skill describes the commands of the binary it shipped with, so a
-# an agent that has one gets the new one; an agent that never opted in is
-# left alone.
-for skills in "$HOME/.claude/skills" "$HOME/.codex/skills"; do
-  if [ -f "$skills/worklog/SKILL.md" ]; then
-    "$prefix/worklog" skill install --dir "$skills" >/dev/null
-    echo "agent skill updated in $skills/worklog"
-  fi
-done
-
 # Completions are generated from the binary, so they are written where a
 # shell already looks for them and rewritten with every install.
 fish_completions="${XDG_CONFIG_HOME:-$HOME/.config}/fish/completions"
 if [ -d "$fish_completions" ]; then
   "$prefix/worklog" completions fish > "$fish_completions/worklog.fish"
   echo "fish completions written to $fish_completions/worklog.fish"
+fi
+
+# The agent skill describes the commands of the binary it shipped with and
+# the hook names the binary's path, so an agent that has them gets this
+# binary's; an agent that never opted in is left alone. Last, since a
+# hooks file the refresh cannot read stops the script here.
+refreshed="$("$prefix/worklog" agents refresh)"
+if [ -n "$refreshed" ]; then
+  printf '%s\n' "$refreshed" | sed 's/^/agent integration updated at /'
 fi

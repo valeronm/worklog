@@ -61,11 +61,17 @@ code.
 
 `skill/SKILL.md` is compiled into the binary so the skill a session reads
 is the one written for the commands it has, and `tests/skill.rs` holds the
-two to each other. The session hook is merged into the agent's settings
-file rather than written over it, because that file is the user's and holds
-other hooks; a scripted `init` touches neither the skill nor the settings
-unless told to, since a script writing into `~/.claude` unasked is the
-kind of surprise the store exists to avoid. The skill is public and written
+two to each other. The session hook is merged into the agent's hooks file
+rather than written over it, because that file is the user's and holds
+other hooks. What the tool owns in it is any `SessionStart` group whose
+command runs `worklog context`, whoever wrote it: that is the unit a
+refresh replaces and an uninstall removes, and the rule a change to the
+recognition must keep. The file is kept as data, so key order survives a
+write and formatting does not. A scripted `init` touches neither the skill
+nor the hooks file unless told to, since a script writing into an agent's
+home unasked is the kind of surprise the store exists to avoid, and a
+refresh writes only where an agent already has the thing, which is what
+lets the installer run it on every host. The skill is public and written
 for a stranger: it holds how to use the store, including the follow-up
 triage put to the user and the offer to log after work, and nothing about
 any one person's other tools.

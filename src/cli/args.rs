@@ -93,55 +93,32 @@ pub enum SetupCommand {
         /// The store directory, `~/worklog` when not given
         #[arg(long)]
         store: Option<String>,
-        /// Also install the agent skill
-        #[arg(long, conflicts_with = "no_skill")]
-        skill: bool,
-        /// Leave the agent skill alone, without asking
+        /// Also install the skill and the session hook for the coding agents
+        #[arg(long, conflicts_with = "no_agents")]
+        agents: bool,
+        /// Leave the coding agents alone, without asking
         #[arg(long)]
-        no_skill: bool,
-        /// Also add the session hook to each agent's hooks file
-        #[arg(long, conflicts_with = "no_hook")]
-        hook: bool,
-        /// Leave the agents' hooks files alone, without asking
-        #[arg(long)]
-        no_hook: bool,
+        no_agents: bool,
     },
-    /// The agent skill that ships with this binary
-    Skill {
+    /// The skill and the `SessionStart` hook for the coding agents on this
+    /// host
+    Agents {
         #[command(subcommand)]
-        what: SkillWhat,
-    },
-    /// The `SessionStart` hook that opens every session with `worklog context`
-    Hook {
-        #[command(subcommand)]
-        what: HookWhat,
+        what: AgentsWhat,
     },
     /// Shell completions for the commands of this binary, to source
     Completions { shell: clap_complete::Shell },
 }
 
 #[derive(Subcommand)]
-pub enum SkillWhat {
-    /// Write the skill where the agent reads it
-    Install {
-        /// Another skills directory than the agent's
-        #[arg(long)]
-        dir: Option<PathBuf>,
-    },
-    /// Print the skill
-    Show,
-}
-
-#[derive(Subcommand)]
-pub enum HookWhat {
-    /// Merge the hook into each agent's hooks file, once
-    Install {
-        /// One hooks file to merge into, instead of the agents' own
-        #[arg(long)]
-        settings: Option<PathBuf>,
-    },
-    /// Print the hook entry
-    Show,
+pub enum AgentsWhat {
+    /// Write the skill and merge the hook, once, for every agent present
+    Install,
+    /// Bring the skill and the hook up to this binary wherever an agent
+    /// already has them
+    Refresh,
+    /// Remove the skill and the hook from every agent that has them
+    Uninstall,
 }
 
 #[derive(Subcommand)]

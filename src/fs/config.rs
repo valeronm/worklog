@@ -1,11 +1,10 @@
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::domain::frontmatter::{self, Fields};
 use crate::domain::machine::MachineName;
 use crate::domain::ports::{Identity, StoreError};
 
-use super::{corrupt, io_error, write_file};
+use super::{corrupt, read_optional, write_file};
 
 /// What `init` records for a host: its name and where its store is.
 ///
@@ -21,10 +20,8 @@ pub struct Config {
 
 impl Config {
     pub fn read(path: &Path) -> Result<Option<Config>, StoreError> {
-        let text = match fs::read_to_string(path) {
-            Ok(text) => text,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(e) => return Err(io_error(path, &e)),
+        let Some(text) = read_optional(path)? else {
+            return Ok(None);
         };
         let fields = frontmatter::parse_fields(&text).map_err(|e| corrupt(path, e))?;
         fields
@@ -84,7 +81,7 @@ mod tests {
             FileIdentity::new(path.clone()).machine().unwrap(),
             Some(config.machine)
         );
-        fs::write(&path, "machine: m\n").unwrap();
+        std::fs::write(&path, "machine: m\n").unwrap();
         assert!(matches!(
             Config::read(&path),
             Err(StoreError::Corrupt { .. })
