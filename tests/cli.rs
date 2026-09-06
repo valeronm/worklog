@@ -943,4 +943,16 @@ fn help_lists_every_command_under_its_heading() {
     assert!(section("Writes").contains("\n  new "));
     assert!(section("Other").contains("\n  serve "));
     assert_eq!(text.matches("\n  show ").count(), 1);
+
+    let mut narrow = Command::cargo_bin("worklog").expect("the binary");
+    narrow.env("COLUMNS", "60");
+    let text = scratch.ok_binary(narrow, &["--help"]);
+    for line in text.lines() {
+        assert!(line.chars().count() <= 60, "{line:?} in {text}");
+    }
+    let column = 2 + "completions".len() + 2;
+    assert!(
+        text.contains(&format!("\n{}", " ".repeat(column))),
+        "a folded row in {text}"
+    );
 }

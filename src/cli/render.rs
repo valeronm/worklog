@@ -245,24 +245,30 @@ fn cut(text: &str, chars: usize) -> String {
 /// Comma-joined names wrapped at 78 columns, two spaces in, as an index
 /// a session reads rather than a listing it scrolls.
 fn wrapped(out: &mut String, names: &[String]) {
-    let mut line = String::from(" ");
-    for (i, name) in names.iter().enumerate() {
-        let piece = if i + 1 == names.len() {
-            format!(" {name}")
-        } else {
-            format!(" {name},")
-        };
-        if line.len() + piece.len() > 78 && line.len() > 1 {
-            out.push_str(&line);
-            out.push('\n');
-            line = String::from(" ");
+    if names.is_empty() {
+        return;
+    }
+    out.push_str("  ");
+    out.push_str(&wrap(&names.join(", "), 2, 78));
+    out.push('\n');
+}
+
+/// The words of `text` folded so no line passes `columns`, every line
+/// after the first indented to sit under the first, which the caller
+/// places at `indent`.
+pub fn wrap(text: &str, indent: usize, columns: usize) -> String {
+    let room = columns.saturating_sub(indent);
+    let mut lines: Vec<String> = Vec::new();
+    for word in text.split_whitespace() {
+        match lines.last_mut() {
+            Some(line) if line.chars().count() + 1 + word.chars().count() <= room => {
+                line.push(' ');
+                line.push_str(word);
+            }
+            _ => lines.push(word.to_owned()),
         }
-        line.push_str(&piece);
     }
-    if line.len() > 1 {
-        out.push_str(&line);
-        out.push('\n');
-    }
+    lines.join(&format!("\n{}", " ".repeat(indent)))
 }
 
 pub fn context(c: &Context) -> String {
