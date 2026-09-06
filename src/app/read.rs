@@ -214,13 +214,26 @@ pub fn log(deps: &Deps, n: usize, machine_name: Option<&str>) -> Result<Log, Fai
 /// Every live document of a kind; entries newest first, the rest by slug.
 pub fn list(deps: &Deps, kind: Kind) -> Result<Listing, Failure> {
     let loaded = load::load(deps.store)?;
-    let rows = match kind {
+    Ok(Listing {
+        rows: rows(&loaded, kind),
+    })
+}
+
+/// Every live document of every kind, in one read of the store.
+pub fn all(deps: &Deps) -> Result<Listing, Failure> {
+    let loaded = load::load(deps.store)?;
+    Ok(Listing {
+        rows: Kind::ALL.iter().flat_map(|k| rows(&loaded, *k)).collect(),
+    })
+}
+
+fn rows(loaded: &load::Loaded, kind: Kind) -> Vec<Row> {
+    match kind {
         Kind::Entry => loaded.entries.iter().map(entry_row).collect(),
         Kind::Fact => loaded.facts.iter().map(fact_row).collect(),
         Kind::Topic => loaded.topics.values().map(topic_row).collect(),
         Kind::Followup => loaded.followups.iter().map(followup_row).collect(),
-    };
-    Ok(Listing { rows })
+    }
 }
 
 pub fn recent(deps: &Deps, n: usize) -> Result<Listing, Failure> {

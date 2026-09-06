@@ -9,7 +9,7 @@ use crate::domain::machine::MachineName;
 use crate::fs::{Agent, Config, Paths};
 
 use super::Rendered;
-use super::args::{AgentsWhat, Cli, SetupCommand};
+use super::args::{AgentsWhat, SetupCommand};
 use super::hook;
 
 /// The agent skill, compiled in so it always describes this binary's
@@ -103,17 +103,14 @@ fn refresh_agent(agent: &Agent) -> Result<String, Failure> {
 pub(super) fn refresh(paths: &Paths) -> Result<String, Failure> {
     let mut written = each_agent(&paths.agents, refresh_agent)?;
     for shell in paths.present_shells() {
-        let file = shell.write_completions(&completions(shell.kind))?;
+        let file = shell.write_completions(&completions(shell.kind)?)?;
         written.push_str(&line(&file));
     }
     Ok(written)
 }
 
-fn completions(shell: clap_complete::Shell) -> String {
-    use clap::CommandFactory as _;
-    let mut out = Vec::new();
-    clap_complete::generate(shell, &mut Cli::command(), "worklog", &mut out);
-    String::from_utf8_lossy(&out).into_owned()
+fn completions(shell: clap_complete::Shell) -> Result<String, Failure> {
+    super::complete::registration(shell, &super::this_binary()?)
 }
 
 fn each_agent<'a>(
@@ -226,7 +223,7 @@ pub(super) fn run(paths: &Paths, command: &SetupCommand) -> Result<Rendered, Fai
             AgentsWhat::Refresh => refresh(paths)?,
             AgentsWhat::Uninstall => each_agent(&paths.agents, uninstall_agent)?,
         },
-        SetupCommand::Completions { shell } => completions(*shell),
+        SetupCommand::Completions { shell } => completions(*shell)?,
     };
     Ok(Rendered { text, exit: 0 })
 }

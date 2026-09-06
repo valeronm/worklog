@@ -48,7 +48,11 @@ impl Scratch {
     }
 
     fn ok(&self, args: &[&str]) -> String {
-        let out = self.run(args);
+        self.ok_binary(Command::cargo_bin("worklog").expect("the binary"), args)
+    }
+
+    fn ok_binary(&self, command: Command, args: &[&str]) -> String {
+        let out = self.run_binary(command, args);
         assert!(
             out.status.success(),
             "{args:?} failed: {}",
@@ -197,8 +201,8 @@ fn init_is_once_and_writes_need_it() {
         assert!(written.contains(&placed.display().to_string()), "{written}");
     }
     let completions = elsewhere.ok(&["completions", "fish"]);
-    assert!(completions.contains("complete -c worklog"), "{completions}");
-    assert!(completions.contains("unclaim"), "{completions}");
+    assert!(completions.starts_with("COMPLETE=fish \""), "{completions}");
+    assert!(completions.ends_with("\" | source\n"), "{completions}");
     // A scripted init without a choice touches nothing under ~/.claude.
     assert!(!s.home().join(".claude").exists());
     // No terminal here, so a nameless init cannot ask and is a usage error.
@@ -265,7 +269,7 @@ fn agents_refresh_brings_up_only_what_is_there() {
     assert!(
         fs::read_to_string(&completions)
             .unwrap()
-            .contains("complete -c worklog")
+            .starts_with("COMPLETE=fish ")
     );
 }
 
@@ -552,6 +556,40 @@ fn listings_keep_the_shapes_completions_parse() {
         serde_json::from_str(&s.ok(&["followups", "--json"])).expect("json");
     assert_eq!(json["open"], 1);
     assert_eq!(json["items"][0]["label"], "due 2026-01-01");
+}
+
+#[test]
+fn a_shell_completes_slugs_and_topics_but_never_files() {
+    let s = seeded();
+    let complete = |args: &[&str]| {
+        let mut command = Command::cargo_bin("worklog").expect("the binary");
+        command.env("COMPLETE", "fish").arg("--").arg("worklog");
+        s.ok_binary(command, args)
+    };
+    let topics = complete(&["facts", ""]);
+    assert!(
+        topics.contains("android\tThe Android toolchain\n"),
+        "{topics}"
+    );
+    assert!(!topics.contains("Documents"), "{topics}");
+    let slugs = complete(&["show", ""]);
+    assert!(
+        slugs.contains("2026-09/2026-09-01-lamp-driver\t"),
+        "{slugs}"
+    );
+    assert!(slugs.contains("android\t"), "{slugs}");
+    assert!(!complete(&["save", ""]).contains("android\t"));
+    s.ok(&["checkout", "android"]);
+    assert!(complete(&["save", ""]).contains("android\ttopic\n"));
+    let followups = complete(&["done", ""]);
+    assert!(followups.contains('\t'), "{followups}");
+    assert!(!followups.contains("android\t"), "{followups}");
+    let tags = complete(&["tag", "la"]);
+    assert_eq!(tags, "lantern\t2\n");
+    let term = complete(&["search", ""]);
+    assert!(!term.contains("Documents"), "{term}");
+    let dir = complete(&["context", "Doc"]);
+    assert_eq!(dir, "Documents/\n");
 }
 
 #[test]

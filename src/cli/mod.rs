@@ -2,6 +2,7 @@
 //! states.
 
 pub mod args;
+pub mod complete;
 pub mod help;
 pub mod hook;
 pub mod render;
@@ -17,11 +18,12 @@ use serde::Serialize;
 
 use crate::app::write::{Made, NewFollowup};
 use crate::app::{Deps, Failure, migrate, read, slug_arg, usage, write};
+use crate::domain::ports::StoreError;
 use crate::domain::slug::Kind;
 use crate::fs::{FileIdentity, FsDrafts, FsHost, FsStore, FsUsage, Paths, SystemClock};
 use crate::web;
 
-use args::{ClaimArg, Cli, Command, NewWhat, ReadCommand, SlugArg, StoreCommand, WriteCommand};
+use args::{ClaimArg, Cli, Command, KindArg, NewWhat, ReadCommand, StoreCommand, WriteCommand};
 
 /// One command's stdout, and the exit code `check` sets on problems and
 /// `upgrade --check` on a newer release.
@@ -47,8 +49,13 @@ fn rendered<T: Serialize>(
     Ok(Rendered { text, exit: 0 })
 }
 
-fn slug(arg: &SlugArg) -> Result<crate::domain::slug::Slug, Failure> {
-    slug_arg(&arg.slug, arg.kind.map(Kind::from))
+fn slug(text: &str, kind: Option<KindArg>) -> Result<crate::domain::slug::Slug, Failure> {
+    slug_arg(text, kind.map(Kind::from))
+}
+
+/// The path of the binary that runs, for a hook or a shell to call back.
+fn this_binary() -> Result<std::path::PathBuf, Failure> {
+    std::env::current_exe().map_err(|e| Failure::Refused(format!("cannot locate this binary: {e}")))
 }
 
 /// Colour only on a terminal, and never with `NO_COLOR` set, so a pipe
@@ -113,7 +120,7 @@ fn dispatch_read(deps: &Deps, json: bool, command: ReadCommand) -> Result<Render
             rendered(json, &out, || render::shown(&out))
         }
         ReadCommand::History(arg) => {
-            let out = read::history(deps, &slug(&arg)?)?;
+            let out = read::history(deps, &slug(&arg.slug, arg.kind)?)?;
             note_foreign(out.foreign.as_deref());
             rendered(json, &out, || render::history(&out))
         }
@@ -244,11 +251,11 @@ fn dispatch_write(deps: &Deps, json: bool, command: WriteCommand) -> Result<Rend
             rendered(json, &out, || render::draft_ref(&out))
         }
         WriteCommand::Checkout(arg) => {
-            let out = write::checkout(deps, &slug(&arg)?)?;
+            let out = write::checkout(deps, &slug(&arg.slug, arg.kind)?)?;
             rendered(json, &out, || render::draft_ref(&out))
         }
         WriteCommand::Save { slug: arg, dry_run } => {
-            let out = write::save(deps, &slug(&arg)?, dry_run)?;
+            let out = write::save(deps, &slug(&arg.slug, arg.kind)?, dry_run)?;
             rendered(json, &out, || {
                 if dry_run {
                     String::new()
@@ -258,7 +265,7 @@ fn dispatch_write(deps: &Deps, json: bool, command: WriteCommand) -> Result<Rend
             })
         }
         WriteCommand::Discard(arg) => {
-            write::discard(deps, &slug(&arg)?)?;
+            write::discard(deps, &slug(&arg.slug, arg.kind)?)?;
             rendered(json, &(), String::new)
         }
         WriteCommand::Done { slug, note } => {
@@ -278,7 +285,7 @@ fn dispatch_write(deps: &Deps, json: bool, command: WriteCommand) -> Result<Rend
             rendered(json, &out, || render::written(&out))
         }
         WriteCommand::Recheck { slug: arg, recheck } => {
-            let out = write::recheck(deps, &slug(&arg)?, &recheck.join(" "))?;
+            let out = write::recheck(deps, &slug(&arg.slug, arg.kind)?, &recheck.join(" "))?;
             rendered(json, &out, || render::written(&out))
         }
         WriteCommand::Verify { slug } => {
@@ -286,15 +293,15 @@ fn dispatch_write(deps: &Deps, json: bool, command: WriteCommand) -> Result<Rend
             rendered(json, &out, || render::written(&out))
         }
         WriteCommand::Tombstone { slug: arg, note } => {
-            let out = write::tombstone(deps, &slug(&arg)?, &note)?;
+            let out = write::tombstone(deps, &slug(&arg.slug, arg.kind)?, &note)?;
             rendered(json, &out, || render::written(&out))
         }
         WriteCommand::Rename { slug: arg, new } => {
-            let out = write::rename(deps, &slug(&arg)?, &new)?;
+            let out = write::rename(deps, &slug(&arg.slug, arg.kind)?, &new)?;
             rendered(json, &out, || render::written(&out))
         }
         WriteCommand::Resolve(arg) => {
-            let out = write::resolve(deps, &slug(&arg)?)?;
+            let out = write::resolve(deps, &slug(&arg.slug, arg.kind)?)?;
             rendered(json, &out, || render::draft_ref(&out))
         }
         WriteCommand::Claim(ClaimArg { topic, dir }) => {
@@ -415,9 +422,46 @@ fn print(text: &str) {
     let _ = stdout.flush();
 }
 
+/// The store and what a use case needs beside it, on this machine.
+struct Opened {
+    store: FsStore,
+    drafts: FsDrafts,
+    identity: FileIdentity,
+    usage: FsUsage,
+    home: String,
+}
+
+impl Opened {
+    /// `None` until `init` has run.
+    fn open(paths: Paths) -> Result<Option<Opened>, StoreError> {
+        Ok(paths.store()?.map(|store| Opened {
+            usage: FsUsage::new(&store),
+            store: FsStore::new(store),
+            drafts: FsDrafts::new(paths.drafts),
+            identity: FileIdentity::new(paths.config),
+            home: paths.home.display().to_string(),
+        }))
+    }
+
+    fn deps(&self) -> Deps<'_> {
+        Deps {
+            store: &self.store,
+            drafts: &self.drafts,
+            identity: &self.identity,
+            clock: &SystemClock,
+            host: &FsHost,
+            usage: &self.usage,
+            home: self.home.clone(),
+        }
+    }
+}
+
 /// Runs the command line and returns the process exit code.
 #[must_use]
 pub fn run() -> i32 {
+    if let Some(exit) = complete::answer() {
+        return exit;
+    }
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let parsed = help::grouped(Cli::command())
         .try_get_matches()
@@ -447,8 +491,8 @@ pub fn run() -> i32 {
         }
         Command::Store(command) => command,
     };
-    let store = match paths.store() {
-        Ok(Some(store)) => store,
+    let opened = match Opened::open(paths) {
+        Ok(Some(opened)) => opened,
         Ok(None) => {
             // The SessionStart hook runs `context` on a host that may not
             // be set up yet, and a notice is what it should see, not a
@@ -464,19 +508,7 @@ pub fn run() -> i32 {
         }
         Err(e) => return fail(&e.into()),
     };
-    let usage = FsUsage::new(&store);
-    let store = FsStore::new(store);
-    let drafts = FsDrafts::new(paths.drafts);
-    let identity = FileIdentity::new(paths.config);
-    let deps = Deps {
-        store: &store,
-        drafts: &drafts,
-        identity: &identity,
-        clock: &SystemClock,
-        host: &FsHost,
-        usage: &usage,
-        home: paths.home.display().to_string(),
-    };
+    let deps = opened.deps();
     let path = command_path(&command);
     let record = |exit: i32| {
         if let Ok(dir) = cwd() {

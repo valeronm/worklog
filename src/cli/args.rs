@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{Args, Parser, Subcommand, ValueEnum, ValueHint};
+
+use super::complete;
 
 use crate::domain::slug::Kind;
 
@@ -43,6 +45,17 @@ impl From<KindArg> for Kind {
 /// A slug, resolved by shape unless the kind is named.
 #[derive(Args)]
 pub struct SlugArg {
+    #[arg(add = complete::slugs())]
+    pub slug: String,
+    /// Settle a slug whose shape fits more than one kind
+    #[arg(long)]
+    pub kind: Option<KindArg>,
+}
+
+/// The slug of a draft on this machine, resolved the same way.
+#[derive(Args)]
+pub struct DraftArg {
+    #[arg(add = complete::drafts())]
     pub slug: String,
     /// Settle a slug whose shape fits more than one kind
     #[arg(long)]
@@ -75,10 +88,10 @@ pub enum StoreCommand {
     /// One-time move of the file-per-document store into this empty one
     Migrate {
         /// The old worklog directory with its year subdirectories
-        #[arg(long)]
+        #[arg(long, value_hint = ValueHint::DirPath)]
         entries: String,
         /// The old facts directory, holding PROJECTS
-        #[arg(long)]
+        #[arg(long, value_hint = ValueHint::DirPath)]
         facts: String,
     },
 }
@@ -91,7 +104,7 @@ pub enum SetupCommand {
     Init {
         machine: Option<String>,
         /// The store directory, `~/worklog` when not given
-        #[arg(long)]
+        #[arg(long, value_hint = ValueHint::DirPath)]
         store: Option<String>,
         /// Also install the skill and the session hook for the coding agents
         #[arg(long, conflicts_with = "no_agents")]
@@ -106,7 +119,8 @@ pub enum SetupCommand {
         #[command(subcommand)]
         what: AgentsWhat,
     },
-    /// Shell completions for the commands of this binary, to source
+    /// The line a shell's startup file holds to take completions from
+    /// this binary
     Completions { shell: clap_complete::Shell },
     /// Put the latest release in the place of this binary when it is
     /// newer, and bring the completions and the agents up to it
@@ -162,11 +176,15 @@ pub enum ReadCommand {
         regex: bool,
     },
     /// Facts and entries carrying a tag
-    Tag { tag: String },
+    Tag {
+        #[arg(add = complete::tags())]
+        tag: String,
+    },
     /// Every tag, most used first
     Tags,
     /// Facts under a topic, ideas apart
     Facts {
+        #[arg(add = complete::topics())]
         topic: Option<String>,
         /// Also the topics it includes
         #[arg(long)]
@@ -174,6 +192,7 @@ pub enum ReadCommand {
     },
     /// Ideas under a topic
     Ideas {
+        #[arg(add = complete::topics())]
         topic: Option<String>,
         /// Also the topics it includes
         #[arg(long)]
@@ -184,6 +203,7 @@ pub enum ReadCommand {
     /// Where a topic lives on this machine, or every claim here, with a
     /// directory this host lacks marked
     Where {
+        #[arg(add = complete::topics())]
         topic: Option<String>,
         /// Another machine's layout
         #[arg(long)]
@@ -192,13 +212,17 @@ pub enum ReadCommand {
     /// Open work, oldest first, with each item's recheck state
     Followups {
         /// A topic, or an entry slug for the items that arose in it
+        #[arg(add = complete::topics())]
         about: Option<String>,
         /// Closed items too
         #[arg(long)]
         all: bool,
     },
     /// The index a session opens with, for a directory
-    Context { dir: Option<String> },
+    Context {
+        #[arg(value_hint = ValueHint::DirPath)]
+        dir: Option<String>,
+    },
     /// Documents with two current versions
     Forks,
     /// Every rule the store has to keep
@@ -217,7 +241,7 @@ pub enum ReadCommand {
     /// version against its parent. Two ids: between them, earlier first
     Diff {
         #[command(flatten)]
-        first: SlugArg,
+        first: DraftArg,
         other: Option<String>,
     },
     /// Every draft on this machine
@@ -236,17 +260,25 @@ pub enum WriteCommand {
     /// Validate, stamp, hash and store the draft
     Save {
         #[command(flatten)]
-        slug: SlugArg,
+        slug: DraftArg,
         /// Validate only
         #[arg(long)]
         dry_run: bool,
     },
     /// Delete a draft without saving
-    Discard(SlugArg),
+    Discard(DraftArg),
     /// Close a followup as done
-    Done { slug: String, note: Option<String> },
+    Done {
+        #[arg(add = complete::followups())]
+        slug: String,
+        note: Option<String>,
+    },
     /// Close a followup as dropped
-    Drop { slug: String, note: Option<String> },
+    Drop {
+        #[arg(add = complete::followups())]
+        slug: String,
+        note: Option<String>,
+    },
     /// Move the recheck of a followup, fact or idea
     Recheck {
         #[command(flatten)]
@@ -256,7 +288,10 @@ pub enum WriteCommand {
         recheck: Vec<String>,
     },
     /// Record that a fact was confirmed today
-    Verify { slug: String },
+    Verify {
+        #[arg(add = complete::facts())]
+        slug: String,
+    },
     /// Remove a document; its slug is never reused
     Tombstone {
         #[command(flatten)]
@@ -281,8 +316,10 @@ pub enum WriteCommand {
 /// A claim named on the command line.
 #[derive(Args)]
 pub struct ClaimArg {
+    #[arg(add = complete::topics())]
     pub topic: String,
     /// The directory, the working directory when not given
+    #[arg(value_hint = ValueHint::DirPath)]
     pub dir: Option<PathBuf>,
 }
 

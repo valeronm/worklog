@@ -13,9 +13,10 @@ use crate::fs::Agent;
 /// a missing store prints a notice and exits 0, so the `|| true` covers
 /// only a binary that is gone.
 fn command() -> Result<String, Failure> {
-    let exe = std::env::current_exe()
-        .map_err(|e| Failure::Refused(format!("cannot locate this binary: {e}")))?;
-    Ok(format!("\"{}\" context 2>/dev/null || true", exe.display()))
+    Ok(format!(
+        "\"{}\" context 2>/dev/null || true",
+        super::this_binary()?.display()
+    ))
 }
 
 /// The hook entry as a hooks file holds it.

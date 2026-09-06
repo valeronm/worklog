@@ -87,12 +87,17 @@ the files hold. `worklog agents refresh` brings everything this host takes
 from the binary up to the one that runs it, only where it already is: the
 skill describes the commands of the binary it shipped with, the hook names
 the binary's path, which an install to a new place leaves stale, and the
-fish completions are the binary's commands too. The installer and
-`upgrade` run it, so none of these drift from the binary.
+fish completions name the binary's path too. The installer and `upgrade`
+run it, so none of these drift from the binary.
 
-`worklog completions <shell>` prints completions for the commands of the
-binary it runs from, for a shell other than fish to take in the place it
-reads.
+Completions are answered by the binary itself, so what a shell offers is
+read from the store as it stands: topics where a topic is expected, slugs
+where a document is, drafts for `save`, `discard` and `diff`, open
+followups for `done` and `drop`, facts for `verify`, tags for `tag`, and
+directories for `context` and `claim`.
+Free text, a search term or a machine name, gets nothing rather than file
+names. `worklog completions <shell>` prints the line a shell other than
+fish adds to its startup file to take them.
 
 ## Develop
 

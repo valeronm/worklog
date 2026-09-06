@@ -18,7 +18,7 @@ askama = "0.16"
 blake3 = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 clap = { version = "4", features = ["derive"] }
-clap_complete = "4"
+clap_complete = { version = "4", features = ["unstable-dynamic"] }
 directories = "6"
 pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
 regex = "1"
