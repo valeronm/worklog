@@ -11,8 +11,8 @@ use super::shell::Shell;
 /// from the binary.
 ///
 /// `WORKLOG_HOME=<dir>` puts the config, the drafts and the default store
-/// under one directory, which is how a test or a migration dry run keeps
-/// clear of the real ones; the agents' files follow `HOME` as always.
+/// under one directory, which is how a test keeps clear of the real ones;
+/// the agents' files follow `HOME` as always.
 /// `WORKLOG_RELEASES=<dir>` is where `upgrade` reads releases instead of
 /// GitHub, for the same reason.
 #[derive(Clone, Debug, PartialEq, Eq)]

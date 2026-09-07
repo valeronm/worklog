@@ -164,7 +164,9 @@ and a fork report can say what happened.
 | `tombstone` | the head | nothing in the fields; the body is the note alone |
 | `rename` | see below | two versions |
 | `claim`, `unclaim` | the head | `claims` on a machine topic |
-| `migrate` | none | a first version imported from the old store |
+| `migrate` | none | a first version an importer wrote |
+
+No command writes `migrate`; the operation is reserved for an importer.
 
 A `save` whose draft names a parent that is no longer the head is
 refused, so a fork can arise only between two machines that wrote from

@@ -19,7 +19,7 @@ fn columns() -> usize {
 }
 
 /// The headings and the enum whose variants sit under each; a command
-/// from none of them, `serve`, `migrate` or `help`, goes under `Other`.
+/// from none of them, `serve` or `help`, goes under `Other`.
 const GROUPS: &[(&str, Augment)] = &[
     ("Setup", SetupCommand::augment_subcommands),
     ("Reads", ReadCommand::augment_subcommands),

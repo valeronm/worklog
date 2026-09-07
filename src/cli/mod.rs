@@ -18,7 +18,7 @@ use clap::{CommandFactory as _, FromArgMatches as _};
 use serde::Serialize;
 
 use crate::app::write::{Made, NewFollowup};
-use crate::app::{Deps, Failure, migrate, read, slug_arg, usage, write};
+use crate::app::{Deps, Failure, read, slug_arg, usage, write};
 use crate::domain::ports::StoreError;
 use crate::domain::slug::Kind;
 use crate::fs::{FileIdentity, FsDrafts, FsHost, FsStore, FsUsage, Paths, SystemClock};
@@ -323,32 +323,6 @@ fn dispatch_write(deps: &Deps, json: bool, command: WriteCommand) -> Result<Rend
     }
 }
 
-fn migrate_command(
-    deps: &Deps,
-    json: bool,
-    entries: &str,
-    facts: &str,
-) -> Result<Rendered, Failure> {
-    let facts = std::path::Path::new(facts);
-    let out = migrate::migrate(
-        deps,
-        std::path::Path::new(entries),
-        facts,
-        &facts.join("PROJECTS"),
-    )?;
-    rendered(json, &out, || {
-        let mut text = format!(
-            "migrated {} topics, {} facts, {} entries, {} followups\n",
-            out.topics, out.facts, out.entries, out.followups
-        );
-        for note in &out.notes {
-            text.push_str(note);
-            text.push('\n');
-        }
-        text
-    })
-}
-
 /// The command path the log names, matched rather than read off the
 /// arguments, so a command added without a name here does not compile.
 fn command_path(command: &StoreCommand) -> &'static str {
@@ -396,7 +370,6 @@ fn command_path(command: &StoreCommand) -> &'static str {
             WriteCommand::Unclaim(_) => "unclaim",
         },
         StoreCommand::Serve { .. } => "serve",
-        StoreCommand::Migrate { .. } => "migrate",
     }
 }
 
@@ -549,9 +522,6 @@ pub fn run() -> i32 {
                     fail(&e)
                 }
             };
-        }
-        StoreCommand::Migrate { entries, facts } => {
-            migrate_command(&deps, cli.json, &entries, &facts)
         }
     };
     let exit = match &result {

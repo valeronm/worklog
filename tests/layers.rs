@@ -54,10 +54,22 @@ fn the_domain_does_no_io() {
     );
 }
 
-/// A use case reaches the network only through the `Releases` port.
+/// A use case reaches the host only through the ports, so what a command
+/// needs from outside is named in one place and swapped in a test.
 #[test]
-fn the_app_reaches_no_network() {
-    reaches_nothing_in("app", &["std::net", "crate::net", "ureq"]);
+fn the_app_reaches_the_host_only_through_ports() {
+    reaches_nothing_in(
+        "app",
+        &[
+            "std::fs",
+            "std::env",
+            "std::process",
+            "std::net",
+            "crate::fs",
+            "crate::net",
+            "ureq",
+        ],
+    );
 }
 
 /// The pages are a rendering of the reads; what they need from the host

@@ -50,8 +50,9 @@ impl fmt::Display for VersionId {
 }
 
 /// What made the version, so history and a fork report can name it.
-/// `Foreign` is a name outside the list, from a newer worklog; the name
-/// itself is in the block's raw entries.
+/// `Migrate` is what an importer writes, and no command does. `Foreign`
+/// is a name outside the list, from a newer worklog; the name itself is
+/// in the block's raw entries.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Operation {
     New,

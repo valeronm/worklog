@@ -70,7 +70,7 @@ pub fn store_version(
 }
 
 /// A document's first version.
-pub fn first_version(
+fn first_version(
     deps: &Deps,
     slug: Slug,
     operation: Operation,

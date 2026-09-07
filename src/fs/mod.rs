@@ -5,7 +5,6 @@ pub mod binary;
 pub mod clock;
 pub mod config;
 pub mod drafts;
-pub mod legacy;
 pub mod paths;
 pub mod releases;
 pub mod shell;

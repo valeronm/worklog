@@ -85,15 +85,6 @@ pub enum StoreCommand {
         #[arg(long, default_value = "127.0.0.1:8080")]
         bind: String,
     },
-    /// One-time move of the file-per-document store into this empty one
-    Migrate {
-        /// The old worklog directory with its year subdirectories
-        #[arg(long, value_hint = ValueHint::DirPath)]
-        entries: String,
-        /// The old facts directory, holding PROJECTS
-        #[arg(long, value_hint = ValueHint::DirPath)]
-        facts: String,
-    },
 }
 
 /// What runs before a store is opened.

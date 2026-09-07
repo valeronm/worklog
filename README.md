@@ -106,7 +106,6 @@ scenarios over a scratch store. `init` writes `~/.config/worklog/config`,
 the machine name and the store directory, and nothing reads a store before
 it exists. `WORKLOG_HOME=<dir>` points a run at `<dir>/config`,
 `<dir>/drafts` and a default store of `<dir>/store`, which is how the tests
-and a migration dry run keep clear of the real ones. CLAUDE.md holds the
-constraints worth knowing before changing anything; `docs/store.md` is
-the file format, versions and operations, and `docs/documents.md` the
-four kinds and their fields.
+keep clear of the real ones. CLAUDE.md holds the constraints worth knowing
+before changing anything; `docs/store.md` is the file format, versions and
+operations, and `docs/documents.md` the four kinds and their fields.
