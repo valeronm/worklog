@@ -209,7 +209,7 @@ pub enum ReadCommand {
         #[arg(long)]
         machine: Option<String>,
     },
-    /// Open work, oldest first, with each item's recheck state
+    /// Open work, due items first, with each item's recheck state
     Followups {
         /// A topic, or an entry slug for the items that arose in it
         #[arg(add = complete::topics())]

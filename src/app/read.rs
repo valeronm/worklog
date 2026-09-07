@@ -466,9 +466,9 @@ fn fact_item(doc: &Doc<Fact>, recheck: &Recheck, today: &str, topics: &[&str]) -
     }
 }
 
-/// Open followups oldest first, then facts and ideas with a recheck of
-/// their own, for a session about `topics`: an item counts when it is
-/// tagged with one, sits under one, or touches one. No topics means all.
+/// Open followups, then facts and ideas with a recheck of their own, for
+/// a session about `topics`: an item counts when it is tagged with one,
+/// sits under one, or touches one. No topics means all.
 fn open_work(loaded: &Loaded, topics: &[&str], today: &str, closed_too: bool) -> Followups {
     let about = |tags: &[String], home: Option<&str>, recheck: Option<&Recheck>| {
         topics.is_empty()
@@ -497,6 +497,7 @@ fn open_work(loaded: &Loaded, topics: &[&str], today: &str, closed_too: bool) ->
         out.items.push(item);
     }
     out.entries = entries.len();
+    let facts_from = out.items.len();
     for f in &loaded.facts {
         let Some(recheck) = &f.data.recheck else {
             continue;
@@ -505,6 +506,8 @@ fn open_work(loaded: &Loaded, topics: &[&str], today: &str, closed_too: bool) ->
             out.items.push(fact_item(f, recheck, today, topics));
         }
     }
+    out.items[..facts_from].sort_by_key(|i| !i.due);
+    out.items[facts_from..].sort_by_key(|i| !i.due);
     out
 }
 

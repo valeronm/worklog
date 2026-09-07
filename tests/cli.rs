@@ -122,6 +122,10 @@ fn set_summary(text: &str, summary: &str) -> String {
     text.replace("summary:\n", &format!("summary: {summary}\n"))
 }
 
+fn today() -> String {
+    chrono::Local::now().format("%Y-%m-%d").to_string()
+}
+
 fn seeded() -> Scratch {
     let s = Scratch::new();
     s.ok(&["init", "m1"]);
@@ -610,9 +614,59 @@ fn a_shell_completes_slugs_and_topics_but_never_files() {
 }
 
 #[test]
+fn followups_list_what_is_due_before_the_rest() {
+    let s = seeded();
+    s.ok(&[
+        "new",
+        "followup",
+        "aaa-someday",
+        "--entry",
+        "2026-09/2026-09-01-lamp-driver",
+        "--summary",
+        "Swap the driver",
+        "--recheck",
+        "2099-01-01 when revised",
+    ]);
+    s.write(&["new", "fact", "lantern/aaa-relay-timing"], |t| {
+        set_summary(t, "The relay settles in a millisecond")
+    });
+    s.ok(&[
+        "recheck",
+        "lantern/aaa-relay-timing",
+        "2099-01-01",
+        "when revised",
+    ]);
+    s.ok(&[
+        "recheck",
+        "lantern/relay-pin-is-fixed",
+        "2026-01-01",
+        "measured once",
+    ]);
+    let json: serde_json::Value =
+        serde_json::from_str(&s.ok(&["followups", "lantern", "--json"])).expect("json");
+    let slugs: Vec<&str> = json["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["slug"].as_str().unwrap())
+        .collect();
+    let today = today();
+    assert_eq!(
+        slugs,
+        [
+            format!("{today}-port"),
+            format!("{today}-aaa-someday"),
+            "lantern/relay-pin-is-fixed".to_owned(),
+            "lantern/aaa-relay-timing".to_owned(),
+        ],
+        "{json}"
+    );
+}
+
+#[test]
 fn followup_lifecycle_and_check() {
     let s = seeded();
-    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let today = today();
     let slug = format!("{today}-port");
     s.ok(&["recheck", &slug, "touching", "lantern"]);
     let list = s.ok(&["followups", "lantern"]);
