@@ -12,6 +12,7 @@ pub mod upgrade;
 pub use setup::SKILL;
 
 use std::io::Write as _;
+use std::path::{Path, PathBuf};
 
 use clap::{CommandFactory as _, FromArgMatches as _};
 use serde::Serialize;
@@ -54,8 +55,15 @@ fn slug(text: &str, kind: Option<KindArg>) -> Result<crate::domain::slug::Slug, 
 }
 
 /// The path of the binary that runs, for a hook or a shell to call back.
-fn this_binary() -> Result<std::path::PathBuf, Failure> {
-    std::env::current_exe().map_err(|e| Failure::Refused(format!("cannot locate this binary: {e}")))
+/// Under `home` it is spelled `$HOME/...`, for a double-quoted shell
+/// command to expand, so a file that holds it can be shared between hosts.
+fn this_binary(home: &Path) -> Result<PathBuf, Failure> {
+    let exe = std::env::current_exe()
+        .map_err(|e| Failure::Refused(format!("cannot locate this binary: {e}")))?;
+    Ok(match exe.strip_prefix(home) {
+        Ok(rest) => Path::new("$HOME").join(rest),
+        Err(_) => exe,
+    })
 }
 
 /// Colour only on a terminal, and never with `NO_COLOR` set, so a pipe

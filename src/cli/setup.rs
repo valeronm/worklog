@@ -61,9 +61,9 @@ fn line(path: &Path) -> String {
 
 /// Each of the agent operations returns what it touched, one path per
 /// line, which is what the command prints.
-fn install_agent(agent: &Agent) -> Result<String, Failure> {
+fn install_agent(agent: &Agent, binary: &Path) -> Result<String, Failure> {
     let skill = line(&agent.write_skill(SKILL)?);
-    let hooks = if hook::install(agent)? {
+    let hooks = if hook::install(agent, binary)? {
         line(&agent.hooks)
     } else {
         format!(
@@ -87,12 +87,12 @@ fn uninstall_agent(agent: &Agent) -> Result<String, Failure> {
 
 /// Brings what an agent already has up to this binary: the skill's text
 /// and the hook's path.
-fn refresh_agent(agent: &Agent) -> Result<String, Failure> {
+fn refresh_agent(agent: &Agent, binary: &Path) -> Result<String, Failure> {
     let mut written = String::new();
     if agent.read_skill()?.is_some_and(|text| text != SKILL) {
         written.push_str(&line(&agent.write_skill(SKILL)?));
     }
-    if hook::refresh(agent)? {
+    if hook::refresh(agent, binary)? {
         written.push_str(&line(&agent.hooks));
     }
     Ok(written)
@@ -101,16 +101,13 @@ fn refresh_agent(agent: &Agent) -> Result<String, Failure> {
 /// Brings everything on this host that comes from the binary up to it:
 /// each agent's skill and hook, and each present shell's completions.
 pub(super) fn refresh(paths: &Paths) -> Result<String, Failure> {
-    let mut written = each_agent(&paths.agents, refresh_agent)?;
+    let binary = super::this_binary(&paths.home)?;
+    let mut written = each_agent(&paths.agents, |agent| refresh_agent(agent, &binary))?;
     for shell in paths.present_shells() {
-        let file = shell.write_completions(&completions(shell.kind)?)?;
-        written.push_str(&line(&file));
+        let registration = super::complete::registration(shell.kind, &binary)?;
+        written.push_str(&line(&shell.write_completions(&registration)?));
     }
     Ok(written)
-}
-
-fn completions(shell: clap_complete::Shell) -> Result<String, Failure> {
-    super::complete::registration(shell, &super::this_binary()?)
 }
 
 fn each_agent<'a>(
@@ -196,7 +193,8 @@ fn init(
         None => paths.default_store.clone(),
     };
     Config { machine, store }.write(&paths.config)?;
-    Ok(line(&paths.config) + &each_agent(agents, install_agent)?)
+    let binary = super::this_binary(&paths.home)?;
+    Ok(line(&paths.config) + &each_agent(agents, |agent| install_agent(agent, &binary))?)
 }
 
 /// Runs a setup command and returns what it prints.
@@ -218,12 +216,17 @@ pub(super) fn run(paths: &Paths, command: &SetupCommand) -> Result<Rendered, Fai
         }
         SetupCommand::Agents { what } => match what {
             AgentsWhat::Install => {
-                each_agent(any_or_refuse(paths, paths.present_agents())?, install_agent)?
+                let binary = super::this_binary(&paths.home)?;
+                each_agent(any_or_refuse(paths, paths.present_agents())?, |agent| {
+                    install_agent(agent, &binary)
+                })?
             }
             AgentsWhat::Refresh => refresh(paths)?,
             AgentsWhat::Uninstall => each_agent(&paths.agents, uninstall_agent)?,
         },
-        SetupCommand::Completions { shell } => completions(*shell)?,
+        SetupCommand::Completions { shell } => {
+            super::complete::registration(*shell, &super::this_binary(&paths.home)?)?
+        }
     };
     Ok(Rendered { text, exit: 0 })
 }

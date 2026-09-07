@@ -3,6 +3,8 @@
 //! and Codex's `hooks.json` hold hooks in the same shape, so one entry and
 //! one set of edits serve both.
 
+use std::path::Path;
+
 use serde_json::{Map, Value, json};
 
 use crate::app::Failure;
@@ -12,18 +14,15 @@ use crate::fs::Agent;
 /// name, since a hook runs with whatever PATH the agent was started with;
 /// a missing store prints a notice and exits 0, so the `|| true` covers
 /// only a binary that is gone.
-fn command() -> Result<String, Failure> {
-    Ok(format!(
-        "\"{}\" context 2>/dev/null || true",
-        super::this_binary()?.display()
-    ))
+fn command(binary: &Path) -> String {
+    format!("\"{}\" context 2>/dev/null || true", binary.display())
 }
 
 /// The hook entry as a hooks file holds it.
-fn entry() -> Result<Value, Failure> {
-    Ok(json!({
-        "hooks": [{ "type": "command", "command": command()? }]
-    }))
+fn entry(binary: &Path) -> Value {
+    json!({
+        "hooks": [{ "type": "command", "command": command(binary) }]
+    })
 }
 
 /// Whether a command line runs `worklog context`: a `worklog` binary, by
@@ -141,9 +140,8 @@ fn edit(
 
 /// Merges the hook into the agent's hooks file and says whether it was
 /// written.
-pub fn install(agent: &Agent) -> Result<bool, Failure> {
-    let entry = entry()?;
-    edit(agent, |root| merge(root, entry))
+pub fn install(agent: &Agent, binary: &Path) -> Result<bool, Failure> {
+    edit(agent, |root| merge(root, entry(binary)))
 }
 
 /// Takes the hook out of the agent's hooks file and says whether it was
@@ -154,9 +152,8 @@ pub fn uninstall(agent: &Agent) -> Result<bool, Failure> {
 
 /// Brings the hook in the agent's hooks file up to this binary and says
 /// whether it was written.
-pub fn refresh(agent: &Agent) -> Result<bool, Failure> {
-    let entry = entry()?;
-    edit(agent, |root| replace(root, &entry))
+pub fn refresh(agent: &Agent, binary: &Path) -> Result<bool, Failure> {
+    edit(agent, |root| replace(root, &entry(binary)))
 }
 
 #[cfg(test)]

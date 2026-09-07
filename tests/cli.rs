@@ -110,6 +110,9 @@ impl Scratch {
     }
 }
 
+/// A `SessionStart` entry naming a worklog binary that is gone.
+const STALE_HOOK: &str = r#"{"hooks": [{"type": "command", "command": "/gone/worklog context"}]}"#;
+
 /// A field of a `history` or `log` line, which are two spaces apart.
 fn column(line: &str, n: usize) -> &str {
     line.split("  ").nth(n).expect("the column")
@@ -229,6 +232,8 @@ fn agents_install_reaches_the_agents_that_are_present() {
     let again = s.ok(&["agents", "install"]);
     assert!(again.contains("already runs worklog context"), "{again}");
     assert_eq!(fs::read_to_string(&hooks).unwrap(), text);
+    let bin = assert_cmd::cargo::cargo_bin("worklog");
+    assert!(text.contains(&bin.display().to_string()), "{text}");
 }
 
 #[test]
@@ -244,7 +249,9 @@ fn agents_refresh_brings_up_only_what_is_there() {
     let hooks = codex.join("hooks.json");
     fs::write(
         &hooks,
-        r#"{"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "/gone/worklog context"}]}, {"hooks": [{"type": "command", "command": "date"}]}]}}"#,
+        format!(
+            r#"{{"hooks": {{"SessionStart": [{STALE_HOOK}, {{"hooks": [{{"type": "command", "command": "date"}}]}}]}}}}"#
+        ),
     )
     .unwrap();
     let written = s.ok(&["agents", "refresh"]);
@@ -348,6 +355,12 @@ fn upgrade_replaces_the_binary_only_with_a_newer_release() {
     fs::copy(&built, &installed).unwrap();
     let fish = s.home().join(".config/fish/completions");
     fs::create_dir_all(&fish).unwrap();
+    let settings = s.agent_home(".claude").join("settings.json");
+    fs::write(
+        &settings,
+        format!(r#"{{"hooks": {{"SessionStart": [{STALE_HOOK}]}}}}"#),
+    )
+    .unwrap();
     let current = worklog::domain::release::current().to_string();
     let upgrade = |args: &[&str]| {
         let mut command = Command::new(&installed);
@@ -373,8 +386,9 @@ fn upgrade_replaces_the_binary_only_with_a_newer_release() {
     assert_eq!(
         String::from_utf8_lossy(&out.stdout),
         format!(
-            "{}\n{}\n",
+            "{}\n{}\n{}\n",
             installed.display(),
+            settings.display(),
             fish.join("worklog.fish").display()
         )
     );
@@ -384,6 +398,9 @@ fn upgrade_replaces_the_binary_only_with_a_newer_release() {
         "{note}"
     );
     assert!(!prefix.join("worklog.new").exists());
+    let hook = fs::read_to_string(&settings).unwrap();
+    assert!(hook.contains("$HOME/.local/bin/worklog"), "{hook}");
+    assert!(!hook.contains(&s.home().display().to_string()), "{hook}");
 
     published(&releases, &format!("v{current}"), b"", b"");
     let out = upgrade(&["upgrade"]);
