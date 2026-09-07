@@ -1,6 +1,7 @@
-//! The store as read-only pages. A request is one read use case and a
-//! template over its output, nothing kept between requests, so a page
-//! shows what a command run at that moment would.
+//! The store as read-only pages. A request takes one snapshot of the
+//! store and renders a template over the reads a page composes from it,
+//! nothing kept between requests, so a page shows what a command run at
+//! that moment would.
 
 pub mod markdown;
 pub mod pages;
@@ -96,7 +97,7 @@ fn decode(text: &str) -> String {
 pub fn respond(deps: &Deps, target: &str) -> Page {
     let (path, query) = target.split_once('?').unwrap_or((target, ""));
     let query = Query::parse(query);
-    match route(deps, path, &query) {
+    match deps.cached(|deps| route(deps, path, &query)) {
         Ok(html) => Page { status: 200, html },
         Err(problem) => {
             let (status, message) = match problem {
@@ -232,6 +233,7 @@ mod tests {
     use super::*;
     use crate::app::testing::World;
     use crate::app::write;
+    use crate::domain::testing::CountingStore;
 
     fn seeded() -> World {
         let w = World::new("desk");
@@ -350,14 +352,17 @@ mod tests {
         );
     }
 
+    fn version_href(w: &World) -> String {
+        let html = ok(w, "/doc/lantern/relay-pin-is-fixed/history");
+        let start = html.find("href=\"/version/").expect("a version link") + "href=\"".len();
+        let end = html[start..].find('"').unwrap() + start;
+        html[start..end].to_owned()
+    }
+
     #[test]
     fn history_and_version_pages_follow_the_chain() {
         let w = seeded();
-        let html = ok(&w, "/doc/lantern/relay-pin-is-fixed/history");
-        let start = html.find("href=\"/version/").expect("a version link") + "href=\"".len();
-        let end = html[start..].find('"').unwrap() + start;
-        let href = html[start..end].to_owned();
-        let html = ok(&w, &href);
+        let html = ok(&w, &version_href(&w));
         assert!(
             html.contains("class=\"added\""),
             "a first version is all additions: {html}"
@@ -380,6 +385,21 @@ mod tests {
         assert!(ok(&w, "/log").contains("lantern/relay-pin-is-fixed"));
         assert!(ok(&w, "/check").contains("documents"));
         assert!(ok(&w, "/forks").contains("fork"));
+    }
+
+    #[test]
+    fn a_page_built_from_several_reads_asks_the_store_each_thing_once() {
+        let w = seeded();
+        let version = version_href(&w);
+        for target in ["/", "/topic/lantern", version.as_str()] {
+            let counting = CountingStore::over(&w.store);
+            let deps = Deps {
+                store: &counting,
+                ..w.deps()
+            };
+            assert_eq!(respond(&deps, target).status, 200);
+            assert_eq!(counting.repeated(), Vec::<String>::new(), "{target}");
+        }
     }
 
     #[test]

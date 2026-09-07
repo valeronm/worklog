@@ -1,6 +1,7 @@
 //! One use case per command, over the ports the domain declares. A use
 //! case returns a typed output and never prints.
 
+mod cache;
 pub mod load;
 pub mod migrate;
 pub mod output;

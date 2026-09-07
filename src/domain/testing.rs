@@ -60,6 +60,57 @@ impl Store for MemoryStore {
     }
 }
 
+pub struct CountingStore<'a> {
+    inner: &'a dyn Store,
+    asked: RefCell<BTreeMap<String, usize>>,
+}
+
+impl<'a> CountingStore<'a> {
+    #[must_use]
+    pub fn over(store: &'a dyn Store) -> CountingStore<'a> {
+        CountingStore {
+            inner: store,
+            asked: RefCell::default(),
+        }
+    }
+
+    fn note(&self, question: String) {
+        *self.asked.borrow_mut().entry(question).or_default() += 1;
+    }
+
+    /// Every question the store was asked more than once.
+    #[must_use]
+    pub fn repeated(&self) -> Vec<String> {
+        self.asked
+            .borrow()
+            .iter()
+            .filter(|(_, times)| **times > 1)
+            .map(|(question, _)| question.clone())
+            .collect()
+    }
+}
+
+impl Store for CountingStore<'_> {
+    fn slugs(&self, kind: Kind) -> Result<Vec<Slug>, StoreError> {
+        self.note(format!("the {kind} slugs"));
+        self.inner.slugs(kind)
+    }
+
+    fn document(&self, slug: &Slug) -> Result<Document, StoreError> {
+        self.note(format!("document {slug}"));
+        self.inner.document(slug)
+    }
+
+    fn by_id_prefix(&self, prefix: &str) -> Result<Vec<(Slug, VersionId)>, StoreError> {
+        self.note(format!("versions under {prefix}"));
+        self.inner.by_id_prefix(prefix)
+    }
+
+    fn put(&self, version: &Version) -> Result<(), StoreError> {
+        self.inner.put(version)
+    }
+}
+
 #[derive(Default)]
 pub struct MemoryDrafts {
     drafts: RefCell<BTreeMap<Slug, Draft>>,

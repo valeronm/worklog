@@ -14,12 +14,12 @@ case per command over the ports and never prints. `fs` implements the ports
 on a directory tree, and `net` the one port that reaches the network, the
 releases `upgrade` reads; `WORKLOG_RELEASES=<dir>` swaps in the `fs`
 implementation so no test touches it. `cli` parses arguments and renders.
-`web` is a second renderer over the reads, one request being one use
-case, and the layer test keeps it from reaching `fs` or `net`: a page
-that needs data no read returns
-gets a read use case, which `--json` then has too, never logic in a
-handler. A use case that wants something new from outside adds it to a
-port, not to a parameter.
+`web` is a second renderer over the reads, one request being one snapshot of
+the store, since every read loads all of it and a page composes several, and
+the layer test keeps it from reaching `fs` or `net`: a page that needs data
+no read returns gets a read use case, which `--json` then has too, never
+logic in a handler. A use case that wants something new from outside adds it
+to a port, not to a parameter.
 
 ## The store's invariants
 
