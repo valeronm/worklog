@@ -295,11 +295,7 @@ pub fn save(deps: &Deps, slug: &Slug, dry_run: bool) -> Result<Written, Failure>
         return Err(Failure::at(slug, "conflict markers remain in the draft"));
     }
     let document = deps.store.document(slug)?;
-    let heads: Vec<&Version> = match document.state() {
-        State::Absent => vec![],
-        State::Live(v) | State::Tombstoned(v) => vec![v],
-        State::Forked(heads) => heads,
-    };
+    let heads = document.heads();
     heads.iter().try_for_each(|h| load::refuse_foreign(h))?;
     let operation = match (draft.parents.len(), heads.len()) {
         (0, 0) => Operation::New,
@@ -502,11 +498,18 @@ fn reclaim(
         load::live(deps.store, &Slug::of_kind(Kind::Topic, topic)?)?;
     }
     let name = machine(deps)?;
-    let mut doc = load::machine_topic(&topics, name.as_str())?.clone();
-    change(&mut doc.data, &graph::contract(path, &deps.home))
+    let doc = load::machine_topic(&topics, name.as_str())?;
+    let mut claims = doc.data.clone();
+    change(&mut claims, &graph::contract(path, &deps.home))
         .map_err(|e| Failure::at(&doc.slug, e))?;
-    let body = std::mem::take(&mut doc.version.body);
-    amend(deps, &doc.version, operation, doc.data.to_fields(), body)
+    let version = &doc.version;
+    amend(
+        deps,
+        version,
+        operation,
+        claims.to_fields(),
+        version.body.clone(),
+    )
 }
 
 /// Claims a directory for a topic on this machine.

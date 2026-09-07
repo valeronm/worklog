@@ -15,7 +15,7 @@ use crate::domain::version::{Document, State, Tombstone, Version, VersionId};
 
 use super::{Deps, Failure};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct Doc<T> {
     pub slug: Slug,
     pub version: Version,
@@ -213,7 +213,7 @@ pub fn named(deps: &Deps, text: &str, kind: Option<Kind>) -> Result<Named, Failu
     let document = match super::slug_arg(text, kind) {
         Ok(slug) => {
             let document = deps.store.document(&slug)?;
-            let named = !document.versions.is_empty() || deps.drafts.read(&slug)?.is_some();
+            let named = !document.is_empty() || deps.drafts.read(&slug)?.is_some();
             named.then_some((slug, document))
         }
         Err(e) if found.is_none() => return Err(e),
@@ -269,7 +269,7 @@ fn load_kind<T>(
             State::Absent => continue,
             State::Live(v) => v.id.clone(),
         };
-        let Some(version) = document.versions.into_iter().find(|v| v.id == head) else {
+        let Some(version) = document.take(&head) else {
             continue;
         };
         loaded.present.insert(slug.clone());

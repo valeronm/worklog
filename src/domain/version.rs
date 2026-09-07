@@ -467,7 +467,7 @@ impl Version {
 /// Every version of one slug.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Document {
-    pub versions: Vec<Version>,
+    versions: Vec<Version>,
 }
 
 /// What a document is right now.
@@ -485,6 +485,19 @@ impl Document {
     #[must_use]
     pub fn new(versions: Vec<Version>) -> Document {
         Document { versions }
+    }
+
+    /// True for a slug the store never held.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.versions.is_empty()
+    }
+
+    /// The version out of the document rather than a copy of it.
+    #[must_use]
+    pub fn take(mut self, id: &VersionId) -> Option<Version> {
+        let at = self.versions.iter().position(|v| &v.id == id)?;
+        Some(self.versions.swap_remove(at))
     }
 
     #[must_use]

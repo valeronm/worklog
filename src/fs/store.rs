@@ -217,7 +217,7 @@ mod tests {
         assert_eq!(store.slugs(Kind::Entry).unwrap(), vec![entry.slug.clone()]);
         assert_eq!(store.slugs(Kind::Fact).unwrap(), vec![]);
         let doc = store.document(&entry.slug).unwrap();
-        assert_eq!(doc.versions, vec![entry.clone()]);
+        assert_eq!(doc.history(), vec![&entry]);
         assert!(
             dir.path()
                 .join("entry/2026-09/2026-09-04-x")
@@ -266,6 +266,6 @@ mod tests {
         store.put(&fact).unwrap();
         let hits = store.by_id_prefix(&fact.id.as_str()[..12]).unwrap();
         assert_eq!(hits, [(fact.slug.clone(), fact.id.clone())]);
-        assert_eq!(store.document(&fact.slug).unwrap().versions, [fact]);
+        assert_eq!(store.document(&fact.slug).unwrap().history(), vec![&fact]);
     }
 }

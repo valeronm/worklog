@@ -162,7 +162,7 @@ pub fn show(deps: &Deps, name: &str, kind: Option<Kind>) -> Result<Shown, Failur
 /// every document it was moved from.
 pub fn history(deps: &Deps, slug: &Slug) -> Result<History, Failure> {
     let document = deps.store.document(slug)?;
-    if document.versions.is_empty() {
+    if document.is_empty() {
         return Err(Failure::Refused(format!("no {}: {slug}", slug.kind())));
     }
     let (_, mut document) = load::follow(deps.store, slug.clone(), document)?;

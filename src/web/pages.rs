@@ -355,7 +355,6 @@ impl Section {
     }
 }
 
-/// A section's link on a topic page, with how many rows it holds.
 pub struct Tab {
     pub name: &'static str,
     pub href: String,
