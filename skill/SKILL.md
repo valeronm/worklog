@@ -248,5 +248,9 @@ writing from the same parent before syncing. `worklog forks` lists them,
 every read shows both heads, and `worklog resolve <slug>` opens a draft
 holding both for a person to reconcile and save. Nothing merges on its own.
 
-`worklog drafts` lists drafts left open on this machine; a stale one is
-finished or discarded, never left to surprise the next session.
+`worklog drafts` lists drafts open on this machine, this session's and
+any other's: sessions run side by side, and a draft is the session's that
+opened it. Save or discard only a draft this session opened. Report the
+rest and leave them; one that is plainly abandoned is put to the user,
+who says whether it is finished or dropped, never decided by the session
+that found it.
