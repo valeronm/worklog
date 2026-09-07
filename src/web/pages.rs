@@ -3,6 +3,7 @@
 
 use askama::Template;
 
+use crate::app::Failure;
 use crate::app::output::{
     Check, Diff, FactListing, FollowupItem, Followups, Forks, Head, History, Listing, Log, Problem,
     Row, Search, Shown, Stamp, Tagged, Tags, Topics, short,
@@ -307,6 +308,61 @@ impl Home {
     }
 }
 
+/// One of the listings a topic page shows one at a time.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Section {
+    Open,
+    Facts,
+    Ideas,
+    Entries,
+}
+
+impl Section {
+    const ALL: [Section; 4] = [
+        Section::Open,
+        Section::Facts,
+        Section::Ideas,
+        Section::Entries,
+    ];
+
+    /// The section a `show` query names, the open work when it names none.
+    pub fn parse(show: Option<&str>) -> Result<Section, Failure> {
+        let Some(show) = show else {
+            return Ok(Section::Open);
+        };
+        Section::ALL
+            .into_iter()
+            .find(|s| s.key() == show)
+            .ok_or_else(|| Failure::Usage(format!("show names no section: {show}")))
+    }
+
+    fn key(self) -> &'static str {
+        match self {
+            Section::Open => "open",
+            Section::Facts => "facts",
+            Section::Ideas => "ideas",
+            Section::Entries => "entries",
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Section::Open => "Open",
+            Section::Facts => "Facts",
+            Section::Ideas => "Ideas",
+            Section::Entries => "Entries",
+        }
+    }
+}
+
+/// A section's link on a topic page, with how many rows it holds.
+pub struct Tab {
+    pub name: &'static str,
+    pub href: String,
+    pub count: usize,
+    pub current: bool,
+}
+
 #[derive(Template)]
 #[template(path = "topic.html")]
 pub struct TopicPage {
@@ -315,31 +371,60 @@ pub struct TopicPage {
     pub summary: String,
     pub heads: Vec<HeadView>,
     pub history: Option<String>,
-    pub facts: Vec<Item>,
-    pub ideas: Vec<Item>,
-    pub entries: Vec<Item>,
+    pub section: Section,
+    pub tabs: Vec<Tab>,
     pub open: Vec<Open>,
+    pub rows: Vec<Item>,
 }
 
 impl TopicPage {
     #[must_use]
-    pub fn new(shown: &Shown, facts: &FactListing, tagged: &Tagged, open: &Followups) -> TopicPage {
+    pub fn new(
+        shown: &Shown,
+        facts: &FactListing,
+        tagged: &Tagged,
+        open: &Followups,
+        section: Section,
+    ) -> TopicPage {
         let heads: Vec<HeadView> = shown.heads.iter().map(HeadView::from).collect();
+        let entries = tagged.rows.iter().filter(|r| r.kind == Kind::Entry.dir());
+        let count = |s| match s {
+            Section::Open => open.items.len(),
+            Section::Facts => facts.facts.len(),
+            Section::Ideas => facts.ideas.len(),
+            Section::Entries => entries.clone().count(),
+        };
+        let href = |s| match s {
+            Section::Open => format!("/topic/{}", shown.slug),
+            _ => format!("/topic/{}?show={}", shown.slug, s.key()),
+        };
+        let rows = match section {
+            Section::Open => Vec::new(),
+            Section::Facts => items(&facts.facts),
+            Section::Ideas => items(&facts.ideas),
+            Section::Entries => entries.clone().map(Item::from).collect(),
+        };
         TopicPage {
             name: shown.slug.clone(),
             name_link: Link::plain(&shown.slug),
             summary: summary_of(&heads),
             heads,
             history: Some(history_href(&shown.slug)),
-            facts: items(&facts.facts),
-            ideas: items(&facts.ideas),
-            entries: tagged
-                .rows
-                .iter()
-                .filter(|r| r.kind == Kind::Entry.dir())
-                .map(Item::from)
+            section,
+            tabs: Section::ALL
+                .into_iter()
+                .map(|s| Tab {
+                    name: s.name(),
+                    href: href(s),
+                    count: count(s),
+                    current: s == section,
+                })
                 .collect(),
-            open: opens(&open.items),
+            open: match section {
+                Section::Open => opens(&open.items),
+                _ => Vec::new(),
+            },
+            rows,
         }
     }
 }

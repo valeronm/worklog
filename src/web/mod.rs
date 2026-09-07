@@ -13,7 +13,7 @@ use crate::domain::slug::{Kind, Slug};
 
 use pages::{
     CheckPage, DocPage, ErrorPage, FactsPage, FollowupsPage, ForksPage, HistoryPage, Home,
-    ListingPage, LogPage, SearchPage, TagsPage, TopicPage, VersionPage,
+    ListingPage, LogPage, SearchPage, Section, TagsPage, TopicPage, VersionPage,
 };
 
 pub struct Page {
@@ -114,7 +114,7 @@ pub fn respond(deps: &Deps, target: &str) -> Page {
 fn route(deps: &Deps, path: &str, query: &Query) -> Result<String, Problem> {
     let path = path.trim_end_matches('/');
     if let Some(name) = path.strip_prefix("/topic/") {
-        return topic(deps, name);
+        return topic(deps, name, query.get("show"));
     }
     if let Some(tag) = path.strip_prefix("/tag/") {
         return Ok(ListingPage::tagged(tag, &read::tag(deps, tag)?).render()?);
@@ -161,12 +161,13 @@ fn home(deps: &Deps) -> Result<String, Problem> {
     Ok(Home::new(&topics, &open, &forks).render()?)
 }
 
-fn topic(deps: &Deps, name: &str) -> Result<String, Problem> {
+fn topic(deps: &Deps, name: &str, show: Option<&str>) -> Result<String, Problem> {
+    let section = Section::parse(show)?;
     let shown = read::show(deps, name, Some(Kind::Topic))?;
     let facts = read::facts(deps, Some(name), false)?;
     let tagged = read::tag(deps, name)?;
     let open = read::followups(deps, Some(name), false)?;
-    Ok(TopicPage::new(&shown, &facts, &tagged, &open).render()?)
+    Ok(TopicPage::new(&shown, &facts, &tagged, &open, section).render()?)
 }
 
 fn version(deps: &Deps, id: &str) -> Result<String, Problem> {
@@ -304,18 +305,31 @@ mod tests {
     }
 
     #[test]
-    fn a_topic_page_shows_its_facts_entries_and_open_work() {
+    fn a_topic_page_shows_its_open_work_and_one_section_at_a_time() {
         let w = seeded();
         let html = ok(&w, "/topic/lantern");
-        assert!(html.contains("The relay pin is fixed on the board"));
-        assert!(html.contains("href=\"/doc/lantern/relay-pin-is-fixed\""));
-        assert!(html.contains("Wired the lamp driver"));
-        assert!(html.contains("href=\"/doc/2026-09/2026-09-01-lamp-driver\""));
         assert!(html.contains("Add the second relay"));
         assert!(
             html.contains("What to know first"),
             "the body renders: {html}"
         );
+        assert!(
+            html.contains("href=\"/topic/lantern?show=entries\">Entries <span class=\"label\">1<"),
+            "the tab counts: {html}"
+        );
+        assert!(
+            !html.contains("The relay pin is fixed on the board"),
+            "facts wait for their tab: {html}"
+        );
+        let html = ok(&w, "/topic/lantern?show=facts");
+        assert!(html.contains("The relay pin is fixed on the board"));
+        assert!(html.contains("href=\"/doc/lantern/relay-pin-is-fixed\""));
+        assert!(!html.contains("Add the second relay"));
+        let html = ok(&w, "/topic/lantern?show=entries");
+        assert!(html.contains("Wired the lamp driver"));
+        assert!(html.contains("href=\"/doc/2026-09/2026-09-01-lamp-driver\""));
+        assert!(!html.contains("The relay pin is fixed on the board"));
+        assert_eq!(page(&w, "/topic/lantern?show=tags").status, 400);
     }
 
     #[test]

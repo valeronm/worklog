@@ -23,9 +23,11 @@
 </ul>
 {% endmacro %}
 
+{% macro ideas_heading() %}Ideas — unbuilt, kept with their settled design{% endmacro %}
+
 {% macro ideas(rows) %}
 {% if !rows.is_empty() %}
-<h2>Ideas — unbuilt, kept with their settled design</h2>
+<h2>{% call ideas_heading() %}{% endcall %}</h2>
 {% call items(rows) %}{% endcall %}
 {% endif %}
 {% endmacro %}

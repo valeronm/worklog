@@ -6,17 +6,17 @@
 <h1>{{ summary|safe }}</h1>
 {% call m::meta("topic", name_link, history) %}{% endcall %}
 {% for h in heads %}{% call m::head(h) %}{% endcall %}{% endfor %}
+<p class="tabs">{% for t in tabs %}<a href="{{ t.href }}"{% if t.current %} aria-current="page"{% endif %}>{{ t.name }} <span class="label">{{ t.count }}</span></a>{% endfor %}</p>
+{% if section == Section::Ideas %}
+<h2>{% call m::ideas_heading() %}{% endcall %}</h2>
+{% else %}
+<h2>{{ section.name() }}</h2>
+{% endif %}
 {% if !open.is_empty() %}
-<h2>Open</h2>
 {% call m::open(open) %}{% endcall %}
-{% endif %}
-{% if !facts.is_empty() %}
-<h2>Facts</h2>
-{% call m::items(facts) %}{% endcall %}
-{% endif %}
-{% call m::ideas(ideas) %}{% endcall %}
-{% if !entries.is_empty() %}
-<h2>Entries</h2>
-{% call m::items(entries) %}{% endcall %}
+{% else if !rows.is_empty() %}
+{% call m::items(rows) %}{% endcall %}
+{% else %}
+<p class="muted">None.</p>
 {% endif %}
 {% endblock %}
