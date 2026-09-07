@@ -4,17 +4,16 @@
 use std::fs;
 use std::path::Path;
 
-fn sources(dir: &Path, found: &mut Vec<(String, String)>) {
-    for entry in fs::read_dir(dir).expect("readable source directory") {
-        let path = entry.expect("readable entry").path();
-        if path.is_dir() {
-            sources(&path, found);
-        } else if path.extension().is_some_and(|e| e == "rs") {
-            found.push((
-                path.display().to_string(),
-                fs::read_to_string(&path).expect("readable source"),
-            ));
+fn sources(path: &Path, found: &mut Vec<(String, String)>) {
+    if path.is_dir() {
+        for entry in fs::read_dir(path).expect("readable source directory") {
+            sources(&entry.expect("readable entry").path(), found);
         }
+    } else if path.extension().is_some_and(|e| e == "rs") {
+        found.push((
+            path.display().to_string(),
+            fs::read_to_string(path).expect("readable source"),
+        ));
     }
 }
 
@@ -52,6 +51,17 @@ fn the_domain_does_no_io() {
             "ureq",
         ],
     );
+}
+
+/// A version's fields are opaque to whatever stores, chains and drafts it,
+/// so a kind can gain a field without the store changing; the two meet
+/// only in `app`.
+#[test]
+fn the_store_reads_no_kind() {
+    let kinds = ["::entry", "::fact", "::topic", "::followup", "kind_keys"];
+    for layer in ["domain/version.rs", "domain/draft.rs", "fs"] {
+        reaches_nothing_in(layer, &kinds);
+    }
 }
 
 /// A use case reaches the host only through the ports, so what a command
