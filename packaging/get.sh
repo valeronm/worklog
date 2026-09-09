@@ -7,6 +7,18 @@ set -eu
 repo="valeronm/worklog"
 prefix="${PREFIX:-$HOME/.local/bin}"
 
+command -v curl >/dev/null 2>&1 || { echo "get.sh: curl is required" >&2; exit 1; }
+
+# Linux ships coreutils' sha256sum and often no shasum, macOS the reverse.
+if command -v sha256sum >/dev/null 2>&1; then
+  verify_checksum() { sha256sum -c "$1"; }
+elif command -v shasum >/dev/null 2>&1; then
+  verify_checksum() { shasum -a 256 -c "$1"; }
+else
+  echo "get.sh: sha256sum or shasum is required" >&2
+  exit 1
+fi
+
 case "$(uname -s)-$(uname -m)" in
   Linux-x86_64) asset="worklog-x86_64-linux" ;;
   Linux-aarch64) asset="worklog-aarch64-linux" ;;
@@ -25,18 +37,6 @@ if [ -z "$tag" ]; then
   exit 1
 fi
 base="https://github.com/$repo/releases/download/$tag"
-
-# Linux ships coreutils' sha256sum and often no shasum, macOS the reverse.
-verify_checksum() {
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum -c "$1"
-  elif command -v shasum >/dev/null 2>&1; then
-    shasum -a 256 -c "$1"
-  else
-    echo "get.sh: no sha256sum or shasum to verify the download with" >&2
-    exit 1
-  fi
-}
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
