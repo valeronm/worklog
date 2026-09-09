@@ -26,11 +26,23 @@ if [ -z "$tag" ]; then
 fi
 base="https://github.com/$repo/releases/download/$tag"
 
+# Linux ships coreutils' sha256sum and often no shasum, macOS the reverse.
+verify_checksum() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum -c "$1"
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 -c "$1"
+  else
+    echo "get.sh: no sha256sum or shasum to verify the download with" >&2
+    exit 1
+  fi
+}
+
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 curl -fsSL -o "$tmp/$asset" "$base/$asset"
 curl -fsSL -o "$tmp/$asset.sha256" "$base/$asset.sha256"
-(cd "$tmp" && shasum -a 256 -c "$asset.sha256" >/dev/null)
+(cd "$tmp" && verify_checksum "$asset.sha256" >/dev/null)
 
 mkdir -p "$prefix"
 install -m 0755 "$tmp/$asset" "$prefix/worklog"
