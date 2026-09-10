@@ -62,7 +62,7 @@ fn stamp(version: &Version) -> Stamp {
         id: version.id.to_string(),
         written: version.block.written.clone(),
         machine: version.block.machine.to_string(),
-        operation: version.operation_name().to_owned(),
+        operation: version.block.operation.clone(),
     }
 }
 
@@ -1095,8 +1095,8 @@ mod tests {
 
     #[test]
     fn check_lists_a_linked_tombstone_that_says_nothing() {
+        use crate::app::operation::Operation;
         use crate::domain::ports::Store;
-        use crate::domain::version::Operation;
         let w = World::new("m1");
         let d = w.deps();
         write::put_topic(&d, "lantern", "A lamp", &[], None).unwrap();

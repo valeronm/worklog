@@ -197,8 +197,9 @@ field on a kind. A binary meeting one it does not know still reads the
 version, keeping the block as written so the bytes still hash; `show`,
 `history` and `check` note it, and a write that would follow it is
 refused, so the machine that cannot read the grammar never writes over
-it. An unknown operation reads as a live head, since the reader cannot
-tell whether it ended the document.
+it. Only `tombstone` and `rename` are interpreted; every other operation
+is carried as a name, and an unknown one reads as a live head, since the
+reader cannot tell whether it ended the document.
 
 Anything else, a new envelope key, a new kind, a new slug shape, needs
 every machine sharing the store upgraded before the first write.

@@ -11,11 +11,10 @@ use crate::domain::kind_keys;
 use crate::domain::recheck::Recheck;
 use crate::domain::slug::{Kind, Slug};
 use crate::domain::topic::{ClaimError, Topic};
-use crate::domain::version::{
-    Operation, State, Version, VersionBlock, VersionId, note_body, with_note,
-};
+use crate::domain::version::{State, Version, VersionBlock, VersionId, note_body, with_note};
 
 use super::load;
+use super::operation::Operation;
 use super::output::{DraftList, DraftRef, Written};
 use super::{Deps, Failure, machine, slug_arg};
 
@@ -59,7 +58,7 @@ pub fn store_version(
         parents,
         written: deps.clock.now(),
         machine: machine(deps)?,
-        operation,
+        operation: operation.as_str().to_owned(),
         superseded_by,
         renamed_from,
         raw: None,
@@ -773,7 +772,7 @@ mod tests {
         assert_ne!(first.id, second.id);
         let head = current(&w, &slug);
         assert_eq!(head.id.to_string(), second.id);
-        assert_eq!(head.block.operation, Operation::Save);
+        assert_eq!(head.block.operation, "save");
     }
 
     #[test]
@@ -831,7 +830,7 @@ mod tests {
         let resolved = save(&d, &slug, false).unwrap();
         let head = current(&w, &slug);
         assert_eq!(head.id.to_string(), resolved.id);
-        assert_eq!(head.block.operation, Operation::Resolve);
+        assert_eq!(head.block.operation, "resolve");
     }
 
     #[test]
@@ -869,7 +868,7 @@ mod tests {
         );
         let head = current(&w, &slug);
         assert!(head.body.contains("dissolved by"));
-        assert_eq!(head.block.operation, Operation::Done);
+        assert_eq!(head.block.operation, "done");
         let fact = Slug::parse("lantern/relay").unwrap();
         put_fact(
             &d,
@@ -932,7 +931,7 @@ mod tests {
         );
         claim(&d, "lantern", dir).unwrap();
         let desk = current(&w, &Slug::parse("desk").unwrap());
-        assert_eq!(desk.block.operation, Operation::Claim);
+        assert_eq!(desk.block.operation, "claim");
         let topic = Topic::from_fields(&desk.fields).unwrap();
         assert_eq!(
             topic.claims[0].1,

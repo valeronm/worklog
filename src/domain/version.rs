@@ -49,80 +49,17 @@ impl fmt::Display for VersionId {
     }
 }
 
-/// What made the version, so history and a fork report can name it.
-/// `Migrate` is what an importer writes, and no command does. `Foreign`
-/// is a name outside the list, from a newer worklog; the name itself is
-/// in the block's raw entries.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Operation {
-    New,
-    Save,
-    Done,
-    Drop,
-    Recheck,
-    Verify,
-    Tombstone,
-    Rename,
-    Resolve,
-    Claim,
-    Unclaim,
-    Migrate,
-    Foreign,
-}
-
-impl Operation {
-    pub const ALL: [Operation; 12] = [
-        Operation::New,
-        Operation::Save,
-        Operation::Done,
-        Operation::Drop,
-        Operation::Recheck,
-        Operation::Verify,
-        Operation::Tombstone,
-        Operation::Rename,
-        Operation::Resolve,
-        Operation::Claim,
-        Operation::Unclaim,
-        Operation::Migrate,
-    ];
-
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Operation::New => "new",
-            Operation::Save => "save",
-            Operation::Done => "done",
-            Operation::Drop => "drop",
-            Operation::Recheck => "recheck",
-            Operation::Verify => "verify",
-            Operation::Tombstone => "tombstone",
-            Operation::Rename => "rename",
-            Operation::Resolve => "resolve",
-            Operation::Claim => "claim",
-            Operation::Unclaim => "unclaim",
-            Operation::Migrate => "migrate",
-            Operation::Foreign => "foreign",
-        }
-    }
-
-    #[must_use]
-    pub fn parse(text: &str) -> Option<Operation> {
-        Operation::ALL.into_iter().find(|op| op.as_str() == text)
-    }
-}
-
-impl fmt::Display for Operation {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
+/// The two operation names the chain itself reads.
+pub const TOMBSTONE: &str = "tombstone";
+pub const RENAME: &str = "rename";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VersionBlock {
     pub parents: Vec<VersionId>,
     pub written: String,
     pub machine: MachineName,
-    pub operation: Operation,
+    /// The command that wrote the version, as the file names it.
+    pub operation: String,
     /// The new slug, on the tombstone a rename leaves behind.
     pub superseded_by: Option<Slug>,
     /// The old slug, on the first version a rename writes at the new one.
@@ -286,7 +223,7 @@ impl VersionBlock {
             ),
             (
                 "operation".to_owned(),
-                Value::Scalar(self.operation.as_str().to_owned()),
+                Value::Scalar(self.operation.clone()),
             ),
         ];
         if let Some(slug) = &self.superseded_by {
@@ -312,7 +249,6 @@ impl VersionBlock {
         let operation = sub
             .required("operation")
             .map_err(|_| FieldError::Missing("version.operation"))?;
-        let operation = Operation::parse(operation).unwrap_or(Operation::Foreign);
         let superseded_by = sub
             .optional("superseded_by")
             .map(Slug::parse)
@@ -327,14 +263,13 @@ impl VersionBlock {
             parents,
             written: written.to_owned(),
             machine,
-            operation,
+            operation: operation.to_owned(),
             superseded_by,
             renamed_from,
-            raw: (operation == Operation::Foreign
-                || entries
-                    .iter()
-                    .any(|(key, _)| !Self::KNOWN.contains(&key.as_str())))
-            .then(|| entries.to_vec()),
+            raw: entries
+                .iter()
+                .any(|(key, _)| !Self::KNOWN.contains(&key.as_str()))
+                .then(|| entries.to_vec()),
         })
     }
 }
@@ -402,45 +337,25 @@ impl Version {
         Ok(version)
     }
 
-    /// A foreign operation reads as a live head even if it ended the
-    /// document under a newer grammar.
+    /// A head carrying `TOMBSTONE`, or `RENAME` with a successor, ended
+    /// the document; an operation from a newer grammar reads as live even
+    /// if it ended the document there.
     #[must_use]
     pub fn is_tombstone(&self) -> bool {
-        match self.block.operation {
-            Operation::Tombstone => true,
-            Operation::Rename => self.block.superseded_by.is_some(),
-            _ => false,
-        }
+        self.block.operation == TOMBSTONE
+            || (self.block.operation == RENAME && self.block.superseded_by.is_some())
     }
 
-    /// What in the version block this worklog does not know, when a newer
-    /// one wrote it; the version reads but cannot be amended.
+    /// The key in the version block this worklog does not know, when a
+    /// newer one wrote it; the version reads but cannot be amended.
     #[must_use]
-    pub fn foreign_grammar(&self) -> Option<String> {
-        let raw = self.block.raw.as_ref()?;
-        if let Some((key, _)) = raw
+    pub fn foreign_key(&self) -> Option<&str> {
+        self.block
+            .raw
+            .as_ref()?
             .iter()
-            .find(|(key, _)| !VersionBlock::KNOWN.contains(&key.as_str()))
-        {
-            return Some(format!("version field `{key}`"));
-        }
-        Some(format!("operation `{}`", self.operation_name()))
-    }
-
-    /// The operation as the file names it, whether or not this worklog
-    /// knows it.
-    #[must_use]
-    pub fn operation_name(&self) -> &str {
-        match (self.block.operation, &self.block.raw) {
-            (Operation::Foreign, Some(raw)) => raw
-                .iter()
-                .find_map(|(key, value)| match (key.as_str(), value) {
-                    ("operation", Value::Scalar(name)) => Some(name.as_str()),
-                    _ => None,
-                })
-                .unwrap_or("foreign"),
-            (operation, _) => operation.as_str(),
-        }
+            .map(|(key, _)| key.as_str())
+            .find(|key| !VersionBlock::KNOWN.contains(key))
     }
 
     /// The body as a note: what a tombstone says about why, or nothing.
@@ -454,7 +369,7 @@ impl Version {
     /// predecessor.
     #[must_use]
     pub fn rename_sides(&self) -> Option<(&Slug, &Slug)> {
-        if self.block.operation != Operation::Rename {
+        if self.block.operation != RENAME {
             return None;
         }
         if let Some(to) = &self.block.superseded_by {
@@ -599,19 +514,19 @@ impl Document {
 mod tests {
     use super::*;
 
-    fn block(parents: &[&VersionId], op: Operation) -> VersionBlock {
+    fn block(parents: &[&VersionId], op: &str) -> VersionBlock {
         VersionBlock {
             parents: parents.iter().map(|p| (*p).clone()).collect(),
             written: "2026-09-04T10:00:00+01:00".into(),
             machine: MachineName::parse("m1").unwrap(),
-            operation: op,
+            operation: op.to_owned(),
             superseded_by: None,
             renamed_from: None,
             raw: None,
         }
     }
 
-    fn topic(name: &str, body: &str, parents: &[&VersionId], op: Operation) -> Version {
+    fn topic(name: &str, body: &str, parents: &[&VersionId], op: &str) -> Version {
         let mut fields = Fields::default();
         fields.push_scalar("summary", "a topic");
         Version::compose(
@@ -624,7 +539,7 @@ mod tests {
 
     #[test]
     fn text_round_trips_and_names_itself() {
-        let v = topic("lantern", "\nbody\n", &[], Operation::New);
+        let v = topic("lantern", "\nbody\n", &[], "new");
         let text = v.to_text();
         assert!(text.starts_with(
             "---\nslug: lantern\nkind: topic\nsummary: a topic\nversion:\n  parents: []\n"
@@ -634,44 +549,56 @@ mod tests {
 
     #[test]
     fn unknown_grammar_reads_and_re_emits_as_written() {
-        let v = topic("lantern", "\nbody\n", &[], Operation::New);
+        let v = topic("lantern", "\nbody\n", &[], "new");
         let text = v
             .to_text()
             .replace("  operation: new\n", "  hue: 3\n  operation: pin\n");
         let read = Version::from_text(&text).unwrap();
         assert_eq!(read.to_text(), text);
-        assert_eq!(read.block.operation, Operation::Foreign);
-        assert_eq!(read.operation_name(), "pin");
-        assert_eq!(
-            read.foreign_grammar().as_deref(),
-            Some("version field `hue`")
-        );
-        assert!(v.foreign_grammar().is_none());
+        assert_eq!(read.block.operation, "pin");
+        assert_eq!(read.foreign_key(), Some("hue"));
+        assert!(v.foreign_key().is_none());
         let renamed_op =
             Version::from_text(&v.to_text().replace("operation: new", "operation: pin")).unwrap();
-        assert_eq!(
-            renamed_op.foreign_grammar().as_deref(),
-            Some("operation `pin`")
-        );
+        assert!(renamed_op.block.raw.is_none());
+        assert_eq!(renamed_op.block.operation, "pin");
+        assert!(!renamed_op.is_tombstone());
+    }
+
+    #[test]
+    fn a_successor_ends_the_document_only_on_a_rename() {
+        let moved_to = |op: &str| {
+            let mut moved = block(&[], op);
+            moved.superseded_by = Some(Slug::parse("lamp").unwrap());
+            let mut fields = Fields::default();
+            fields.push_scalar("summary", "a topic");
+            Version::compose(Slug::parse("t").unwrap(), moved, fields, String::new())
+        };
+        let stone = moved_to(RENAME);
+        assert!(stone.is_tombstone());
+        assert!(stone.rename_sides().is_some());
+        let pinned = moved_to("pin");
+        assert!(!pinned.is_tombstone());
+        assert!(pinned.rename_sides().is_none());
     }
 
     #[test]
     fn non_canonical_bytes_are_refused() {
-        let v = topic("lantern", "\nbody\n", &[], Operation::New);
+        let v = topic("lantern", "\nbody\n", &[], "new");
         let text = v.to_text().replace("summary: a topic", "summary:  a topic");
         assert_eq!(Version::from_text(&text), Err(VersionError::NotCanonical));
     }
 
     #[test]
     fn heads_and_forks() {
-        let a = topic("t", "\n1\n", &[], Operation::New);
-        let b = topic("t", "\n2\n", &[&a.id], Operation::Save);
-        let c = topic("t", "\n3\n", &[&a.id], Operation::Save);
+        let a = topic("t", "\n1\n", &[], "new");
+        let b = topic("t", "\n2\n", &[&a.id], "save");
+        let c = topic("t", "\n3\n", &[&a.id], "save");
         let linear = Document::new(vec![a.clone(), b.clone()]);
         assert_eq!(linear.state(), State::Live(&b));
         let forked = Document::new(vec![a.clone(), b.clone(), c.clone()]);
         assert!(matches!(forked.state(), State::Forked(heads) if heads.len() == 2));
-        let resolved = topic("t", "\n4\n", &[&b.id, &c.id], Operation::Resolve);
+        let resolved = topic("t", "\n4\n", &[&b.id, &c.id], "resolve");
         let doc = Document::new(vec![a.clone(), b, c, resolved.clone()]);
         assert_eq!(doc.state(), State::Live(&resolved));
         assert_eq!(doc.history().len(), 4);
@@ -681,8 +608,8 @@ mod tests {
 
     #[test]
     fn a_tombstone_is_a_head_with_no_body() {
-        let a = topic("t", "\n1\n", &[], Operation::New);
-        let t = topic("t", "", &[&a.id], Operation::Tombstone);
+        let a = topic("t", "\n1\n", &[], "new");
+        let t = topic("t", "", &[&a.id], TOMBSTONE);
         let doc = Document::new(vec![a, t.clone()]);
         assert_eq!(doc.state(), State::Tombstoned(&t));
         assert_eq!(doc.current(), None);

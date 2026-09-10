@@ -64,6 +64,15 @@ fn the_store_reads_no_kind() {
     }
 }
 
+/// The ports' implementations sit below the use cases, so the commands a
+/// version names are unknown to what stores it.
+#[test]
+fn the_host_reaches_no_use_case() {
+    for layer in ["fs", "net.rs"] {
+        reaches_nothing_in(layer, &["crate::app", "crate::cli", "crate::web"]);
+    }
+}
+
 /// A use case reaches the host only through the ports, so what a command
 /// needs from outside is named in one place and swapped in a test.
 #[test]

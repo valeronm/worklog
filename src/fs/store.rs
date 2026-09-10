@@ -183,7 +183,7 @@ mod tests {
     use super::*;
     use crate::domain::frontmatter::Fields;
     use crate::domain::machine::MachineName;
-    use crate::domain::version::{Operation, VersionBlock};
+    use crate::domain::version::VersionBlock;
 
     fn version(slug: &str, body: &str) -> Version {
         let mut fields = Fields::default();
@@ -194,7 +194,7 @@ mod tests {
                 parents: vec![],
                 written: "2026-09-04T10:00:00+01:00".into(),
                 machine: MachineName::parse("m").unwrap(),
-                operation: Operation::New,
+                operation: "new".into(),
                 superseded_by: None,
                 renamed_from: None,
                 raw: None,

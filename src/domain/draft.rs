@@ -129,7 +129,7 @@ mod tests {
     #[test]
     fn merging_carries_markers_until_edited() {
         use super::super::machine::MachineName;
-        use super::super::version::{Operation, VersionBlock};
+        use super::super::version::VersionBlock;
         let head = |body: &str| {
             let mut fields = Fields::default();
             fields.push_scalar("summary", "s");
@@ -139,7 +139,7 @@ mod tests {
                     parents: vec![],
                     written: "2026-09-04T10:00:00+01:00".into(),
                     machine: MachineName::parse("m").unwrap(),
-                    operation: Operation::Save,
+                    operation: "save".into(),
                     superseded_by: None,
                     renamed_from: None,
                     raw: None,

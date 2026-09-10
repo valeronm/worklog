@@ -13,6 +13,7 @@ use crate::domain::slug::{Kind, Slug};
 use crate::domain::topic::Topic;
 use crate::domain::version::{Document, State, Tombstone, Version, VersionId};
 
+use super::operation::Operation;
 use super::{Deps, Failure};
 
 #[derive(Debug)]
@@ -65,12 +66,17 @@ pub struct Loaded {
     facts_by_topic: BTreeMap<String, Vec<usize>>,
 }
 
-/// What in the version a newer worklog wrote: grammar in its block, or a
-/// field its kind does not know.
+/// What in the version a newer worklog wrote: a key in its block, an
+/// operation no command here writes, or a field its kind does not know.
 #[must_use]
 pub fn foreign(version: &Version) -> Option<String> {
     version
-        .foreign_grammar()
+        .foreign_key()
+        .map(|key| format!("version field `{key}`"))
+        .or_else(|| {
+            let op = &version.block.operation;
+            (!Operation::is_known(op)).then(|| format!("operation `{op}`"))
+        })
         .or_else(|| unknown_key(version.slug.kind(), &version.fields))
 }
 
