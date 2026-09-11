@@ -219,12 +219,13 @@ judgement call for a person.
 | link | from | `check` says |
 | --- | --- | --- |
 | naming no document shape, or no document | anything | a problem |
-| to a removed document | an entry | nothing |
-| to a removed document | any other kind | a notice |
+| to a removed document | an entry, or a followup that is done or dropped | nothing |
+| to a removed document | anything else | a notice |
 | to a removed document with no note | anything | a notice on the removed document |
 
-An entry cites what was true on its date; any other kind rests on what
-it links, and has gone stale when that is removed.
+An entry cites what was true on its date, and a closed followup what was
+true when it closed; anything else rests on what it links, and has gone
+stale when that is removed.
 
 ## Usage
 

@@ -721,13 +721,18 @@ pub fn check(deps: &Deps) -> Result<Check, Failure> {
 /// Every link in every live document and every tombstone's note, since
 /// the link to where a document ended is the one a reader follows.
 fn check_links(loaded: &Loaded, out: &mut Check) {
-    let linked: Vec<(&Slug, &Version)> = loaded
+    let linked: Vec<(&Slug, &Version, bool)> = loaded
         .entries
         .iter()
-        .map(|d| (&d.slug, &d.version))
-        .chain(loaded.facts.iter().map(|d| (&d.slug, &d.version)))
-        .chain(loaded.topics.values().map(|d| (&d.slug, &d.version)))
-        .chain(loaded.followups.iter().map(|d| (&d.slug, &d.version)))
+        .map(|d| (&d.slug, &d.version, d.slug.kind().cites()))
+        .chain(loaded.facts.iter().map(|d| (&d.slug, &d.version, false)))
+        .chain(loaded.topics.values().map(|d| (&d.slug, &d.version, false)))
+        .chain(
+            loaded
+                .followups
+                .iter()
+                .map(|d| (&d.slug, &d.version, d.data.cites())),
+        )
         .collect();
     let noted: Vec<(&Slug, &str)> = loaded
         .removed()
@@ -736,7 +741,7 @@ fn check_links(loaded: &Loaded, out: &mut Check) {
     out.documents = linked.len() + noted.len();
     let mut inbound: BTreeMap<Slug, usize> = BTreeMap::new();
     let mut stale: BTreeSet<(Slug, Slug)> = BTreeSet::new();
-    let mut scan = |slug: &Slug, text: &str| {
+    let mut scan = |slug: &Slug, text: &str, cites: bool| {
         for target in links::targets(text) {
             out.links += 1;
             let Ok(target) = Slug::parse(&target) else {
@@ -750,7 +755,7 @@ fn check_links(loaded: &Loaded, out: &mut Check) {
                 load::Landing::Present => {}
                 load::Landing::Removed(removed) => {
                     *inbound.entry(removed.clone()).or_default() += 1;
-                    if !slug.kind().cites() {
+                    if !cites {
                         stale.insert((slug.clone(), target));
                     }
                 }
@@ -761,11 +766,11 @@ fn check_links(loaded: &Loaded, out: &mut Check) {
             }
         }
     };
-    for (slug, version) in &linked {
-        scan(slug, &version.content_text());
+    for (slug, version, cites) in &linked {
+        scan(slug, &version.content_text(), *cites);
     }
     for (slug, note) in noted {
-        scan(slug, note);
+        scan(slug, note, slug.kind().cites());
     }
     for (slug, target) in stale {
         out.notices.push(Problem::at(
@@ -1138,6 +1143,54 @@ mod tests {
                 "links a removed document: [[lantern/relay]]",
                 "removed with no note saying why, linked from 1"
             ]
+        );
+        assert!(report.problems.is_empty());
+    }
+
+    #[test]
+    fn check_lets_a_closed_followup_cite_a_removed_document() {
+        let w = World::new("m1");
+        let d = w.deps();
+        write::put_topic(&d, "lantern", "A lamp", &[], None).unwrap();
+        write::put_fact(&d, "lantern/relay", "The relay", &["lantern"], false).unwrap();
+        write::put_entry(
+            &d,
+            "2026-09/2026-09-01-first",
+            "2026-09-01",
+            "First",
+            &["lantern"],
+        )
+        .unwrap();
+        for name in ["2026-09-01-open", "2026-09-01-done", "2026-09-01-dropped"] {
+            write::put_followup(
+                &d,
+                name,
+                "2026-09/2026-09-01-first",
+                "Rests on [[lantern/relay]]",
+                &["lantern"],
+                None,
+            )
+            .unwrap();
+        }
+        let followup = |name| Slug::of_kind(Kind::Followup, name).unwrap();
+        write::done(&d, &followup("2026-09-01-done"), None).unwrap();
+        write::drop_(
+            &d,
+            &followup("2026-09-01-dropped"),
+            Some("superseded by [[lantern/relay]]"),
+        )
+        .unwrap();
+        let relay = Slug::parse("lantern/relay").unwrap();
+        write::tombstone(&d, &relay, "moved into the README").unwrap();
+        let report = check(&d).unwrap();
+        let notices: Vec<String> = report
+            .notices
+            .iter()
+            .map(|n| format!("{}: {}", n.slug, n.message))
+            .collect();
+        assert_eq!(
+            notices,
+            ["2026-09-01-open: links a removed document: [[lantern/relay]]"]
         );
         assert!(report.problems.is_empty());
     }

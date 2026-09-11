@@ -126,6 +126,13 @@ impl Followup {
     pub fn is_open(&self) -> bool {
         self.state == FollowupState::Open
     }
+
+    /// A closed followup is not maintained: it says what was true when it
+    /// closed.
+    #[must_use]
+    pub fn cites(&self) -> bool {
+        !self.is_open()
+    }
 }
 
 #[cfg(test)]

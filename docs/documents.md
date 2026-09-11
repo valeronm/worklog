@@ -83,7 +83,8 @@ document rather than a line in the entry so that closing it writes
 nothing into the entry. After it is written it changes only by state:
 `done` or `drop` close it, each with an optional note saying what
 dissolved or ended it, and `recheck` reschedules it. A closed followup
-takes no further state change.
+takes no further state change, and its links are citations, as an
+entry's are.
 
 | field | presence | meaning |
 | --- | --- | --- |

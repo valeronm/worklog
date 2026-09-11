@@ -239,9 +239,10 @@ or on a machine that has not synced.
 
 `worklog check` verifies every link, recheck and reference across the store
 and exits 1 on a problem. A link to a removed document lands on its
-tombstone. From an entry that is a citation; from anything live it is a
-notice, since the live document has gone stale, as is a linked tombstone
-from before the note was required. A notice never changes the exit code.
+tombstone. From an entry, or a followup that is done or dropped, that is
+a citation; from anything live it is a notice, since the live document
+has gone stale, as is a linked tombstone from before the note was
+required. A notice never changes the exit code.
 
 A document with two current versions is a fork, made by two machines
 writing from the same parent before syncing. `worklog forks` lists them,
