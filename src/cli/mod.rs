@@ -66,6 +66,25 @@ fn this_binary(home: &Path) -> Result<PathBuf, Failure> {
     })
 }
 
+fn run_as_found_on_path() -> bool {
+    let Ok(exe) = std::env::current_exe().and_then(std::fs::canonicalize) else {
+        return false;
+    };
+    // The canonical path names a symlink's target, not the name PATH holds.
+    let invoked = std::env::args_os().next().map(PathBuf::from);
+    let (Some(name), Some(path)) = (
+        invoked.as_deref().and_then(Path::file_name),
+        std::env::var_os("PATH"),
+    ) else {
+        return false;
+    };
+    std::env::split_paths(&path)
+        .map(|dir| dir.join(name))
+        .find(|candidate| candidate.is_file())
+        .and_then(|candidate| std::fs::canonicalize(candidate).ok())
+        .is_some_and(|found| found == exe)
+}
+
 /// Colour only on a terminal, and never with `NO_COLOR` set, so a pipe
 /// gets plain bytes.
 fn paint() -> bool {
@@ -491,7 +510,11 @@ pub fn run() -> i32 {
     };
     let deps = opened.deps();
     let path = command_path(&command);
+    let installed = run_as_found_on_path();
     let record = |exit: i32| {
+        if !installed {
+            return;
+        }
         if let Ok(dir) = cwd() {
             // A full disk is no reason for a command that worked to say
             // otherwise, so the log's own failure goes unsaid.

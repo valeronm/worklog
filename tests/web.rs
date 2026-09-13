@@ -21,8 +21,20 @@ impl Drop for Served {
     }
 }
 
+fn worklog() -> Command {
+    let built = cargo_bin("worklog");
+    let dirs = built.parent().map(Path::to_path_buf).into_iter();
+    let path = std::env::join_paths(dirs.chain(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    )))
+    .expect("a joinable PATH");
+    let mut command = Command::new(built);
+    command.env("PATH", path);
+    command
+}
+
 fn run(root: &Path, args: &[&str]) -> String {
-    let out = Command::new(cargo_bin("worklog"))
+    let out = worklog()
         .env("WORKLOG_HOME", root)
         .env("HOME", root.join("home"))
         .current_dir(root)
@@ -65,7 +77,7 @@ fn seeded(root: &Path) {
 }
 
 fn serve(root: &Path) -> Served {
-    let mut child = Command::new(cargo_bin("worklog"))
+    let mut child = worklog()
         .env("WORKLOG_HOME", root)
         .env("HOME", root.join("home"))
         .current_dir(root)

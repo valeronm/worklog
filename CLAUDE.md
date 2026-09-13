@@ -96,3 +96,7 @@ tests, `lantern`, `atlas`, `phone`, `desk`, is the one to extend.
 the crate and a suppression lives at its site with a `reason`. The
 toolchain is pinned in `mise.toml` and CI reads the pin from there.
 Releases are cut by tag; `docs/release.md` has the steps.
+
+A benchmark or a loop never runs the installed `worklog`, since the
+binary PATH finds logs every run into the store's usage: time a build run
+by its path, or point `WORKLOG_HOME` at a copy of the store.

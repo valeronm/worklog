@@ -37,7 +37,14 @@ impl Scratch {
     }
 
     fn run_binary(&self, mut command: Command, args: &[&str]) -> Output {
+        let built = assert_cmd::cargo::cargo_bin("worklog");
+        let dirs = built.parent().map(Path::to_path_buf).into_iter();
+        let path = std::env::join_paths(dirs.chain(std::env::split_paths(
+            &std::env::var_os("PATH").unwrap_or_default(),
+        )))
+        .expect("a joinable PATH");
         command
+            .env("PATH", path)
             .env("WORKLOG_HOME", self.root.path())
             .env("HOME", self.home())
             .env_remove("XDG_CONFIG_HOME")
@@ -461,6 +468,18 @@ fn every_run_is_logged_under_the_machine_that_ran_it() {
     assert_eq!(flagged, [["--json"], ["--json"]]);
     assert!(s.ok(&["usage", "--machine", "m2"]).is_empty());
     assert!(s.ok(&["usage", "--since", "2099-01-01"]).is_empty());
+}
+
+#[test]
+fn a_binary_off_path_logs_nothing() {
+    let s = seeded();
+    let copy = s.root.path().join("bench/worklog");
+    fs::create_dir_all(copy.parent().unwrap()).unwrap();
+    fs::copy(assert_cmd::cargo::cargo_bin("worklog"), &copy).unwrap();
+    s.ok_binary(Command::new(&copy), &["facts", "lantern"]);
+    s.ok(&["facts", "lantern"]);
+    let counted = s.ok(&["usage"]);
+    assert!(counted.contains("      1 facts\n"), "{counted}");
 }
 
 #[test]

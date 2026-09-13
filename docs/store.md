@@ -232,7 +232,9 @@ stale when that is removed.
 `usage` is not a document, because a count is not immutable. A machine
 appends a line to its own file for the month on every command run
 against a store, and reads every machine's files, so a sync carries
-them without a conflict to report.
+them without a conflict to report. Only the binary PATH finds under the
+name it was run by appends, since the log counts use and a build under
+test is not use.
 
 A line is tab-separated fields ending in a newline: the `written` stamp,
 the machine, the command path, the exit code, the working directory
