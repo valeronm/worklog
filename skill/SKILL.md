@@ -9,12 +9,16 @@ The store is a set of documents, each a chain of immutable versions, read
 and written only through `worklog`. Four kinds:
 
 - **entry** — one piece of work as it was done, dated; a day holds as many
-  as there were tasks; `2026-09/2026-09-04-lamp-driver`.
-- **fact** — what is true now, under a topic; `lantern/relay-pin-is-fixed`.
-  A fact with `idea: true` is an idea: a settled design not yet built.
-- **followup** — open work that arose in an entry; `2026-09-04-port`.
+  as there were tasks. Its slug is the month, then the dated name:
+  `2026-09/2026-09-04-lamp-driver`.
+- **fact** — what is true now, under a topic, which its slug names first:
+  `lantern/relay-pin-is-fixed`. A fact with `idea: true` is an idea: a
+  settled design not yet built.
+- **followup** — open work that arose in an entry. Its slug is dated by
+  the day it was opened, with no month and no topic: `2026-09-04-port`.
 - **topic** — what a subject is and which topics a session about it also
-  needs; `lantern`. A machine's topic says where topics live on that host.
+  needs; its slug is the bare name, `lantern`. A machine's topic says where
+  topics live on that host.
 
 A session opens with `worklog context`: the topics its directory and
 machine reach, their facts by name, what is due, and what needs a hand.
@@ -50,7 +54,9 @@ under Open work; never the text of a record.
 2. Read the file at that path, then edit it: it lives outside the working
    directory, and an edit tool refuses a file it has not read. The draft
    is the document's own fields and body, the same text `show` prints;
-   what it came from is kept in a file beside it that is the tool's.
+   what it came from is kept in a file beside it that is the tool's. Every
+   field is one line: a list is `[a, b]`, never an item per line, and a
+   `summary` does not wrap.
 3. `worklog diff <slug>` shows the draft against the store; read it once
    to check the edit landed as meant.
 4. `worklog save <slug>` validates, stamps and stores it. A refusal names
@@ -82,16 +88,18 @@ stderr with exit 1; a usage error exits 2.
    **What / Why / Changes / Notes**. Record what was non-obvious: decisions,
    gotchas, why not the other way. Never git state.
 2. `worklog diff` then `worklog save`.
-3. Open work from this session becomes followups, one each:
-   `worklog new followup <name> --entry <entry-slug> --summary "…"
-   --recheck "<date> <why>"` or `--recheck "touching <topic>"`. Put each
-   doable item to the user first, one AskUserQuestion per item naming the
-   item and what doing it involves, with three options: **do it now**,
-   carried out in this session so it never becomes a followup; **record as
-   followup**; **drop it**, and if the drop was a decision its why goes in
-   the entry's Notes. Never withhold an item because it seemed not worth
-   asking, and never ask the same item twice. A silently written followup
-   is a delay decision the user never made.
+3. Put each doable item of open work from this session to the user, one
+   question per item naming the item and what doing it involves, with
+   three options: **do it now**, carried out in this session so it is never
+   recorded; **record it**; **drop it**, and if the drop was a decision its
+   why goes in the entry's Notes. Never withhold an item because it seemed
+   not worth asking, and never ask the same item twice. A silently recorded
+   item is a delay decision the user never made. A recorded item goes where
+   the triage under Open work puts it: a followup when something waits on
+   it, `worklog new followup <name> --entry <entry-slug> --summary "…"
+   --recheck "<date> <why>"` or `--recheck "touching <topic>"`, one each;
+   otherwise an idea, `worklog new idea <topic>/<name>`, which the entry
+   links.
 4. Reconcile: `worklog followups <topic>` for the topics this work touched;
    `done` what it completed with a note naming what dissolved it, `recheck`
    what it moved, `drop` what it made moot.
@@ -105,16 +113,21 @@ recheck`; given an entry slug instead of a topic, it lists the items that
 arose in that entry. Everything `context` shows as due is triaged in that session:
 done, dropped, rescheduled, or acted on.
 
-Triage an item, new or found in a backlog, in this order: can it be done
-now, then it is not a followup, do it or put it to the user; is it already
-answered, then `done` it with a note naming what dissolved it; does an idea
-already hold the work, then `drop` it and let the entry's Notes link the
-idea; is something waiting on it, then it is a followup with its recheck;
-otherwise it is an idea.
+Triage an item, new or found in a backlog, by the first question that
+fits:
+
+1. Can it be done now? Then it is not a followup: do it, or put it to the
+   user.
+2. Is it already answered? Then `done` it with a note naming what
+   dissolved it.
+3. Does an idea already hold the work? Then `drop` it and let the entry's
+   Notes link the idea.
+4. Is something waiting on it? Then it is a followup with its recheck.
+5. Otherwise it is an idea.
 
 A followup carries a recheck: a date and why, meaning when to look again,
-not when the thing is expected; or `touching <topic>`, raised by every
-session opening in that topic. An idea, listed apart under `worklog ideas
+not when the thing is expected; or `touching <topic>`, which takes no why
+and is raised by every session opening in that topic. An idea, listed apart under `worklog ideas
 [topic]`, gains a recheck through `worklog recheck` when something starts
 waiting on it.
 
@@ -211,15 +224,12 @@ topic's directories, `--machine <name>` another host's.
 - `worklog log [n]` — the newest versions written anywhere in the store,
   whatever their kind, so what other machines wrote since is one call;
   `--machine <name>` for one host's writes.
-- `worklog show <slug>` prints a document as it stands; `worklog history
-  <slug>` its versions, back through any rename with the versions written
-  under the old slug marked `as <old-slug>`. A renamed slug still reads:
-  `show`, `history` and `[[links]]` follow the move, while a write to it
-  refuses and names the new slug. A version id, or a prefix of one as `history` and
-  `log` print them, names one stored version anywhere in the store:
+- `worklog show <slug>` prints a document as it stands, `worklog history
+  <slug>` its versions. A renamed slug still reads and links follow it,
+  while a write to it refuses and names the new slug. A version id, or a
+  prefix of one as `history` and `log` print it, names one stored version:
   `worklog show <id>` prints it, `worklog diff <id>` what it changed
-  against its parent, where a rename's two versions report the move rather
-  than a text diff, and `worklog diff <id> <id>` between any two.
+  against its parent, and `worklog diff <id> <id>` between any two.
 
 Answer a "what did we do about X" question by reading the matching
 documents and reconstructing what changed, when and why, citing slugs. If
@@ -241,8 +251,7 @@ or on a machine that has not synced.
 and exits 1 on a problem. A link to a removed document lands on its
 tombstone. From an entry, or a followup that is done or dropped, that is
 a citation; from anything live it is a notice, since the live document
-has gone stale, as is a linked tombstone from before the note was
-required. A notice never changes the exit code.
+has gone stale. A notice never changes the exit code.
 
 A document with two current versions is a fork, made by two machines
 writing from the same parent before syncing. `worklog forks` lists them,
