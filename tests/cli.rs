@@ -558,7 +558,7 @@ fn context_indexes_the_directory_and_stays_small() {
         "{ctx}"
     );
     assert!(
-        ctx.contains("1 open follow-ups in 1 entries here, 0 without recheck"),
+        ctx.contains("1 open follow-up in 1 entry here, 0 without recheck"),
         "{ctx}"
     );
     assert!(

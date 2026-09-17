@@ -284,7 +284,7 @@ fn group(g: &Group, facts: bool, ideas: bool) -> String {
         if facts {
             wrapped(&mut out, &g.facts);
         } else {
-            let _ = writeln!(out, "  ({} facts)", g.facts.len());
+            let _ = writeln!(out, "  ({})", many(g.facts.len(), "fact", "facts"));
         }
     } else if g.ideas.is_empty() {
         out.push_str("  (no facts)\n");
@@ -294,10 +294,15 @@ fn group(g: &Group, facts: bool, ideas: bool) -> String {
             out.push_str("Ideas — unbuilt, kept with their settled design; opened like a fact:\n");
             wrapped(&mut out, &g.ideas);
         } else {
-            let _ = writeln!(out, "  ({} ideas)", g.ideas.len());
+            let _ = writeln!(out, "  ({})", many(g.ideas.len(), "idea", "ideas"));
         }
     }
     out
+}
+
+/// A count and the word it counts, in the number the count calls for.
+fn many(n: usize, one: &str, more: &str) -> String {
+    format!("{n} {}", if n == 1 { one } else { more })
 }
 
 /// One rung for each thing `context` can give up.
@@ -317,8 +322,10 @@ fn page(c: &Context, rung: usize) -> String {
     if c.open > 0 {
         let _ = writeln!(
             work,
-            "{} open follow-ups in {} entries here, {} without recheck — `worklog followups <topic>`",
-            c.open, c.open_entries, c.without_recheck
+            "{} in {} here, {} without recheck — `worklog followups <topic>`",
+            many(c.open, "open follow-up", "open follow-ups"),
+            many(c.open_entries, "entry", "entries"),
+            c.without_recheck
         );
     }
     if dropped < c.due.len() {
@@ -332,7 +339,8 @@ fn page(c: &Context, rung: usize) -> String {
         // What a cut drops is the oldest, an item already passed over.
         let _ = writeln!(
             work,
-            "{dropped} older items due — `worklog followups <topic>`"
+            "{} due — `worklog followups <topic>`",
+            many(dropped, "older item", "older items")
         );
     }
     if !work.is_empty() {
@@ -359,8 +367,8 @@ fn page(c: &Context, rung: usize) -> String {
     }
     if !c.unreached.is_empty() {
         sections.push(format!(
-            "{} other topics — `worklog topics` says what each is\n",
-            c.unreached.len()
+            "{} — `worklog topics` says what each is\n",
+            many(c.unreached.len(), "other topic", "other topics")
         ));
     }
     sections.join("\n")
@@ -612,7 +620,7 @@ mod tests {
         };
         let out = context(&c);
         assert!(out.len() <= CONTEXT_BYTES, "{out}");
-        assert!(out.starts_with("1 open follow-ups"), "{out}");
+        assert!(out.starts_with("1 open follow-up in 1 entry here"), "{out}");
         assert!(
             out.contains("lantern — this directory:\n  relay-pin-0-is-fixed, "),
             "{out}"
