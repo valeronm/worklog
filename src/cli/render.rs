@@ -9,7 +9,7 @@
 use std::fmt::Write as _;
 
 use crate::app::output::{
-    Check, Context, Diff, DraftList, DraftRef, FactListing, FollowupItem, Followups, Forks,
+    Check, Context, Diff, DraftList, DraftRef, FactListing, FollowupItem, Followups, Forks, Group,
     History, Listing, Log, Row, Search, Shown, Tags, Topics, Usage, Where, Written, short,
 };
 
@@ -62,8 +62,8 @@ pub fn fact_listing(l: &FactListing) -> String {
     out
 }
 
-fn followup_line(out: &mut String, item: &FollowupItem) {
-    let _ = writeln!(out, "- ({}) {}", item.label, item.summary);
+fn followup_line(out: &mut String, item: &FollowupItem, summary: &str) {
+    let _ = writeln!(out, "- ({}) {}", item.label, summary);
     match &item.entry {
         Some(entry) => {
             let _ = writeln!(out, "    {} — in {entry}", item.slug);
@@ -187,7 +187,7 @@ pub fn followups(f: &Followups) -> String {
             }
             out.push_str("Facts and ideas with a recheck of their own:\n");
         }
-        followup_line(&mut out, item);
+        followup_line(&mut out, item, &item.summary);
     }
     if f.open > 0 || !f.items.is_empty() {
         let _ = writeln!(
@@ -271,79 +271,127 @@ pub fn wrap(text: &str, indent: usize, columns: usize) -> String {
     lines.join(&format!("\n{}", " ".repeat(indent)))
 }
 
-pub fn context(c: &Context) -> String {
+/// Claude Code replaces a hook's output longer than 10,000 characters with
+/// its first 2,000, and a character never takes fewer than a byte.
+pub const CONTEXT_BYTES: usize = 10_000;
+
+/// A topic's block in `context`, its facts and its ideas each by name or
+/// as a count.
+fn group(g: &Group, facts: bool, ideas: bool) -> String {
     let mut out = String::new();
-    let Some(machine) = &c.machine else {
-        out.push_str(
-            "No machine name: `worklog init <name>` before the store can place this directory.\n",
-        );
-        return out;
-    };
-    if c.groups.is_empty() {
-        let _ = writeln!(
-            out,
-            "No topic carries `machine: {machine}`, so nothing reaches this directory."
-        );
-        return out;
-    }
-    out.push_str(
-        "Durable facts and ideas, by name — `worklog facts <topic>` for what each\nclaims, `worklog show <topic>/<name>` for one whole.\n",
-    );
-    for g in &c.groups {
-        let _ = writeln!(out, "\n{} — {}:", g.topic, g.via);
-        if g.facts.is_empty() && g.ideas.is_empty() {
-            out.push_str("  (no facts)\n");
+    let _ = writeln!(out, "{} — {}:", g.topic, g.via);
+    if !g.facts.is_empty() {
+        if facts {
+            wrapped(&mut out, &g.facts);
+        } else {
+            let _ = writeln!(out, "  ({} facts)", g.facts.len());
         }
-        wrapped(&mut out, &g.facts);
-        if !g.ideas.is_empty() {
+    } else if g.ideas.is_empty() {
+        out.push_str("  (no facts)\n");
+    }
+    if !g.ideas.is_empty() {
+        if ideas {
             out.push_str("Ideas — unbuilt, kept with their settled design; opened like a fact:\n");
             wrapped(&mut out, &g.ideas);
+        } else {
+            let _ = writeln!(out, "  ({} ideas)", g.ideas.len());
         }
     }
+    out
+}
+
+/// One rung for each thing `context` can give up.
+fn rungs(c: &Context) -> usize {
+    c.groups.len() * 2 + c.due.len()
+}
+
+/// `context` with what `rung` gives up left out: fact names go first,
+/// topic by topic, then idea names, then the oldest due items.
+fn page(c: &Context, rung: usize) -> String {
+    let topics = c.groups.len();
+    let naming_facts = topics.saturating_sub(rung);
+    let naming_ideas = topics.saturating_sub(rung.saturating_sub(topics));
+    let dropped = rung.saturating_sub(topics * 2).min(c.due.len());
+    let mut sections: Vec<String> = Vec::new();
+    let mut work = String::new();
     if c.open > 0 {
         let _ = writeln!(
-            out,
-            "\n{} open follow-ups in {} entries here, {} without recheck — `worklog followups <topic>`",
+            work,
+            "{} open follow-ups in {} entries here, {} without recheck — `worklog followups <topic>`",
             c.open, c.open_entries, c.without_recheck
         );
     }
-    if !c.due.is_empty() {
-        out.push_str("due now:\n");
-        for item in &c.due {
+    if dropped < c.due.len() {
+        work.push_str("due now:\n");
+        for item in &c.due[dropped..] {
             // An index names the item; `worklog show <slug>` has the rest.
-            let brief = FollowupItem {
-                summary: cut(&item.summary, 96),
-                ..item.clone()
-            };
-            followup_line(&mut out, &brief);
+            followup_line(&mut work, item, &cut(&item.summary, 96));
         }
     }
-    if !c.forks.is_empty() {
+    if dropped > 0 {
+        // What a cut drops is the oldest, an item already passed over.
         let _ = writeln!(
-            out,
-            "\nForked, needing `worklog resolve`: {}",
-            c.forks.join(", ")
+            work,
+            "{dropped} older items due — `worklog followups <topic>`"
         );
+    }
+    if !work.is_empty() {
+        sections.push(work);
+    }
+    if !c.forks.is_empty() {
+        sections.push(format!(
+            "Forked, needing `worklog resolve`: {}\n",
+            c.forks.join(", ")
+        ));
     }
     if !c.drafts.is_empty() {
-        let _ = writeln!(
-            out,
-            "\nDrafts left open on this machine — `worklog drafts`: {}",
+        sections.push(format!(
+            "Drafts left open on this machine — `worklog drafts`: {}\n",
             c.drafts.join(", ")
-        );
+        ));
+    }
+    sections.push(
+        "Durable facts and ideas, by name where they fit and counted where not —\n`worklog facts <topic>` for their claims, `worklog show <topic>/<name>` for one.\n"
+            .to_owned(),
+    );
+    for (n, g) in c.groups.iter().enumerate() {
+        sections.push(group(g, n < naming_facts, n < naming_ideas));
     }
     if !c.unreached.is_empty() {
-        out.push_str(
-            "\nNot reached here, with fact counts — `worklog topics` says what each is:\n",
-        );
-        let names: Vec<String> = c
-            .unreached
-            .iter()
-            .map(|t| format!("{} ({})", t.name, t.count))
-            .collect();
-        wrapped(&mut out, &names);
+        sections.push(format!(
+            "{} other topics — `worklog topics` says what each is\n",
+            c.unreached.len()
+        ));
     }
-    out
+    sections.join("\n")
+}
+
+pub fn context(c: &Context) -> String {
+    let Some(machine) = &c.machine else {
+        return "No machine name: `worklog init <name>` before the store can place this directory.\n"
+            .to_owned();
+    };
+    if c.groups.is_empty() {
+        return format!(
+            "No topic carries `machine: {machine}`, so nothing reaches this directory.\n"
+        );
+    }
+    let last = rungs(c);
+    let (mut low, mut high) = (0, last);
+    let mut fitting = None;
+    while low < high {
+        let rung = usize::midpoint(low, high);
+        let out = page(c, rung);
+        if out.len() <= CONTEXT_BYTES {
+            high = rung;
+            fitting = Some(out);
+        } else {
+            low = rung + 1;
+        }
+    }
+    // The last rung gives up everything there is, so it is the answer
+    // whether or not it fits.
+    fitting.unwrap_or_else(|| page(c, last))
 }
 
 pub fn forks(f: &Forks) -> String {
@@ -505,7 +553,7 @@ pub fn diff(d: &Diff, paint: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::output::Side;
+    use crate::app::output::{Count, Side};
 
     fn two_sides() -> Diff {
         Diff {
@@ -520,6 +568,116 @@ mod tests {
             },
             renamed: None,
         }
+    }
+
+    fn topic(name: &str, facts: usize, ideas: usize) -> Group {
+        Group {
+            topic: name.into(),
+            summary: String::new(),
+            distance: 0,
+            via: "this directory".into(),
+            facts: (0..facts)
+                .map(|n| format!("relay-pin-{n}-is-fixed"))
+                .collect(),
+            ideas: (0..ideas).map(|n| format!("idea-{n}-is-unbuilt")).collect(),
+        }
+    }
+
+    fn due_item(n: usize) -> FollowupItem {
+        FollowupItem {
+            slug: format!("2026-09-01-port-{n}"),
+            source: "followup".into(),
+            entry: Some("2026-09/2026-09-01-lamp-driver".into()),
+            state: Some("open".into()),
+            summary: format!("Add relay {n} to the board and wire its driver"),
+            recheck: None,
+            label: "due 2026-01-01".into(),
+            due: true,
+        }
+    }
+
+    #[test]
+    fn context_counts_the_facts_whose_names_would_not_fit() {
+        let c = Context {
+            machine: Some("m1".into()),
+            groups: vec![
+                topic("lantern", 3, 1),
+                topic("atlas", 600, 1),
+                topic("phone", 2, 1),
+            ],
+            open: 1,
+            open_entries: 1,
+            due: vec![due_item(1)],
+            ..Context::default()
+        };
+        let out = context(&c);
+        assert!(out.len() <= CONTEXT_BYTES, "{out}");
+        assert!(out.starts_with("1 open follow-ups"), "{out}");
+        assert!(
+            out.contains("lantern — this directory:\n  relay-pin-0-is-fixed, "),
+            "{out}"
+        );
+        assert!(
+            out.contains("atlas — this directory:\n  (600 facts)\nIdeas"),
+            "{out}"
+        );
+        assert!(
+            out.contains("phone — this directory:\n  (2 facts)\nIdeas"),
+            "{out}"
+        );
+        assert!(out.ends_with("  idea-0-is-unbuilt\n"), "{out}");
+    }
+
+    #[test]
+    fn ideas_go_to_counts_before_the_due_list_is_cut() {
+        let c = Context {
+            machine: Some("m1".into()),
+            groups: vec![topic("lantern", 4, 300)],
+            open: 90,
+            open_entries: 40,
+            due: (0..90).map(due_item).collect(),
+            ..Context::default()
+        };
+        let out = context(&c);
+        assert!(out.len() <= CONTEXT_BYTES, "{}", out.len());
+        assert!(
+            out.contains("lantern — this directory:\n  (4 facts)\n  (300 ideas)"),
+            "{out}"
+        );
+        // The newest survive a cut, so the item opened last is always there.
+        assert!(out.contains("Add relay 89 to the board"), "{out}");
+        assert!(!out.contains("Add relay 0 to the board"), "{out}");
+        let cut = out
+            .lines()
+            .find(|l| l.contains("older items due"))
+            .expect("the count of what was cut");
+        let dropped: usize = cut.split(' ').next().unwrap().parse().unwrap();
+        assert_eq!(dropped + out.matches("— in 2026-09/").count(), 90, "{out}");
+    }
+
+    #[test]
+    fn the_search_lands_where_a_rung_by_rung_walk_would() {
+        let c = Context {
+            machine: Some("m1".into()),
+            groups: vec![
+                topic("lantern", 120, 200),
+                topic("atlas", 40, 1),
+                topic("phone", 1, 1),
+            ],
+            open: 60,
+            open_entries: 30,
+            due: (0..60).map(due_item).collect(),
+            unreached: vec![Count {
+                name: "personal".into(),
+                count: 2,
+            }],
+            ..Context::default()
+        };
+        let walked = (0..=rungs(&c))
+            .map(|rung| page(&c, rung))
+            .find(|out| out.len() <= CONTEXT_BYTES)
+            .expect("a rung that fits");
+        assert_eq!(context(&c), walked);
     }
 
     #[test]

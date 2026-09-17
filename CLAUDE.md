@@ -45,9 +45,10 @@ document.
 under Topic. Since every matching claim loads, a topic that should not
 reach every project must not be claimed for a wide directory.
 
-`context` is printed at session start and a session is shown only its
-first couple of kilobytes, so the text renderer keeps it to names and
-counts, must-act-on items first. `tests/cli.rs` pins the shape.
+`context` is printed at session start, and Claude Code replaces a hook's
+output past a size limit with a short preview of its start, so the text
+renderer holds it under that limit, must-act-on items first, and counts a
+topic's facts once their names would not fit. `tests/cli.rs` pins the shape.
 
 ## Output contract
 

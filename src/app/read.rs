@@ -553,7 +553,7 @@ pub fn forks(deps: &Deps) -> Result<Forks, Failure> {
 }
 
 /// The index a session opens with: the topics its directory and machine
-/// reach, their facts by name, what is due, and what needs a hand.
+/// reach, their facts, what is due, and what needs a hand.
 pub fn context(deps: &Deps, directory: &str) -> Result<Context, Failure> {
     let loaded = load::load(deps.store)?;
     let today = deps.clock.today();

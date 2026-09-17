@@ -530,8 +530,8 @@ fn context_indexes_the_directory_and_stays_small() {
     let s = seeded();
     let ctx = s.ok(&["context", "projects/Android/atlas"]);
     let expected = [
-        "Durable facts and ideas, by name — `worklog facts <topic>` for what each",
-        "claims, `worklog show <topic>/<name>` for one whole.",
+        "Durable facts and ideas, by name where they fit and counted where not —",
+        "`worklog facts <topic>` for their claims, `worklog show <topic>/<name>` for one.",
         "",
         "atlas — this directory:",
         "  (no facts)",
@@ -546,13 +546,12 @@ fn context_indexes_the_directory_and_stays_small() {
         "host — this machine:",
         "  (no facts)",
         "",
-        "Not reached here, with fact counts — `worklog topics` says what each is:",
-        "  lantern (1), personal (0)",
+        "2 other topics — `worklog topics` says what each is",
         "",
     ]
     .join("\n");
     assert_eq!(ctx, expected);
-    assert!(ctx.len() < 2048);
+    assert!(ctx.len() <= worklog::cli::render::CONTEXT_BYTES);
     let ctx = s.ok(&["context", "projects/lantern"]);
     assert!(
         ctx.contains("lantern — this directory:\n  relay-pin-is-fixed\n"),

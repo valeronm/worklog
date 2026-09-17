@@ -21,7 +21,8 @@ and written only through `worklog`. Four kinds:
   topics live on that host.
 
 A session opens with `worklog context`: the topics its directory and
-machine reach, their facts by name, what is due, and what needs a hand.
+machine reach, their facts by name or, where the names would not fit, by
+count, what is due, and what needs a hand.
 Read a fact before relying on it: `worklog show <topic>/<name>`. Read a
 topic's facts before starting work in it: `worklog facts <topic>`.
 
