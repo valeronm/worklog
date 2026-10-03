@@ -78,8 +78,7 @@ refresh writes only where the thing already is, a fish completions
 directory included, which is what lets the installer and `upgrade` run it
 on every host without a network. The skill is public and written
 for a stranger: it holds how to use the store, including the follow-up
-triage put to the user and the offer to log after work, and nothing about
-any one person's other tools.
+triage put to the user, and nothing about any one person's other tools.
 
 ## What stays out of the repo
 

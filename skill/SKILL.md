@@ -29,8 +29,7 @@ topic's facts before starting work in it: `worklog facts <topic>`.
 ## When to write
 
 - **Capture**: the user asks to log work, or a substantive piece of work has
-  just finished. After such work, offer to log it; do not write an entry
-  unprompted.
+  just finished.
 - **Record**: the user states something that outlives the conversation and
   no work happened: a fact, a decision, an unbuilt idea. Write or update the
   fact; no entry.
