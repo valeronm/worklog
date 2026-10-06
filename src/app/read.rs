@@ -117,7 +117,10 @@ pub fn show(deps: &Deps, name: &str, kind: Option<Kind>) -> Result<Shown, Failur
     let (slug, heads, removed, foreign) = match load::named(deps, name, kind)? {
         load::Named::Version(v) => (v.slug.clone(), vec![head(&v)], None, load::foreign_note(&v)),
         load::Named::Slug(slug, document) => {
-            let (slug, document) = load::follow(deps.store, slug, document)?;
+            let (slug, document, lost) = load::follow(deps.store, slug, document)?;
+            if let Some(to) = lost {
+                return Err(Failure::Refused(load::lost_rename_note(&slug, &to)));
+            }
             let (heads, removed): (Vec<&Version>, Option<String>) =
                 match (document.state(), document.tombstone()) {
                     (State::Live(v), _) => (vec![v], None),
@@ -165,7 +168,8 @@ pub fn history(deps: &Deps, slug: &Slug) -> Result<History, Failure> {
     if document.is_empty() {
         return Err(Failure::Refused(format!("no {}: {slug}", slug.kind())));
     }
-    let (_, mut document) = load::follow(deps.store, slug.clone(), document)?;
+    let (landed, mut document, lost) = load::follow(deps.store, slug.clone(), document)?;
+    let lost_rename = lost.map(|to| load::lost_rename_note(&landed, &to));
     let foreign = document.current().and_then(load::foreign_note);
     let mut versions = Vec::new();
     loop {
@@ -184,6 +188,7 @@ pub fn history(deps: &Deps, slug: &Slug) -> Result<History, Failure> {
         slug: slug.path().to_owned(),
         versions,
         foreign,
+        lost_rename,
     })
 }
 
@@ -656,6 +661,9 @@ pub fn check(deps: &Deps) -> Result<Check, Failure> {
     for (slug, reason) in &loaded.broken {
         problem(slug, reason.clone());
     }
+    for (slug, to) in loaded.lost_renames() {
+        problem(slug, load::lost_rename_reason(to));
+    }
     for (slug, what) in loaded.foreign() {
         out.notices
             .push(Problem::at(slug, load::foreign_reason(what)));
@@ -752,7 +760,8 @@ fn check_links(loaded: &Loaded, out: &mut Check) {
                 continue;
             };
             match loaded.landing(&target) {
-                load::Landing::Present => {}
+                // `check` reports a lost rename once, at the renamed slug.
+                load::Landing::Present | load::Landing::Lost => {}
                 load::Landing::Removed(removed) => {
                     *inbound.entry(removed.clone()).or_default() += 1;
                     if !cites {
@@ -1054,6 +1063,59 @@ mod tests {
             show(&d, "lantern/nothing", None),
             Err(Failure::Refused(_))
         ));
+    }
+
+    #[test]
+    fn a_rename_with_no_moved_version_reads_as_lost() {
+        use crate::app::operation::Operation;
+
+        let w = World::new("m1");
+        let d = w.deps();
+        seed(&d);
+        let first = Slug::parse("lantern/relay-pin-is-fixed").unwrap();
+        write::rename(&d, &first, "lantern/relay-pin").unwrap();
+        write::put_fact(
+            &d,
+            "lantern/timing",
+            "After [[lantern/relay-pin-is-fixed]]",
+            &["lantern"],
+            false,
+        )
+        .unwrap();
+        let moved = Slug::parse("lantern/relay-pin").unwrap();
+        let head = d.store.document(&moved).unwrap().current().unwrap().clone();
+        write::store_version(
+            &d,
+            moved.clone(),
+            vec![head.id.clone()],
+            Operation::Rename,
+            head.fields,
+            String::new(),
+            Some(Slug::parse("lantern/relay-contact").unwrap()),
+            None,
+        )
+        .unwrap();
+        let lost = "renamed to lantern/relay-contact, which the store has not got";
+        let note = format!("{moved} was {lost}");
+        assert!(matches!(
+            show(&d, "lantern/relay-pin-is-fixed", None),
+            Err(Failure::Refused(m)) if m == note
+        ));
+        let history = history(&d, &first).unwrap();
+        let operations: Vec<&str> = history
+            .versions
+            .iter()
+            .map(|v| v.stamp.operation.as_str())
+            .collect();
+        assert_eq!(operations, ["rename", "rename", "rename", "new"]);
+        assert_eq!(history.lost_rename, Some(note));
+        let report = check(&d).unwrap();
+        let problems: Vec<(&str, &str)> = report
+            .problems
+            .iter()
+            .map(|p| (p.slug.as_str(), p.message.as_str()))
+            .collect();
+        assert_eq!(problems, [("lantern/relay-pin", lost)]);
     }
 
     #[test]

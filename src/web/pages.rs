@@ -487,6 +487,7 @@ pub struct HistoryPage {
     pub history: Option<String>,
     /// A note that the head was written by a newer worklog.
     pub foreign: Option<String>,
+    pub lost_rename: Option<String>,
     pub versions: Vec<HistoryLine>,
 }
 
@@ -501,6 +502,7 @@ impl From<&History> for HistoryPage {
             slug_plain: Link::plain(&h.slug),
             history: None,
             foreign: h.foreign.clone(),
+            lost_rename: h.lost_rename.clone(),
             versions: h
                 .versions
                 .iter()

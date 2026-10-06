@@ -116,6 +116,9 @@ pub struct History {
     pub versions: Vec<HistoryRow>,
     /// A note that a version was written by a newer worklog.
     pub foreign: Option<String>,
+    /// A note that the chain ends at a rename whose new slug has no
+    /// versions.
+    pub lost_rename: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

@@ -44,6 +44,8 @@ enum Stone {
 pub enum Landing<'a> {
     Present,
     Removed(&'a Slug),
+    /// A rename on the way names a slug with no versions.
+    Lost,
     Missing,
 }
 
@@ -152,18 +154,34 @@ pub fn live(store: &dyn Store, slug: &Slug) -> Result<Version, Failure> {
 }
 
 /// The document a slug reaches through any renames, and the slug it
-/// landed on, whatever state that document is in.
+/// landed on, whatever state that document is in. A rename whose new slug
+/// has no versions is not followed: the tombstone's document comes back
+/// with that new slug beside it.
 pub fn follow(
     store: &dyn Store,
     mut slug: Slug,
     mut document: Document,
-) -> Result<(Slug, Document), Failure> {
+) -> Result<(Slug, Document, Option<Slug>), Failure> {
     // Slugs are never reused, so a rename chain cannot loop.
     while let Some(to) = document.renamed_to().cloned() {
-        document = store.document(&to)?;
+        let moved = store.document(&to)?;
+        if moved.is_empty() {
+            return Ok((slug, document, Some(to)));
+        }
+        document = moved;
         slug = to;
     }
-    Ok((slug, document))
+    Ok((slug, document, None))
+}
+
+#[must_use]
+pub fn lost_rename_reason(to: &Slug) -> String {
+    format!("renamed to {to}, which the store has not got")
+}
+
+#[must_use]
+pub fn lost_rename_note(slug: &Slug, to: &Slug) -> String {
+    format!("{slug} was {}", lost_rename_reason(to))
 }
 
 /// A version's first parent, which sits in its own document or, for the
@@ -383,11 +401,29 @@ impl Loaded {
                 return Landing::Present;
             }
             match self.tombstones.get_key_value(at) {
+                Some((_, Stone::RenamedTo(to))) if !self.has_versions(to) => return Landing::Lost,
                 Some((_, Stone::RenamedTo(to))) => at = to,
                 Some((removed, Stone::Removed { .. })) => return Landing::Removed(removed),
                 None => return Landing::Missing,
             }
         }
+    }
+
+    /// The renamed slugs whose new slug has no versions, each with that
+    /// new slug.
+    pub fn lost_renames(&self) -> impl Iterator<Item = (&Slug, &Slug)> {
+        self.tombstones
+            .iter()
+            .filter_map(|(slug, stone)| match stone {
+                Stone::RenamedTo(to) if !self.has_versions(to) => Some((slug, to)),
+                _ => None,
+            })
+    }
+
+    /// `load_kind` files every document that has a version under `present`
+    /// or `tombstones`.
+    fn has_versions(&self, slug: &Slug) -> bool {
+        self.present.contains(slug) || self.tombstones.contains_key(slug)
     }
 
     /// The removed documents with the note each tombstone carries.

@@ -190,6 +190,11 @@ is the one place a chain crosses documents.
 A read of the old slug follows `superseded_by` to wherever the document
 is now; a write to it is refused and names the new slug.
 
+The two versions are separate writes and the tombstone lands first, so a
+tombstone can name a slug with no versions. `show` then refuses the old
+slug and says so, `history` ends at the tombstone, and `check` reports
+it as a problem.
+
 ## What a newer binary wrote
 
 The grammar grows only by adding: a key in the block, an operation, a
