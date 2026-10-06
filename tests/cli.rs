@@ -1,6 +1,7 @@
 //! The binary over a scratch store: exit codes, stdout shapes and the
 //! write path end to end.
 
+use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Output;
@@ -36,13 +37,17 @@ impl Scratch {
         self.run_binary(Command::cargo_bin("worklog").expect("the binary"), args)
     }
 
-    fn run_binary(&self, mut command: Command, args: &[&str]) -> Output {
+    fn run_binary(&self, command: Command, args: &[&str]) -> Output {
         let built = assert_cmd::cargo::cargo_bin("worklog");
         let dirs = built.parent().map(Path::to_path_buf).into_iter();
         let path = std::env::join_paths(dirs.chain(std::env::split_paths(
             &std::env::var_os("PATH").unwrap_or_default(),
         )))
         .expect("a joinable PATH");
+        self.run_with_path(command, &path, args)
+    }
+
+    fn run_with_path(&self, mut command: Command, path: &OsStr, args: &[&str]) -> Output {
         command
             .env("PATH", path)
             .env("WORKLOG_HOME", self.root.path())
@@ -473,10 +478,16 @@ fn every_run_is_logged_under_the_machine_that_ran_it() {
 #[test]
 fn a_binary_off_path_logs_nothing() {
     let s = seeded();
-    let copy = s.root.path().join("bench/worklog");
-    fs::create_dir_all(copy.parent().unwrap()).unwrap();
-    fs::copy(assert_cmd::cargo::cargo_bin("worklog"), &copy).unwrap();
-    s.ok_binary(Command::new(&copy), &["facts", "lantern"]);
+    let elsewhere = s.root.path().join("bench");
+    fs::create_dir_all(&elsewhere).unwrap();
+    fs::write(elsewhere.join("worklog"), "").unwrap();
+    let built = Command::cargo_bin("worklog").expect("the binary");
+    let off = s.run_with_path(built, elsewhere.as_os_str(), &["facts", "lantern"]);
+    assert!(
+        off.status.success(),
+        "{}",
+        String::from_utf8_lossy(&off.stderr)
+    );
     s.ok(&["facts", "lantern"]);
     let counted = s.ok(&["usage"]);
     assert!(counted.contains("      1 facts\n"), "{counted}");
