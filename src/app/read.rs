@@ -1067,8 +1067,6 @@ mod tests {
 
     #[test]
     fn a_rename_with_no_moved_version_reads_as_lost() {
-        use crate::app::operation::Operation;
-
         let w = World::new("m1");
         let d = w.deps();
         seed(&d);
@@ -1083,18 +1081,9 @@ mod tests {
         )
         .unwrap();
         let moved = Slug::parse("lantern/relay-pin").unwrap();
-        let head = d.store.document(&moved).unwrap().current().unwrap().clone();
-        write::store_version(
-            &d,
-            moved.clone(),
-            vec![head.id.clone()],
-            Operation::Rename,
-            head.fields,
-            String::new(),
-            Some(Slug::parse("lantern/relay-contact").unwrap()),
-            None,
-        )
-        .unwrap();
+        let head = load::live(d.store, &moved).unwrap();
+        let to = Slug::parse("lantern/relay-contact").unwrap();
+        write::rename_tombstone(&d, &head, &to).unwrap();
         let lost = "renamed to lantern/relay-contact, which the store has not got";
         let note = format!("{moved} was {lost}");
         assert!(matches!(

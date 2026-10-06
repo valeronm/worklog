@@ -448,37 +448,60 @@ pub fn tombstone(deps: &Deps, slug: &Slug, note: &str) -> Result<Written, Failur
     amend(deps, &version, Operation::Tombstone, fields, body)
 }
 
-/// A tombstone naming the new slug, and the new slug's first version with
-/// the same content, parented on the tombstone so a walk back from the new
-/// slug crosses the move.
-pub fn rename(deps: &Deps, from: &Slug, to: &str) -> Result<Written, Failure> {
-    let to = Slug::of_kind(from.kind(), to)?;
-    let version = load::live_to_amend(deps.store, from)?;
-    refuse_existing(deps, &to)?;
-    let stone = store_version(
+/// The tombstone a rename leaves under the old slug, naming the new one.
+pub(super) fn rename_tombstone(
+    deps: &Deps,
+    version: &Version,
+    to: &Slug,
+) -> Result<Version, Failure> {
+    store_version(
         deps,
-        from.clone(),
-        vec![version.id],
+        version.slug.clone(),
+        vec![version.id.clone()],
         Operation::Rename,
         version.fields.clone(),
         String::new(),
         Some(to.clone()),
         None,
-    )?;
-    let moved = store_version(
-        deps,
-        to,
-        vec![stone.id.clone()],
-        Operation::Rename,
-        version.fields,
-        version.body,
-        None,
-        Some(from.clone()),
-    )?;
+    )
+}
+
+/// A tombstone naming the new slug, and the new slug's first version with
+/// the same content, parented on the tombstone so a walk back from the new
+/// slug crosses the move. Given a rename whose tombstone landed alone, it
+/// writes the missing version.
+pub fn rename(deps: &Deps, from: &Slug, to: &str) -> Result<Written, Failure> {
+    let to = Slug::of_kind(from.kind(), to)?;
+    let document = deps.store.document(from)?;
+    let (stone, moved) = match document.state() {
+        State::Live(version) => {
+            load::refuse_foreign(version)?;
+            refuse_existing(deps, &to)?;
+            let stone = rename_tombstone(deps, version, &to)?;
+            let moved = Version::moved_by(&stone, version);
+            (stone.id, moved)
+        }
+        State::Tombstoned(stone)
+            if document.renamed_to() == Some(&to) && deps.store.document(&to)?.is_empty() =>
+        {
+            load::refuse_foreign(stone)?;
+            let Some(before) = stone.block.parents.first().and_then(|id| document.get(id)) else {
+                return Err(Failure::Refused(format!(
+                    "{from} was renamed to {to}, and the version it moved is not in the store"
+                )));
+            };
+            (stone.id.clone(), Version::moved_by(stone, before))
+        }
+        _ => return Err(load::not_live(from, &document)),
+    };
+    let Some(moved) = moved else {
+        unreachable!("a rename's tombstone names the new slug");
+    };
+    deps.store.put(&moved)?;
     Ok(Written {
         slug: moved.slug.path().to_owned(),
         id: moved.id.to_string(),
-        tombstone: Some(stone.id.to_string()),
+        tombstone: Some(stone.to_string()),
     })
 }
 
@@ -913,6 +936,47 @@ mod tests {
         assert!(matches!(
             tombstone(&d, &fact, "gone"),
             Err(Failure::Refused(m)) if m.contains("renamed to")
+        ));
+    }
+
+    #[test]
+    fn a_rename_run_again_writes_the_version_that_never_landed() {
+        fn seeded() -> (World, Slug) {
+            let w = World::new("m1");
+            let d = w.deps();
+            put_topic(&d, "lantern", "A lamp", &[], None).unwrap();
+            put_fact(
+                &d,
+                "lantern/relay",
+                "The relay is fixed",
+                &["lantern"],
+                false,
+            )
+            .unwrap();
+            (w, Slug::parse("lantern/relay").unwrap())
+        }
+        let (unbroken, fact) = seeded();
+        let whole = rename(&unbroken.deps(), &fact, "lantern/relay-pin").unwrap();
+
+        let (w, fact) = seeded();
+        let to = Slug::parse("lantern/relay-pin").unwrap();
+        rename_tombstone(&w.deps(), &current(&w, &fact), &to).unwrap();
+        let later = World {
+            clock: crate::domain::testing::FixedClock::on("2026-09-09"),
+            ..World::new("m2")
+        };
+        let other = Deps {
+            store: &w.store,
+            ..later.deps()
+        };
+        assert!(matches!(
+            rename(&other, &fact, "lantern/relay-contact"),
+            Err(Failure::Refused(m)) if m.ends_with("was renamed to lantern/relay-pin")
+        ));
+        assert_eq!(rename(&other, &fact, "lantern/relay-pin").unwrap(), whole);
+        assert!(matches!(
+            rename(&other, &fact, "lantern/relay-pin"),
+            Err(Failure::Refused(m)) if m.ends_with("was renamed to lantern/relay-pin")
         ));
     }
 

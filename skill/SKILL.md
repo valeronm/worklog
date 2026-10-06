@@ -253,6 +253,11 @@ tombstone. From an entry, or a followup that is done or dropped, that is
 a citation; from anything live it is a notice, since the live document
 has gone stale. A notice never changes the exit code.
 
+A slug `show` or `check` reports as renamed to one the store has not got
+is a rename cut short, or one whose other half has not synced yet. Once
+sync has settled, `worklog rename` with the two slugs the message gives
+finishes it.
+
 A document with two current versions is a fork, made by two machines
 writing from the same parent before syncing. `worklog forks` lists them,
 every read shows both heads, and `worklog resolve <slug>` opens a draft

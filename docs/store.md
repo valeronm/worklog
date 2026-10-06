@@ -185,7 +185,9 @@ A rename writes two versions. Under the old slug, a tombstone with
 the old head, with an empty body. Under the new slug, a first version
 with the same fields and body, `operation: rename`, `renamed_from`
 naming the old slug, and the tombstone as its parent. That parent link
-is the one place a chain crosses documents.
+is the one place a chain crosses documents. The first version carries
+the tombstone's `written` and `machine`, so it is a function of the
+tombstone and the version before it.
 
 A read of the old slug follows `superseded_by` to wherever the document
 is now; a write to it is refused and names the new slug.
@@ -193,7 +195,11 @@ is now; a write to it is refused and names the new slug.
 The two versions are separate writes and the tombstone lands first, so a
 tombstone can name a slug with no versions. `show` then refuses the old
 slug and says so, `history` ends at the tombstone, and `check` reports
-it as a problem.
+it as a problem. The same `rename` run again writes the missing version,
+with the id the first run would have given it, so one that arrives late
+from another machine is the same file. A rename written before both
+versions shared a stamp completes under a different id, and a late
+arrival then forks the new slug.
 
 ## What a newer binary wrote
 

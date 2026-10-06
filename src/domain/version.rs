@@ -378,6 +378,33 @@ impl Version {
         let from = self.block.renamed_from.as_ref()?;
         Some((from, &self.slug))
     }
+
+    /// The first version a rename writes under the new slug, from the
+    /// tombstone it left and the version before that one; `None` when
+    /// `stone` is no rename's tombstone. Every part comes from the two, so
+    /// composing it again yields the same id.
+    #[must_use]
+    pub fn moved_by(stone: &Version, before: &Version) -> Option<Version> {
+        if stone.block.operation != RENAME {
+            return None;
+        }
+        let to = stone.block.superseded_by.clone()?;
+        let block = VersionBlock {
+            parents: vec![stone.id.clone()],
+            written: stone.block.written.clone(),
+            machine: stone.block.machine.clone(),
+            operation: RENAME.to_owned(),
+            superseded_by: None,
+            renamed_from: Some(stone.slug.clone()),
+            raw: None,
+        };
+        Some(Version::compose(
+            to,
+            block,
+            stone.fields.clone(),
+            before.body.clone(),
+        ))
+    }
 }
 
 /// Every version of one slug.
@@ -580,6 +607,26 @@ mod tests {
         let pinned = moved_to("pin");
         assert!(!pinned.is_tombstone());
         assert!(pinned.rename_sides().is_none());
+    }
+
+    #[test]
+    fn a_moved_version_is_made_of_its_tombstone_and_the_version_before() {
+        let before = topic("t", "\nbody\n", &[], "new");
+        let mut leaving = block(&[&before.id], RENAME);
+        leaving.superseded_by = Some(Slug::parse("lamp").unwrap());
+        let stone = Version::compose(
+            before.slug.clone(),
+            leaving,
+            before.fields.clone(),
+            String::new(),
+        );
+        let moved = Version::moved_by(&stone, &before).unwrap();
+        assert_eq!(moved.rename_sides(), stone.rename_sides());
+        assert_eq!(moved.block.parents, std::slice::from_ref(&stone.id));
+        assert_eq!(moved.block.written, stone.block.written);
+        assert_eq!(moved.body, before.body);
+        assert_eq!(Version::moved_by(&stone, &before).unwrap().id, moved.id);
+        assert!(Version::moved_by(&before, &before).is_none());
     }
 
     #[test]
