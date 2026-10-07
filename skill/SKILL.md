@@ -127,7 +127,10 @@ fits:
 
 A followup carries a recheck: a date and why, meaning when to look again,
 not when the thing is expected; or `touching <topic>`, which takes no why
-and is raised by every session opening in that topic. An idea, listed apart under `worklog ideas
+and is raised by every session opening in that topic. A session is shown
+a followup only through a tag naming a topic its directory claims or a
+recheck touching one, so give a new followup one of the two; `worklog
+check` notes an open one that names no topic at all. An idea, listed apart under `worklog ideas
 [topic]`, gains a recheck through `worklog recheck` when something starts
 waiting on it.
 

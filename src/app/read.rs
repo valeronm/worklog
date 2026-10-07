@@ -95,6 +95,20 @@ fn has_tag(tags: &[String], tag: &str) -> bool {
     tags.iter().any(|t| t.eq_ignore_ascii_case(tag))
 }
 
+/// The topic names an item carries: its tags, the topic it sits under and
+/// the one its recheck touches.
+fn topic_names<'a>(
+    tags: &'a [String],
+    home: Option<&'a str>,
+    recheck: Option<&'a Recheck>,
+) -> impl Iterator<Item = &'a str> {
+    let touched = match recheck {
+        Some(Recheck::Touching(topic)) => Some(topic.as_str()),
+        _ => None,
+    };
+    tags.iter().map(String::as_str).chain(home).chain(touched)
+}
+
 /// Counts ranked most used first, names breaking ties, each made into
 /// what the listing holds.
 fn most_used_first<T>(
@@ -471,16 +485,12 @@ fn fact_item(doc: &Doc<Fact>, recheck: &Recheck, today: &str, topics: &[&str]) -
 }
 
 /// Open followups, then facts and ideas with a recheck of their own, for
-/// a session about `topics`: an item counts when it is tagged with one,
-/// sits under one, or touches one. No topics means all.
+/// a session about `topics`. No topics means all.
 fn open_work(loaded: &Loaded, topics: &[&str], today: &str, closed_too: bool) -> Followups {
     let about = |tags: &[String], home: Option<&str>, recheck: Option<&Recheck>| {
         topics.is_empty()
-            || topics.iter().any(|t| {
-                has_tag(tags, t)
-                    || home.is_some_and(|h| h.eq_ignore_ascii_case(t))
-                    || recheck.is_some_and(|r| r.touches(t))
-            })
+            || topic_names(tags, home, recheck)
+                .any(|n| topics.iter().any(|t| n.eq_ignore_ascii_case(t)))
     };
     let mut out = Followups::default();
     let mut entries: Vec<&str> = Vec::new();
@@ -728,8 +738,22 @@ pub fn check(deps: &Deps) -> Result<Check, Failure> {
         if !loaded.is_present(&f.data.entry) {
             problem(&f.slug, format!("arose in no live entry: {}", f.data.entry));
         }
-        if let Some(t) = touching_unknown(&f.data.recheck) {
+        let missing = touching_unknown(&f.data.recheck);
+        if let Some(t) = &missing {
             problem(&f.slug, format!("touching no topic: {t}"));
+        }
+        let names_a_topic = topic_names(&f.data.tags, None, f.data.recheck.as_ref())
+            .any(|n| loaded.has_topic(&tag_key(n)));
+        // A recheck touching a missing topic is a problem already.
+        if f.data.is_open() && !names_a_topic && missing.is_none() {
+            let tags = match f.data.tags.as_slice() {
+                [] => String::new(),
+                tags => format!(" ({})", tags.join(", ")),
+            };
+            out.notices.push(Problem::at(
+                &f.slug,
+                format!("open and names no topic{tags}"),
+            ));
         }
     }
     check_links(&loaded, &mut out);
@@ -1176,6 +1200,37 @@ mod tests {
             assert!(listed.items.iter().all(|i| i.entry.as_deref() == Some(new)));
             assert_eq!(show(&d, name, None).unwrap().followups, shown);
         }
+    }
+
+    #[test]
+    fn check_notes_an_open_followup_that_names_no_topic() {
+        let w = World::new("m1");
+        let d = w.deps();
+        seed(&d);
+        let put = |name, tags: &[&str], recheck| {
+            let entry = "2026-09/2026-09-01-first";
+            write::put_followup(&d, name, entry, "Open", tags, recheck).unwrap();
+        };
+        put("2026-09-02-bare", &[], None);
+        put("2026-09-02-loose", &["rust", "ci"], None);
+        put("2026-09-02-touching", &["rust"], Some("touching lantern"));
+        put("2026-09-02-closed", &["rust"], None);
+        write::drop_(&d, &Slug::parse("2026-09-02-closed").unwrap(), None).unwrap();
+
+        let report = check(&d).unwrap();
+        let notices: Vec<(&str, &str)> = report
+            .notices
+            .iter()
+            .map(|n| (n.slug.as_str(), n.message.as_str()))
+            .collect();
+        assert_eq!(
+            notices,
+            [
+                ("2026-09-02-bare", "open and names no topic"),
+                ("2026-09-02-loose", "open and names no topic (rust, ci)"),
+            ]
+        );
+        assert!(report.problems.is_empty());
     }
 
     #[test]

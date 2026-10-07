@@ -94,6 +94,11 @@ entry's are.
 | `state` | always | `open`, `done` or `dropped` |
 | `summary` | always | one line |
 
+A followup has no topic of its own: a session is shown it when one of
+its tags names a topic its directory claims, or its recheck touches one.
+`check` notes an open followup whose tags name no topic and whose
+recheck touches none, which no session is shown.
+
 The body starts as one blank line; `done` and `drop` append their note
 as its last line. A followup's slug carries the date it was opened, not
 the entry's.
