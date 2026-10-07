@@ -359,7 +359,7 @@ fn page(c: &Context, rung: usize) -> String {
         ));
     }
     sections.push(
-        "Durable facts and ideas, by name where they fit and counted where not —\n`worklog facts <topic>` for their claims, `worklog show <topic>/<name>` for one.\n"
+        "Durable facts and ideas, by name where they fit and counted where not —\n`worklog facts <topic>` for their claims, `worklog show <topic>/<name>` for one,\n`worklog tag <topic>` for a topic's entries.\n"
             .to_owned(),
     );
     for (n, g) in c.groups.iter().enumerate() {

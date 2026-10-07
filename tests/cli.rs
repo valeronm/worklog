@@ -542,7 +542,8 @@ fn context_indexes_the_directory_and_stays_small() {
     let ctx = s.ok(&["context", "projects/Android/atlas"]);
     let expected = [
         "Durable facts and ideas, by name where they fit and counted where not —",
-        "`worklog facts <topic>` for their claims, `worklog show <topic>/<name>` for one.",
+        "`worklog facts <topic>` for their claims, `worklog show <topic>/<name>` for one,",
+        "`worklog tag <topic>` for a topic's entries.",
         "",
         "atlas — this directory:",
         "  (no facts)",

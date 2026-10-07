@@ -1,6 +1,6 @@
 ---
 name: worklog
-description: Record work done, durable facts, follow-ups and topics in the worklog store, and look them up. Use when asked to log work ("log this", "/worklog", "write an entry"), when a durable fact, a decision or an unbuilt idea is stated, when open work needs closing or rescheduling, or when a topic is raised without enough context to act on and the store may hold it. Every write goes through the `worklog` binary; nothing in the store is edited by hand.
+description: Record work done, durable facts, follow-ups and topics in the worklog store, and look them up. Use when asked to log work ("log this", "/worklog", "write an entry"), when a durable fact, a decision or an unbuilt idea is stated, when open work needs closing or rescheduling, when new work starts in a project that has a topic, or when a topic is raised without enough context to act on and the store may hold it. Every write goes through the `worklog` binary; nothing in the store is edited by hand.
 ---
 
 # worklog
@@ -23,8 +23,10 @@ and written only through `worklog`. Four kinds:
 A session opens with `worklog context`: the topics its directory and
 machine reach, their facts by name or, where the names would not fit, by
 count, what is due, and what needs a hand.
-Read a fact before relying on it: `worklog show <topic>/<name>`. Read a
-topic's facts before starting work in it: `worklog facts <topic>`.
+Read a fact before relying on it: `worklog show <topic>/<name>`. Before
+new work in a topic, follow the steps under Search and recall. A session
+handing work to a subagent gives it the facts that work rests on, since a
+subagent opens with none.
 
 ## When to write
 
@@ -107,11 +109,11 @@ stderr with exit 1; a usage error exits 2.
 
 ## Open work
 
-`worklog followups [topic]` lists open items oldest first with each
+`worklog followups [topic]` lists open items, due ones first, with each
 item's state: `due <date>`, `by <date>`, `touching <topic>`, or `no
 recheck`; given an entry slug instead of a topic, it lists the items that
-arose in that entry. Everything `context` shows as due is triaged in that session:
-done, dropped, rescheduled, or acted on.
+arose in that entry. Everything `context` shows as due is triaged in that
+session: done, dropped, rescheduled, or acted on.
 
 Triage an item, new or found in a backlog, by the first question that
 fits:
@@ -127,20 +129,21 @@ fits:
 
 A followup carries a recheck: a date and why, meaning when to look again,
 not when the thing is expected; or `touching <topic>`, which takes no why
-and is raised by every session opening in that topic. A session is shown
-a followup only through a tag naming a topic its directory claims or a
-recheck touching one, so give a new followup one of the two; `worklog
-check` notes an open one that names no topic at all. An idea, listed apart under `worklog ideas
-[topic]`, gains a recheck through `worklog recheck` when something starts
-waiting on it.
+and is raised by every session opening in that topic. A session finds a
+followup through a tag naming a topic or a recheck touching one. A new
+followup takes its entry's tags unless given `--tags`, so tag the entry
+with its topic or use `touching <topic>`; `worklog check` notes an open
+followup that names no topic at all. An idea, listed apart under `worklog
+ideas [topic]`, gains a recheck through `worklog recheck` when something
+starts waiting on it.
 
 ## Facts and topics
 
-A fact is one thing that is true, under the topic it is about, with a `summary` that is
-the fact itself, then a body: the fact as it holds now, **Why**, and **How
-to apply**. It is rewritten (checkout, save) when it changes and
-tombstoned when it stops being true. `worklog verify <fact>` records that
-it was checked and found still true.
+A fact is one thing that is true, under the topic it is about, with a
+`summary` that is the fact itself, then a body: the fact as it holds now,
+**Why**, and **How to apply**. It is rewritten (checkout, save) when it
+changes and tombstoned when it stops being true. `worklog verify <fact>`
+records that it was checked and found still true.
 
 Which store holds it:
 
@@ -220,6 +223,21 @@ this host lacks; after a migration or a moved checkout, `worklog unclaim
 topic's directories, `--machine <name>` another host's.
 
 ## Search and recall
+
+Before new work in a topic, find what the work touches and what was
+already decided about it:
+
+1. For each topic the opener lists that the work touches, `worklog facts
+   <topic>` lists its facts and ideas; `show` the ones that bear on the
+   work.
+2. `worklog tag <topic>` lists the entries tagged with the topic, and
+   `worklog search <term>` narrows them to what is about to change: a
+   component, a file, an identifier. `show` the entries whose summary or
+   matching lines bear on the work, for the decision taken and what was
+   rejected.
+3. `worklog followups <topic>` for open work on what is about to change.
+
+Tell the user what was found that bears on the work, citing slugs.
 
 - `worklog search <term>` — every document holding the term, facts first;
   `--regex` for a pattern.

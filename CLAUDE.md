@@ -88,6 +88,8 @@ directory included, which is what lets the installer and `upgrade` run it
 on every host without a network. The skill is public and written
 for a stranger: it holds how to use the store, including the follow-up
 triage put to the user, and nothing about any one person's other tools.
+It says what the tool gives and how to use it, not how the tool works: a
+rule restated there is a copy `tests/skill.rs` cannot hold to the code.
 
 ## What stays out of the repo
 
