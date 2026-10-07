@@ -613,7 +613,7 @@ pub fn context(deps: &Deps, directory: &str) -> Result<Context, Failure> {
     }
     let roots: Vec<&str> = reached
         .iter()
-        .filter(|r| matches!(r.via, Via::Claim(_)))
+        .filter(|r| r.shows_work)
         .map(|r| r.topic.as_str())
         .collect();
     if !roots.is_empty() {
@@ -1231,6 +1231,37 @@ mod tests {
             ]
         );
         assert!(report.problems.is_empty());
+    }
+
+    #[test]
+    fn an_unclaimed_directory_is_shown_the_open_work_no_project_has() {
+        let w = World::new("m1");
+        let d = w.deps();
+        write::put_topic(&d, "lantern", "A topic", &["bench"], None).unwrap();
+        write::put_topic(&d, "bench", "A topic", &[], None).unwrap();
+        write::put_topic(&d, "tools", "A topic", &[], None).unwrap();
+        write::put_topic(&d, "house", "A topic", &["tools"], None).unwrap();
+        let claims: &[(&str, &[&str])] = &[("lantern", &["~/projects/lantern"])];
+        write::put_machine_topic(&d, "desk", "This machine", "m1", claims, &["house"]).unwrap();
+        let entry = "2026-09/2026-09-01-first";
+        write::put_entry(&d, entry, "2026-09-01", "First", &[]).unwrap();
+        for topic in ["lantern", "bench", "house", "desk", "tools"] {
+            let name = format!("2026-09-01-{topic}");
+            let due = Some("2026-09-02 why");
+            write::put_followup(&d, &name, entry, "Open", &[topic], due).unwrap();
+        }
+        let due = |dir: &str| -> Vec<String> {
+            let shown = context(&d, dir).unwrap();
+            shown.due.into_iter().map(|i| i.slug).collect()
+        };
+        assert_eq!(
+            due("/home/u/projects/lantern"),
+            ["2026-09-01-bench", "2026-09-01-lantern"]
+        );
+        assert_eq!(
+            due("/home/u"),
+            ["2026-09-01-desk", "2026-09-01-house", "2026-09-01-tools"]
+        );
     }
 
     #[test]

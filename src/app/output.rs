@@ -242,7 +242,7 @@ pub struct Context {
     pub machine: Option<String>,
     pub directory: String,
     pub groups: Vec<Group>,
-    /// Open followups tagged with a directly claimed topic.
+    /// Open followups of the topics whose open work the session is shown.
     pub open: usize,
     pub open_entries: usize,
     pub without_recheck: usize,

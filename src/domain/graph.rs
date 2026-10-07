@@ -20,6 +20,9 @@ pub struct Reached {
     /// Include steps from the root that reached it.
     pub distance: usize,
     pub via: Via,
+    /// Whether the session is shown the topic's open work, which a topic
+    /// takes from the root that reached it.
+    pub shows_work: bool,
 }
 
 /// A topic by slug; `None` for a name no topic carries.
@@ -58,7 +61,7 @@ fn matched(cwd: &str, claim: &str, home: &str) -> Option<usize> {
 /// Walks `includes` breadth-first from `root`, adding every topic not yet
 /// in `reached`; an include naming no topic is skipped here and reported
 /// by the store check.
-fn walk(root: &str, topics: &Lookup, reached: &mut Vec<Reached>) {
+fn walk(root: &str, shows_work: bool, topics: &Lookup, reached: &mut Vec<Reached>) {
     let mut frontier = vec![(root.to_owned(), 0usize)];
     while !frontier.is_empty() {
         let mut next = Vec::new();
@@ -72,6 +75,7 @@ fn walk(root: &str, topics: &Lookup, reached: &mut Vec<Reached>) {
                     topic: include.clone(),
                     distance: distance + 1,
                     via: Via::Included { from: from.clone() },
+                    shows_work,
                 });
                 next.push((include.clone(), distance + 1));
             }
@@ -87,8 +91,9 @@ pub fn included(root: &str, topics: &Lookup) -> Vec<Reached> {
         topic: root.to_owned(),
         distance: 0,
         via: Via::Machine,
+        shows_work: true,
     }];
-    walk(root, topics, &mut reached);
+    walk(root, true, topics, &mut reached);
     reached
 }
 
@@ -103,6 +108,7 @@ pub fn resolve(
     topics: &Lookup,
 ) -> Vec<Reached> {
     let cwd = cwd.trim_end_matches('/');
+    let mut claimed = false;
     let mut roots: Vec<(String, Via)> = Vec::new();
     if let Some((machine_slug, machine)) = machine {
         // Longest match per topic, then topics by match length, then name.
@@ -124,7 +130,8 @@ pub fn resolve(
             roots.push(((*topic).to_owned(), Via::Claim((*path).to_owned())));
         }
         roots.push((machine_slug.to_owned(), Via::Machine));
-        if best.is_empty() {
+        claimed = !best.is_empty();
+        if !claimed {
             for topic in &machine.unclaimed {
                 roots.push((topic.clone(), Via::Unclaimed));
             }
@@ -135,12 +142,16 @@ pub fn resolve(
         if reached.iter().any(|r| r.topic == root) {
             continue;
         }
+        // The machine topic loads in every session on the host, and its
+        // open work belongs to none of the host's projects.
+        let shows_work = !(claimed && via == Via::Machine);
         reached.push(Reached {
             topic: root.clone(),
             distance: 0,
             via,
+            shows_work,
         });
-        walk(&root, topics, &mut reached);
+        walk(&root, shows_work, topics, &mut reached);
     }
     reached
 }
@@ -231,6 +242,41 @@ mod tests {
             [("host", 0), ("personal", 0), ("taxes", 1)]
         );
         assert_eq!(reached[1].via, Via::Unclaimed);
+    }
+
+    #[test]
+    fn open_work_is_shown_for_all_but_the_machine_chain_of_a_claimed_directory() {
+        let mut topics = store();
+        topics.get_mut("host").unwrap().includes = vec!["lab".into()];
+        let shown = |cwd: &str| -> Vec<(String, bool)> {
+            resolve_in(&topics, cwd)
+                .into_iter()
+                .map(|r| (r.topic, r.shows_work))
+                .collect()
+        };
+        let pairs = |list: &[(&str, bool)]| -> Vec<(String, bool)> {
+            list.iter().map(|(t, s)| ((*t).to_owned(), *s)).collect()
+        };
+        assert_eq!(
+            shown("/home/u/projects/Android/atlas"),
+            pairs(&[
+                ("atlas", true),
+                ("android", true),
+                ("phone-a", true),
+                ("phone-b", true),
+                ("host", false),
+                ("lab", false),
+            ])
+        );
+        assert_eq!(
+            shown("/home/u/Documents"),
+            pairs(&[
+                ("host", true),
+                ("lab", true),
+                ("personal", true),
+                ("taxes", true),
+            ])
+        );
     }
 
     #[test]

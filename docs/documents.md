@@ -94,10 +94,10 @@ entry's are.
 | `state` | always | `open`, `done` or `dropped` |
 | `summary` | always | one line |
 
-A followup has no topic of its own: a session is shown it when one of
-its tags names a topic its directory claims, or its recheck touches one.
-`check` notes an open followup whose tags name no topic and whose
-recheck touches none, which no session is shown.
+A followup has no topic of its own: it is a topic's open work through a
+tag naming the topic or a recheck touching it, and a session is shown it
+by the rule under Topic. `check` notes an open followup whose tags name
+no topic and whose recheck touches none, since that one is no topic's.
 
 The body starts as one blank line; `done` and `drop` append their note
 as its last line. A followup's slug carries the date it was opened, not
@@ -137,6 +137,15 @@ closest first, with no shadowing of a wider claim by a narrower one;
 `unclaimed` loads only when none matches; the machine topic always
 loads. From each topic reached, `includes` is walked breadth-first,
 each topic once, so a cycle ends.
+
+A session is shown the open work of the topics its directory claims and
+of every topic those include. Where it claims none, it is shown that of
+the machine's `unclaimed` topics, of the machine topic itself, and of
+what they include. In a claimed directory the machine topic and what
+only it includes bring their facts and not their open work, which
+belongs to none of the host's projects. An item is a topic's open work
+when it sits under the topic, a tag of it names the topic, or its
+recheck touches it.
 
 A topic named in `includes`, `claims` or `unclaimed` has to exist, and a
 machine has one topic; `check` reports both.
