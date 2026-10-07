@@ -49,8 +49,13 @@ Follow-ups section from the followups naming it.
 | `date` | always | the day the work was done; equals the slug's |
 | `machine` | always | where the work happened, which is not where the version was written |
 | `tags` | always | the topics it belongs to |
-| `files_touched` | always | the paths the work changed |
+| `files_touched` | always | where the work changed files, each path in full from `~` |
 | `summary` | always | one line |
+
+`files_touched` is what a search for a file or a project finds an entry
+by. Files inside a repo are listed as the repo's directory, since the
+repo holds which of them changed; a file changed outside one, or in a
+repo whose work tree is the home directory, is listed by its own path.
 
 The body is prose.
 

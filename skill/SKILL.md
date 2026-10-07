@@ -85,10 +85,21 @@ stderr with exit 1; a usage error exits 2.
 
 1. `worklog new entry <kebab-name>`; edit the draft. `date` and `machine`
    are filled. Set `tags` from the vocabulary `worklog tags` shows, reusing
-   before inventing, `files_touched` to the real paths changed, if any, and
-   `summary` as one line, which is what every listing shows. Body sections:
-   **What / Why / Changes / Notes**. Record what was non-obvious: decisions,
-   gotchas, why not the other way. Never git state.
+   before inventing, and `summary` as one line, which is what every listing
+   shows. Body sections: **What / Why / Changes / Notes**. Record what was
+   non-obvious: decisions, gotchas, why not the other way. Never git state.
+
+   `files_touched` is what a later search for a file or a project finds
+   the entry by. Each item is a path in full from `~`, with no note beside
+   it:
+   - the repo's directory, `~/projects/lantern`, for files inside a repo,
+     since the repo holds which of them changed;
+   - the file itself for one changed outside a repo, or in a repo whose
+     work tree is the home directory.
+
+   List only what the work edited: nothing a build or an install wrote, no
+   store document, no file only read. It is `[]` when the work edited no
+   file.
 2. `worklog diff` then `worklog save`.
 3. Put each doable item of open work from this session to the user, one
    question per item naming the item and what doing it involves, with
@@ -281,10 +292,9 @@ is a rename cut short, or one whose other half has not synced yet. Once
 sync has settled, `worklog rename` with the two slugs the message gives
 finishes it.
 
-A document with two current versions is a fork, made by two machines
-writing from the same parent before syncing. `worklog forks` lists them,
-every read shows both heads, and `worklog resolve <slug>` opens a draft
-holding both for a person to reconcile and save. Nothing merges on its own.
+A fork is a document with two current versions. `worklog forks` lists
+them, and `worklog resolve <slug>` opens a draft holding both for a
+person to reconcile and save.
 
 `worklog drafts` lists drafts open on this machine, this session's and
 any other's: sessions run side by side, and a draft is the session's that
