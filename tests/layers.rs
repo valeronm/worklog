@@ -53,6 +53,18 @@ fn the_domain_does_no_io() {
     );
 }
 
+/// `load::load` names topics and entries as they are now, and a write
+/// that stored its documents back would rewrite the names as stored.
+#[test]
+fn no_write_reads_the_store_renamed() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app/write.rs");
+    let text = fs::read_to_string(path).expect("readable source");
+    let (shipped, _tests) = text
+        .split_once("#[cfg(test)]\nmod tests")
+        .expect("a test module");
+    assert!(!shipped.contains("load::load("));
+}
+
 /// A version's fields are opaque to whatever stores, chains and drafts it,
 /// so a kind can gain a field without the store changing; the two meet
 /// only in `app`.

@@ -9,6 +9,7 @@ use crate::domain::followup::Followup;
 use crate::domain::frontmatter::{FieldError, Fields};
 use crate::domain::kind_keys;
 use crate::domain::ports::Store;
+use crate::domain::recheck::Recheck;
 use crate::domain::slug::{Kind, Slug};
 use crate::domain::topic::Topic;
 use crate::domain::version::{Document, State, Tombstone, Version, VersionId};
@@ -42,7 +43,7 @@ enum Stone {
 
 /// Where a link lands, through any renames.
 pub enum Landing<'a> {
-    Present,
+    Present(&'a Slug),
     Removed(&'a Slug),
     /// A rename on the way names a slug with no versions.
     Lost,
@@ -64,8 +65,9 @@ pub struct Loaded {
     present: BTreeSet<Slug>,
     /// What the tombstone at each tombstoned slug says.
     tombstones: BTreeMap<Slug, Stone>,
-    /// Indexes into `facts`, by topic.
+    /// Indexes into `facts`, by topic as it is named now.
     facts_by_topic: BTreeMap<String, Vec<usize>>,
+    renamed: Renamed,
 }
 
 /// What in the version a newer worklog wrote: a key in its block, an
@@ -182,6 +184,20 @@ pub fn lost_rename_reason(to: &Slug) -> String {
 #[must_use]
 pub fn lost_rename_note(slug: &Slug, to: &Slug) -> String {
     format!("{slug} was {}", lost_rename_reason(to))
+}
+
+/// The document and every document it was renamed from, newest first,
+/// each with the slug it is stored under.
+pub fn lineage(store: &dyn Store, slug: &Slug) -> Result<Vec<(Slug, Document)>, Failure> {
+    let mut chain = Vec::new();
+    let mut at = Some(slug.clone());
+    while let Some(slug) = at {
+        let document = store.document(&slug)?;
+        let first = document.history().last().copied();
+        at = first.and_then(|v| v.block.renamed_from.clone());
+        chain.push((slug, document));
+    }
+    Ok(chain)
 }
 
 /// A version's first parent, which sits in its own document or, for the
@@ -313,16 +329,18 @@ fn load_kind<T>(
     Ok(docs)
 }
 
-/// Every live followup, oldest first, without the rest of the store.
-pub fn followups(store: &dyn Store) -> Result<Vec<Doc<Followup>>, Failure> {
+/// Every live followup, oldest first, read without the rest of the store;
+/// its entry and topics are named as stored.
+pub fn stored_followups(store: &dyn Store) -> Result<Vec<Doc<Followup>>, Failure> {
     let mut scratch = Loaded::default();
     let mut docs = load_kind(store, Kind::Followup, Followup::from_fields, &mut scratch)?;
     docs.sort_by(|a, b| a.slug.cmp(&b.slug));
     Ok(docs)
 }
 
-/// Every live topic, without the rest of the store.
-pub fn topics(store: &dyn Store) -> Result<Vec<Doc<Topic>>, Failure> {
+/// Every live topic, read without the rest of the store; the topics it
+/// names are named as stored.
+pub fn stored_topics(store: &dyn Store) -> Result<Vec<Doc<Topic>>, Failure> {
     let mut scratch = Loaded::default();
     load_kind(store, Kind::Topic, Topic::from_fields, &mut scratch)
 }
@@ -354,20 +372,159 @@ pub fn load(store: &dyn Store) -> Result<Loaded, Failure> {
     loaded.entries.sort_by(|a, b| b.slug.cmp(&a.slug));
     loaded.facts = load_kind(store, Kind::Fact, Fact::from_fields, &mut loaded)?;
     loaded.facts.sort_by(|a, b| a.slug.cmp(&b.slug));
-    for (i, fact) in loaded.facts.iter().enumerate() {
-        let topic = fact.slug.topic().unwrap_or_default().to_owned();
-        loaded.facts_by_topic.entry(topic).or_default().push(i);
-    }
     loaded.topics = load_kind(store, Kind::Topic, Topic::from_fields, &mut loaded)?
         .into_iter()
         .map(|doc| (doc.slug.path().to_owned(), doc))
         .collect();
     loaded.followups = load_kind(store, Kind::Followup, Followup::from_fields, &mut loaded)?;
     loaded.followups.sort_by(|a, b| a.slug.cmp(&b.slug));
+    loaded.name_topics_as_now();
+    loaded.name_entries_as_now();
+    for (i, fact) in loaded.facts.iter().enumerate() {
+        let topic = loaded.home(fact).to_owned();
+        loaded.facts_by_topic.entry(topic).or_default().push(i);
+    }
     Ok(loaded)
 }
 
+/// Old topic name, lowercased, to the name the topic has now; tags and
+/// `touching` name a topic without case.
+#[derive(Default)]
+struct Renamed(BTreeMap<String, String>);
+
+impl Renamed {
+    fn now(&self, name: &str) -> Option<&String> {
+        self.0.get(&name.to_ascii_lowercase())
+    }
+
+    fn rename(&self, name: &mut String) {
+        if let Some(now) = self.now(name) {
+            now.clone_into(name);
+        }
+    }
+
+    /// Renaming must not leave the topic's name twice in one list: a
+    /// listing counts every tag a document carries.
+    fn rename_all(&self, names: &mut Vec<String>) {
+        let mut at = 0;
+        while at < names.len() {
+            match self.now(&names[at]) {
+                Some(now) if names.iter().any(|n| n.eq_ignore_ascii_case(now)) => {
+                    names.remove(at);
+                }
+                Some(now) => {
+                    now.clone_into(&mut names[at]);
+                    at += 1;
+                }
+                None => at += 1,
+            }
+        }
+    }
+
+    fn retouch(&self, recheck: &mut Option<Recheck>) {
+        match recheck {
+            Some(Recheck::Touching(topic)) => self.rename(topic),
+            Some(Recheck::On { .. }) | None => {}
+        }
+    }
+}
+
 impl Loaded {
+    /// Each kind is destructured without `..`, so a field added to one
+    /// does not compile until it is placed here.
+    fn name_topics_as_now(&mut self) {
+        let renamed = Renamed(
+            self.tombstones
+                .keys()
+                .filter(|old| old.kind() == Kind::Topic)
+                .filter_map(|old| {
+                    let now = self.current(old)?;
+                    Some((old.path().to_ascii_lowercase(), now.path().to_owned()))
+                })
+                .collect(),
+        );
+        if renamed.0.is_empty() {
+            return;
+        }
+        for entry in &mut self.entries {
+            let Entry {
+                date: _,
+                machine: _,
+                tags,
+                files_touched: _,
+                summary: _,
+            } = &mut entry.data;
+            renamed.rename_all(tags);
+        }
+        for fact in &mut self.facts {
+            let Fact {
+                tags,
+                idea: _,
+                recheck,
+                verified: _,
+                summary: _,
+            } = &mut fact.data;
+            renamed.rename_all(tags);
+            renamed.retouch(recheck);
+        }
+        for followup in &mut self.followups {
+            let Followup {
+                entry: _,
+                tags,
+                recheck,
+                state: _,
+                summary: _,
+            } = &mut followup.data;
+            renamed.rename_all(tags);
+            renamed.retouch(recheck);
+        }
+        for topic in self.topics.values_mut() {
+            let Topic {
+                summary: _,
+                includes,
+                machine: _,
+                claims,
+                unclaimed,
+            } = &mut topic.data;
+            renamed.rename_all(includes);
+            renamed.rename_all(unclaimed);
+            for (name, _) in claims {
+                renamed.rename(name);
+            }
+        }
+        self.renamed = renamed;
+    }
+
+    fn name_entries_as_now(&mut self) {
+        let moved: Vec<(usize, Slug)> = self
+            .followups
+            .iter()
+            .enumerate()
+            .filter_map(|(i, f)| {
+                let now = self.current(&f.data.entry)?;
+                (*now != f.data.entry).then(|| (i, now.clone()))
+            })
+            .collect();
+        for (i, now) in moved {
+            self.followups[i].data.entry = now;
+        }
+    }
+
+    /// The name a topic has now, given that or one it was renamed from.
+    #[must_use]
+    pub fn current_topic<'a>(&'a self, name: &'a str) -> &'a str {
+        if self.has_topic(name) {
+            return name;
+        }
+        self.renamed.now(name).map_or(name, String::as_str)
+    }
+
+    /// The topic a fact sits under, as it is named now.
+    #[must_use]
+    pub fn home<'a>(&'a self, fact: &'a Doc<Fact>) -> &'a str {
+        self.current_topic(fact.slug.topic().unwrap_or_default())
+    }
+
     /// Every document a newer worklog wrote into, with what it wrote.
     pub fn foreign(&self) -> impl Iterator<Item = (&Slug, &str)> {
         let docs = self
@@ -389,7 +546,16 @@ impl Loaded {
     /// A slug that reaches a present document, through any renames.
     #[must_use]
     pub fn reaches(&self, slug: &Slug) -> bool {
-        matches!(self.landing(slug), Landing::Present)
+        self.current(slug).is_some()
+    }
+
+    /// The slug a document has now, given that or one it was renamed from.
+    #[must_use]
+    pub fn current(&self, slug: &Slug) -> Option<&Slug> {
+        match self.landing(slug) {
+            Landing::Present(now) => Some(now),
+            _ => None,
+        }
     }
 
     #[must_use]
@@ -397,8 +563,8 @@ impl Loaded {
         // Slugs are never reused, so a rename chain cannot loop.
         let mut at = slug;
         loop {
-            if self.present.contains(at) {
-                return Landing::Present;
+            if let Some(now) = self.present.get(at) {
+                return Landing::Present(now);
             }
             match self.tombstones.get_key_value(at) {
                 Some((_, Stone::RenamedTo(to))) if !self.has_versions(to) => return Landing::Lost,

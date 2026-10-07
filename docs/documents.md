@@ -88,7 +88,7 @@ entry's are.
 
 | field | presence | meaning |
 | --- | --- | --- |
-| `entry` | always | the entry slug it arose in; live when the followup is written, and present for `check` |
+| `entry` | always | the entry slug it arose in; live when the followup is written, and present for `check`, under that slug or one the entry was renamed to |
 | `tags` | always | the topics it belongs to |
 | `recheck` | if set | when to look at it again |
 | `state` | always | `open`, `done` or `dropped` |
@@ -135,5 +135,12 @@ each topic once, so a cycle ends.
 
 A topic named in `includes`, `claims` or `unclaimed` has to exist, and a
 machine has one topic; `check` reports both.
+
+A renamed topic answers for the name it had. Nothing stored is rewritten:
+a fact filed under the old name, a tag, a `touching` recheck and a name
+in `includes`, `claims` or `unclaimed` all read as the topic's name now,
+and a command given the old name acts on the topic. A fact keeps its
+slug until it is renamed itself, and `context` prints such a fact by its
+whole slug. A new fact is refused under the old name.
 
 The body is prose about the subject.

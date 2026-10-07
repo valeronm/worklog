@@ -120,7 +120,7 @@ fn validate(deps: &Deps, slug: &Slug, fields: &Fields) -> Result<(), Failure> {
             Fact::from_fields(fields).map_err(|e| Failure::at(slug, e))?;
             let topic = Slug::of_kind(Kind::Topic, slug.topic().unwrap_or_default())
                 .map_err(|e| Failure::at(slug, e))?;
-            load::live(deps.store, &topic)
+            load::live(deps.store, &slug_now(deps, &topic)?)
                 .map_err(|_| Failure::at(slug, format!("no topic: {topic}")))?;
         }
         Kind::Topic => {
@@ -128,7 +128,7 @@ fn validate(deps: &Deps, slug: &Slug, fields: &Fields) -> Result<(), Failure> {
         }
         Kind::Followup => {
             let followup = Followup::from_fields(fields).map_err(|e| Failure::at(slug, e))?;
-            load::live(deps.store, &followup.entry).map_err(|_| {
+            load::live(deps.store, &slug_now(deps, &followup.entry)?).map_err(|_| {
                 Failure::at(slug, format!("arose in no live entry: {}", followup.entry))
             })?;
         }
@@ -192,6 +192,12 @@ pub fn new_entry(deps: &Deps, name: &str, date: Option<&str>) -> Result<DraftRef
 
 pub fn new_fact(deps: &Deps, slug: &str, idea: bool) -> Result<DraftRef, Failure> {
     let slug = slug_arg(slug, Some(Kind::Fact))?;
+    // The facts left under a renamed topic's old name can only shrink.
+    let topic = Slug::of_kind(Kind::Topic, slug.topic().unwrap_or_default())?;
+    let document = deps.store.document(&topic)?;
+    if document.renamed_to().is_some() {
+        return Err(load::not_live(&topic, &document));
+    }
     let fact = Fact {
         tags: vec![slug.topic().unwrap_or_default().to_owned()],
         idea,
@@ -505,25 +511,43 @@ pub fn rename(deps: &Deps, from: &Slug, to: &str) -> Result<Written, Failure> {
     })
 }
 
-/// A claim or its removal on this machine's topic. `path` is absolute;
-/// `change` gets it spelled as the store spells claims.
-fn reclaim(
-    deps: &Deps,
-    topic: &str,
-    path: &str,
-    change: impl FnOnce(&mut Topic, &str) -> Result<(), ClaimError>,
-    operation: Operation,
-) -> Result<Written, Failure> {
-    let topics = load::topics(deps.store)?;
-    if !topics.iter().any(|t| t.slug.path() == topic) {
-        // The precise refusal: absent, removed, or forked.
-        load::live(deps.store, &Slug::of_kind(Kind::Topic, topic)?)?;
+fn slug_now(deps: &Deps, slug: &Slug) -> Result<Slug, Failure> {
+    let document = deps.store.document(slug)?;
+    Ok(load::follow(deps.store, slug.clone(), document)?.0)
+}
+
+/// `path` is absolute.
+fn reclaim(deps: &Deps, topic: &str, path: &str, operation: Operation) -> Result<Written, Failure> {
+    let topics = load::stored_topics(deps.store)?;
+    let now = slug_now(deps, &Slug::of_kind(Kind::Topic, topic)?)?;
+    if !topics.iter().any(|t| t.slug == now) {
+        // `load::live` refuses with the state the topic is in.
+        load::live(deps.store, &now)?;
     }
     let name = machine(deps)?;
     let doc = load::machine_topic(&topics, name.as_str())?;
     let mut claims = doc.data.clone();
-    change(&mut claims, &graph::contract(path, &deps.home))
-        .map_err(|e| Failure::at(&doc.slug, e))?;
+    let path = graph::contract(path, &deps.home);
+    // A claim made before a rename is stored under the topic's old name.
+    let same_topic = |stored: &str| {
+        let stored = Slug::of_kind(Kind::Topic, stored).ok();
+        stored.and_then(|s| slug_now(deps, &s).ok()).as_ref() == Some(&now)
+    };
+    let held = claims
+        .claims
+        .iter()
+        .find(|(stored, paths)| paths.contains(&path) && same_topic(stored))
+        .map(|(stored, _)| stored.clone());
+    let changed = match (operation, held) {
+        (Operation::Claim, Some(_)) => Err(ClaimError::Already {
+            topic: now.path().to_owned(),
+            path,
+        }),
+        (Operation::Claim, None) => claims.claim(now.path(), &path),
+        (Operation::Unclaim, held) => claims.unclaim(held.as_deref().unwrap_or(now.path()), &path),
+        (other, _) => unreachable!("{other:?} changes no claim"),
+    };
+    changed.map_err(|e| Failure::at(&doc.slug, e))?;
     let version = &doc.version;
     amend(
         deps,
@@ -536,23 +560,11 @@ fn reclaim(
 
 /// Claims a directory for a topic on this machine.
 pub fn claim(deps: &Deps, topic: &str, path: &str) -> Result<Written, Failure> {
-    reclaim(
-        deps,
-        topic,
-        path,
-        |t, p| t.claim(topic, p),
-        Operation::Claim,
-    )
+    reclaim(deps, topic, path, Operation::Claim)
 }
 
 pub fn unclaim(deps: &Deps, topic: &str, path: &str) -> Result<Written, Failure> {
-    reclaim(
-        deps,
-        topic,
-        path,
-        |t, p| t.unclaim(topic, p),
-        Operation::Unclaim,
-    )
+    reclaim(deps, topic, path, Operation::Unclaim)
 }
 
 #[cfg(any(test, feature = "testing"))]
@@ -1006,6 +1018,64 @@ mod tests {
         assert!(
             matches!(unclaim(&d, "lantern", dir), Err(Failure::Refused(m)) if m.contains("does not claim"))
         );
+    }
+
+    #[test]
+    fn what_hangs_from_a_renamed_document_stays_writable() {
+        let w = World::new("m1");
+        let d = w.deps();
+        put_topic(&d, "lantern", "A lamp", &[], None).unwrap();
+        put_machine_topic(&d, "desk", "This machine", "m1", &[], &[]).unwrap();
+        put_fact(
+            &d,
+            "lantern/relay",
+            "The relay is fixed",
+            &["lantern"],
+            false,
+        )
+        .unwrap();
+        let dir = "/home/u/projects/lantern";
+        claim(&d, "lantern", dir).unwrap();
+        rename(&d, &Slug::parse("lantern").unwrap(), "lamp").unwrap();
+
+        assert!(matches!(
+            new_fact(&d, "lantern/wick", false),
+            Err(Failure::Refused(m)) if m == "lantern was renamed to lamp"
+        ));
+        let fact = Slug::parse("lantern/relay").unwrap();
+        checkout(&d, &fact).unwrap();
+        edit_draft(&d, &fact, "The relay pin is fixed", "\nFixed.\n");
+        save(&d, &fact, false).unwrap();
+
+        for name in ["lantern", "lamp"] {
+            assert!(matches!(
+                claim(&d, name, dir),
+                Err(Failure::Refused(m)) if m.ends_with("already claims ~/projects/lantern for lamp")
+            ));
+        }
+        put_entry(&d, "2026-09/2026-09-01-first", "2026-09-01", "First", &[]).unwrap();
+        let port = put_followup(
+            &d,
+            "2026-09-01-port",
+            "2026-09/2026-09-01-first",
+            "Port it",
+            &["lamp"],
+            None,
+        )
+        .unwrap()
+        .slug;
+        let first = Slug::parse("2026-09/2026-09-01-first").unwrap();
+        rename(&d, &first, "2026-09/2026-09-01-first-thing").unwrap();
+        checkout(&d, &port).unwrap();
+        edit_draft(&d, &port, "Port it properly", "\n");
+        save(&d, &port, false).unwrap();
+
+        unclaim(&d, "lamp", dir).unwrap();
+        let desk = Topic::from_fields(&current(&w, &Slug::parse("desk").unwrap()).fields).unwrap();
+        assert!(desk.claims.is_empty());
+        claim(&d, "lantern", dir).unwrap();
+        let desk = Topic::from_fields(&current(&w, &Slug::parse("desk").unwrap()).fields).unwrap();
+        assert_eq!(desk.claims[0].0, "lamp");
     }
 
     #[test]

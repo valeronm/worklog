@@ -226,7 +226,9 @@ topic's directories, `--machine <name>` another host's.
   `--machine <name>` for one host's writes.
 - `worklog show <slug>` prints a document as it stands, `worklog history
   <slug>` its versions. A renamed slug still reads and links follow it,
-  while a write to it refuses and names the new slug. A version id, or a
+  while a write to it refuses and names the new slug. A renamed topic
+  keeps its facts, claims and open work: they answer under the new name,
+  and a fact stays at its old slug until renamed itself. A version id, or a
   prefix of one as `history` and `log` print it, names one stored version:
   `worklog show <id>` prints it, `worklog diff <id>` what it changed
   against its parent, and `worklog diff <id> <id>` between any two.

@@ -142,9 +142,10 @@ pub fn show(deps: &Deps, name: &str, kind: Option<Kind>) -> Result<Shown, Failur
     let slug = &slug;
     let followups = if slug.kind() == Kind::Entry && heads.len() == 1 {
         let today = deps.clock.today();
-        load::followups(deps.store)?
+        let lineage = load::lineage(deps.store, slug)?;
+        load::stored_followups(deps.store)?
             .iter()
-            .filter(|f| &f.data.entry == slug)
+            .filter(|f| lineage.iter().any(|(name, _)| name == &f.data.entry))
             .map(|f| followup_item(f, &today, &[]))
             .collect()
     } else {
@@ -168,21 +169,16 @@ pub fn history(deps: &Deps, slug: &Slug) -> Result<History, Failure> {
     if document.is_empty() {
         return Err(Failure::Refused(format!("no {}: {slug}", slug.kind())));
     }
-    let (landed, mut document, lost) = load::follow(deps.store, slug.clone(), document)?;
+    let (landed, document, lost) = load::follow(deps.store, slug.clone(), document)?;
     let lost_rename = lost.map(|to| load::lost_rename_note(&landed, &to));
     let foreign = document.current().and_then(load::foreign_note);
     let mut versions = Vec::new();
-    loop {
-        let ordered = document.history();
-        versions.extend(ordered.iter().map(|v| HistoryRow {
+    for (_, document) in load::lineage(deps.store, &landed)? {
+        versions.extend(document.history().iter().map(|v| HistoryRow {
             stamp: stamp(v),
             slug: v.slug.path().to_owned(),
             parents: v.block.parents.iter().map(ToString::to_string).collect(),
         }));
-        let Some(from) = ordered.last().and_then(|v| v.block.renamed_from.as_ref()) else {
-            break;
-        };
-        document = deps.store.document(from)?;
     }
     Ok(History {
         slug: slug.path().to_owned(),
@@ -299,6 +295,7 @@ pub fn search(deps: &Deps, term: &str, regex: bool) -> Result<Search, Failure> {
 /// Facts first, then entries, carrying the tag.
 pub fn tag(deps: &Deps, tag: &str) -> Result<Tagged, Failure> {
     let loaded = load::load(deps.store)?;
+    let tag = loaded.current_topic(tag);
     let mut rows: Vec<Row> = loaded
         .facts
         .iter()
@@ -355,6 +352,7 @@ fn topics_covered(loaded: &Loaded, topic: Option<&str>, deep: bool) -> Vec<Strin
 pub fn facts(deps: &Deps, topic: Option<&str>, deep: bool) -> Result<FactListing, Failure> {
     let loaded = load::load(deps.store)?;
     let mut listing = FactListing::default();
+    let topic = topic.map(|t| loaded.current_topic(t));
     for topic in topics_covered(&loaded, topic, deep) {
         for f in loaded.facts_of(&topic) {
             if f.data.idea {
@@ -405,6 +403,7 @@ pub fn where_(
     machine_name: Option<&str>,
 ) -> Result<Where, Failure> {
     let loaded = load::load(deps.store)?;
+    let topic = topic.map(|t| loaded.current_topic(t));
     if let Some(topic) = topic
         && !loaded.has_topic(topic)
     {
@@ -507,7 +506,7 @@ fn open_work(loaded: &Loaded, topics: &[&str], today: &str, closed_too: bool) ->
         let Some(recheck) = &f.data.recheck else {
             continue;
         };
-        if about(&f.data.tags, f.slug.topic(), Some(recheck)) {
+        if about(&f.data.tags, Some(loaded.home(f)), Some(recheck)) {
             out.items.push(fact_item(f, recheck, today, topics));
         }
     }
@@ -523,9 +522,10 @@ pub fn followups(deps: &Deps, about: Option<&str>, all: bool) -> Result<Followup
     let today = deps.clock.today();
     let entry = about
         .and_then(|a| Slug::parse(a).ok())
-        .filter(|s| s.kind() == Kind::Entry);
+        .filter(|s| s.kind() == Kind::Entry)
+        .map(|typed| loaded.current(&typed).cloned().unwrap_or(typed));
     let Some(entry) = entry else {
-        let topics: Vec<&str> = about.into_iter().collect();
+        let topics: Vec<&str> = about.map(|t| loaded.current_topic(t)).into_iter().collect();
         return Ok(open_work(&loaded, &topics, &today, all));
     };
     let mut out = open_work(&loaded, &[], &today, all);
@@ -555,6 +555,16 @@ pub fn forks(deps: &Deps) -> Result<Forks, Failure> {
             })
             .collect(),
     })
+}
+
+/// A fact still filed under a name its topic was renamed from is not found
+/// at `<topic>/<name>`.
+fn named_under(fact: &Doc<Fact>, topic: &str) -> String {
+    if fact.slug.topic() == Some(topic) {
+        fact.slug.name().to_owned()
+    } else {
+        fact.slug.path().to_owned()
+    }
 }
 
 /// The index a session opens with: the topics its directory and machine
@@ -587,8 +597,8 @@ pub fn context(deps: &Deps, directory: &str) -> Result<Context, Failure> {
                 Via::Unclaimed => "unclaimed directory".to_owned(),
                 Via::Included { from } => format!("via {from}"),
             },
-            facts: facts.iter().map(|f| f.slug.name().to_owned()).collect(),
-            ideas: ideas.iter().map(|f| f.slug.name().to_owned()).collect(),
+            facts: facts.iter().map(|f| named_under(f, &r.topic)).collect(),
+            ideas: ideas.iter().map(|f| named_under(f, &r.topic)).collect(),
         });
     }
     let roots: Vec<&str> = reached
@@ -706,7 +716,7 @@ pub fn check(deps: &Deps) -> Result<Check, Failure> {
         _ => None,
     };
     for f in &loaded.facts {
-        let topic = f.slug.topic().unwrap_or_default();
+        let topic = loaded.home(f);
         if !loaded.has_topic(topic) {
             problem(&f.slug, format!("sits under no topic: {topic}"));
         }
@@ -761,7 +771,7 @@ fn check_links(loaded: &Loaded, out: &mut Check) {
             };
             match loaded.landing(&target) {
                 // `check` reports a lost rename once, at the renamed slug.
-                load::Landing::Present | load::Landing::Lost => {}
+                load::Landing::Present(_) | load::Landing::Lost => {}
                 load::Landing::Removed(removed) => {
                     *inbound.entry(removed.clone()).or_default() += 1;
                     if !cites {
@@ -1105,6 +1115,67 @@ mod tests {
             .map(|p| (p.slug.as_str(), p.message.as_str()))
             .collect();
         assert_eq!(problems, [("lantern/relay-pin", lost)]);
+    }
+
+    #[test]
+    fn a_renamed_topic_answers_for_its_old_name() {
+        let w = World::new("m1");
+        let d = w.deps();
+        seed(&d);
+        let dir = "/home/u/projects/lantern";
+        write::put_topic(&d, "bench", "A bench", &["lantern"], None).unwrap();
+        let later = Slug::parse("2026-09-01-later").unwrap();
+        write::recheck(&d, &later, "touching lantern").unwrap();
+        let before = context(&d, dir).unwrap();
+        let slugs = |l: FactListing| l.facts.into_iter().map(|r| r.slug).collect::<Vec<_>>();
+        let through_bench = slugs(facts(&d, Some("bench"), true).unwrap());
+        assert_eq!(through_bench, ["lantern/relay-pin-is-fixed"]);
+        assert_eq!(before.due.len(), 2);
+
+        write::rename(&d, &Slug::parse("lantern").unwrap(), "lamp").unwrap();
+        let after = context(&d, dir).unwrap();
+        assert_eq!(after.groups[0].topic, "lamp");
+        assert_eq!(after.groups[0].facts, ["lantern/relay-pin-is-fixed"]);
+        assert_eq!(after.open, before.open);
+        let due = |c: &Context| c.due.iter().map(|i| i.slug.clone()).collect::<Vec<_>>();
+        assert_eq!(due(&after), due(&before));
+        assert!(check(&d).unwrap().problems.is_empty());
+        for name in ["lantern", "lamp"] {
+            assert_eq!(facts(&d, Some(name), false).unwrap().facts.len(), 1);
+            assert_eq!(followups(&d, Some(name), false).unwrap().open, before.open);
+            assert!(tag(&d, name).unwrap().topic);
+            assert_eq!(where_(&d, Some(name), None).unwrap().claims.len(), 1);
+        }
+        assert_eq!(
+            followups(&d, Some("Lantern"), false).unwrap().open,
+            before.open
+        );
+        assert_eq!(
+            slugs(facts(&d, Some("bench"), true).unwrap()),
+            through_bench
+        );
+        assert!(tags(&d).unwrap().tags.iter().all(|t| t.name != "lantern"));
+    }
+
+    #[test]
+    fn a_followup_keeps_to_its_entry_through_a_rename() {
+        let w = World::new("m1");
+        let d = w.deps();
+        seed(&d);
+        let old = "2026-09/2026-09-01-first";
+        let new = "2026-09/2026-09-01-first-thing";
+        let open = followups(&d, Some(old), false).unwrap().open;
+        let shown = show(&d, old, None).unwrap().followups;
+        assert_eq!((open, shown.len()), (2, 2));
+
+        write::rename(&d, &Slug::parse(old).unwrap(), new).unwrap();
+        assert!(check(&d).unwrap().problems.is_empty());
+        for name in [old, new] {
+            let listed = followups(&d, Some(name), false).unwrap();
+            assert_eq!(listed.open, open);
+            assert!(listed.items.iter().all(|i| i.entry.as_deref() == Some(new)));
+            assert_eq!(show(&d, name, None).unwrap().followups, shown);
+        }
     }
 
     #[test]

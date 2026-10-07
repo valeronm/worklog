@@ -45,6 +45,15 @@ document.
 under Topic. Since every matching claim loads, a topic that should not
 reach every project must not be claimed for a wide directory.
 
+A topic is renamed without rewriting what names it: `load` maps every
+stored topic name to the topic's name now, so nothing after it compares
+against an old one. The mapping takes each kind apart field by field, so
+a new field does not compile until it is placed there; what nothing
+checks is that a use case taking a topic name from the command line
+resolves it the same way. A write never starts from `load`, since storing
+its documents back would rewrite the names: `claim` and `unclaim` read
+the machine topic as stored, and `tests/layers.rs` holds `write` to that.
+
 `context` is printed at session start, and Claude Code replaces a hook's
 output past a size limit with a short preview of its start, so the text
 renderer holds it under that limit, must-act-on items first, and counts a
