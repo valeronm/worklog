@@ -4,7 +4,7 @@
 {% block query %}{{ term }}{% endblock %}
 {% block content %}
 <h1>Search</h1>
-<form action="/search" method="get"><input type="search" name="q" value="{{ term }}" autofocus> <button>Find</button></form>
+<form action="/search" method="get"><input type="search" name="q" value="{{ term }}" autofocus> <input class="narrow" type="search" name="topic" placeholder="Topic" value="{{ topic }}"> <button>Find</button></form>
 {% if term.is_empty() %}
 <p class="muted">Documents whose text holds the term, facts first.</p>
 {% else if hits.is_empty() %}

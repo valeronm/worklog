@@ -639,6 +639,8 @@ fn a_shell_completes_slugs_and_topics_but_never_files() {
     assert_eq!(tags, "lantern\t2\n");
     let term = complete(&["search", ""]);
     assert!(!term.contains("Documents"), "{term}");
+    let within = complete(&["search", "--topic", "la"]);
+    assert_eq!(within, "lantern\tA Rust app that dims a lamp\n");
     let dir = complete(&["context", "Doc"]);
     assert_eq!(dir, "Documents/\n");
 }

@@ -238,20 +238,23 @@ topic's directories, `--machine <name>` another host's.
 Before new work in a topic, find what the work touches and what was
 already decided about it:
 
-1. For each topic the opener lists that the work touches, `worklog facts
-   <topic>` lists its facts and ideas; `show` the ones that bear on the
-   work.
-2. `worklog tag <topic>` lists the entries tagged with the topic, and
-   `worklog search <term>` narrows them to what is about to change: a
-   component, a file, an identifier. `show` the entries whose summary or
-   matching lines bear on the work, for the decision taken and what was
-   rejected.
-3. `worklog followups <topic>` for open work on what is about to change.
+1. For each topic the opener lists that the work touches, pick by what
+   the work is. When it names what is about to change, a component, a
+   file, an identifier, `worklog search <term> --topic <topic>` returns
+   the topic's facts, then its entries and followups, that hold the term.
+   The term is matched as written, so try the other words the thing goes
+   by before reading an empty result as nothing decided.
+2. When the work is open-ended, `worklog facts <topic>` lists every fact
+   and idea in the topic and `worklog tag <topic>` its entries.
+3. `show` the facts and entries whose summary or matching lines bear on
+   the work, for the decision taken and what was rejected.
+4. `worklog followups <topic>` for open work on what is about to change.
 
 Tell the user what was found that bears on the work, citing slugs.
 
 - `worklog search <term>` — every document holding the term, facts first;
-  `--regex` for a pattern.
+  `--regex` for a pattern, `--topic <topic>` for only what is filed under
+  a topic or tagged with it.
 - `worklog tag <tag>`, `worklog recent [n]`, `worklog list --kind <kind>`.
 - `worklog log [n]` — the newest versions written anywhere in the store,
   whatever their kind, so what other machines wrote since is one call;

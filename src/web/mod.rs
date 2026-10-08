@@ -143,10 +143,13 @@ fn route(deps: &Deps, path: &str, query: &Query) -> Result<String, Problem> {
         "/tags" => Ok(TagsPage::from(&read::tags(deps)?).render()?),
         "/search" => {
             let term = query.get("q").unwrap_or("").trim();
-            if term.is_empty() {
-                return Ok(SearchPage::from(&Search::default()).render()?);
-            }
-            Ok(SearchPage::from(&read::search(deps, term, false)?).render()?)
+            let topic = query.get("topic").map(str::trim).filter(|t| !t.is_empty());
+            let found = if term.is_empty() {
+                Search::default()
+            } else {
+                read::search(deps, term, false, topic)?
+            };
+            Ok(SearchPage::new(&found, topic).render()?)
         }
         "/log" => Ok(LogPage::from(&read::log(deps, 100, None)?).render()?),
         "/check" => Ok(CheckPage::from(&read::check(deps)?).render()?),
@@ -382,6 +385,9 @@ mod tests {
         assert!(ok(&w, "/tag/lantern").contains("Wired the lamp driver"));
         assert!(ok(&w, "/search?q=relay+pin").contains("relay-pin-is-fixed"));
         assert!(ok(&w, "/search").contains("<form"));
+        let within = ok(&w, "/search?q=relay&topic=lantern");
+        assert!(within.contains("relay-pin-is-fixed") && within.contains("value=\"lantern\""));
+        assert!(ok(&w, "/search?q=relay&topic=phone").contains("No documents match"));
         assert!(ok(&w, "/log").contains("lantern/relay-pin-is-fixed"));
         assert!(ok(&w, "/check").contains("documents"));
         assert!(ok(&w, "/forks").contains("fork"));

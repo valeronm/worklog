@@ -685,13 +685,16 @@ pub struct HitView {
 #[template(path = "search.html")]
 pub struct SearchPage {
     pub term: String,
+    pub topic: String,
     pub hits: Vec<HitView>,
 }
 
-impl From<&Search> for SearchPage {
-    fn from(s: &Search) -> SearchPage {
+impl SearchPage {
+    #[must_use]
+    pub fn new(s: &Search, topic: Option<&str>) -> SearchPage {
         SearchPage {
             term: s.term.clone(),
+            topic: topic.unwrap_or_default().to_owned(),
             hits: s
                 .hits
                 .iter()

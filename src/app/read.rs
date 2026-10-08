@@ -109,6 +109,13 @@ fn topic_names<'a>(
     tags.iter().map(String::as_str).chain(home).chain(touched)
 }
 
+/// Whether an item carries one of `topics`. No topics means every item does.
+fn about(topics: &[&str], tags: &[String], home: Option<&str>, recheck: Option<&Recheck>) -> bool {
+    topics.is_empty()
+        || topic_names(tags, home, recheck)
+            .any(|n| topics.iter().any(|t| n.eq_ignore_ascii_case(t)))
+}
+
 /// Counts ranked most used first, names breaking ties, each made into
 /// what the listing holds.
 fn most_used_first<T>(
@@ -259,8 +266,14 @@ pub fn recent(deps: &Deps, n: usize) -> Result<Listing, Failure> {
 }
 
 /// Facts first, then entries, topics and followups, each with up to three
-/// matching lines.
-pub fn search(deps: &Deps, term: &str, regex: bool) -> Result<Search, Failure> {
+/// matching lines. A topic keeps only what is filed under it or tagged with
+/// it, and the topic itself.
+pub fn search(
+    deps: &Deps,
+    term: &str,
+    regex: bool,
+    topic: Option<&str>,
+) -> Result<Search, Failure> {
     if term.trim().is_empty() {
         return Err(Failure::Usage("search needs a term".into()));
     }
@@ -274,6 +287,8 @@ pub fn search(deps: &Deps, term: &str, regex: bool) -> Result<Search, Failure> {
         .build()
         .map_err(|e| Failure::Usage(format!("bad regex: {e}")))?;
     let loaded = load::load(deps.store)?;
+    let topic = topic.map(|t| loaded.current_topic(t));
+    let within = |tags: &[String], home: Option<&str>| about(topic.as_slice(), tags, home, None);
     let mut hits = Vec::new();
     let mut consider = |row: Row, version: &Version| {
         let text = version.content_text();
@@ -289,16 +304,25 @@ pub fn search(deps: &Deps, term: &str, regex: bool) -> Result<Search, Failure> {
         }
     };
     for f in &loaded.facts {
-        consider(fact_row(f), &f.version);
+        let home = topic.map(|_| loaded.home(f));
+        if within(&f.data.tags, home) {
+            consider(fact_row(f), &f.version);
+        }
     }
     for e in &loaded.entries {
-        consider(entry_row(e), &e.version);
+        if within(&e.data.tags, None) {
+            consider(entry_row(e), &e.version);
+        }
     }
     for t in loaded.topics.values() {
-        consider(topic_row(t), &t.version);
+        if within(&[], Some(t.slug.path())) {
+            consider(topic_row(t), &t.version);
+        }
     }
     for f in &loaded.followups {
-        consider(followup_row(f), &f.version);
+        if within(&f.data.tags, None) {
+            consider(followup_row(f), &f.version);
+        }
     }
     Ok(Search {
         term: term.to_owned(),
@@ -487,15 +511,11 @@ fn fact_item(doc: &Doc<Fact>, recheck: &Recheck, today: &str, topics: &[&str]) -
 /// Open followups, then facts and ideas with a recheck of their own, for
 /// a session about `topics`. No topics means all.
 fn open_work(loaded: &Loaded, topics: &[&str], today: &str, closed_too: bool) -> Followups {
-    let about = |tags: &[String], home: Option<&str>, recheck: Option<&Recheck>| {
-        topics.is_empty()
-            || topic_names(tags, home, recheck)
-                .any(|n| topics.iter().any(|t| n.eq_ignore_ascii_case(t)))
-    };
     let mut out = Followups::default();
     let mut entries: Vec<&str> = Vec::new();
     for f in &loaded.followups {
-        if (!closed_too && !f.data.is_open()) || !about(&f.data.tags, None, f.data.recheck.as_ref())
+        if (!closed_too && !f.data.is_open())
+            || !about(topics, &f.data.tags, None, f.data.recheck.as_ref())
         {
             continue;
         }
@@ -516,7 +536,7 @@ fn open_work(loaded: &Loaded, topics: &[&str], today: &str, closed_too: bool) ->
         let Some(recheck) = &f.data.recheck else {
             continue;
         };
-        if about(&f.data.tags, Some(loaded.home(f)), Some(recheck)) {
+        if about(topics, &f.data.tags, Some(loaded.home(f)), Some(recheck)) {
             out.items.push(fact_item(f, recheck, today, topics));
         }
     }
@@ -535,8 +555,8 @@ pub fn followups(deps: &Deps, about: Option<&str>, all: bool) -> Result<Followup
         .filter(|s| s.kind() == Kind::Entry)
         .map(|typed| loaded.current(&typed).cloned().unwrap_or(typed));
     let Some(entry) = entry else {
-        let topics: Vec<&str> = about.map(|t| loaded.current_topic(t)).into_iter().collect();
-        return Ok(open_work(&loaded, &topics, &today, all));
+        let topic = about.map(|t| loaded.current_topic(t));
+        return Ok(open_work(&loaded, topic.as_slice(), &today, all));
     };
     let mut out = open_work(&loaded, &[], &today, all);
     out.items
@@ -1026,6 +1046,32 @@ mod tests {
     }
 
     #[test]
+    fn search_keeps_to_what_a_topic_holds_or_tags() {
+        let w = World::new("m1");
+        let d = w.deps();
+        seed(&d);
+        let slugs = |topic| {
+            let found = search(&d, ".", true, Some(topic)).unwrap();
+            let mut slugs: Vec<String> = found.hits.into_iter().map(|h| h.row.slug).collect();
+            slugs.sort();
+            slugs
+        };
+        assert_eq!(
+            slugs("Lantern"),
+            [
+                "2026-09-01-later",
+                "2026-09-01-port",
+                "2026-09/2026-09-01-first",
+                "lantern",
+                "lantern/relay-pin-is-fixed",
+            ]
+        );
+        assert_eq!(slugs("phone"), ["phone", "phone/needs-beta"]);
+        assert_eq!(slugs("android"), ["android", "phone/needs-beta"]);
+        assert!(slugs("rust").is_empty());
+    }
+
+    #[test]
     fn listings_and_search() {
         let w = World::new("m1");
         let d = w.deps();
@@ -1046,11 +1092,11 @@ mod tests {
         assert!(listing.facts.is_empty());
         assert_eq!(listing.ideas.len(), 1);
         assert_eq!(ideas(&d, None, false).unwrap().rows.len(), 1);
-        let hits = search(&d, "FIXED", false).unwrap();
+        let hits = search(&d, "FIXED", false, None).unwrap();
         assert_eq!(hits.hits.len(), 1);
         assert_eq!(hits.hits[0].row.slug, "lantern/relay-pin-is-fixed");
-        assert!(search(&d, "fix.d", false).unwrap().hits.is_empty());
-        assert_eq!(search(&d, "fix.d", true).unwrap().hits.len(), 1);
+        assert!(search(&d, "fix.d", false, None).unwrap().hits.is_empty());
+        assert_eq!(search(&d, "fix.d", true, None).unwrap().hits.len(), 1);
         let by_entry = followups(&d, Some("2026-09/2026-09-01-first"), false).unwrap();
         assert_eq!(by_entry.items.len(), 2);
         assert_eq!((by_entry.open, by_entry.entries, by_entry.due), (2, 1, 1));

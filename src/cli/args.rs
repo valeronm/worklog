@@ -165,6 +165,9 @@ pub enum ReadCommand {
         /// Read the term as a regular expression
         #[arg(long)]
         regex: bool,
+        /// Only what is filed under this topic or tagged with it
+        #[arg(long, add = complete::topics())]
+        topic: Option<String>,
     },
     /// Facts and entries carrying a tag
     Tag {

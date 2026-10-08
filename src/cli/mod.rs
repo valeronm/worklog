@@ -163,8 +163,8 @@ fn dispatch_read(deps: &Deps, json: bool, command: ReadCommand) -> Result<Render
             let out = read::log(deps, n, machine.as_deref())?;
             rendered(json, &out, || render::log(&out))
         }
-        ReadCommand::Search { term, regex } => {
-            let out = read::search(deps, &term.join(" "), regex)?;
+        ReadCommand::Search { term, regex, topic } => {
+            let out = read::search(deps, &term.join(" "), regex, topic.as_deref())?;
             note_empty(
                 out.hits.is_empty(),
                 "no documents match",
