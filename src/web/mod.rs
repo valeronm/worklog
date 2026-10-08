@@ -145,11 +145,14 @@ fn route(deps: &Deps, path: &str, query: &Query) -> Result<String, Problem> {
             let term = query.get("q").unwrap_or("").trim();
             let topic = query.get("topic").map(str::trim).filter(|t| !t.is_empty());
             let found = if term.is_empty() {
-                Search::default()
+                Search {
+                    topic: topic.map(str::to_owned),
+                    ..Search::default()
+                }
             } else {
                 read::search(deps, term, false, topic)?
             };
-            Ok(SearchPage::new(&found, topic).render()?)
+            Ok(SearchPage::from(&found).render()?)
         }
         "/log" => Ok(LogPage::from(&read::log(deps, 100, None)?).render()?),
         "/check" => Ok(CheckPage::from(&read::check(deps)?).render()?),
@@ -388,6 +391,7 @@ mod tests {
         let within = ok(&w, "/search?q=relay&topic=lantern");
         assert!(within.contains("relay-pin-is-fixed") && within.contains("value=\"lantern\""));
         assert!(ok(&w, "/search?q=relay&topic=phone").contains("No documents match"));
+        assert!(ok(&w, "/search?topic=lantern").contains("value=\"lantern\""));
         assert!(ok(&w, "/log").contains("lantern/relay-pin-is-fixed"));
         assert!(ok(&w, "/check").contains("documents"));
         assert!(ok(&w, "/forks").contains("fork"));

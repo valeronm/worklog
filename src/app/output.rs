@@ -143,6 +143,8 @@ pub struct Hit {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct Search {
     pub term: String,
+    /// The name the search kept to: a renamed topic's name now, otherwise as given.
+    pub topic: Option<String>,
     pub hits: Vec<Hit>,
 }
 

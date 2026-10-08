@@ -689,12 +689,11 @@ pub struct SearchPage {
     pub hits: Vec<HitView>,
 }
 
-impl SearchPage {
-    #[must_use]
-    pub fn new(s: &Search, topic: Option<&str>) -> SearchPage {
+impl From<&Search> for SearchPage {
+    fn from(s: &Search) -> SearchPage {
         SearchPage {
             term: s.term.clone(),
-            topic: topic.unwrap_or_default().to_owned(),
+            topic: s.topic.clone().unwrap_or_default(),
             hits: s
                 .hits
                 .iter()

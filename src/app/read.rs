@@ -326,6 +326,7 @@ pub fn search(
     }
     Ok(Search {
         term: term.to_owned(),
+        topic: topic.map(str::to_owned),
         hits,
     })
 }
@@ -1215,6 +1216,9 @@ mod tests {
             assert_eq!(followups(&d, Some(name), false).unwrap().open, before.open);
             assert!(tag(&d, name).unwrap().topic);
             assert_eq!(where_(&d, Some(name), None).unwrap().claims.len(), 1);
+            let found = search(&d, "relay", false, Some(name)).unwrap();
+            assert_eq!(found.topic.as_deref(), Some("lamp"));
+            assert_eq!(found.hits.len(), 1);
         }
         assert_eq!(
             followups(&d, Some("Lantern"), false).unwrap().open,
