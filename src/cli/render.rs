@@ -496,8 +496,7 @@ const UNCHANGED: Tint = Tint {
 };
 
 pub fn diff(d: &Diff, paint: bool) -> String {
-    std::iter::once(&d.before)
-        .chain(&d.other_parents)
+    d.befores()
         .map(|before| diff_from(before, d, paint))
         .collect()
 }
@@ -570,17 +569,18 @@ mod tests {
     fn two_sides() -> Diff {
         Diff {
             slug: "lantern".into(),
-            before: Side {
+            before: Some(Side {
                 name: "lantern@aaaaaaaaaaaa".into(),
                 text: "---\nsummary: s\n---\n\nthe relay pin is fixed\n".into(),
                 stamp: None,
-            },
+            }),
             after: Side {
                 name: "lantern@bbbbbbbbbbbb".into(),
                 text: "---\nsummary: s\n---\n\nthe relay pin is free\n".into(),
                 stamp: None,
             },
             other_parents: vec![],
+            missing_parents: vec![],
             renamed: None,
         }
     }
@@ -710,7 +710,7 @@ mod tests {
     #[test]
     fn two_sides_holding_one_text_are_said_not_to_differ() {
         let mut same = two_sides();
-        same.after.text = same.before.text.clone();
+        same.after.text = same.before.as_ref().unwrap().text.clone();
         assert_eq!(
             diff(&same, false),
             "--- lantern@aaaaaaaaaaaa\n+++ lantern@bbbbbbbbbbbb\nno changes\n"

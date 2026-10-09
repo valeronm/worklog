@@ -6,9 +6,12 @@
 {% call m::crumbs(crumbs) %}{% endcall %}
 <h1>{{ head.summary|safe }}</h1>
 {% call m::meta("version", short_link, history) %}{% endcall %}
-<h2>Against its parent</h2>
-{% if parents.is_empty() %}<p class="muted">A first version: nothing came before it.</p>{% else %}<ul class="parents">{% for p in parents %}<li>{% call m::link(p) %}{% endcall %}</li>{% endfor %}</ul>{% endif %}
-<pre class="diff">{% for l in lines %}<span class="{{ l.class }}">{{ l.sign }}{{ l.text }}</span>{% endfor %}</pre>
+<h2>Against {% if several_parents %}each parent{% else %}its parent{% endif %}</h2>
+{% if first_version %}<p class="muted">A first version: nothing came before it.</p>{% endif %}
+{% for note in notes %}<p class="notice">{{ note }}</p>
+{% endfor %}{% for d in diffs %}{% if let Some(p) = d.parent %}<ul class="parents"><li>{% call m::link(p) %}{% endcall %}</li></ul>{% endif %}
+<pre class="diff">{% for l in d.lines %}<span class="{{ l.class }}">{{ l.sign }}{{ l.text }}</span>{% endfor %}</pre>
+{% endfor %}
 <h2>As written</h2>
 {% call m::head(head) %}{% endcall %}
 {% endblock %}

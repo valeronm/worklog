@@ -340,13 +340,41 @@ pub struct DraftList {
 /// The texts a diff is made of; the diff itself is a rendering.
 pub struct Diff {
     pub slug: String,
-    pub before: Side,
-    /// Every parent past the first, when `after` came from several.
+    /// Absent when `after` has parents and the store holds none of them;
+    /// a first version has an empty side.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub before: Option<Side>,
+    /// Every parent past `before`, when `after` came from several.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub other_parents: Vec<Side>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub missing_parents: Vec<String>,
     pub after: Side,
     /// The move, when the version was written by a rename.
     pub renamed: Option<Renamed>,
+}
+
+impl Side {
+    #[must_use]
+    pub fn empty(name: impl Into<String>) -> Side {
+        Side {
+            name: name.into(),
+            text: String::new(),
+            stamp: None,
+        }
+    }
+}
+
+impl Diff {
+    pub fn befores(&self) -> impl Iterator<Item = &Side> {
+        self.before.iter().chain(&self.other_parents)
+    }
+
+    /// The note a read prints for each parent the store does not hold.
+    pub fn missing_parent_notes(&self) -> impl Iterator<Item = String> {
+        let ids = self.missing_parents.iter();
+        ids.map(|id| format!("parent {} is not in the store", short(id)))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

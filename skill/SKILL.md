@@ -266,7 +266,8 @@ Tell the user what was found that bears on the work, citing slugs.
   and a fact stays at its old slug until renamed itself. A version id, or a
   prefix of one as `history` and `log` print it, names one stored version:
   `worklog show <id>` prints it, `worklog diff <id>` what it changed
-  against its parent, and `worklog diff <id> <id>` between any two.
+  against its parent, or against each parent where it resolved a fork, and
+  `worklog diff <id> <id>` between any two.
 
 Answer a "what did we do about X" question by reading the matching
 documents and reconstructing what changed, when and why, citing slugs. If

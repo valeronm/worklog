@@ -152,6 +152,10 @@ fn column(line: &str, n: usize) -> &str {
     line.split("  ").nth(n).expect("the column")
 }
 
+fn word(line: &str, n: usize) -> &str {
+    line.split_whitespace().nth(n).expect("the word")
+}
+
 fn set_summary(text: &str, summary: &str) -> String {
     text.replace("summary:\n", &format!("summary: {summary}\n"))
 }
@@ -909,7 +913,38 @@ fn save_refuses_stale_unchanged_and_broken_drafts() {
 }
 
 #[test]
-fn a_fork_is_reported_everywhere_and_resolved_by_hand() {
+fn a_version_is_diffed_without_a_parent_the_store_lacks() {
+    let s = seeded();
+    let parent = fs::read_dir(s.root.path().join("store/topic/lantern"))
+        .unwrap()
+        .next()
+        .expect("the first version's file")
+        .unwrap()
+        .path();
+    s.write(&["checkout", "lantern"], |t| {
+        t.replace("first.", "first, again.")
+    });
+    let history = s.ok(&["history", "lantern"]);
+    let ids: Vec<&str> = history.lines().map(|l| column(l, 0)).collect();
+    fs::remove_file(parent).unwrap();
+    let diff = s.run(&["diff", ids[0]]);
+    assert_eq!(diff.status.code(), Some(0));
+    assert!(diff.stdout.is_empty(), "nothing to compare against");
+    assert_eq!(
+        String::from_utf8_lossy(&diff.stderr),
+        format!("worklog: parent {} is not in the store\n", ids[1])
+    );
+    let json: serde_json::Value = serde_json::from_str(&s.ok(&["diff", ids[0], "--json"])).unwrap();
+    let missing = json["missing_parents"][0]
+        .as_str()
+        .expect("the parent's id");
+    assert!(missing.starts_with(ids[1]), "{json}");
+    assert!(json.get("before").is_none(), "{json}");
+}
+
+/// A store where two machines each wrote a version of `lantern` from the
+/// same parent.
+fn forked() -> Scratch {
     let s = seeded();
     let other = s.peer("m2");
     s.write(&["checkout", "lantern"], |t| {
@@ -919,6 +954,19 @@ fn a_fork_is_reported_everywhere_and_resolved_by_hand() {
         t.replace("first.", "first, says m2.")
     });
     other.sync_to(&s);
+    s
+}
+
+fn resolve_with(s: &Scratch, body: &str) {
+    let path = s.ok(&["resolve", "lantern"]);
+    let text = fs::read_to_string(path.trim()).unwrap();
+    let body_start = text[4..].find("---\n").unwrap() + 8;
+    fs::write(path.trim(), format!("{}{body}", &text[..body_start])).unwrap();
+}
+
+#[test]
+fn a_fork_is_reported_everywhere_and_resolved_by_hand() {
+    let s = forked();
     let forks = s.ok(&["forks"]);
     assert!(forks.starts_with("lantern: "), "{forks}");
     let err = s.refused(&["checkout", "lantern"]);
@@ -938,9 +986,27 @@ fn a_fork_is_reported_everywhere_and_resolved_by_hand() {
     assert!(text.contains("<<<<<<< ") && text.contains("======= ") && text.contains(">>>>>>>"));
     let err = s.refused(&["save", "lantern"]);
     assert!(err.contains("conflict markers"), "{err}");
-    let body_start = text[4..].find("---\n").unwrap() + 8;
-    let resolved = format!("{}\nWhat to know first, says m1.\n", &text[..body_start]);
-    fs::write(path.trim(), resolved).unwrap();
+    s.ok(&["discard", "lantern"]);
+    resolve_with(&s, "What to know first, say both.\n");
+    s.ok(&["save", "lantern"]);
+    assert_eq!(s.ok(&["forks"]), "");
+    let history = s.ok(&["history", "lantern"]);
+    assert!(
+        history
+            .lines()
+            .next()
+            .unwrap()
+            .contains("resolve  parents:"),
+        "{history}"
+    );
+    assert_eq!(history.lines().count(), 4);
+}
+
+#[test]
+fn a_resolve_draft_is_diffed_against_each_head() {
+    let s = forked();
+    let shown = s.ok(&["show", "lantern"]);
+    resolve_with(&s, "\nWhat to know first, says m1.\n");
     let against = s.ok(&["diff", "lantern"]);
     for head in shown.lines().filter_map(|l| l.strip_prefix("==== ")) {
         assert!(against.contains(&format!("--- {head}\n")), "{against}");
@@ -959,24 +1025,55 @@ fn a_fork_is_reported_everywhere_and_resolved_by_hand() {
         [&json["before"], &json["other_parents"][0]].map(|side| side["machine"].clone());
     machines.sort_by_key(ToString::to_string);
     assert_eq!(machines, ["m1", "m2"]);
-    let resolved = format!("{}What to know first, say both.\n", &text[..body_start]);
-    fs::write(path.trim(), resolved).unwrap();
+    s.ok(&["checkout", "lantern/relay-pin-is-fixed"]);
+    let unforked = s.ok(&["diff", "lantern/relay-pin-is-fixed", "--json"]);
+    assert!(!unforked.contains("other_parents"), "{unforked}");
+}
+
+#[test]
+fn a_resolved_version_is_diffed_against_each_parent_the_store_holds() {
+    let s = forked();
+    let shown = s.ok(&["show", "lantern"]);
+    resolve_with(&s, "What to know first, say both.\n");
     s.ok(&["save", "lantern"]);
-    assert_eq!(s.ok(&["forks"]), "");
     let history = s.ok(&["history", "lantern"]);
+    let resolved = column(history.lines().next().unwrap(), 0);
+    let against = s.ok(&["diff", resolved]);
+    assert_eq!(against.matches("--- lantern@").count(), 2, "{against}");
     assert!(
-        history
-            .lines()
-            .next()
-            .unwrap()
-            .contains("resolve  parents:"),
-        "{history}"
+        against.contains("-What to know first, says m1."),
+        "{against}"
     );
-    assert_eq!(history.lines().count(), 4);
-    s.ok(&["checkout", "lantern"]);
     assert!(
-        !s.ok(&["diff", "lantern", "--json"])
-            .contains("other_parents")
+        against.contains("-What to know first, says m2."),
+        "{against}"
+    );
+    let from_m2 = shown
+        .lines()
+        .find(|l| l.starts_with("==== head ") && l.contains(" on m2 "))
+        .map(|l| word(l, 2))
+        .expect("the head m2 wrote");
+    let lost = fs::read_dir(s.root.path().join("store/topic/lantern"))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .find(|p| {
+            p.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with(from_m2)
+        })
+        .expect("that head's file");
+    fs::remove_file(lost).unwrap();
+    let partly = s.run(&["diff", resolved]);
+    let against = String::from_utf8_lossy(&partly.stdout);
+    assert_eq!(against.matches("--- lantern@").count(), 1, "{against}");
+    assert!(
+        against.contains("-What to know first, says m1."),
+        "{against}"
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&partly.stderr),
+        format!("worklog: parent {from_m2} is not in the store\n")
     );
 }
 

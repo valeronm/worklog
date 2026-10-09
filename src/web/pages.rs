@@ -6,7 +6,7 @@ use askama::Template;
 use crate::app::Failure;
 use crate::app::output::{
     Check, Diff, FactListing, FollowupItem, Followups, Forks, Head, History, Listing, Log, Problem,
-    Row, Search, Shown, Stamp, Tagged, Tags, Topics, short,
+    Row, Search, Shown, Side, Stamp, Tagged, Tags, Topics, short,
 };
 use crate::domain::frontmatter::{self, Fields, Value};
 use crate::domain::slug::{Kind, Slug};
@@ -522,24 +522,14 @@ pub struct DiffLine {
     pub text: String,
 }
 
-#[derive(Template)]
-#[template(path = "version.html")]
-pub struct VersionPage {
-    pub crumbs: Vec<Link>,
-    pub nav: &'static str,
-    pub slug: Link,
-    pub short_link: Link,
-    pub history: Option<String>,
-    pub head: HeadView,
-    pub parents: Vec<Link>,
+pub struct ParentDiff {
+    pub parent: Option<Link>,
     pub lines: Vec<DiffLine>,
 }
 
-impl VersionPage {
-    #[must_use]
-    pub fn new(slug: &str, head: &Head, diff: &Diff) -> VersionPage {
-        let text_diff = similar::TextDiff::from_lines(&diff.before.text, &diff.after.text);
-        let lines = text_diff
+impl ParentDiff {
+    fn new(before: &Side, after: &Side) -> ParentDiff {
+        let lines = similar::TextDiff::from_lines(&before.text, &after.text)
             .iter_all_changes()
             .map(|change| {
                 let (class, sign) = match change.tag() {
@@ -554,6 +544,35 @@ impl VersionPage {
                 }
             })
             .collect();
+        ParentDiff {
+            parent: before.stamp.as_ref().map(|s| version_link(&s.id)),
+            lines,
+        }
+    }
+}
+
+#[derive(Template)]
+#[template(path = "version.html")]
+pub struct VersionPage {
+    pub crumbs: Vec<Link>,
+    pub nav: &'static str,
+    pub slug: Link,
+    pub short_link: Link,
+    pub history: Option<String>,
+    pub head: HeadView,
+    pub first_version: bool,
+    pub several_parents: bool,
+    pub diffs: Vec<ParentDiff>,
+    pub notes: Vec<String>,
+}
+
+impl VersionPage {
+    #[must_use]
+    pub fn new(slug: &str, head: &Head, diff: &Diff) -> VersionPage {
+        let diffs = diff
+            .befores()
+            .map(|before| ParentDiff::new(before, &diff.after))
+            .collect();
         let mut place = place(slug);
         place.crumbs.push(slug_link(slug));
         place.crumbs.push(Link::to("History", history_href(slug)));
@@ -564,8 +583,10 @@ impl VersionPage {
             short_link: Link::plain(head.stamp.short()),
             history: None,
             head: HeadView::from(head),
-            parents: head.parents.iter().map(|p| version_link(p)).collect(),
-            lines,
+            first_version: head.parents.is_empty(),
+            several_parents: head.parents.len() > 1,
+            diffs,
+            notes: diff.missing_parent_notes().collect(),
         }
     }
 }
@@ -802,4 +823,88 @@ impl From<&Forks> for ForksPage {
 pub struct ErrorPage {
     pub status: u16,
     pub message: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn stamped(id: &str) -> Stamp {
+        Stamp {
+            id: id.repeat(64),
+            written: "2026-09-04T10:00:00.000001+01:00".into(),
+            machine: "desk".into(),
+            operation: "save".into(),
+        }
+    }
+
+    fn side(id: &str, text: &str) -> Side {
+        Side {
+            name: format!("lantern@{id}"),
+            text: format!("---\nsummary: A lamp\n---\n\n{text}\n"),
+            stamp: Some(stamped(id)),
+        }
+    }
+
+    #[test]
+    fn a_version_with_two_parents_is_shown_against_each() {
+        let after = side("c", "says both");
+        let head = Head {
+            stamp: stamped("c"),
+            parents: vec!["a".repeat(64), "b".repeat(64)],
+            text: after.text.clone(),
+        };
+        let diff = Diff {
+            slug: "lantern".into(),
+            before: Some(side("a", "says desk")),
+            other_parents: vec![side("b", "says phone")],
+            missing_parents: vec![],
+            after,
+            renamed: None,
+        };
+        let page = VersionPage::new("lantern", &head, &diff).render().unwrap();
+        assert!(page.contains("Against each parent"), "{page}");
+        assert_eq!(page.matches("<pre class=\"diff\">").count(), 2);
+        for (parent, line) in [("a", "-says desk"), ("b", "-says phone")] {
+            assert!(page.contains(&format!("/version/{}\"", parent.repeat(64))));
+            assert!(page.contains(line), "{page}");
+        }
+    }
+
+    fn without_held_parents(missing: &[&str]) -> String {
+        let ids = |ids: &[&str]| ids.iter().map(|id| id.repeat(64)).collect();
+        let after = side("c", "says both");
+        let head = Head {
+            stamp: stamped("c"),
+            parents: ids(missing),
+            text: after.text.clone(),
+        };
+        let diff = Diff {
+            slug: "lantern".into(),
+            before: missing.is_empty().then(|| Side::empty("(none)")),
+            other_parents: vec![],
+            missing_parents: ids(missing),
+            after,
+            renamed: None,
+        };
+        VersionPage::new("lantern", &head, &diff).render().unwrap()
+    }
+
+    #[test]
+    fn a_version_with_no_parent_is_a_first_version() {
+        let page = without_held_parents(&[]);
+        assert!(page.contains("A first version"), "{page}");
+        assert_eq!(page.matches("<pre class=\"diff\">").count(), 1);
+    }
+
+    #[test]
+    fn a_parent_the_store_lacks_is_not_taken_for_a_first_version() {
+        let page = without_held_parents(&["a"]);
+        assert!(
+            page.contains("<p class=\"notice\">parent aaaaaaaaaaaa is not in the store</p>"),
+            "{page}"
+        );
+        assert!(!page.contains("A first version"), "{page}");
+        assert!(!page.contains("<pre class=\"diff\">"), "{page}");
+    }
 }

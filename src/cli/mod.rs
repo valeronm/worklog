@@ -254,6 +254,9 @@ fn dispatch_read(deps: &Deps, json: bool, command: ReadCommand) -> Result<Render
                 other.as_deref(),
                 first.kind.map(Kind::from),
             )?;
+            for note in out.missing_parent_notes() {
+                note_aside(Some(&note));
+            }
             rendered(json, &out, || render::diff(&out, paint()))
         }
         ReadCommand::Drafts => {
