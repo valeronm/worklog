@@ -562,6 +562,8 @@ pub struct VersionPage {
     pub head: HeadView,
     pub first_version: bool,
     pub several_parents: bool,
+    /// The slugs a rename moved the document between, old then new.
+    pub renamed: Option<(Link, Link)>,
     pub diffs: Vec<ParentDiff>,
     pub notes: Vec<String>,
 }
@@ -569,10 +571,15 @@ pub struct VersionPage {
 impl VersionPage {
     #[must_use]
     pub fn new(slug: &str, head: &Head, diff: &Diff) -> VersionPage {
-        let diffs = diff
-            .befores()
-            .map(|before| ParentDiff::new(before, &diff.after))
-            .collect();
+        let renamed = diff.renamed.as_ref();
+        // A rename copies the content, so there is no change to show.
+        let diffs = if renamed.is_some() {
+            Vec::new()
+        } else {
+            diff.befores()
+                .map(|before| ParentDiff::new(before, &diff.after))
+                .collect()
+        };
         let mut place = place(slug);
         place.crumbs.push(slug_link(slug));
         place.crumbs.push(Link::to("History", history_href(slug)));
@@ -585,6 +592,7 @@ impl VersionPage {
             head: HeadView::from(head),
             first_version: head.parents.is_empty(),
             several_parents: head.parents.len() > 1,
+            renamed: renamed.map(|r| (slug_link(&r.from), slug_link(&r.to))),
             diffs,
             notes: diff.missing_parent_notes().collect(),
         }
@@ -828,6 +836,7 @@ pub struct ErrorPage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::output::Renamed;
 
     fn stamped(id: &str) -> Stamp {
         Stamp {
@@ -888,6 +897,36 @@ mod tests {
             renamed: None,
         };
         VersionPage::new("lantern", &head, &diff).render().unwrap()
+    }
+
+    #[test]
+    fn a_version_a_rename_wrote_shows_the_move_and_no_diff() {
+        let after = side("b", "says desk");
+        let head = Head {
+            stamp: stamped("b"),
+            parents: vec!["a".repeat(64)],
+            text: after.text.clone(),
+        };
+        let diff = Diff {
+            slug: "lamp".into(),
+            before: Some(side("a", "says desk")),
+            other_parents: vec![],
+            missing_parents: vec![],
+            after,
+            renamed: Some(Renamed {
+                from: "lantern".into(),
+                to: "lamp".into(),
+            }),
+        };
+        let page = VersionPage::new("lamp", &head, &diff).render().unwrap();
+        assert!(
+            page.contains(
+                "Renamed from <a href=\"/topic/lantern\">lantern</a> \
+                 to <a href=\"/topic/lamp\">lamp</a>."
+            ),
+            "{page}"
+        );
+        assert!(!page.contains("<pre class=\"diff\">"), "{page}");
     }
 
     #[test]
