@@ -8,6 +8,7 @@
 {% call m::meta("of", slug_plain, history) %}{% endcall %}
 {% call m::notice(foreign) %}{% endcall %}
 {% call m::notice(lost_rename) %}{% endcall %}
+{% call m::notice(waiting) %}{% endcall %}
 <table>
 <tr><th>Version</th><th>Written</th><th>Machine</th><th>Operation</th><th>Parents</th></tr>
 {% for v in versions %}

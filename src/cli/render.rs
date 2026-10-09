@@ -85,7 +85,7 @@ pub fn shown(s: &Shown) -> String {
         }
         None => {
             for head in &s.heads {
-                if s.forked {
+                if s.heads.len() > 1 {
                     let _ = writeln!(out, "==== {}", head.stamp.head_label());
                 }
                 out.push_str(&head.text);

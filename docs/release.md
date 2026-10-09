@@ -27,6 +27,9 @@ installs it.
    a document there. Any other change to the grammar, and binaries from
    before that tolerance, need every machine sharing the store upgraded
    before the first write.
+6. A binary from before a document could be waiting reads one as forked
+   and will `resolve` it, so the hold on such a document is only as good
+   as the oldest binary sharing the store.
 
 Nothing checks that the tag matches `Cargo.toml`; `worklog --version`
 reports the manifest, so a mismatch is visible but not fatal. The tag must

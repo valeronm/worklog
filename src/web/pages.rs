@@ -443,6 +443,7 @@ pub struct DocPage {
     pub removed: bool,
     /// A note that a head was written by a newer worklog.
     pub foreign: Option<String>,
+    pub waiting: Option<String>,
     pub history: Option<String>,
     pub heads: Vec<HeadView>,
     pub followups: Vec<Open>,
@@ -463,6 +464,7 @@ impl From<&Shown> for DocPage {
             forked: s.forked,
             removed: s.removed.is_some(),
             foreign: s.foreign.clone(),
+            waiting: s.waiting.clone(),
             history: Some(history_href(&s.slug)),
             heads,
             followups: opens(&s.followups),
@@ -488,6 +490,7 @@ pub struct HistoryPage {
     /// A note that the head was written by a newer worklog.
     pub foreign: Option<String>,
     pub lost_rename: Option<String>,
+    pub waiting: Option<String>,
     pub versions: Vec<HistoryLine>,
 }
 
@@ -503,6 +506,7 @@ impl From<&History> for HistoryPage {
             history: None,
             foreign: h.foreign.clone(),
             lost_rename: h.lost_rename.clone(),
+            waiting: h.waiting.clone(),
             versions: h
                 .versions
                 .iter()

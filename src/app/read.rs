@@ -130,34 +130,35 @@ fn most_used_first<T>(
         .collect()
 }
 
-/// A document's current text, or every head of a fork; or one stored
-/// version, named by its id.
+/// A document's current text, or every head where it has several; or one
+/// stored version, named by its id.
 pub fn show(deps: &Deps, name: &str, kind: Option<Kind>) -> Result<Shown, Failure> {
     // A stored version stands on its own; its entry's followups belong to
     // the document as it is now.
-    let (slug, heads, removed, foreign) = match load::named(deps, name, kind)? {
-        load::Named::Version(v) => (v.slug.clone(), vec![head(&v)], None, load::foreign_note(&v)),
+    let (slug, heads, removed, foreign, waiting) = match load::named(deps, name, kind)? {
+        load::Named::Version(v) => {
+            let foreign = load::foreign_note(&v);
+            (v.slug.clone(), vec![head(&v)], None, foreign, None)
+        }
         load::Named::Slug(slug, document) => {
             let (slug, document, lost) = load::follow(deps.store, slug, document)?;
             if let Some(to) = lost {
                 return Err(Failure::Refused(load::lost_rename_note(&slug, &to)));
             }
-            let (heads, removed): (Vec<&Version>, Option<String>) =
+            let (heads, removed, waiting): (Vec<&Version>, Option<String>, bool) =
                 match (document.state(), document.tombstone()) {
-                    (State::Live(v), _) => (vec![v], None),
-                    (State::Forked(heads), _) => (heads, None),
+                    (State::Live(v), _) => (vec![v], None, false),
+                    (State::Forked(heads), _) => (heads, None, false),
+                    (State::Waiting(heads), _) => (heads, None, true),
                     (State::Tombstoned(v), Some(Tombstone::Removed { note })) => {
-                        (vec![v], Some(note.unwrap_or_default().to_owned()))
+                        (vec![v], Some(note.unwrap_or_default().to_owned()), false)
                     }
                     _ => return Err(load::not_live(&slug, &document)),
                 };
             let foreign = heads.iter().find_map(|v| load::foreign_note(v));
-            (
-                slug,
-                heads.into_iter().map(head).collect(),
-                removed,
-                foreign,
-            )
+            let heads = heads.into_iter().map(head).collect();
+            let waiting = waiting.then(|| load::waiting_note(&slug));
+            (slug, heads, removed, foreign, waiting)
         }
     };
     let slug = &slug;
@@ -175,11 +176,12 @@ pub fn show(deps: &Deps, name: &str, kind: Option<Kind>) -> Result<Shown, Failur
     Ok(Shown {
         slug: slug.path().to_owned(),
         kind: slug.kind().dir().to_owned(),
-        forked: heads.len() > 1,
+        forked: heads.len() > 1 && waiting.is_none(),
         removed,
         heads,
         followups,
         foreign,
+        waiting,
     })
 }
 
@@ -193,6 +195,8 @@ pub fn history(deps: &Deps, slug: &Slug) -> Result<History, Failure> {
     let (landed, document, lost) = load::follow(deps.store, slug.clone(), document)?;
     let lost_rename = lost.map(|to| load::lost_rename_note(&landed, &to));
     let foreign = document.current().and_then(load::foreign_note);
+    let waiting = matches!(document.state(), State::Waiting(_));
+    let waiting = waiting.then(|| load::waiting_note(&landed));
     let mut versions = Vec::new();
     for (_, document) in load::lineage(deps.store, &landed)? {
         versions.extend(document.history().iter().map(|v| HistoryRow {
@@ -206,6 +210,7 @@ pub fn history(deps: &Deps, slug: &Slug) -> Result<History, Failure> {
         versions,
         foreign,
         lost_rename,
+        waiting,
     })
 }
 
@@ -701,7 +706,7 @@ pub fn usage(deps: &Deps, machine: Option<&str>, since: Option<&str>) -> Result<
 fn missing_parents(deps: &Deps) -> Result<Vec<Problem>, Failure> {
     let documents = load::documents(deps.store)?;
     let lacks_a_parent = |version: &&Version| {
-        let slug = load::parents_slug(version);
+        let slug = version.parents_slug();
         let holder = documents.iter().find(|(s, _)| s == slug);
         holder.is_none_or(|(_, document)| document.lacks_a_parent_of(version))
     };

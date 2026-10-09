@@ -965,7 +965,46 @@ fn versions_lacking_a_parent_are_counted_in_one_notice() {
     let check = s.ok(&["check"]);
     let said = "notice: lantern: 2 versions name a parent that is not in the store\n";
     assert!(check.contains(said), "{check}");
-    assert!(check.ends_with("1 forks, 1 notices\n"), "{check}");
+    assert!(check.ends_with("0 forks, 1 notices\n"), "{check}");
+}
+
+#[test]
+fn a_document_missing_a_version_between_two_others_waits_and_is_no_fork() {
+    let s = seeded();
+    for word in ["second", "third"] {
+        s.write(&["checkout", "lantern"], |t| {
+            format!("{t}Written {word}.\n")
+        });
+    }
+    let whole = s.ok(&["show", "lantern"]);
+    let history = s.ok(&["history", "lantern"]);
+    let middle = s.version_file("topic/lantern", column(history.lines().nth(1).unwrap(), 0));
+    let aside = s.root.path().join("not-yet-synced");
+    fs::rename(&middle, &aside).unwrap();
+    let waits = "worklog: a version of lantern names a parent that is not in the store: \
+                 which version is current waits on the sync\n";
+    let shown = s.run(&["show", "lantern"]);
+    assert_eq!(String::from_utf8_lossy(&shown.stderr), waits);
+    let heads = String::from_utf8_lossy(&shown.stdout);
+    assert_eq!(heads.matches("==== head ").count(), 2, "{heads}");
+    let history = s.run(&["history", "lantern"]);
+    assert_eq!(String::from_utf8_lossy(&history.stderr), waits);
+    assert_eq!(s.ok(&["forks"]), "");
+    assert!(!s.ok(&["context", "projects/lantern"]).contains("Forked"));
+    for refused in [
+        &["resolve", "lantern"][..],
+        &["checkout", "lantern"],
+        &["tombstone", "lantern", "gone"],
+        &["rename", "lantern", "lamp"],
+        &["new", "topic", "lantern"],
+    ] {
+        assert_eq!(s.refused(refused), waits, "{refused:?}");
+    }
+    fs::rename(&aside, &middle).unwrap();
+    assert_eq!(s.ok(&["show", "lantern"]), whole);
+    s.ok(&["checkout", "lantern"]);
+    fs::rename(&middle, &aside).unwrap();
+    assert_eq!(s.refused(&["save", "lantern"]), waits);
 }
 
 /// A store where two machines each wrote a version of `lantern` from the

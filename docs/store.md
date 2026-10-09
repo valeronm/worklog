@@ -130,9 +130,14 @@ the files each time it is read; nothing stores it.
    tombstoned.
 3. One other head means the document is live, and that head is its
    current version.
-4. Two or more heads mean a fork. The heads are ordered by id. A fork
-   with a tombstone among its heads is still a fork.
-5. No version at all: the document does not exist.
+4. Two or more heads, and a parent some version names that the document
+   does not hold: the document is waiting unless every head descends
+   from a version naming that parent. A head that does not may be an
+   ancestor of the missing version, which the files cannot tell from a
+   fork.
+5. Two or more heads otherwise mean a fork. The heads are ordered by id.
+   A fork with a tombstone among its heads is still a fork.
+6. No version at all: the document does not exist.
 
 A slug is never reused: outside a fork, nothing is written after a
 tombstone, so it stays a head. The one exception is a removed document
@@ -143,6 +148,11 @@ elsewhere.
 Forks are reported, never merged. Every read shows every head, `check`
 counts them, and only `resolve` writes a version naming them all, a
 tombstone among them included.
+
+A waiting document shows every head too, with a note, and takes no
+write, `resolve` included, since a version written now would name as a
+parent what the missing version may already follow. It settles when the
+version arrives, as live or as a fork.
 
 `history` orders a document newest first, each version after every
 version naming it as a parent. Versions on a fork share no order, so the

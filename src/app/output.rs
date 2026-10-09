@@ -96,8 +96,8 @@ pub struct Head {
     pub text: String,
 }
 
-/// A document as it stands: one head, every head of a fork, or the
-/// tombstone of a removed one.
+/// A document as it stands: one head, every head where there are
+/// several, or the tombstone of a removed one.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Shown {
     pub slug: String,
@@ -110,6 +110,8 @@ pub struct Shown {
     pub followups: Vec<FollowupItem>,
     /// A note that a head was written by a newer worklog.
     pub foreign: Option<String>,
+    /// A note that the heads wait on a version the store does not hold.
+    pub waiting: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -130,6 +132,8 @@ pub struct History {
     /// A note that the chain ends at a rename whose new slug has no
     /// versions.
     pub lost_rename: Option<String>,
+    /// A note that the heads wait on a version the store does not hold.
+    pub waiting: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

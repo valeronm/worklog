@@ -170,6 +170,7 @@ fn refuse_existing(deps: &Deps, slug: &Slug) -> Result<(), Failure> {
         State::Live(_) | State::Forked(_) => Err(Failure::Refused(format!(
             "{slug} exists: `worklog checkout {slug}` to change it"
         ))),
+        State::Waiting(_) => Err(load::not_live(slug, &document)),
         State::Tombstoned(_) => Err(Failure::Refused(format!(
             "{slug} was removed; a slug is never reused"
         ))),
@@ -284,8 +285,10 @@ pub fn checkout(deps: &Deps, slug: &Slug) -> Result<DraftRef, Failure> {
 /// A draft holding every head of a fork, for a person to reconcile.
 pub fn resolve(deps: &Deps, slug: &Slug) -> Result<DraftRef, Failure> {
     let document = deps.store.document(slug)?;
-    let State::Forked(heads) = document.state() else {
-        return Err(Failure::Refused(format!("{slug} is not forked")));
+    let heads = match document.state() {
+        State::Forked(heads) => heads,
+        State::Waiting(_) => return Err(load::not_live(slug, &document)),
+        _ => return Err(Failure::Refused(format!("{slug} is not forked"))),
     };
     let heads: Vec<Version> = heads.into_iter().cloned().collect();
     heads.iter().try_for_each(load::refuse_foreign)?;
@@ -300,6 +303,9 @@ pub fn save(deps: &Deps, slug: &Slug, dry_run: bool) -> Result<Written, Failure>
         return Err(Failure::at(slug, "conflict markers remain in the draft"));
     }
     let document = deps.store.document(slug)?;
+    if matches!(document.state(), State::Waiting(_)) {
+        return Err(load::not_live(slug, &document));
+    }
     let heads = document.heads();
     heads.iter().try_for_each(|h| load::refuse_foreign(h))?;
     let operation = match (draft.parents.len(), heads.len()) {

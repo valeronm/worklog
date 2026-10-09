@@ -157,12 +157,14 @@ fn dispatch_read(deps: &Deps, json: bool, command: ReadCommand) -> Result<Render
         ReadCommand::Show(arg) => {
             let out = read::show(deps, &arg.slug, arg.kind.map(Kind::from))?;
             note_aside(out.foreign.as_deref());
+            note_aside(out.waiting.as_deref());
             rendered(json, &out, || render::shown(&out))
         }
         ReadCommand::History(arg) => {
             let out = read::history(deps, &slug(&arg.slug, arg.kind)?)?;
             note_aside(out.foreign.as_deref());
             note_aside(out.lost_rename.as_deref());
+            note_aside(out.waiting.as_deref());
             rendered(json, &out, || render::history(&out))
         }
         ReadCommand::List { kind } => {

@@ -61,7 +61,7 @@ pub struct Loaded {
     pub forks: Vec<(Slug, Vec<VersionId>)>,
     /// A current version whose fields its kind refuses.
     pub broken: Vec<(Slug, String)>,
-    /// Every document with a live head or a fork.
+    /// Every document that is live, forked or waiting.
     present: BTreeSet<Slug>,
     /// What the tombstone at each tombstoned slug says.
     tombstones: BTreeMap<Slug, Stone>,
@@ -121,6 +121,16 @@ pub fn live_to_amend(store: &dyn Store, slug: &Slug) -> Result<Version, Failure>
     Ok(version)
 }
 
+/// The note on a document whose heads wait on a version the store does
+/// not hold.
+#[must_use]
+pub fn waiting_note(slug: &Slug) -> String {
+    format!(
+        "a version of {slug} names a parent that is not in the store: \
+         which version is current waits on the sync"
+    )
+}
+
 /// The refusal for a document that has no single live head.
 #[must_use]
 pub fn not_live(slug: &Slug, document: &Document) -> Failure {
@@ -143,6 +153,7 @@ pub fn not_live(slug: &Slug, document: &Document) -> Failure {
                 .collect::<Vec<_>>()
                 .join(", ")
         )),
+        State::Waiting(_) => Failure::Refused(waiting_note(slug)),
     }
 }
 
@@ -200,20 +211,13 @@ pub fn lineage(store: &dyn Store, slug: &Slug) -> Result<Vec<(Slug, Document)>, 
     Ok(chain)
 }
 
-/// The document a version's parents sit in: its own or, for the version
-/// a rename moved, the old slug's.
-#[must_use]
-pub fn parents_slug(version: &Version) -> &Slug {
-    version.block.renamed_from.as_ref().unwrap_or(&version.slug)
-}
-
 /// A version's parents that the store holds, then the ids of those it
 /// does not.
 pub fn parents(
     store: &dyn Store,
     version: &Version,
 ) -> Result<(Vec<Version>, Vec<VersionId>), Failure> {
-    let document = store.document(parents_slug(version))?;
+    let document = store.document(version.parents_slug())?;
     let (mut held, mut missing) = (Vec::new(), Vec::new());
     for id in &version.block.parents {
         match document.get(id) {
@@ -307,6 +311,10 @@ fn load_kind<T>(
                 loaded
                     .forks
                     .push((slug, heads.iter().map(|h| h.id.clone()).collect()));
+                continue;
+            }
+            State::Waiting(_) => {
+                loaded.present.insert(slug);
                 continue;
             }
             State::Tombstoned(_) => {
@@ -551,7 +559,7 @@ impl Loaded {
         docs.filter_map(|(slug, what)| what.as_deref().map(|w| (slug, w)))
     }
 
-    /// A document with a live head or a fork, whatever its kind.
+    /// A document that is live, forked or waiting, whatever its kind.
     #[must_use]
     pub fn is_present(&self, slug: &Slug) -> bool {
         self.present.contains(slug)
@@ -616,7 +624,7 @@ impl Loaded {
             })
     }
 
-    /// A topic that exists, forked or not.
+    /// A topic that exists, with one head or several.
     #[must_use]
     pub fn has_topic(&self, name: &str) -> bool {
         Slug::of_kind(Kind::Topic, name).is_ok_and(|slug| self.present.contains(&slug))

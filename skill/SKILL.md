@@ -305,6 +305,10 @@ them, and `worklog resolve <slug>` opens a draft holding both for a
 person to reconcile and save. `worklog diff <slug>` shows that draft
 against each head in turn, with `no changes` under a head it equals.
 
+A document that `show` notes as waiting on the sync has a file that has
+not arrived, and is missing from listings. Leave it; it settles when the
+file arrives.
+
 `worklog drafts` lists drafts open on this machine, this session's and
 any other's: sessions run side by side, and a draft is the session's that
 opened it. Save or discard only a draft this session opened. Report the

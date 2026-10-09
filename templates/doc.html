@@ -7,6 +7,7 @@
 <h1>{{ summary|safe }}</h1>
 {% call m::meta(kind, slug_text, history) %}{% endcall %}
 {% call m::notice(foreign) %}{% endcall %}
+{% call m::notice(waiting) %}{% endcall %}
 {% if removed %}
 <p class="notice">Removed. The note below says why.</p>
 {% endif %}

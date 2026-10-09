@@ -379,6 +379,13 @@ impl Version {
         Some((from, &self.slug))
     }
 
+    /// The document the version's parents sit in: its own or, for the
+    /// version a rename moved, the old slug's.
+    #[must_use]
+    pub fn parents_slug(&self) -> &Slug {
+        self.block.renamed_from.as_ref().unwrap_or(&self.slug)
+    }
+
     /// The first version a rename writes under the new slug, from the
     /// tombstone it left and the version before that one; `None` when
     /// `stone` is no rename's tombstone. Every part comes from the two, so
@@ -422,6 +429,9 @@ pub enum State<'a> {
     Tombstoned(&'a Version),
     /// Two or more heads, sorted by id.
     Forked(Vec<&'a Version>),
+    /// Two or more heads, sorted by id, one of which may be an ancestor of a
+    /// version the document does not hold.
+    Waiting(Vec<&'a Version>),
 }
 
 impl Document {
@@ -446,6 +456,30 @@ impl Document {
     #[must_use]
     pub fn get(&self, id: &VersionId) -> Option<&Version> {
         self.versions.iter().find(|v| &v.id == id)
+    }
+
+    /// A version a rename moved names a parent under the old slug, which
+    /// is not missing here.
+    fn own(&self) -> impl Iterator<Item = &Version> {
+        self.versions.iter().filter(|v| v.parents_slug() == &v.slug)
+    }
+
+    /// A head that descends from no version naming a missing parent may
+    /// be an ancestor of that parent.
+    fn a_head_may_precede_a_missing_parent(&self, heads: &[&Version]) -> bool {
+        let named = self.own().flat_map(|v| &v.block.parents);
+        let mut missing = named.filter(|id| self.get(id).is_none());
+        missing.any(|id| !heads.iter().all(|head| self.follows(head, id)))
+    }
+
+    fn follows(&self, version: &Version, parent: &VersionId) -> bool {
+        let mut children = self.own().filter(|v| v.block.parents.contains(parent));
+        children.any(|child| self.descends(version, child))
+    }
+
+    fn descends(&self, version: &Version, from: &Version) -> bool {
+        let mut parents = version.block.parents.iter().filter_map(|id| self.get(id));
+        version.id == from.id || parents.any(|parent| self.descends(parent, from))
     }
 
     /// Whether the version names a parent that no version here carries.
@@ -485,6 +519,7 @@ impl Document {
             [] => State::Absent,
             [head] if head.is_tombstone() => State::Tombstoned(head),
             [head] => State::Live(head),
+            _ if self.a_head_may_precede_a_missing_parent(&heads) => State::Waiting(heads),
             _ => State::Forked(heads),
         }
     }
@@ -670,6 +705,53 @@ mod tests {
         assert!(!partial.lacks_a_parent_of(&a));
         assert!(!partial.lacks_a_parent_of(&b));
         assert!(partial.lacks_a_parent_of(&resolved));
+    }
+
+    #[test]
+    fn a_head_that_may_precede_a_missing_version_waits() {
+        let first = topic("t", "\n1\n", &[], "new");
+        let second = topic("t", "\n2\n", &[&first.id], "save");
+        let third = topic("t", "\n3\n", &[&second.id], "save");
+        let gapped = Document::new(vec![first.clone(), third.clone()]);
+        assert!(matches!(gapped.state(), State::Waiting(heads) if heads.len() == 2));
+        let aside = topic("t", "\n4\n", &[&first.id], "save");
+        let branched = Document::new(vec![first.clone(), aside, third.clone()]);
+        assert!(matches!(branched.state(), State::Waiting(heads) if heads.len() == 2));
+        let rootless = Document::new(vec![second.clone(), third.clone()]);
+        assert_eq!(rootless.state(), State::Live(&third));
+        let whole = Document::new(vec![first, second, third.clone()]);
+        assert_eq!(whole.state(), State::Live(&third));
+    }
+
+    #[test]
+    fn heads_that_all_follow_the_missing_version_are_a_fork() {
+        let first = topic("t", "\n1\n", &[], "new");
+        let second = topic("t", "\n2\n", &[&first.id], "save");
+        let left = topic("t", "\n3\n", &[&second.id], "save");
+        let right = topic("t", "\n4\n", &[&second.id], "save");
+        let under_one = Document::new(vec![second, left.clone(), right.clone()]);
+        assert!(matches!(under_one.state(), State::Forked(heads) if heads.len() == 2));
+        let siblings = Document::new(vec![left, right]);
+        assert!(matches!(siblings.state(), State::Forked(heads) if heads.len() == 2));
+    }
+
+    #[test]
+    fn two_renames_onto_one_slug_fork_without_waiting_on_the_old_ones() {
+        let moved_from = |old: &str| {
+            let tombstone = VersionId::of(&format!("the tombstone under {old}"));
+            let mut block = block(&[&tombstone], "rename");
+            block.renamed_from = Some(Slug::parse(old).unwrap());
+            let mut fields = Fields::default();
+            fields.push_scalar("summary", "a topic");
+            Version::compose(
+                Slug::parse("t").unwrap(),
+                block,
+                fields,
+                format!("\n{old}\n"),
+            )
+        };
+        let document = Document::new(vec![moved_from("lamp"), moved_from("torch")]);
+        assert!(matches!(document.state(), State::Forked(heads) if heads.len() == 2));
     }
 
     #[test]
