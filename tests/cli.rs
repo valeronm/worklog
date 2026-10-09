@@ -924,18 +924,12 @@ fn save_refuses_stale_unchanged_and_broken_drafts() {
 #[test]
 fn a_version_is_diffed_without_a_parent_the_store_lacks() {
     let s = seeded();
-    let parent = fs::read_dir(s.root.path().join("store/topic/lantern"))
-        .unwrap()
-        .next()
-        .expect("the first version's file")
-        .unwrap()
-        .path();
     s.write(&["checkout", "lantern"], |t| {
         t.replace("first.", "first, again.")
     });
     let history = s.ok(&["history", "lantern"]);
     let ids: Vec<&str> = history.lines().map(|l| column(l, 0)).collect();
-    fs::remove_file(parent).unwrap();
+    fs::remove_file(s.version_file("topic/lantern", ids[1])).unwrap();
     let diff = s.run(&["diff", ids[0]]);
     assert_eq!(diff.status.code(), Some(0));
     assert!(diff.stdout.is_empty(), "nothing to compare against");
@@ -1085,17 +1079,7 @@ fn a_resolved_version_is_diffed_against_each_parent_the_store_holds() {
         .find(|l| l.starts_with("==== head ") && l.contains(" on m2 "))
         .map(|l| word(l, 2))
         .expect("the head m2 wrote");
-    let lost = fs::read_dir(s.root.path().join("store/topic/lantern"))
-        .unwrap()
-        .map(|e| e.unwrap().path())
-        .find(|p| {
-            p.file_name()
-                .unwrap()
-                .to_string_lossy()
-                .starts_with(from_m2)
-        })
-        .expect("that head's file");
-    fs::remove_file(lost).unwrap();
+    fs::remove_file(s.version_file("topic/lantern", from_m2)).unwrap();
     let partly = s.run(&["diff", resolved]);
     let against = String::from_utf8_lossy(&partly.stdout);
     assert_eq!(against.matches("--- lantern@").count(), 1, "{against}");
@@ -1249,8 +1233,7 @@ fn a_version_from_a_newer_worklog_reads_and_refuses_edits() {
     use worklog::domain::version::Version;
     let s = seeded();
     // The stored fact, as a newer worklog would have written a sibling.
-    let dir = s.root.path().join("store/fact/lantern/relay-pin-is-fixed");
-    let stored = fs::read_dir(&dir).unwrap().next().unwrap().unwrap().path();
+    let stored = s.version_file("fact/lantern/relay-pin-is-fixed", "");
     let text = fs::read_to_string(stored)
         .unwrap()
         .replace("relay-pin-is-fixed", "from-the-future")
