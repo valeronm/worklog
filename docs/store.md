@@ -66,11 +66,12 @@ body
 - The body is everything after the closing fence, copied byte for byte.
 
 There is no escaping. A scalar that opens with `[` and closes with `]`
-reads as a list, and a comma inside a list item splits it, so a value in
-either shape is refused when a draft is saved. A reader skips a blank
-line anywhere in the fields and a `#` line at the top level; that
-tolerance is for the files a person edits, and a version with either is
-refused.
+reads as a list, so a draft holding one where its kind wants text is
+refused, and a comma inside a list item makes two items of it. A command
+refuses a value that would not read back as it was given. A reader skips
+a blank line anywhere in the fields and a `#` line at the top level;
+that tolerance is for the files a person edits, and a version with
+either is refused.
 
 ## A version
 

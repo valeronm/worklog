@@ -1291,6 +1291,36 @@ fn rename_refuses_a_slug_the_document_could_not_be_saved_under() {
 }
 
 #[test]
+fn a_value_that_would_not_read_back_is_refused_before_it_is_stored() {
+    let s = seeded();
+    for summary in ["Add the relay\nand test it", "[bracketed]"] {
+        let err = s.refused(&[
+            "new",
+            "followup",
+            "second",
+            "--entry",
+            "2026-09/2026-09-01-lamp-driver",
+            "--recheck",
+            "touching lantern",
+            "--summary",
+            summary,
+        ]);
+        assert!(err.contains("does not read back as written"), "{err}");
+    }
+    let err = s.refused(&[
+        "recheck",
+        &format!("{}-port", today()),
+        "2027-01-01",
+        "wait\nfor the board",
+    ]);
+    assert!(err.contains("does not read back as written"), "{err}");
+    assert_eq!(
+        s.ok(&["check"]),
+        "check: 10 documents, 0 links, 0 problems, 0 forks, 0 notices\n"
+    );
+}
+
+#[test]
 fn a_version_from_a_newer_worklog_reads_and_refuses_edits() {
     use worklog::domain::version::Version;
     let s = seeded();

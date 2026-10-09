@@ -64,6 +64,10 @@ pub fn store_version(
         raw: None,
     };
     let version = Version::compose(slug, block, fields, body);
+    // The grammar has no escaping.
+    if Version::from_text(&version.to_text()).as_ref() != Ok(&version) {
+        return Err(Failure::at(&version.slug, "does not read back as written"));
+    }
     deps.store.put(&version)?;
     Ok(version)
 }
