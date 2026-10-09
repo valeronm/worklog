@@ -148,6 +148,12 @@ tombstone among them included.
 version naming it as a parent. Versions on a fork share no order, so the
 id decides between them.
 
+A version can arrive before a parent it names, since a sync carries
+files in no order. Such a version still reads; `diff` compares it with
+the parents that are there and notes the one that is not, and `check`
+gives the document a notice, since only a parent that never arrives is
+a fault.
+
 ## Operations
 
 Each operation names the command that writes the version, so `history`

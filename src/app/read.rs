@@ -698,6 +698,25 @@ pub fn usage(deps: &Deps, machine: Option<&str>, since: Option<&str>) -> Result<
     Ok(out)
 }
 
+fn missing_parents(deps: &Deps) -> Result<Vec<Problem>, Failure> {
+    let documents = load::documents(deps.store)?;
+    let lacks_a_parent = |version: &&Version| {
+        let slug = load::parents_slug(version);
+        let holder = documents.iter().find(|(s, _)| s == slug);
+        holder.is_none_or(|(_, document)| document.lacks_a_parent_of(version))
+    };
+    let notice = |(slug, document): &(Slug, Document)| {
+        let versions = document.history().into_iter();
+        let message = match versions.filter(lacks_a_parent).count() {
+            0 => return None,
+            1 => "a version names a parent that is not in the store".to_owned(),
+            n => format!("{n} versions name a parent that is not in the store"),
+        };
+        Some(Problem::at(slug, message))
+    };
+    Ok(documents.iter().filter_map(notice).collect())
+}
+
 /// Every rule the store as a whole has to keep.
 pub fn check(deps: &Deps) -> Result<Check, Failure> {
     let loaded = load::load(deps.store)?;
@@ -713,6 +732,7 @@ pub fn check(deps: &Deps) -> Result<Check, Failure> {
         out.notices
             .push(Problem::at(slug, load::foreign_reason(what)));
     }
+    out.notices.extend(missing_parents(deps)?);
     out.forks = loaded
         .forks
         .iter()

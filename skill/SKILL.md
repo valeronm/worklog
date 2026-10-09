@@ -291,6 +291,10 @@ tombstone. From an entry, or a followup that is done or dropped, that is
 a citation; from anything live it is a notice, since the live document
 has gone stale. A notice never changes the exit code.
 
+A notice that a version names a parent not in the store means a file has
+not synced yet. If it outlasts the sync, `worklog history <slug>` lists
+the versions and `worklog diff <id>` on one names the parent it lacks.
+
 A slug `show` or `check` reports as renamed to one the store has not got
 is a rename cut short, or one whose other half has not synced yet. Once
 sync has settled, `worklog rename` with the two slugs the message gives

@@ -81,6 +81,15 @@ impl Scratch {
         lines.lines().filter_map(Invocation::parse_line).collect()
     }
 
+    /// The file of the version of a document that the id opens.
+    fn version_file(&self, document: &str, id: &str) -> PathBuf {
+        fs::read_dir(self.root.path().join("store").join(document))
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .find(|p| p.file_name().unwrap().to_string_lossy().starts_with(id))
+            .expect("the version's file")
+    }
+
     fn ok(&self, args: &[&str]) -> String {
         self.ok_binary(Command::cargo_bin("worklog").expect("the binary"), args)
     }
@@ -940,6 +949,29 @@ fn a_version_is_diffed_without_a_parent_the_store_lacks() {
         .expect("the parent's id");
     assert!(missing.starts_with(ids[1]), "{json}");
     assert!(json.get("before").is_none(), "{json}");
+    let check = s.ok(&["check"]);
+    let said = "notice: lantern: a version names a parent that is not in the store\n";
+    assert!(check.contains(said), "{check}");
+    assert!(check.ends_with("1 notices\n"), "{check}");
+}
+
+#[test]
+fn versions_lacking_a_parent_are_counted_in_one_notice() {
+    let s = seeded();
+    for word in ["second", "third", "fourth"] {
+        s.write(&["checkout", "lantern"], |t| {
+            format!("{t}Written {word}.\n")
+        });
+    }
+    let history = s.ok(&["history", "lantern"]);
+    let ids: Vec<&str> = history.lines().map(|l| column(l, 0)).collect();
+    for lost in [ids[3], ids[1]] {
+        fs::remove_file(s.version_file("topic/lantern", lost)).unwrap();
+    }
+    let check = s.ok(&["check"]);
+    let said = "notice: lantern: 2 versions name a parent that is not in the store\n";
+    assert!(check.contains(said), "{check}");
+    assert!(check.ends_with("1 forks, 1 notices\n"), "{check}");
 }
 
 /// A store where two machines each wrote a version of `lantern` from the
@@ -1130,7 +1162,11 @@ fn rename_and_tombstone() {
         s.ok(&["show", "lantern/relay-pin-is-fixed"]),
         s.ok(&["show", "lantern/relay-pin"])
     );
-    assert!(s.ok(&["check"]).contains("0 problems"));
+    let check = s.ok(&["check"]);
+    assert!(
+        check.ends_with("0 problems, 0 forks, 0 notices\n"),
+        "{check}"
+    );
     // Either name's history is the whole chain, with the rows written
     // under the other name marked.
     let history = s.ok(&["history", "lantern/relay-pin"]);

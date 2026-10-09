@@ -200,15 +200,20 @@ pub fn lineage(store: &dyn Store, slug: &Slug) -> Result<Vec<(Slug, Document)>, 
     Ok(chain)
 }
 
+/// The document a version's parents sit in: its own or, for the version
+/// a rename moved, the old slug's.
+#[must_use]
+pub fn parents_slug(version: &Version) -> &Slug {
+    version.block.renamed_from.as_ref().unwrap_or(&version.slug)
+}
+
 /// A version's parents that the store holds, then the ids of those it
-/// does not; a parent sits in the version's own document or, for the
-/// version a rename moved, in the old slug's.
+/// does not.
 pub fn parents(
     store: &dyn Store,
     version: &Version,
 ) -> Result<(Vec<Version>, Vec<VersionId>), Failure> {
-    let holder = version.block.renamed_from.as_ref().unwrap_or(&version.slug);
-    let document = store.document(holder)?;
+    let document = store.document(parents_slug(version))?;
     let (mut held, mut missing) = (Vec::new(), Vec::new());
     for id in &version.block.parents {
         match document.get(id) {

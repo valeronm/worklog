@@ -448,6 +448,13 @@ impl Document {
         self.versions.iter().find(|v| &v.id == id)
     }
 
+    /// Whether the version names a parent that no version here carries.
+    #[must_use]
+    pub fn lacks_a_parent_of(&self, version: &Version) -> bool {
+        let mut parents = version.block.parents.iter();
+        parents.any(|id| self.get(id).is_none())
+    }
+
     /// The ids in `history` order, newest first, owned so the document can go.
     #[must_use]
     pub fn history_ids(&self) -> Vec<VersionId> {
@@ -651,6 +658,18 @@ mod tests {
         assert_eq!(doc.history().len(), 4);
         assert_eq!(doc.history()[0], &resolved);
         assert_eq!(doc.history()[3], &a);
+    }
+
+    #[test]
+    fn a_document_lacks_a_parent_none_of_its_versions_carries() {
+        let a = topic("t", "\n1\n", &[], "new");
+        let b = topic("t", "\n2\n", &[&a.id], "save");
+        let c = topic("t", "\n3\n", &[&a.id], "save");
+        let resolved = topic("t", "\n4\n", &[&b.id, &c.id], "resolve");
+        let partial = Document::new(vec![a.clone(), b.clone(), resolved.clone()]);
+        assert!(!partial.lacks_a_parent_of(&a));
+        assert!(!partial.lacks_a_parent_of(&b));
+        assert!(partial.lacks_a_parent_of(&resolved));
     }
 
     #[test]
