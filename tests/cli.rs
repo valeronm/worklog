@@ -1268,6 +1268,29 @@ fn rename_and_tombstone() {
 }
 
 #[test]
+fn rename_refuses_a_slug_the_document_could_not_be_saved_under() {
+    let s = seeded();
+    let err = s.refused(&[
+        "rename",
+        "lantern/relay-pin-is-fixed",
+        "ghost/relay-pin-is-fixed",
+    ]);
+    assert!(err.contains("no topic: ghost"), "{err}");
+    let err = s.refused(&[
+        "rename",
+        "2026-09/2026-09-01-lamp-driver",
+        "2026-08/2026-08-01-lamp-driver",
+    ]);
+    assert!(err.contains("date 2026-09-01 is not the slug's"), "{err}");
+    s.ok(&["show", "lantern/relay-pin-is-fixed"]);
+    s.ok(&["show", "2026-09/2026-09-01-lamp-driver"]);
+    assert_eq!(
+        s.ok(&["check"]),
+        "check: 10 documents, 0 links, 0 problems, 0 forks, 0 notices\n"
+    );
+}
+
+#[test]
 fn a_version_from_a_newer_worklog_reads_and_refuses_edits() {
     use worklog::domain::version::Version;
     let s = seeded();

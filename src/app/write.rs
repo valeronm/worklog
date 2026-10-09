@@ -489,6 +489,7 @@ pub fn rename(deps: &Deps, from: &Slug, to: &str) -> Result<Written, Failure> {
         State::Live(version) => {
             load::refuse_foreign(version)?;
             refuse_existing(deps, &to)?;
+            validate(deps, &to, &version.fields)?;
             let stone = rename_tombstone(deps, version, &to)?;
             let moved = Version::moved_by(&stone, version);
             (stone.id, moved)
