@@ -6,7 +6,7 @@ use std::fmt;
 use super::draft::Draft;
 use super::machine::MachineName;
 use super::slug::{Kind, Slug};
-use super::usage::Invocation;
+use super::usage::{Invocation, Session};
 use super::version::{Document, Version, VersionId};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -79,9 +79,11 @@ pub trait Identity {
     fn machine(&self) -> Result<Option<MachineName>, StoreError>;
 }
 
-/// What the host this runs on can answer about itself.
+/// What the host this runs on can answer about itself and this process.
 pub trait Host {
     fn dir_exists(&self, path: &str) -> bool;
+    /// The agent session this process was started from.
+    fn session(&self) -> Option<Session>;
 }
 
 pub trait Clock {

@@ -1,25 +1,35 @@
-//! A coding agent's own files on this host: the skill under its skills
-//! directory and the file its hooks are read from.
+//! A coding agent on this host: the skill under its skills directory, the
+//! file its hooks are read from, and the session it runs a command in.
 
 use std::path::PathBuf;
 
 use crate::domain::ports::StoreError;
+use crate::domain::usage::Session;
 
 use super::{optional, read_optional, write_file};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Agent {
+    /// Written to the usage log as the agent of a session.
     pub name: &'static str,
     home: PathBuf,
     /// The skill's own directory, so removing it takes nothing else.
     skill_dir: PathBuf,
     pub hooks: PathBuf,
+    /// Set by the agent in the environment of a command it runs.
+    pub session_variable: &'static str,
 }
 
 impl Agent {
-    pub(super) fn new(name: &'static str, home: PathBuf, hooks: &str) -> Agent {
+    pub(super) fn new(
+        name: &'static str,
+        home: PathBuf,
+        hooks: &str,
+        session_variable: &'static str,
+    ) -> Agent {
         Agent {
             name,
+            session_variable,
             skill_dir: home.join("skills").join("worklog"),
             hooks: home.join(hooks),
             home,
@@ -30,6 +40,15 @@ impl Agent {
     /// an install never creates one for an agent that is not.
     pub(super) fn is_present(&self) -> bool {
         self.home.is_dir()
+    }
+
+    /// The session this process runs in, when this agent started it.
+    pub(super) fn session(&self) -> Option<Session> {
+        let id = std::env::var(self.session_variable).ok()?;
+        (!id.is_empty()).then(|| Session {
+            agent: self.name.to_owned(),
+            id,
+        })
     }
 
     fn skill_file(&self) -> PathBuf {

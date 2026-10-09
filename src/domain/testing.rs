@@ -7,7 +7,7 @@ use super::draft::Draft;
 use super::machine::MachineName;
 use super::ports::{Binary, Clock, Drafts, Host, Identity, Releases, Store, StoreError, Usage};
 use super::slug::{Kind, Slug};
-use super::usage::Invocation;
+use super::usage::{Invocation, Session};
 use super::version::{Document, Version, VersionId};
 
 #[derive(Default)]
@@ -180,6 +180,10 @@ impl Host for FixedHost {
     fn dir_exists(&self, path: &str) -> bool {
         self.0.borrow().iter().any(|d| d == path)
     }
+
+    fn session(&self) -> Option<Session> {
+        None
+    }
 }
 
 pub struct FixedClock {
@@ -204,6 +208,24 @@ impl Clock for FixedClock {
 
     fn now(&self) -> String {
         self.now.clone()
+    }
+}
+
+/// # Panics
+/// On a machine name that does not parse.
+#[must_use]
+pub fn ran(machine: &str, command: &str, day: &str) -> Invocation {
+    Invocation {
+        written: format!("{day}T10:00:00.000001+01:00"),
+        machine: MachineName::parse(machine).expect("a machine name"),
+        command: command.to_owned(),
+        exit: 0,
+        refusal: None,
+        hits: None,
+        directory: "~/projects/lantern".to_owned(),
+        arguments: vec![],
+        version: None,
+        session: None,
     }
 }
 

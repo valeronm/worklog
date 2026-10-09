@@ -14,9 +14,10 @@ pub use setup::SKILL;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
-use clap::{CommandFactory as _, FromArgMatches as _};
+use clap::{CommandFactory as _, FromArgMatches as _, Subcommand as _};
 use serde::Serialize;
 
+use crate::app::usage::Outcome;
 use crate::app::write::{Made, NewFollowup};
 use crate::app::{Deps, Failure, read, slug_arg, usage, write};
 use crate::domain::ports::StoreError;
@@ -24,13 +25,26 @@ use crate::domain::slug::Kind;
 use crate::fs::{FileIdentity, FsDrafts, FsHost, FsStore, FsUsage, Paths, SystemClock};
 use crate::web;
 
-use args::{ClaimArg, Cli, Command, KindArg, NewWhat, ReadCommand, StoreCommand, WriteCommand};
+use args::{
+    ClaimArg, Cli, Command, KindArg, NewWhat, ReadCommand, SetupCommand, StoreCommand, WriteCommand,
+};
 
 /// One command's stdout, and the exit code `check` sets on problems and
 /// `upgrade --check` on a newer release.
 struct Rendered {
     text: String,
     exit: i32,
+    hits: Option<usize>,
+}
+
+impl Rendered {
+    fn new(text: String, exit: i32) -> Rendered {
+        Rendered {
+            text,
+            exit,
+            hits: None,
+        }
+    }
 }
 
 /// A value as the JSON a command prints or a hooks file holds.
@@ -47,7 +61,7 @@ fn rendered<T: Serialize>(
     text: impl FnOnce() -> String,
 ) -> Result<Rendered, Failure> {
     let text = if json { pretty_json(value)? } else { text() };
-    Ok(Rendered { text, exit: 0 })
+    Ok(Rendered::new(text, 0))
 }
 
 fn slug(text: &str, kind: Option<KindArg>) -> Result<crate::domain::slug::Slug, Failure> {
@@ -171,7 +185,9 @@ fn dispatch_read(deps: &Deps, json: bool, command: ReadCommand) -> Result<Render
                 Some(out.term.clone()),
                 ": ",
             );
-            rendered(json, &out, || render::search(&out))
+            let mut r = rendered(json, &out, || render::search(&out))?;
+            r.hits = Some(out.hits.len());
+            Ok(r)
         }
         ReadCommand::Tag { tag } => {
             let out = read::tag(deps, &tag)?;
@@ -428,17 +444,20 @@ struct Opened {
     drafts: FsDrafts,
     identity: FileIdentity,
     usage: FsUsage,
+    host: FsHost,
     home: String,
 }
 
 impl Opened {
     /// `None` until `init` has run.
     fn open(paths: Paths) -> Result<Option<Opened>, StoreError> {
+        let host = FsHost::new(paths.session());
         Ok(paths.store()?.map(|store| Opened {
             usage: FsUsage::new(&store),
             store: FsStore::new(store),
             drafts: FsDrafts::new(paths.drafts),
             identity: FileIdentity::new(paths.config),
+            host,
             home: paths.home.display().to_string(),
         }))
     }
@@ -449,11 +468,69 @@ impl Opened {
             drafts: &self.drafts,
             identity: &self.identity,
             clock: &SystemClock,
-            host: &FsHost,
+            host: &self.host,
             usage: &self.usage,
             home: self.home.clone(),
         }
     }
+}
+
+/// The store command the words on the command line name, as far as they
+/// name one; `None` for a setup command.
+fn typed_command(argv: &[String]) -> Option<String> {
+    let mut words = argv.iter().filter(|a| !a.starts_with('-')).peekable();
+    let setup = SetupCommand::augment_subcommands(clap::Command::new(""));
+    if words
+        .peek()
+        .is_some_and(|w| setup.find_subcommand(w).is_some())
+    {
+        return None;
+    }
+    let store = StoreCommand::augment_subcommands(clap::Command::new(""));
+    let mut at = &store;
+    let mut path = Vec::new();
+    for word in words {
+        let Some(sub) = at.find_subcommand(word) else {
+            break;
+        };
+        path.push(sub.get_name());
+        at = sub;
+    }
+    Some(path.join(" "))
+}
+
+fn log(deps: &Deps, argv: &[String], command: &str, outcome: Outcome) {
+    if !run_as_found_on_path() {
+        return;
+    }
+    if let Ok(dir) = cwd() {
+        // A full disk is no reason for a command that worked to say
+        // otherwise, so the log's own failure goes unsaid.
+        let _ = usage::record(
+            deps,
+            command,
+            arguments(argv, command),
+            &dir.display().to_string(),
+            outcome,
+        );
+    }
+}
+
+fn log_refused(argv: &[String], error: &clap::Error) {
+    let Some(command) = typed_command(argv) else {
+        return;
+    };
+    let Ok(Some(opened)) = Paths::from_env().and_then(Opened::open) else {
+        return;
+    };
+    let rendered = error.to_string();
+    let first = rendered.lines().next().unwrap_or_default();
+    let outcome = Outcome {
+        exit: 2,
+        refusal: Some(first.strip_prefix("error: ").unwrap_or(first).to_owned()),
+        hits: None,
+    };
+    log(&opened.deps(), argv, &command, outcome);
 }
 
 /// Runs the command line and returns the process exit code.
@@ -472,7 +549,11 @@ pub fn run() -> i32 {
             // clap prints help and version to stdout with exit 0, and a
             // usage error to stderr with exit 2.
             let _ = e.print();
-            return if e.use_stderr() { 2 } else { 0 };
+            if !e.use_stderr() {
+                return 0;
+            }
+            log_refused(&argv, &e);
+            return 2;
         }
     };
     let paths = match Paths::from_env() {
@@ -482,7 +563,7 @@ pub fn run() -> i32 {
     let command = match cli.command {
         Command::Setup(command) => {
             return match setup::run(&paths, &command) {
-                Ok(Rendered { text, exit }) => {
+                Ok(Rendered { text, exit, .. }) => {
                     print(&text);
                     exit
                 }
@@ -510,23 +591,7 @@ pub fn run() -> i32 {
     };
     let deps = opened.deps();
     let path = command_path(&command);
-    let installed = run_as_found_on_path();
-    let record = |exit: i32| {
-        if !installed {
-            return;
-        }
-        if let Ok(dir) = cwd() {
-            // A full disk is no reason for a command that worked to say
-            // otherwise, so the log's own failure goes unsaid.
-            let _ = usage::record(
-                &deps,
-                path,
-                arguments(&argv, path),
-                &dir.display().to_string(),
-                exit,
-            );
-        }
-    };
+    let record = |outcome: Outcome| log(&deps, &argv, path, outcome);
     let result = match command {
         StoreCommand::Read(command) => dispatch_read(&deps, cli.json, command),
         StoreCommand::Write(command) => dispatch_write(&deps, cli.json, command),
@@ -536,27 +601,30 @@ pub fn run() -> i32 {
             return match web::Server::bind(&bind) {
                 Ok(server) => {
                     eprintln!("worklog: serving on http://{}/", server.address());
-                    record(0);
+                    record(Outcome::default());
                     server.run(&deps);
                     0
                 }
                 Err(e) => {
-                    record(e.exit_code());
+                    record(Outcome::failed(&e));
                     fail(&e)
                 }
             };
         }
     };
-    let exit = match &result {
-        Ok(r) => r.exit,
-        Err(e) => e.exit_code(),
-    };
-    record(exit);
     match result {
         Ok(r) => {
+            record(Outcome {
+                exit: r.exit,
+                refusal: None,
+                hits: r.hits,
+            });
             print(&r.text);
-            exit
+            r.exit
         }
-        Err(e) => fail(&e),
+        Err(e) => {
+            record(Outcome::failed(&e));
+            fail(&e)
+        }
     }
 }

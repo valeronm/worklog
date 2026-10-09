@@ -17,7 +17,7 @@ repaired.
   fact/<topic>/<name>/<id>.md
   followup/<YYYY-MM-DD>-<name>/<id>.md
   topic/<name>/<id>.md
-  usage/<machine>-<YYYY-MM>.tsv
+  usage/<machine>-<YYYY-MM>.jsonl
   .stignore                                   in a Syncthing folder only
 ```
 
@@ -247,12 +247,33 @@ them without a conflict to report. Only the binary PATH finds under the
 name it was run by appends, since the log counts use and a build under
 test is not use.
 
-A line is tab-separated fields ending in a newline: the `written` stamp,
-the machine, the command path, the exit code, the working directory
-with `~` for home, then one field per argument. Inside a field, a
-backslash, a tab, a newline and a carriage return are written `\\`,
-`\t`, `\n` and `\r`. A line a sync delivers half-written reads as
-nothing.
+A line is one JSON object ending in a newline:
+
+```
+{"written":"2026-09-04T10:00:00.123456+01:00","machine":"desk","version":"1.2.3","agent":"Codex","session":"s-1","command":"search","exit":0,"hits":2,"directory":"~/projects/lantern","arguments":["lantern"]}
+```
+
+`version` is the release of the binary that ran. `agent` and `session`
+are the coding agent the command ran under and the id of its session,
+and both are left out at a terminal; a line with one of them alone reads
+as having neither. `refusal` is the message of a run that
+failed, the first line of it for a command line the parser refused, and
+`hits` how many documents a `search` matched; each is left
+out of a line it does not apply to. `directory` spells home as `~`. A
+reader passes over a key it does not know, so a field is added without a
+new file name. A line a sync delivers half-written reads as nothing.
+
+A command line the parser refuses is logged with exit code 2 under the
+command its words got as far as naming, which is the empty string when
+they named none; `usage` leaves the empty one out of its counts. A setup
+command is never logged.
+
+A binary from before the JSON files wrote `usage/<machine>-<YYYY-MM>.tsv`
+and reads nothing else. Those files are still read and never written: a
+line is tab-separated fields, the `written` stamp, the machine, the
+command path, the exit code, the working directory, then one field per
+argument, and inside a field a backslash, a tab, a newline and a
+carriage return are written `\\`, `\t`, `\n` and `\r`.
 
 ## Drafts
 

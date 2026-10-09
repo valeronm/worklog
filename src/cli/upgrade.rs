@@ -19,10 +19,10 @@ pub(super) fn run(paths: &Paths, check: bool) -> Result<Rendered, Failure> {
     let current = release::current();
     if check {
         let latest = upgrade::check(releases.as_ref())?;
-        return Ok(Rendered {
-            text: format!("current: {current}\nlatest: {latest}\n"),
-            exit: i32::from(latest > current),
-        });
+        return Ok(Rendered::new(
+            format!("current: {current}\nlatest: {latest}\n"),
+            i32::from(latest > current),
+        ));
     }
     let binary = FsBinary::running()?;
     let (outcome, written) = upgrade::run(releases.as_ref(), &binary, current, release::asset())?;
@@ -42,5 +42,5 @@ pub(super) fn run(paths: &Paths, check: bool) -> Result<Rendered, Failure> {
             written
         }
     };
-    Ok(Rendered { text, exit: 0 })
+    Ok(Rendered::new(text, 0))
 }

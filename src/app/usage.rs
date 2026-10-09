@@ -1,9 +1,28 @@
 //! Recording that a command ran, the one use case ending in no version.
 
 use crate::domain::graph;
+use crate::domain::release;
 use crate::domain::usage::Invocation;
 
 use super::{Deps, Failure, machine};
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Outcome {
+    pub exit: i32,
+    pub refusal: Option<String>,
+    pub hits: Option<usize>,
+}
+
+impl Outcome {
+    #[must_use]
+    pub fn failed(failure: &Failure) -> Outcome {
+        Outcome {
+            exit: failure.exit_code(),
+            refusal: Some(failure.to_string()),
+            hits: None,
+        }
+    }
+}
 
 /// Appends the run to this machine's log.
 pub fn record(
@@ -11,15 +30,19 @@ pub fn record(
     command: &str,
     arguments: Vec<String>,
     directory: &str,
-    exit: i32,
+    outcome: Outcome,
 ) -> Result<(), Failure> {
     Ok(deps.usage.record(&Invocation {
         written: deps.clock.now(),
         machine: machine(deps)?,
         command: command.to_owned(),
-        exit,
+        exit: outcome.exit,
+        refusal: outcome.refusal,
+        hits: outcome.hits,
         directory: graph::contract(directory, &deps.home),
         arguments,
+        version: Some(release::current().to_string()),
+        session: deps.host.session(),
     })?)
 }
 
@@ -37,7 +60,7 @@ mod tests {
             "facts",
             vec!["lantern".to_owned()],
             "/home/u/projects/lantern",
-            0,
+            Outcome::default(),
         )
         .unwrap();
         let logged = w.usage.all().unwrap();
@@ -45,12 +68,16 @@ mod tests {
         assert_eq!(logged[0].directory, "~/projects/lantern");
         assert_eq!(logged[0].command, "facts");
         assert_eq!(logged[0].arguments, ["lantern"]);
+        assert_eq!(
+            logged[0].version.as_deref(),
+            Some(env!("CARGO_PKG_VERSION"))
+        );
     }
 
     #[test]
     fn a_host_without_a_machine_name_logs_nothing() {
         let w = World::unnamed();
-        assert!(record(&w.deps(), "context", vec![], "/home/u", 0).is_err());
+        assert!(record(&w.deps(), "context", vec![], "/home/u", Outcome::default()).is_err());
         assert_eq!(w.usage.all().unwrap(), []);
     }
 }

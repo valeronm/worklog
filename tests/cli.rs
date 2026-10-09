@@ -8,6 +8,11 @@ use std::process::Output;
 
 use assert_cmd::Command;
 use worklog::domain::usage::Invocation;
+use worklog::fs::{Agent, Paths};
+
+fn agents() -> Vec<Agent> {
+    Paths::from_env().expect("a home directory").agents
+}
 
 struct Scratch {
     root: tempfile::TempDir,
@@ -48,6 +53,13 @@ impl Scratch {
     }
 
     fn run_with_path(&self, mut command: Command, path: &OsStr, args: &[&str]) -> Output {
+        // A suite run from inside an agent session would log that session.
+        for agent in agents() {
+            let variable = agent.session_variable;
+            if !command.get_envs().any(|(name, _)| name == variable) {
+                command.env_remove(variable);
+            }
+        }
         command
             .env("PATH", path)
             .env("WORKLOG_HOME", self.root.path())
@@ -57,6 +69,16 @@ impl Scratch {
             .args(args)
             .output()
             .expect("the binary runs")
+    }
+
+    fn logged(&self) -> Vec<Invocation> {
+        let logs: Vec<PathBuf> = fs::read_dir(self.root.path().join("store/usage"))
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .collect();
+        assert_eq!(logs.len(), 1, "one file per machine and month: {logs:?}");
+        let lines = fs::read_to_string(&logs[0]).unwrap();
+        lines.lines().filter_map(Invocation::parse_line).collect()
     }
 
     fn ok(&self, args: &[&str]) -> String {
@@ -442,17 +464,11 @@ fn every_run_is_logged_under_the_machine_that_ran_it() {
     let s = seeded();
     s.ok(&["facts", "lantern"]);
     s.ok(&["facts", "lantern"]);
-    s.refused(&["show", "lantern/nothing"]);
+    let said = s.refused(&["show", "lantern/nothing"]);
     let counted = s.ok(&["usage"]);
     assert!(counted.starts_with("m1 — "), "{counted}");
     assert!(counted.contains("      2 facts\n"), "{counted}");
-    let logs: Vec<PathBuf> = fs::read_dir(s.root.path().join("store/usage"))
-        .unwrap()
-        .map(|e| e.unwrap().path())
-        .collect();
-    assert_eq!(logs.len(), 1, "one file per machine and month: {logs:?}");
-    let lines = fs::read_to_string(&logs[0]).unwrap();
-    let logged: Vec<Invocation> = lines.lines().filter_map(Invocation::parse_line).collect();
+    let logged = s.logged();
     let refused = logged
         .iter()
         .find(|i| i.command == "show")
@@ -460,19 +476,100 @@ fn every_run_is_logged_under_the_machine_that_ran_it() {
     assert_eq!(refused.machine.as_str(), "m1");
     assert_eq!(refused.exit, 1);
     assert_eq!(refused.arguments, ["lantern/nothing"]);
+    let refusal = refused.refusal.as_deref().expect("what the run said");
+    assert_eq!(said, format!("worklog: {refusal}\n"));
+    assert_eq!(refused.session, None);
     // A global flag belongs to the binary wherever it was typed.
     s.ok(&["--json", "topics"]);
     s.ok(&["topics", "--json"]);
-    let lines = fs::read_to_string(&logs[0]).unwrap();
-    let flagged: Vec<Vec<String>> = lines
-        .lines()
-        .filter_map(Invocation::parse_line)
+    let flagged: Vec<Vec<String>> = s
+        .logged()
+        .into_iter()
         .filter(|i| i.command == "topics")
         .map(|i| i.arguments)
         .collect();
     assert_eq!(flagged, [["--json"], ["--json"]]);
     assert!(s.ok(&["usage", "--machine", "m2"]).is_empty());
     assert!(s.ok(&["usage", "--since", "2099-01-01"]).is_empty());
+}
+
+#[test]
+fn a_search_is_logged_with_how_many_documents_it_matched() {
+    let s = seeded();
+    let before = s.logged().len();
+    s.ok(&["search", "relay"]);
+    s.ok(&["search", "no-such-word-anywhere"]);
+    s.ok(&["facts", "lantern"]);
+    let hits: Vec<(String, Option<usize>)> = s.logged()[before..]
+        .iter()
+        .map(|i| (i.command.clone(), i.hits))
+        .collect();
+    let found = hits[0].1.expect("a count");
+    assert!(found > 0, "{hits:?}");
+    assert_eq!(
+        hits[1..],
+        [("search".to_owned(), Some(0)), ("facts".to_owned(), None)]
+    );
+}
+
+#[test]
+fn a_command_line_the_parser_refuses_is_logged_under_the_command_it_named() {
+    let s = seeded();
+    let before = s.logged().len();
+    for args in [
+        &["facts", "--no-such-flag"][..],
+        &["new", "entry"],
+        &["no-such-command"],
+        &["init", "--no-such-flag"],
+        &["--help"],
+    ] {
+        s.run(args);
+    }
+    let logged: Vec<(String, i32, Vec<String>)> = s.logged()[before..]
+        .iter()
+        .map(|i| (i.command.clone(), i.exit, i.arguments.clone()))
+        .collect();
+    assert_eq!(
+        logged,
+        [
+            ("facts".to_owned(), 2, vec!["--no-such-flag".to_owned()]),
+            ("new entry".to_owned(), 2, vec![]),
+            (String::new(), 2, vec!["no-such-command".to_owned()]),
+        ]
+    );
+    let refusal = s.logged()[before].refusal.clone().expect("what clap said");
+    assert!(refusal.contains("--no-such-flag"), "{refusal}");
+    assert!(!refusal.starts_with("error"), "{refusal}");
+    assert!(!refusal.contains('\n'), "{refusal}");
+    let counted = s.ok(&["usage"]);
+    assert!(counted.contains("      1 facts\n"), "{counted}");
+    assert!(!counted.contains("      1 \n"), "{counted}");
+}
+
+#[test]
+fn a_run_inside_an_agent_session_is_logged_with_its_id() {
+    let s = seeded();
+    let mut expected = Vec::new();
+    for (n, agent) in agents().into_iter().enumerate() {
+        let id = format!("s-{n}");
+        let mut command = Command::cargo_bin("worklog").expect("the binary");
+        command.env(agent.session_variable, &id);
+        s.ok_binary(command, &["facts", "lantern"]);
+        expected.push((agent.name.to_owned(), id));
+    }
+    let mut nested = Command::cargo_bin("worklog").expect("the binary");
+    for agent in agents() {
+        nested.env(agent.session_variable, "s-nested");
+    }
+    s.ok_binary(nested, &["facts", "lantern"]);
+    expected.push((agents()[0].name.to_owned(), "s-nested".to_owned()));
+    let sessions: Vec<(String, String)> = s
+        .logged()
+        .into_iter()
+        .filter_map(|i| i.session)
+        .map(|s| (s.agent, s.id))
+        .collect();
+    assert_eq!(sessions, expected);
 }
 
 #[test]

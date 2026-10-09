@@ -228,5 +228,5 @@ pub(super) fn run(paths: &Paths, command: &SetupCommand) -> Result<Rendered, Fai
             super::complete::registration(*shell, &super::this_binary(&paths.home)?)?
         }
     };
-    Ok(Rendered { text, exit: 0 })
+    Ok(Rendered::new(text, 0))
 }

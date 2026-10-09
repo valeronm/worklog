@@ -91,6 +91,12 @@ triage put to the user, and nothing about any one person's other tools.
 It says what the tool gives and how to use it, not how the tool works: a
 rule restated there is a copy `tests/skill.rs` cannot hold to the code.
 
+A usage line gets its session from the environment variable an agent sets
+for a command it runs. Nothing checks the name the agent table holds
+against the agent, so a rename on the agent's side leaves the session out
+rather than failing a test. The first agent in the table whose variable is
+set is the one logged when one agent runs inside another.
+
 ## What stays out of the repo
 
 No store content reaches the repo, and nothing in it refers to whoever

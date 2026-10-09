@@ -25,12 +25,26 @@ pub use usage::FsUsage;
 use std::path::Path;
 
 use crate::domain::ports::{Host, StoreError};
+use crate::domain::usage::Session;
 
-pub struct FsHost;
+pub struct FsHost {
+    session: Option<Session>,
+}
+
+impl FsHost {
+    #[must_use]
+    pub fn new(session: Option<Session>) -> FsHost {
+        FsHost { session }
+    }
+}
 
 impl Host for FsHost {
     fn dir_exists(&self, path: &str) -> bool {
         Path::new(path).is_dir()
+    }
+
+    fn session(&self) -> Option<Session> {
+        self.session.clone()
     }
 }
 

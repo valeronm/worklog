@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use crate::domain::ports::StoreError;
+use crate::domain::usage::Session;
 
 use super::agent::Agent;
 use super::config::Config;
@@ -58,8 +59,18 @@ impl Paths {
             drafts,
             default_store,
             agents: vec![
-                Agent::new("Claude Code", home.join(".claude"), "settings.json"),
-                Agent::new("Codex", home.join(".codex"), "hooks.json"),
+                Agent::new(
+                    "Claude Code",
+                    home.join(".claude"),
+                    "settings.json",
+                    "CLAUDE_CODE_SESSION_ID",
+                ),
+                Agent::new(
+                    "Codex",
+                    home.join(".codex"),
+                    "hooks.json",
+                    "CODEX_THREAD_ID",
+                ),
             ],
             shells: vec![Shell::new(
                 clap_complete::Shell::Fish,
@@ -75,6 +86,11 @@ impl Paths {
     #[must_use]
     pub fn present_agents(&self) -> Vec<&Agent> {
         self.agents.iter().filter(|a| a.is_present()).collect()
+    }
+
+    #[must_use]
+    pub fn session(&self) -> Option<Session> {
+        self.agents.iter().find_map(Agent::session)
     }
 
     /// The shells on this host.

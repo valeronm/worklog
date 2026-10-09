@@ -678,6 +678,10 @@ pub fn usage(deps: &Deps, machine: Option<&str>, since: Option<&str>) -> Result<
         if since.is_some_and(|day| run.written.as_str() < day) {
             continue;
         }
+        // A command line that named no command was not a use of one.
+        if run.command.is_empty() {
+            continue;
+        }
         *counted
             .entry(run.machine.to_string())
             .or_default()
@@ -1317,7 +1321,7 @@ mod tests {
     #[test]
     fn usage_counts_each_command_under_its_machine() {
         use crate::domain::ports::Usage as _;
-        use crate::domain::usage::Invocation;
+        use crate::domain::testing::ran;
 
         let w = World::new("m1");
         for (machine, command, day) in [
@@ -1325,17 +1329,9 @@ mod tests {
             ("desk", "context", "2026-09-02"),
             ("desk", "show", "2026-09-02"),
             ("phone", "context", "2026-09-02"),
+            ("phone", "", "2026-09-02"),
         ] {
-            w.usage
-                .record(&Invocation {
-                    written: format!("{day}T10:00:00.000001+01:00"),
-                    machine: MachineName::parse(machine).unwrap(),
-                    command: command.to_owned(),
-                    exit: 0,
-                    directory: "~/projects/lantern".into(),
-                    arguments: vec![],
-                })
-                .unwrap();
+            w.usage.record(&ran(machine, command, day)).unwrap();
         }
         let d = &w.deps();
         let all = usage(d, None, None).unwrap();
