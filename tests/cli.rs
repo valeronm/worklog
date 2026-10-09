@@ -469,6 +469,10 @@ fn every_run_is_logged_under_the_machine_that_ran_it() {
     assert!(counted.starts_with("m1 — "), "{counted}");
     assert!(counted.contains("      2 facts\n"), "{counted}");
     let logged = s.logged();
+    assert!(
+        logged.iter().any(|i| i.command == "new topic"),
+        "{logged:?}"
+    );
     let refused = logged
         .iter()
         .find(|i| i.command == "show")

@@ -358,54 +358,14 @@ fn dispatch_write(deps: &Deps, json: bool, command: WriteCommand) -> Result<Rend
     }
 }
 
-/// The command path the log names, matched rather than read off the
-/// arguments, so a command added without a name here does not compile.
-fn command_path(command: &StoreCommand) -> &'static str {
-    match command {
-        StoreCommand::Read(read) => match read {
-            ReadCommand::Show(_) => "show",
-            ReadCommand::History(_) => "history",
-            ReadCommand::List { .. } => "list",
-            ReadCommand::Recent { .. } => "recent",
-            ReadCommand::Log { .. } => "log",
-            ReadCommand::Search { .. } => "search",
-            ReadCommand::Tag { .. } => "tag",
-            ReadCommand::Tags => "tags",
-            ReadCommand::Facts { .. } => "facts",
-            ReadCommand::Ideas { .. } => "ideas",
-            ReadCommand::Topics => "topics",
-            ReadCommand::Where { .. } => "where",
-            ReadCommand::Followups { .. } => "followups",
-            ReadCommand::Context { .. } => "context",
-            ReadCommand::Forks => "forks",
-            ReadCommand::Check => "check",
-            ReadCommand::Usage { .. } => "usage",
-            ReadCommand::Diff { .. } => "diff",
-            ReadCommand::Drafts => "drafts",
-        },
-        StoreCommand::Write(write) => match write {
-            WriteCommand::New { what } => match what {
-                NewWhat::Entry { .. } => "new entry",
-                NewWhat::Fact { .. } => "new fact",
-                NewWhat::Idea { .. } => "new idea",
-                NewWhat::Topic { .. } => "new topic",
-                NewWhat::Followup { .. } => "new followup",
-            },
-            WriteCommand::Checkout(_) => "checkout",
-            WriteCommand::Save { .. } => "save",
-            WriteCommand::Discard(_) => "discard",
-            WriteCommand::Done { .. } => "done",
-            WriteCommand::Drop { .. } => "drop",
-            WriteCommand::Recheck { .. } => "recheck",
-            WriteCommand::Verify { .. } => "verify",
-            WriteCommand::Tombstone { .. } => "tombstone",
-            WriteCommand::Rename { .. } => "rename",
-            WriteCommand::Resolve(_) => "resolve",
-            WriteCommand::Claim(_) => "claim",
-            WriteCommand::Unclaim(_) => "unclaim",
-        },
-        StoreCommand::Serve { .. } => "serve",
+fn command_path(matches: &clap::ArgMatches) -> String {
+    let mut words = Vec::new();
+    let mut at = matches;
+    while let Some((name, sub)) = at.subcommand() {
+        words.push(name);
+        at = sub;
     }
+    words.join(" ")
 }
 
 /// Everything on the command line but the command's own words, so a
@@ -542,9 +502,9 @@ pub fn run() -> i32 {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let parsed = help::grouped(Cli::command())
         .try_get_matches()
-        .and_then(|m| Cli::from_arg_matches(&m));
-    let cli = match parsed {
-        Ok(cli) => cli,
+        .and_then(|m| Ok((command_path(&m), Cli::from_arg_matches(&m)?)));
+    let (name, cli) = match parsed {
+        Ok(parsed) => parsed,
         Err(e) => {
             // clap prints help and version to stdout with exit 0, and a
             // usage error to stderr with exit 2.
@@ -590,8 +550,7 @@ pub fn run() -> i32 {
         Err(e) => return fail(&e.into()),
     };
     let deps = opened.deps();
-    let path = command_path(&command);
-    let record = |outcome: Outcome| log(&deps, &argv, path, outcome);
+    let record = |outcome: Outcome| log(&deps, &argv, &name, outcome);
     let result = match command {
         StoreCommand::Read(command) => dispatch_read(&deps, cli.json, command),
         StoreCommand::Write(command) => dispatch_write(&deps, cli.json, command),
@@ -626,5 +585,63 @@ pub fn run() -> i32 {
             record(Outcome::failed(&e));
             fail(&e)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn spelled_one_way(command: &clap::Command) {
+        let name = command.get_name();
+        assert_eq!(
+            command.get_all_aliases().count(),
+            0,
+            "`{name}` has an alias"
+        );
+        assert!(
+            command.get_short_flag().is_none() && command.get_long_flag().is_none(),
+            "`{name}` is spelled as a flag"
+        );
+        if command.has_subcommands() {
+            for argument in command.get_arguments() {
+                assert!(
+                    !argument.get_action().takes_values(),
+                    "`{name}` takes `{}` before its subcommand",
+                    argument.get_id()
+                );
+            }
+        }
+        command.get_subcommands().for_each(spelled_one_way);
+    }
+
+    fn walked_to_its_path(command: &clap::Command, path: &[String]) {
+        for sub in command.get_subcommands() {
+            let mut deeper = path.to_vec();
+            deeper.push(sub.get_name().to_owned());
+            assert_eq!(typed_command(&deeper), Some(deeper.join(" ")));
+            walked_to_its_path(sub, &deeper);
+        }
+    }
+
+    #[test]
+    fn a_store_command_is_named_by_the_words_typed_for_it() {
+        let all = Cli::command();
+        let store = StoreCommand::augment_subcommands(clap::Command::new(""));
+        let setup = SetupCommand::augment_subcommands(clap::Command::new(""));
+        spelled_one_way(&all);
+        walked_to_its_path(&store, &[]);
+        for command in setup.get_subcommands() {
+            assert_eq!(typed_command(&[command.get_name().to_owned()]), None);
+        }
+        assert_eq!(
+            all.get_subcommands().count(),
+            store.get_subcommands().count() + setup.get_subcommands().count(),
+            "a command is neither setup nor store"
+        );
+        assert!(
+            all.try_get_matches_from(["worklog", "topic"]).is_err(),
+            "a prefix of `topics` parses"
+        );
     }
 }
