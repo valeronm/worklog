@@ -7,9 +7,10 @@ or updates the GitHub release with each binary and its `.sha256`.
 installs it.
 
 1. Bump `version` in `Cargo.toml` and commit it on `main`.
-2. `cargo test` and `cargo clippy --all-targets --all-features -- -D warnings`
-   green locally; CI runs the same and the tag build uses `--locked`, so
-   `Cargo.lock` must be committed with the bump.
+2. `cargo test --workspace` and `cargo clippy --workspace --all-targets
+   --all-features -- -D warnings` green locally; CI runs the same and the
+   tag build uses `--locked`, so `Cargo.lock` must be committed with the
+   bump.
 3. Push `main` first, then the tag:
 
    ```

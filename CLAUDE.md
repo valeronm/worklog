@@ -108,9 +108,12 @@ tests, `lantern`, `atlas`, `phone`, `desk`, is the one to extend.
 
 ## Build and check
 
-`cargo fmt --all --check`, `cargo clippy --all-targets --all-features --
--D warnings` and `cargo test` are what CI runs; pedantic clippy is on for
-the crate and a suppression lives at its site with a `reason`. The
+`cargo fmt --all --check`, `cargo clippy --workspace --all-targets
+--all-features -- -D warnings` and `cargo test --workspace` are what CI
+runs; pedantic clippy is on for each crate and a suppression lives at its
+site with a `reason`. `crates/worklog-next` is the store being rebuilt, a
+second crate so it cannot reach into this one, and without `--workspace`
+a check covers the root package alone. The
 toolchain is pinned in `mise.toml` and CI reads the pin from there.
 Releases are cut by tag; `docs/release.md` has the steps.
 
