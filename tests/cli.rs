@@ -939,6 +939,26 @@ fn a_fork_is_reported_everywhere_and_resolved_by_hand() {
     let err = s.refused(&["save", "lantern"]);
     assert!(err.contains("conflict markers"), "{err}");
     let body_start = text[4..].find("---\n").unwrap() + 8;
+    let resolved = format!("{}\nWhat to know first, says m1.\n", &text[..body_start]);
+    fs::write(path.trim(), resolved).unwrap();
+    let against = s.ok(&["diff", "lantern"]);
+    for head in shown.lines().filter_map(|l| l.strip_prefix("==== ")) {
+        assert!(against.contains(&format!("--- {head}\n")), "{against}");
+    }
+    assert!(
+        against.contains("+++ lantern (draft)\nno changes\n"),
+        "{against}"
+    );
+    assert!(
+        against.contains("-What to know first, says m2."),
+        "{against}"
+    );
+    let json: serde_json::Value =
+        serde_json::from_str(&s.ok(&["diff", "lantern", "--json"])).unwrap();
+    let mut machines =
+        [&json["before"], &json["other_parents"][0]].map(|side| side["machine"].clone());
+    machines.sort_by_key(ToString::to_string);
+    assert_eq!(machines, ["m1", "m2"]);
     let resolved = format!("{}What to know first, say both.\n", &text[..body_start]);
     fs::write(path.trim(), resolved).unwrap();
     s.ok(&["save", "lantern"]);
@@ -953,6 +973,11 @@ fn a_fork_is_reported_everywhere_and_resolved_by_hand() {
         "{history}"
     );
     assert_eq!(history.lines().count(), 4);
+    s.ok(&["checkout", "lantern"]);
+    assert!(
+        !s.ok(&["diff", "lantern", "--json"])
+            .contains("other_parents")
+    );
 }
 
 #[test]

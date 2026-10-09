@@ -10,7 +10,7 @@ use std::fmt::Write as _;
 
 use crate::app::output::{
     Check, Context, Diff, DraftList, DraftRef, FactListing, FollowupItem, Followups, Forks, Group,
-    History, Listing, Log, Row, Search, Shown, Tags, Topics, Usage, Where, Written, short,
+    History, Listing, Log, Row, Search, Shown, Side, Tags, Topics, Usage, Where, Written, short,
 };
 
 pub const IDEAS_HEADING: &str = "Ideas — unbuilt, kept with their settled design:";
@@ -86,14 +86,7 @@ pub fn shown(s: &Shown) -> String {
         None => {
             for head in &s.heads {
                 if s.forked {
-                    let _ = writeln!(
-                        out,
-                        "==== head {} — {} on {} by {}",
-                        head.stamp.short(),
-                        head.stamp.operation,
-                        head.stamp.machine,
-                        head.stamp.written_to_millis()
-                    );
+                    let _ = writeln!(out, "==== {}", head.stamp.head_label());
                 }
                 out.push_str(&head.text);
             }
@@ -502,18 +495,25 @@ const UNCHANGED: Tint = Tint {
     mark: DIM,
 };
 
+pub fn diff(d: &Diff, paint: bool) -> String {
+    std::iter::once(&d.before)
+        .chain(&d.other_parents)
+        .map(|before| diff_from(before, d, paint))
+        .collect()
+}
+
 /// A unified diff of the two sides, three lines of context. Painted, which
 /// the caller decides from where stdout goes, it is what an editor shows:
 /// a removed or added line on a faint tint running to the edge, the words
 /// that differ on a stronger tint where a removed line pairs with an added
 /// one, and the line's number and sign in the hue.
-pub fn diff(d: &Diff, paint: bool) -> String {
+fn diff_from(before: &Side, d: &Diff, paint: bool) -> String {
     use similar::ChangeTag;
     const RESET: &str = "\x1b[0m";
     const TO_EDGE: &str = "\x1b[K";
     let (dim, reset) = if paint { (DIM, RESET) } else { ("", "") };
     let mut out = String::new();
-    let _ = writeln!(out, "{dim}--- {}{reset}", d.before.name);
+    let _ = writeln!(out, "{dim}--- {}{reset}", before.name);
     let _ = writeln!(out, "{dim}+++ {}{reset}", d.after.name);
     // A rename copies the content, so its versions report the move rather
     // than a body leaving and returning.
@@ -521,7 +521,11 @@ pub fn diff(d: &Diff, paint: bool) -> String {
         let _ = writeln!(out, "renamed from {} to {}", renamed.from, renamed.to);
         return out;
     }
-    let diff = similar::TextDiff::from_lines(&d.before.text, &d.after.text);
+    if before.text == d.after.text {
+        out.push_str("no changes\n");
+        return out;
+    }
+    let diff = similar::TextDiff::from_lines(&before.text, &d.after.text);
     let mut unified = diff.unified_diff();
     unified.context_radius(3);
     if !paint {
@@ -561,7 +565,7 @@ pub fn diff(d: &Diff, paint: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::output::{Count, Side};
+    use crate::app::output::Count;
 
     fn two_sides() -> Diff {
         Diff {
@@ -569,11 +573,14 @@ mod tests {
             before: Side {
                 name: "lantern@aaaaaaaaaaaa".into(),
                 text: "---\nsummary: s\n---\n\nthe relay pin is fixed\n".into(),
+                stamp: None,
             },
             after: Side {
                 name: "lantern@bbbbbbbbbbbb".into(),
                 text: "---\nsummary: s\n---\n\nthe relay pin is free\n".into(),
+                stamp: None,
             },
+            other_parents: vec![],
             renamed: None,
         }
     }
@@ -698,5 +705,15 @@ mod tests {
         assert!(painted.contains(&format!("{}fixed{}", REMOVED.word, REMOVED.line)));
         assert!(painted.contains(&format!("{}free{}", ADDED.word, ADDED.line)));
         assert!(painted.contains("   5 -"), "{painted}");
+    }
+
+    #[test]
+    fn two_sides_holding_one_text_are_said_not_to_differ() {
+        let mut same = two_sides();
+        same.after.text = same.before.text.clone();
+        assert_eq!(
+            diff(&same, false),
+            "--- lantern@aaaaaaaaaaaa\n+++ lantern@bbbbbbbbbbbb\nno changes\n"
+        );
     }
 }

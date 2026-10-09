@@ -41,6 +41,17 @@ impl Stamp {
         short(&self.id)
     }
 
+    #[must_use]
+    pub fn head_label(&self) -> String {
+        format!(
+            "head {} — {} on {} by {}",
+            self.short(),
+            self.operation,
+            self.machine,
+            self.written_to_millis()
+        )
+    }
+
     /// The stamp to the minute, in the offset it was written with.
     #[must_use]
     pub fn written_to_minute(&self) -> String {
@@ -326,10 +337,13 @@ pub struct DraftList {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-/// The two texts a diff is made of; the diff itself is a rendering.
+/// The texts a diff is made of; the diff itself is a rendering.
 pub struct Diff {
     pub slug: String,
     pub before: Side,
+    /// Every parent past the first, when `after` came from several.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub other_parents: Vec<Side>,
     pub after: Side,
     /// The move, when the version was written by a rename.
     pub renamed: Option<Renamed>,
@@ -345,6 +359,9 @@ pub struct Renamed {
 pub struct Side {
     pub name: String,
     pub text: String,
+    /// Absent on a side that is not a stored version.
+    #[serde(flatten)]
+    pub stamp: Option<Stamp>,
 }
 
 #[cfg(test)]

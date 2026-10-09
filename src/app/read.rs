@@ -856,17 +856,27 @@ fn check_links(loaded: &Loaded, out: &mut Check) {
     }
 }
 
-/// The draft against the version it was checked out from.
 fn at(v: &Version) -> Side {
     Side {
         name: format!("{}@{}", v.slug, v.id.short()),
         text: v.content_text(),
+        stamp: Some(stamp(v)),
     }
 }
 
-/// A draft against the version it came from, when given a slug; a stored
-/// version against its parent, when given an id; or two stored versions,
-/// the earlier on the left whichever was named first.
+fn fork_head(v: &Version) -> Side {
+    let stamp = stamp(v);
+    Side {
+        name: stamp.head_label(),
+        text: v.content_text(),
+        stamp: Some(stamp),
+    }
+}
+
+/// A draft against the version it came from, or against each head of the
+/// fork it resolves, when given a slug; a stored version against its
+/// parent, when given an id; or two stored versions, the earlier on the
+/// left whichever was named first.
 pub fn diff(
     deps: &Deps,
     name: &str,
@@ -875,33 +885,46 @@ pub fn diff(
 ) -> Result<Diff, Failure> {
     let first = load::named(deps, name, kind)?;
     let second = other.map(|o| load::named(deps, o, kind)).transpose()?;
-    let (slug, before, after, renamed) = match (first, second) {
+    let (slug, before, other_parents, after, renamed) = match (first, second) {
         (load::Named::Slug(slug, document), None) => {
             let draft = load::draft(deps, &slug)?;
-            let missing = draft.parents.iter().find(|p| document.get(p).is_none());
-            if let Some(p) = missing {
-                return Err(Failure::Refused(format!(
-                    "draft parent {} is not in the store",
-                    p.short()
-                )));
-            }
-            let before = match draft.parents.as_slice() {
-                [parent] => document
-                    .get(parent)
-                    .map(Version::content_text)
-                    .unwrap_or_default(),
-                _ => String::new(),
+            let parents = draft
+                .parents
+                .iter()
+                .map(|p| {
+                    document.get(p).ok_or_else(|| {
+                        Failure::Refused(format!("draft parent {} is not in the store", p.short()))
+                    })
+                })
+                .collect::<Result<Vec<&Version>, Failure>>()?;
+            let (before, other_parents) = match parents.as_slice() {
+                [] => (
+                    Side {
+                        name: format!("{slug} (store)"),
+                        text: String::new(),
+                        stamp: None,
+                    },
+                    Vec::new(),
+                ),
+                [only] => (
+                    Side {
+                        name: format!("{slug} (store)"),
+                        ..at(only)
+                    },
+                    Vec::new(),
+                ),
+                [first, rest @ ..] => (
+                    fork_head(first),
+                    rest.iter().copied().map(fork_head).collect(),
+                ),
             };
             let after = crate::domain::frontmatter::emit(&draft.fields, &draft.body);
-            let before = Side {
-                name: format!("{slug} (store)"),
-                text: before,
-            };
             let after = Side {
                 name: format!("{slug} (draft)"),
+                stamp: None,
                 text: after,
             };
-            (slug, before, after, None)
+            (slug, before, other_parents, after, None)
         }
         (load::Named::Slug(slug, _), Some(_)) | (_, Some(load::Named::Slug(slug, _))) => {
             return Err(Failure::Usage(format!(
@@ -913,6 +936,7 @@ pub fn diff(
             let before = parent.as_ref().map_or_else(
                 || Side {
                     name: "(none)".to_owned(),
+                    stamp: None,
                     text: String::new(),
                 },
                 at,
@@ -922,7 +946,7 @@ pub fn diff(
                 to: to.path().to_owned(),
             });
             let after = at(&v);
-            (v.slug, before, after, renamed)
+            (v.slug, before, Vec::new(), after, renamed)
         }
         (load::Named::Version(a), Some(load::Named::Version(b))) => {
             // Within one document the chain says which came first
@@ -937,12 +961,13 @@ pub fn diff(
             };
             let (older, newer) = if a_is_older { (a, b) } else { (b, a) };
             let (before, after) = (at(&older), at(&newer));
-            (newer.slug, before, after, None)
+            (newer.slug, before, Vec::new(), after, None)
         }
     };
     Ok(Diff {
         slug: slug.path().to_owned(),
         before,
+        other_parents,
         after,
         renamed,
     })

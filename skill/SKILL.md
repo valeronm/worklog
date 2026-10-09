@@ -297,7 +297,8 @@ finishes it.
 
 A fork is a document with two current versions. `worklog forks` lists
 them, and `worklog resolve <slug>` opens a draft holding both for a
-person to reconcile and save.
+person to reconcile and save. `worklog diff <slug>` shows that draft
+against each head in turn, with `no changes` under a head it equals.
 
 `worklog drafts` lists drafts open on this machine, this session's and
 any other's: sessions run side by side, and a draft is the session's that

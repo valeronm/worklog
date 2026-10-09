@@ -231,8 +231,9 @@ pub enum ReadCommand {
         #[arg(long)]
         since: Option<String>,
     },
-    /// A slug: the draft against the version it came from. An id: that
-    /// version against its parent. Two ids: between them, earlier first
+    /// A slug: the draft against the version it came from, or against each
+    /// head of the fork it resolves. An id: that version against its
+    /// parent. Two ids: between them, earlier first
     Diff {
         #[command(flatten)]
         first: DraftArg,
