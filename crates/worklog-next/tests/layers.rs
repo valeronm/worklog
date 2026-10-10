@@ -73,3 +73,18 @@ fn no_module_outside_the_schema_names_it() {
         assert!(!text.contains("schema"), "{path} names the schema");
     }
 }
+
+#[test]
+fn the_app_reaches_the_host_only_through_ports() {
+    reaches_nothing_in(
+        "app",
+        &[
+            "std::fs",
+            "std::env",
+            "std::process",
+            "std::net",
+            "std::time",
+            "crate::fs",
+        ],
+    );
+}

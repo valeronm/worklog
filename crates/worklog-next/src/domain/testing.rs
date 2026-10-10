@@ -4,18 +4,28 @@
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 
-use super::document::{Document, State};
+use super::document::{Document, State, Unreadable};
 use super::draft::Draft;
 use super::id::{DocumentId, VersionId};
-use super::ports::{Drafts, Ids, Store, StoreError};
-use super::version::{Envelope, Fields, Kind, Links, Stamp, Version};
+use super::ports::{Clock, Drafts, Host, Ids, Store, StoreError};
+use super::version::{Envelope, Fields, Kind, Links, ReadError, Stamp, Version};
 
 #[derive(Default)]
 pub struct MemoryStore {
     versions: RefCell<BTreeMap<DocumentId, Vec<Version>>>,
+    unreadable: RefCell<BTreeMap<DocumentId, Vec<Unreadable>>>,
 }
 
 impl MemoryStore {
+    /// Makes `document(id)` report an unreadable version beside what it holds.
+    pub fn plant_unreadable(&self, document: &DocumentId, version: VersionId, why: ReadError) {
+        self.unreadable
+            .borrow_mut()
+            .entry(document.clone())
+            .or_default()
+            .push(Unreadable { id: version, why });
+    }
+
     fn matching(&self, wanted: impl Fn(&Document) -> bool) -> Vec<DocumentId> {
         self.versions
             .borrow()
@@ -31,7 +41,13 @@ impl MemoryStore {
 impl Store for MemoryStore {
     fn document(&self, id: &DocumentId) -> Result<Document, StoreError> {
         let versions = self.versions.borrow().get(id).cloned().unwrap_or_default();
-        Ok(Document::new(id.clone(), versions, vec![]))
+        let unreadable = self
+            .unreadable
+            .borrow()
+            .get(id)
+            .cloned()
+            .unwrap_or_default();
+        Ok(Document::new(id.clone(), versions, unreadable))
     }
 
     fn put(&self, version: &Version) -> Result<(), StoreError> {
@@ -118,6 +134,32 @@ impl Ids for SequenceIds {
     fn mint(&self) -> Result<DocumentId, StoreError> {
         self.minted.set(self.minted.get() + 1);
         Ok(DocumentId::from_bytes(self.minted.get().to_be_bytes()))
+    }
+}
+
+pub struct FixedClock(pub Stamp);
+
+impl FixedClock {
+    /// # Panics
+    ///
+    /// When `text` is not a stamp.
+    #[must_use]
+    pub fn at(text: &str) -> FixedClock {
+        FixedClock(Stamp::parse(text).expect("a stamp"))
+    }
+}
+
+impl Clock for FixedClock {
+    fn now(&self) -> Stamp {
+        self.0.clone()
+    }
+}
+
+pub struct FixedHost(pub Option<DocumentId>);
+
+impl Host for FixedHost {
+    fn machine(&self) -> Result<Option<DocumentId>, StoreError> {
+        Ok(self.0.clone())
     }
 }
 
@@ -317,6 +359,33 @@ mod tests {
     #[test]
     fn the_memory_drafts_keep_the_contract() {
         drafts_contract(&MemoryDrafts::default(), &SequenceIds::default());
+    }
+
+    #[test]
+    fn a_fixed_clock_and_host_answer_what_they_hold() {
+        let clock = FixedClock::at("2026-10-09T18:22:41.118204+01:00");
+        assert_eq!(clock.now(), clock.now());
+        assert_eq!(clock.now().day(), "2026-10-09");
+        assert_eq!(FixedHost(Some(atlas())).machine(), Ok(Some(atlas())));
+        assert_eq!(FixedHost(None).machine(), Ok(None));
+    }
+
+    #[test]
+    fn a_planted_version_is_unreadable_beside_the_stored_ones() {
+        let store = MemoryStore::default();
+        let relay = first(&lantern(), "fact", "name = \"relay\"", "text\n");
+        store.put(&relay).unwrap();
+        let planted = first(&lantern(), "fact", "name = \"other\"", "text\n").id;
+        store.plant_unreadable(&lantern(), planted, ReadError::Corrupt);
+        let held = store.document(&lantern()).unwrap();
+        assert_eq!(held.unreadable().len(), 1);
+        assert_eq!(held.state(), State::Live(&relay));
+
+        let planted = relay.id.clone();
+        store.plant_unreadable(&atlas(), planted, ReadError::Corrupt);
+        let alone = store.document(&atlas()).unwrap();
+        assert_eq!(alone.unreadable().len(), 1);
+        assert_eq!(alone.state(), State::Absent);
     }
 
     #[test]

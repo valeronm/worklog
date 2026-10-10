@@ -26,7 +26,7 @@ impl Date {
         datetime.date.filter(|_| alone).map(Date)
     }
 
-    pub(super) fn value(self) -> Value {
+    pub(crate) fn value(self) -> Value {
         Value::Datetime(self.0.into())
     }
 }

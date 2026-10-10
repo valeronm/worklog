@@ -15,6 +15,52 @@ pub enum KindOf {
     Claim,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Reference {
+    pub key: &'static str,
+    /// The kind the target must be; `None` for any document.
+    pub target: Option<KindOf>,
+    /// Whether a reference newly made must point at a document that is not ended.
+    pub unended_when_made: bool,
+    /// Whether a document holding this reference keeps its target from being ended.
+    pub holds_open: bool,
+}
+
+const fn reference(
+    key: &'static str,
+    target: Option<KindOf>,
+    unended_when_made: bool,
+    holds_open: bool,
+) -> Reference {
+    Reference {
+        key,
+        target,
+        unended_when_made,
+        holds_open,
+    }
+}
+
+const TOPIC: Option<KindOf> = Some(KindOf::Topic);
+const TOPIC_REFERENCES: [Reference; 2] = [
+    reference("part_of", TOPIC, true, true),
+    reference("uses", TOPIC, true, true),
+];
+const FACT_REFERENCES: [Reference; 1] = [reference("topic", TOPIC, true, true)];
+const ENTRY_REFERENCES: [Reference; 2] = [
+    reference("machine", TOPIC, true, false),
+    reference("topics", TOPIC, true, false),
+];
+const FOLLOWUP_REFERENCES: [Reference; 4] = [
+    reference("topics", TOPIC, true, true),
+    reference("entry", Some(KindOf::Entry), false, false),
+    reference("about", None, false, false),
+    reference("touching", TOPIC, true, true),
+];
+const CLAIM_REFERENCES: [Reference; 2] = [
+    reference("machine", TOPIC, true, true),
+    reference("topic", TOPIC, true, true),
+];
+
 impl KindOf {
     pub const ALL: [KindOf; 5] = [
         KindOf::Topic,
@@ -35,15 +81,14 @@ impl KindOf {
         }
     }
 
-    /// The keys whose values are references to documents.
     #[must_use]
-    pub fn references(self) -> &'static [&'static str] {
+    pub fn references(self) -> &'static [Reference] {
         match self {
-            KindOf::Topic => &["part_of", "uses"],
-            KindOf::Fact => &["topic"],
-            KindOf::Entry => &["machine", "topics"],
-            KindOf::Followup => &["topics", "entry", "about", "touching"],
-            KindOf::Claim => &["machine", "topic"],
+            KindOf::Topic => &TOPIC_REFERENCES,
+            KindOf::Fact => &FACT_REFERENCES,
+            KindOf::Entry => &ENTRY_REFERENCES,
+            KindOf::Followup => &FOLLOWUP_REFERENCES,
+            KindOf::Claim => &CLAIM_REFERENCES,
         }
     }
 
@@ -464,9 +509,17 @@ mod tests {
             }
             ids.sort();
             ids.dedup();
-            let mut references = kind.references().to_vec();
+            let mut references: Vec<&str> = kind.references().iter().map(|r| r.key).collect();
             references.sort_unstable();
             assert_eq!(ids, references, "{}", kind.word());
+            assert!(
+                kind.references()
+                    .iter()
+                    .all(|reference| !reference.holds_open
+                        || reference.target == Some(KindOf::Topic)),
+                "{}",
+                kind.word()
+            );
             for key in kind.set_once() {
                 assert!(
                     written.iter().any(|held| held == key),

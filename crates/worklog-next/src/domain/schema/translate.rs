@@ -17,8 +17,9 @@ fn each<E>(
     turn: impl Fn(&str, &str) -> Result<String, E>,
 ) -> Result<Fields, E> {
     let mut turned = fields.clone();
-    for key in kind.references() {
-        match turned.get_mut(*key) {
+    for reference in kind.references() {
+        let key = reference.key;
+        match turned.get_mut(key) {
             Some(Value::String(text)) => *text = turn(key, text)?,
             Some(Value::Array(items)) => {
                 for item in items {

@@ -95,6 +95,12 @@ impl Stamp {
             .ok_or_else(|| VersionError::NotAStamp(text.to_owned()))
     }
 
+    /// The date part, `YYYY-MM-DD`.
+    #[must_use]
+    pub fn day(&self) -> String {
+        self.to_string().chars().take(10).collect()
+    }
+
     fn of(datetime: Datetime) -> Option<Stamp> {
         (datetime.date.is_some() && datetime.time.is_some() && datetime.offset.is_some())
             .then_some(Stamp(datetime))
@@ -558,5 +564,11 @@ mod tests {
                 .to_string(),
             "2026-10-09T18:22:41.118204+01:00"
         );
+    }
+
+    #[test]
+    fn a_stamp_reports_its_day() {
+        let stamp = Stamp::parse("2026-10-09T18:22:41.118204+01:00").unwrap();
+        assert_eq!(stamp.day(), "2026-10-09");
     }
 }

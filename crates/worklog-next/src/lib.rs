@@ -3,7 +3,7 @@
 //!
 //! `domain` holds the model and its rules and touches nothing outside
 //! memory; `fs` implements the ports the domain declares on a directory
-//! tree.
+//! tree. `app` holds one use case per command over those ports.
 
 #![allow(
     clippy::missing_errors_doc,
@@ -14,5 +14,6 @@
     reason = "a `Version` in `version` and a `Document` in `document` read better than invented names"
 )]
 
+pub mod app;
 pub mod domain;
 pub mod fs;

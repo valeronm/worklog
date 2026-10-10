@@ -6,7 +6,7 @@ use std::fmt;
 use super::document::Document;
 use super::draft::Draft;
 use super::id::{DocumentId, VersionId};
-use super::version::{Kind, Version};
+use super::version::{Kind, Stamp, Version};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StoreError {
@@ -65,4 +65,13 @@ pub trait Drafts {
     fn list(&self) -> Result<Vec<Draft>, StoreError>;
     /// Where the draft of the document is or would be.
     fn location(&self, document: &DocumentId) -> String;
+}
+
+pub trait Clock {
+    fn now(&self) -> Stamp;
+}
+
+pub trait Host {
+    /// The id of this machine's topic; `None` before the host is set up.
+    fn machine(&self) -> Result<Option<DocumentId>, StoreError>;
 }
