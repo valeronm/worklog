@@ -21,6 +21,14 @@ pub(crate) fn is_hex(text: &str, len: usize) -> bool {
     text.len() == len && text.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
 
+/// Whether the text could open a document's id or a version's hash,
+/// with or without the algorithm before the hash.
+#[must_use]
+pub fn is_id_prefix(text: &str) -> bool {
+    let hash = text.strip_prefix(VersionId::ALGORITHM).unwrap_or(text);
+    !hash.is_empty() && is_hex(hash, hash.len())
+}
+
 /// Minted when a document is created and carried by every version of it.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct DocumentId(String);

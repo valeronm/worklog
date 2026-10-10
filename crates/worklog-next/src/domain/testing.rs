@@ -128,6 +128,13 @@ pub fn lantern() -> DocumentId {
     DocumentId::from_bytes(0x7f3a_91c0_5be2_446d_8a10_c3f2_9b7e_6d54_u128.to_be_bytes())
 }
 
+pub const ATLAS: &str = "a71a5000000000000000000000000001";
+
+#[must_use]
+pub fn atlas() -> DocumentId {
+    DocumentId::from_bytes(0xa71a_5000_0000_0000_0000_0000_0000_0001_u128.to_be_bytes())
+}
+
 fn compose(envelope: Envelope, fields: &str, body: &str) -> Version {
     let fields: Fields = fields.parse().expect("fields in TOML");
     Version::compose(envelope, fields, Links::default(), body.to_owned()).expect("a version")

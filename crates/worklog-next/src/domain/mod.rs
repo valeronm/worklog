@@ -6,6 +6,7 @@ pub mod draft;
 pub mod fence;
 pub mod id;
 pub mod ports;
+pub mod schema;
 pub mod version;
 
 #[cfg(any(test, feature = "testing"))]
