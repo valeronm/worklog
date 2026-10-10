@@ -1,5 +1,5 @@
 use crate::app::draft::refuse_open;
-use crate::app::lookup::{Lookup, ended, unreadable};
+use crate::app::lookup::{Lookup, refuse_ended};
 use crate::app::save::{Admitted, stepped};
 use crate::app::{Deps, Failure, Written};
 use crate::domain::id::DocumentId;
@@ -17,10 +17,7 @@ pub(super) fn open(deps: &Deps, lookup: &Lookup, address: &str) -> Result<Open, 
     let id = lookup.one(address)?;
     let label = lookup.label(&id)?;
     refuse_open(deps, &id, &label)?;
-    if !lookup.document(&id)?.unreadable().is_empty() {
-        return Err(unreadable(&label));
-    }
-    let (head, record) = lookup.writable(&id, id.short())?;
+    let (head, record) = lookup.writable(&id, &label)?;
     Ok(Open {
         id,
         label,
@@ -31,10 +28,7 @@ pub(super) fn open(deps: &Deps, lookup: &Lookup, address: &str) -> Result<Open, 
 
 impl Open {
     pub(super) fn unended(&self) -> Result<(), Failure> {
-        if self.record.ending.is_some() {
-            return Err(ended(&self.label));
-        }
-        Ok(())
+        refuse_ended(&self.record, &self.label)
     }
 
     pub(super) fn shown(&self) -> Fields {

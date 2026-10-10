@@ -4,14 +4,16 @@ use std::rc::Rc;
 
 use toml::Value;
 
-use crate::app::draft::{draft_for, spelled};
-use crate::app::lookup::{Lookup, forked, read_or_skip, unreadable, with_article};
-use crate::app::{Deps, Failed, Failure, Written, kind_named};
+use crate::app::draft::{draft_for, names, spelled};
+use crate::app::heads::{heads_not_ended, read_or_skip, row_head, texts, topic_edges};
+use crate::app::lookup::{Lookup, forked, no_head_reads, unreadable, with_article};
+use crate::app::rules::{closing_edge, fits, holds_topic_open, name_is_free_as};
+use crate::app::{Deps, Failed, Failure, Written, counted, kind_named};
 use crate::domain::document::{Document, State};
 use crate::domain::draft::Draft;
 use crate::domain::id::{DocumentId, VersionId};
 use crate::domain::schema::address::Found;
-use crate::domain::schema::graph::{Edges, closes_cycle};
+use crate::domain::schema::graph::Edges;
 use crate::domain::schema::kind::Reference;
 use crate::domain::schema::{Content, KindOf, Record, links, step, translate};
 use crate::domain::version::{Envelope, Fields, Kind, Links, Version};
@@ -34,7 +36,7 @@ pub fn save(deps: &Deps, address: &str) -> Result<Written, Failure> {
     };
     target.admits(fork)?;
     let fields = target.ids(&draft)?;
-    let next = target.next(deps, &fields, body, fork)?;
+    let next = target.next(deps, &fields, body)?;
     let written = target
         .checked(deps, &next, body, label, fork)?
         .store(deps)?;
@@ -60,8 +62,7 @@ pub(super) fn admit(
         .store(deps)
 }
 
-/// `fields` are shaped as a draft holds them, with references already ids. Refuses a step
-/// the schema does not allow and whatever `admit` refuses, and stores nothing.
+// `fields` are shaped as a draft holds them, with references already ids.
 pub(super) fn stepped(
     deps: &Deps,
     lookup: &Lookup,
@@ -73,7 +74,7 @@ pub(super) fn stepped(
 ) -> Result<Admitted, Failure> {
     let target = Target::of(lookup, id, kind, fields, Origin::Direct)?;
     target.admits(Fork::Refused)?;
-    let next = target.next(deps, fields, body, Fork::Refused)?;
+    let next = target.next(deps, fields, body)?;
     target.checked(deps, &next, body, label, Fork::Refused)
 }
 
@@ -88,51 +89,6 @@ impl Admitted {
             version: self.0.id,
         })
     }
-}
-
-/// Refuses when another document holds, as the current name of a head that is not ended and
-/// in the same scope, the name document `id` would have with `content`.
-pub(super) fn name_is_free(
-    lookup: &Lookup,
-    id: &DocumentId,
-    content: &Content,
-) -> Result<(), Failure> {
-    let what = match lookup.address(id)? {
-        Some(address) => address,
-        None => lookup
-            .address_of(content)?
-            .unwrap_or_else(|| id.short().to_owned()),
-    };
-    name_is_free_as(lookup, id, &what, content)
-}
-
-fn name_is_free_as(
-    lookup: &Lookup,
-    id: &DocumentId,
-    what: &str,
-    content: &Content,
-) -> Result<(), Failure> {
-    let Some((name, _)) = content.naming() else {
-        return Ok(());
-    };
-    for holder in lookup.holders(content.kind(), "name", name.as_str())? {
-        if holder != *id && names_alike(lookup, &holder, content)? {
-            return Err(Failure::at(
-                what,
-                format!("name: {name} is taken by {}", lookup.label(&holder)?),
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn names_alike(lookup: &Lookup, holder: &DocumentId, content: &Content) -> Result<bool, Failure> {
-    let name = content.naming().map(|(name, _)| name);
-    Ok(lookup.readable(holder)?.iter().any(|other| {
-        other.ending.is_none()
-            && same_scope(content, &other.content)
-            && other.content.naming().map(|(name, _)| name) == name
-    }))
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -166,7 +122,7 @@ impl<'a, 'b> Target<'a, 'b> {
         let document = lookup.document(id)?;
         let what = match lookup.address(id)? {
             Some(address) => address,
-            None => match spelled_by(lookup, id, kind, fields)? {
+            None => match spelled_by(lookup, kind, fields)? {
                 Some(spelled) => spelled,
                 None if origin == Origin::Direct && document.heads().is_empty() => {
                     format!("new {kind}")
@@ -279,26 +235,35 @@ impl<'a, 'b> Target<'a, 'b> {
         turned.map_err(|error| self.refusal(error))
     }
 
-    fn next(
-        &self,
-        deps: &Deps,
-        fields: &Fields,
-        body: &str,
-        fork: Fork,
-    ) -> Result<Record, Failure> {
-        let parent = self.document.heads().first().copied();
-        let was = parent.map(|parent| match fork {
-            Fork::Refused => parent.fields.clone(),
-            Fork::Resolved => without_ending(parent),
-        });
-        step::next(
-            &self.kind,
-            fields,
-            was.as_ref(),
-            parent.is_none_or(|parent| parent.body != body),
-            deps.today()?,
-        )
-        .map_err(|error| self.refusal(error))
+    fn next(&self, deps: &Deps, fields: &Fields, body: &str) -> Result<Record, Failure> {
+        let stepped = match self.document.state() {
+            State::Absent => step::next(&self.kind, fields, None, true, deps.today()?),
+            State::Live(head) => step::next(
+                &self.kind,
+                fields,
+                Some(&head.fields),
+                head.body != body,
+                deps.today()?,
+            ),
+            State::Forked(heads) => {
+                let Some((speaking, _)) = row_head(&self.document) else {
+                    return Err(no_head_reads(&self.what));
+                };
+                let others: Vec<Record> = (heads.into_iter())
+                    .filter(|head| head.id != speaking.id)
+                    .filter_map(read_or_skip)
+                    .collect();
+                step::joined(
+                    &self.kind,
+                    fields,
+                    &speaking.fields,
+                    &others,
+                    speaking.body != body,
+                    deps.today()?,
+                )
+            }
+        };
+        stepped.map_err(|error| self.refusal(error))
     }
 
     fn checked(
@@ -335,21 +300,20 @@ impl<'a, 'b> Target<'a, 'b> {
 
     fn dependents(&self) -> Result<(), Failure> {
         let mut named = Vec::new();
-        for (kind, noun) in [
-            (KindOf::Fact, "facts"),
-            (KindOf::Followup, "followups"),
-            (KindOf::Claim, "claims"),
-            (KindOf::Topic, "topics"),
-        ] {
+        let others = KindOf::ALL
+            .into_iter()
+            .filter(|kind| *kind != KindOf::Topic);
+        for kind in others.chain([KindOf::Topic]) {
             let mut holders = BTreeSet::new();
             for reference in kind.references() {
-                if reference.holds_open && reference.target == Some(KindOf::Topic) {
-                    let id = self.document.id().as_str();
-                    holders.extend(self.lookup.holders(kind, reference.key, id)?);
+                if holds_topic_open(reference) {
+                    let id = self.document.id();
+                    let held = self.lookup.holders(kind, reference.key, &[id], false)?;
+                    holders.extend(held.iter().map(|holder| holder.id().clone()));
                 }
             }
             if !holders.is_empty() {
-                named.push(format!("{} {noun}", holders.len()));
+                named.push(counted(holders.len(), kind.word(), kind.plural()));
             }
         }
         if named.is_empty() {
@@ -358,14 +322,8 @@ impl<'a, 'b> Target<'a, 'b> {
         Err(self.refusal(format!("still has {}", named.join(", "))))
     }
 
-    // A head that does not read counts as not ended.
     fn references(&self, kind: KindOf, fields: &Fields) -> Result<(), Failure> {
-        let before: Vec<&Version> = self
-            .document
-            .heads()
-            .into_iter()
-            .filter(|head| read_or_skip(head).is_none_or(|record| record.ending.is_none()))
-            .collect();
+        let before = heads_not_ended(&self.document);
         for reference in kind.references() {
             let key = reference.key;
             let held = held(&before, key);
@@ -385,22 +343,16 @@ impl<'a, 'b> Target<'a, 'b> {
     fn reference(&self, reference: &Reference, text: &str) -> Result<(), Failure> {
         let id = DocumentId::parse(text).map_err(|error| Failure::Refused(error.to_string()))?;
         let shown = self.lookup.label(&id)?;
-        let Some(kind) = self.lookup.document(&id)?.kind().cloned() else {
-            return Err(Failure::Refused(format!("{shown} is no document")));
-        };
-        if let Some(wanted) = reference.target
-            && kind.as_str() != wanted.word()
-        {
-            return Err(Failure::Refused(format!(
-                "{shown} is not {}",
-                with_article(wanted.word())
-            )));
+        let misfit = fits(
+            self.lookup,
+            &id,
+            reference.target,
+            reference.unended_when_made,
+        )?;
+        match misfit {
+            Some(misfit) => Err(Failure::Refused(format!("{shown} {misfit}"))),
+            None => Ok(()),
         }
-        let records = self.lookup.records(&id)?;
-        if reference.unended_when_made && records.iter().all(|record| record.ending.is_some()) {
-            return Err(Failure::Refused(format!("{shown} is ended")));
-        }
-        Ok(())
     }
 
     fn closes_no_cycle(&self, content: &Content) -> Result<(), Failure> {
@@ -408,26 +360,18 @@ impl<'a, 'b> Target<'a, 'b> {
             return Ok(());
         };
         let failed = Failed::default();
-        let edges_of = |id: &DocumentId| {
-            edges(self.lookup, id).unwrap_or_else(|failure| {
+        let edges_of = |id: &DocumentId| match self.lookup.document(id) {
+            Ok(document) => Some(topic_edges(&document)),
+            Err(failure) => {
                 failed.keep(failure);
                 None
-            })
+            }
         };
-        let closes = |part_of: &[DocumentId], uses: &[DocumentId]| {
-            let proposed = Edges {
-                part_of: part_of.to_vec(),
-                uses: uses.to_vec(),
-            };
-            closes_cycle(self.document.id(), &proposed, edges_of)
+        let proposed = Edges {
+            part_of: topic.part_of.clone(),
+            uses: topic.uses.clone(),
         };
-        let closing = if closes(&topic.part_of, &[]) {
-            Some("part_of")
-        } else if closes(&[], &topic.uses) {
-            Some("uses")
-        } else {
-            None
-        };
+        let closing = closing_edge(self.document.id(), &proposed, edges_of);
         failed.done()?;
         match closing {
             Some(key) => {
@@ -474,25 +418,12 @@ impl<'a, 'b> Target<'a, 'b> {
     }
 }
 
-fn spelled_by(
-    lookup: &Lookup,
-    id: &DocumentId,
-    kind: &Kind,
-    fields: &Fields,
-) -> Result<Option<String>, Failure> {
-    let failed = Failed::default();
+fn spelled_by(lookup: &Lookup, kind: &Kind, fields: &Fields) -> Result<Option<String>, Failure> {
     let named = match KindOf::of(kind) {
-        Ok(kind) => translate::to_names(fields, kind, |id| {
-            lookup.address(id).unwrap_or_else(|failure| {
-                failed.keep(failure);
-                None
-            })
-        }),
+        Ok(kind) => names(lookup, fields, kind)?,
         Err(_) => fields.clone(),
     };
-    failed.done()?;
-    let draft = Draft::first(id.clone(), kind.clone(), named, String::new());
-    Ok(spelled(&draft))
+    Ok(spelled(kind, &named))
 }
 
 fn held<'v>(heads: &[&'v Version], key: &str) -> Vec<&'v str> {
@@ -507,42 +438,6 @@ fn held<'v>(heads: &[&'v Version], key: &str) -> Vec<&'v str> {
     held
 }
 
-fn without_ending(head: &Version) -> Fields {
-    match read_or_skip(head).map(Record::reopen) {
-        Some(Ok(reopened)) => reopened.fields(),
-        _ => head.fields.clone(),
-    }
-}
-
-fn texts<'f>(fields: &'f Fields, key: &str) -> Vec<&'f str> {
-    match fields.get(key) {
-        Some(Value::String(text)) => vec![text],
-        Some(Value::Array(items)) => items.iter().filter_map(Value::as_str).collect(),
-        _ => Vec::new(),
-    }
-}
-
-fn same_scope(one: &Content, other: &Content) -> bool {
-    match (one, other) {
-        (Content::Topic(_), Content::Topic(_)) => true,
-        (Content::Fact(one), Content::Fact(other)) => one.topic == other.topic,
-        (Content::Entry(one), Content::Entry(other)) => one.date == other.date,
-        _ => false,
-    }
-}
-
-fn edges(lookup: &Lookup, id: &DocumentId) -> Result<Option<Edges>, Failure> {
-    let mut held: Option<Edges> = None;
-    for record in lookup.readable(id)? {
-        if let Content::Topic(topic) = record.content {
-            let edges = held.get_or_insert_with(Edges::default);
-            edges.part_of.extend(topic.part_of);
-            edges.uses.extend(topic.uses);
-        }
-    }
-    Ok(held)
-}
-
 #[cfg(test)]
 mod tests {
     use toml::Value;
@@ -550,7 +445,7 @@ mod tests {
     use super::*;
     use crate::app::draft::{self, New};
     use crate::app::testing::{
-        ENDED, TOPIC, World, entry, fact, fork, head, record, refused, topic, world,
+        ENDED, ENDED_FACT, TOPIC, World, entry, fact, fork, head, record, refused, topic, world,
     };
     use crate::domain::draft::Draft;
     use crate::domain::ports::{Drafts, Ids, Store};
@@ -616,7 +511,7 @@ mod tests {
         label: &str,
     ) -> Result<Written, Failure> {
         let deps = world.deps();
-        let lookup = Lookup::new(&world.store);
+        let lookup = world.lookup();
         stepped(&deps, &lookup, id, kind, fields, body, label)?.store(&deps)
     }
 
@@ -741,7 +636,7 @@ mod tests {
     fn a_reference_names_a_document_of_its_kind() {
         let (world, lantern) = world();
         let deps = world.deps();
-        entry(&world, &[&lantern]);
+        entry(&world, "2026-10-08", "lamp-driver", &[&lantern]);
         let relay = new_fact(&world, "lantern/relay-pin");
         let address = relay.as_str();
 
@@ -771,7 +666,7 @@ mod tests {
         let (world, _) = world();
         let deps = world.deps();
         let atlas = topic(&world, "atlas", "");
-        let driver = entry(&world, &[&atlas]);
+        let driver = entry(&world, "2026-10-08", "lamp-driver", &[&atlas]);
         end(&world, &atlas, "atlas");
 
         let relay = new_fact(&world, "lantern/relay-pin");
@@ -822,10 +717,7 @@ mod tests {
 
         end(&world, &lantern, "lantern");
         save(&deps, phone.as_str()).unwrap();
-        assert_eq!(
-            Lookup::new(&world.store).find("lantern").unwrap(),
-            Found::One(phone)
-        );
+        assert_eq!(world.lookup().find("lantern").unwrap(), Found::One(phone));
     }
 
     #[test]
@@ -854,7 +746,7 @@ mod tests {
         );
         assert!(open(&world, &lantern));
 
-        let desk = world.host.0.clone().unwrap();
+        let desk = world.machine();
         draft::checkout(&deps, "phone").unwrap();
         set(&world, &phone, "part_of", list(&["lantern"]));
         set(&world, &phone, "uses", list(&["atlas", "desk"]));
@@ -978,7 +870,7 @@ mod tests {
             text.contains("lantern: is forked; resolve it first"),
             "{text}"
         );
-        let lookup = Lookup::new(&world.store);
+        let lookup = world.lookup();
         let text = refused(admit(&deps, &lookup, &lantern, &ended, "\n", "end"));
         assert!(
             text.contains("lantern: is forked; resolve it first"),
@@ -992,7 +884,7 @@ mod tests {
         let deps = world.deps();
         let nowhere = DocumentId::from_bytes([0xab; 16]);
         let other = DocumentId::from_bytes([0xcd; 16]);
-        let driver = entry(&world, &[&nowhere]);
+        let driver = entry(&world, "2026-10-08", "lamp-driver", &[&nowhere]);
         draft::checkout(&deps, "2026-10-08-lamp-driver").unwrap();
         set(&world, &driver, "summary", "Wired the lamp driver");
         set(
@@ -1025,7 +917,7 @@ mod tests {
         let (world, _) = world();
         let deps = world.deps();
         let ended = topic(&world, "atlas", "");
-        let driver = entry(&world, &[&ended]);
+        let driver = entry(&world, "2026-10-08", "lamp-driver", &[&ended]);
         end(&world, &ended, "atlas");
         topic(&world, "atlas", "");
         draft::checkout(&deps, "2026-10-08-lamp-driver").unwrap();
@@ -1084,12 +976,12 @@ mod tests {
             .unwrap();
         let entry: Fields = format!(
             "name = \"lantern\"\ndate = 2026-10-09\nmachine = \"{}\"\nsummary = \"A lamp\"\n",
-            world.host.0.clone().unwrap()
+            world.machine()
         )
         .parse()
         .unwrap();
         let entry = Record::read(&kind("entry"), &entry).unwrap();
-        let lookup = Lookup::new(&world.store);
+        let lookup = world.lookup();
         let unlike = [
             store(&world, &lantern, &kind("entry"), &fields, "\n", "save"),
             admit(&deps, &lookup, &lantern, &entry, "\n", "end"),
@@ -1121,8 +1013,34 @@ mod tests {
         set(&world, &relay, "topic", broken.as_str());
         let text = refused(save(&world.deps(), relay.as_str()));
         assert!(
-            text.contains(&format!("/relay-pin: topic: {}", broken.short())),
+            text.ends_with(&format!(
+                "/relay-pin: topic: {} does not read",
+                broken.short()
+            )),
             "{text}"
+        );
+    }
+
+    #[test]
+    fn a_reference_to_a_document_with_a_head_that_reads_beside_one_that_does_not_is_stored() {
+        let (world, _) = world();
+        let atlas = topic(&world, "atlas", "");
+        let root = head(&world, &atlas);
+        let fields = format!("name = \"atlas\"\n{TOPIC}");
+        world
+            .store
+            .put(&after(&[&root], &fields, "live\n"))
+            .unwrap();
+        world
+            .store
+            .put(&after(&[&root], "name = \"atlas\"\n", "unread\n"))
+            .unwrap();
+        let relay = new_fact(&world, "lantern/relay-pin");
+        set(&world, &relay, "topic", atlas.as_str());
+        save(&world.deps(), relay.as_str()).unwrap();
+        assert_eq!(
+            head(&world, &relay).fields.get("topic"),
+            Some(&Value::from(atlas.as_str()))
         );
     }
 
@@ -1177,7 +1095,7 @@ mod tests {
             .parse()
             .unwrap();
         let next = Record::read(&kind("topic"), &ended).unwrap();
-        let lookup = Lookup::new(&world.store);
+        let lookup = world.lookup();
         let written = admit(&deps, &lookup, &lantern, &next, "See [[desk]].\n", "end").unwrap();
         let stored = head(&world, &lantern);
         assert_eq!(stored.id, written.version);
@@ -1190,7 +1108,7 @@ mod tests {
         world
             .store
             .plant_unreadable(&lantern, planted, ReadError::Corrupt);
-        let lookup = Lookup::new(&world.store);
+        let lookup = world.lookup();
         let text = refused(admit(&deps, &lookup, &lantern, &next, "\n", "reopen"));
         assert!(
             text.contains("lantern: holds a version this worklog cannot read"),
@@ -1272,7 +1190,7 @@ mod tests {
     fn a_new_entry_on_a_host_whose_machine_topic_is_ended_is_refused() {
         let (world, _) = world();
         let deps = world.deps();
-        let desk = world.host.0.clone().unwrap();
+        let desk = world.machine();
         end(&world, &desk, "desk");
         let what = New::Entry {
             name: "lamp-driver",
@@ -1293,7 +1211,7 @@ mod tests {
         let (world, _) = world();
         let deps = world.deps();
         let renamed = topic(&world, "atlas", "");
-        let driver = entry(&world, &[&renamed]);
+        let driver = entry(&world, "2026-10-08", "lamp-driver", &[&renamed]);
         draft::checkout(&deps, "2026-10-08-lamp-driver").unwrap();
         world.amend(
             &renamed,
@@ -1324,9 +1242,9 @@ mod tests {
         let deps = world.deps();
         let relay = fact(&world, &lantern, "relay-pin", "");
         let ended = record(&world, &lantern).end(ending()).unwrap();
-        let lookup = Lookup::new(&world.store);
+        let lookup = world.lookup();
         let text = refused(admit(&deps, &lookup, &lantern, &ended, "\n", "retired"));
-        assert_eq!(text, "lantern: still has 1 facts");
+        assert_eq!(text, "lantern: still has 1 fact");
 
         let gone = Ending {
             reason: Reason::False,
@@ -1334,7 +1252,7 @@ mod tests {
         };
         let gone = record(&world, &relay).end(gone).unwrap();
         admit(&deps, &lookup, &relay, &gone, "The relay.\n", "false").unwrap();
-        let lookup = Lookup::new(&world.store);
+        let lookup = world.lookup();
         admit(&deps, &lookup, &lantern, &ended, "\n", "retired").unwrap();
         assert_eq!(head(&world, &lantern).envelope.change, "retired");
     }
@@ -1352,7 +1270,7 @@ mod tests {
                  confirmed = 2026-09-04\nsummary = \"s\"\n{rest}"
             )
         };
-        let gone = "ended = \"false\"\nended_on = 2026-10-09\nnote = \"n\"\n";
+        let gone = ENDED_FACT;
         let ended = after(&[&root], &fields(&lantern, gone), "ended\n");
         let live = after(&[&root], &fields(&atlas, ""), "live\n");
         world.store.put(&ended).unwrap();

@@ -1,16 +1,15 @@
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
-use toml::Value;
-
-use crate::app::Failure;
+use crate::app::heads::{is_holder, kind_of, label_or_short, readable_heads, row_head};
+use crate::app::{Failure, kind_named};
 use crate::domain::document::{Document, State};
-use crate::domain::id::DocumentId;
-use crate::domain::ports::Store;
+use crate::domain::id::{DocumentId, VersionId};
+use crate::domain::ports::{Store, StoreError};
 use crate::domain::schema::address::{Address, Candidate, Found, Holds, choose, displayed, holds};
 use crate::domain::schema::{Content, KindOf, Name, Record};
-use crate::domain::version::{Fields, Kind, Version};
+use crate::domain::version::{Kind, Version};
 
 pub(super) fn with_article(word: &str) -> String {
     let article = if word.starts_with(['a', 'e', 'i', 'o', 'u']) {
@@ -29,39 +28,77 @@ pub(super) fn forked(what: &str) -> Failure {
     Failure::at(what, "is forked; resolve it first")
 }
 
-pub(super) fn ended(what: &str) -> Failure {
-    Failure::at(what, "is ended; reopen it first")
+pub(super) fn no_head_reads(what: &str) -> Failure {
+    Failure::at(
+        what,
+        "no head of this fork reads; a newer worklog may be needed",
+    )
 }
 
-fn no_such_document(what: &str) -> Failure {
+pub(super) fn refuse_ended(record: &Record, what: &str) -> Result<(), Failure> {
+    if record.ending.is_some() {
+        return Err(Failure::at(what, "is ended; reopen it first"));
+    }
+    Ok(())
+}
+
+pub(super) fn names_no_document(address: &str) -> Failure {
+    Failure::at(address, "names no document")
+}
+
+pub(super) fn no_such_document(what: &str) -> Failure {
     Failure::at(what, "no such document")
+}
+
+pub(super) fn not_a(kind: KindOf) -> String {
+    format!("is not {}", with_article(kind.word()))
 }
 
 fn read_or_refuse(head: &Version, what: &str) -> Result<Record, Failure> {
     Record::read(&head.envelope.kind, &head.fields).map_err(|error| Failure::at(what, error))
 }
 
-pub(super) fn read_or_skip(head: &Version) -> Option<Record> {
-    Record::read(&head.envelope.kind, &head.fields).ok()
+/// Only `put` reaches the store past a `Lookup`.
+#[derive(Clone, Copy)]
+pub struct Stored<'a>(&'a dyn Store);
+
+impl<'a> Stored<'a> {
+    #[must_use]
+    pub fn new(store: &'a dyn Store) -> Stored<'a> {
+        Stored(store)
+    }
+
+    pub(super) fn put(&self, version: &Version) -> Result<(), StoreError> {
+        self.0.put(version)
+    }
 }
 
-/// One command's view of the store: each question is put to the store once.
-pub struct Lookup<'a> {
+type Question = (String, Vec<String>);
+
+pub(super) struct Unknown {
+    pub(super) kind: Kind,
+    pub(super) documents: Vec<Rc<Document>>,
+}
+
+// One command's view of the store: each question is put to the store once.
+pub(super) struct Lookup<'a> {
     store: &'a dyn Store,
     documents: RefCell<BTreeMap<DocumentId, Rc<Document>>>,
-    holding: RefCell<BTreeMap<(String, String), Vec<DocumentId>>>,
+    kinds: RefCell<BTreeMap<&'static str, Vec<Rc<Document>>>>,
+    holding: RefCell<BTreeMap<Question, Vec<DocumentId>>>,
 }
 
 impl<'a> Lookup<'a> {
-    pub fn new(store: &'a dyn Store) -> Lookup<'a> {
+    pub(super) fn new(stored: Stored<'a>) -> Lookup<'a> {
         Lookup {
-            store,
+            store: stored.0,
             documents: RefCell::default(),
+            kinds: RefCell::default(),
             holding: RefCell::default(),
         }
     }
 
-    pub fn document(&self, id: &DocumentId) -> Result<Rc<Document>, Failure> {
+    pub(super) fn document(&self, id: &DocumentId) -> Result<Rc<Document>, Failure> {
         if let Some(held) = self.documents.borrow().get(id) {
             return Ok(Rc::clone(held));
         }
@@ -72,22 +109,44 @@ impl<'a> Lookup<'a> {
         Ok(held)
     }
 
-    /// One record per head, in head order: empty for an absent document, a refusal naming the
-    /// document when a head does not read.
-    pub fn records(&self, id: &DocumentId) -> Result<Vec<Record>, Failure> {
-        self.records_as(id, id.short())
-    }
-
-    fn records_as(&self, id: &DocumentId, what: &str) -> Result<Vec<Record>, Failure> {
-        self.document(id)?
-            .heads()
+    fn seeded(&self, documents: Vec<Document>) -> Vec<Rc<Document>> {
+        let mut held = self.documents.borrow_mut();
+        documents
             .into_iter()
-            .map(|head| read_or_refuse(head, what))
+            .map(|document| {
+                let kept = held
+                    .entry(document.id().clone())
+                    .or_insert_with(|| Rc::new(document));
+                Rc::clone(kept)
+            })
             .collect()
     }
 
-    /// The only head and its record; refuses an absent or a forked document, naming `what`.
-    pub fn writable(&self, id: &DocumentId, what: &str) -> Result<(Version, Record), Failure> {
+    pub(super) fn of_kind(&self, kind: KindOf) -> Result<Vec<Rc<Document>>, Failure> {
+        if let Some(answer) = self.kinds.borrow().get(kind.word()) {
+            return Ok(answer.clone());
+        }
+        let answer = self.seeded(self.store.of_kind(&kind_named(kind))?);
+        self.kinds.borrow_mut().insert(kind.word(), answer.clone());
+        Ok(answer)
+    }
+
+    pub(super) fn writable(
+        &self,
+        id: &DocumentId,
+        what: &str,
+    ) -> Result<(Version, Record), Failure> {
+        if !self.document(id)?.unreadable().is_empty() {
+            return Err(unreadable(what));
+        }
+        self.only_head(id, what)
+    }
+
+    pub(super) fn only_head(
+        &self,
+        id: &DocumentId,
+        what: &str,
+    ) -> Result<(Version, Record), Failure> {
         let document = self.document(id)?;
         match document.state() {
             State::Absent => Err(no_such_document(what)),
@@ -96,8 +155,8 @@ impl<'a> Lookup<'a> {
         }
     }
 
-    /// A usage failure when `address` is no address; a name is tried before an id prefix.
-    pub fn find(&self, address: &str) -> Result<Found, Failure> {
+    // A name is tried before an id prefix.
+    pub(super) fn find(&self, address: &str) -> Result<Found, Failure> {
         let parsed = Address::parse(address).map_err(|error| Failure::Usage(error.to_string()))?;
         let named = match &parsed {
             Address::Topic(name) => self.topic_named(name)?,
@@ -125,11 +184,17 @@ impl<'a> Lookup<'a> {
         }
     }
 
-    /// Refuses, naming the address, when it means no document or several.
-    pub fn one(&self, address: &str) -> Result<DocumentId, Failure> {
+    pub(super) fn versions_under(
+        &self,
+        prefix: &str,
+    ) -> Result<Vec<(DocumentId, VersionId)>, Failure> {
+        Ok(self.store.versions_under(prefix)?)
+    }
+
+    pub(super) fn one(&self, address: &str) -> Result<DocumentId, Failure> {
         match self.find(address)? {
             Found::One(id) => Ok(id),
-            Found::None => Err(Failure::at(address, "names no document")),
+            Found::None => Err(names_no_document(address)),
             Found::Collision(ids) => {
                 let shorts: Vec<&str> = ids.iter().map(DocumentId::short).collect();
                 Err(Failure::at(
@@ -140,114 +205,134 @@ impl<'a> Lookup<'a> {
         }
     }
 
-    /// Refuses, naming the address, unless it means one document of the kind, when one is
-    /// given, with a head that is not ended.
-    pub fn referencable(&self, address: &str, kind: Option<KindOf>) -> Result<DocumentId, Failure> {
-        let id = self.one(address)?;
-        let records = self.records_as(&id, address)?;
-        let Some(first) = records.first() else {
-            return Err(no_such_document(address));
-        };
-        if let Some(kind) = kind
-            && first.content.kind() != kind
-        {
-            return Err(Failure::at(
-                address,
-                format!("is not {}", with_article(kind.word())),
-            ));
-        }
-        if records.iter().all(|record| record.ending.is_some()) {
-            return Err(Failure::at(address, "is ended"));
-        }
-        Ok(id)
+    pub(super) fn holding_unreadable(&self) -> Result<Vec<Rc<Document>>, Failure> {
+        Ok(self.seeded(self.store.unreadable()?))
     }
 
-    /// None for a kind without a name, for a fact whose topic cannot be read, and for a
-    /// document with no readable head.
-    pub fn address(&self, id: &DocumentId) -> Result<Option<String>, Failure> {
-        let Some(record) = self.readable(id)?.into_iter().next() else {
+    pub(super) fn is_kind(&self, id: &DocumentId, kind: KindOf) -> Result<bool, Failure> {
+        let document = self.document(id)?;
+        Ok(kind_of(&document) == Some(kind) && row_head(&document).is_some())
+    }
+
+    pub(super) fn everything(&self) -> Result<Vec<Rc<Document>>, Failure> {
+        let mut documents = Vec::new();
+        for kind in KindOf::ALL {
+            documents.extend(self.of_kind(kind)?);
+        }
+        Ok(documents)
+    }
+
+    pub(super) fn forks(&self) -> Result<Vec<Rc<Document>>, Failure> {
+        let mut forked = self.seeded(self.store.forked()?);
+        forked.retain(|document| kind_of(document).is_some());
+        Ok(forked)
+    }
+
+    pub(super) fn unknown(&self) -> Result<Vec<Unknown>, Failure> {
+        let mut unknown = Vec::new();
+        for kind in self.store.kinds()? {
+            if KindOf::of(&kind).is_err() {
+                let documents = self.seeded(self.store.of_kind(&kind)?);
+                unknown.push(Unknown { kind, documents });
+            }
+        }
+        Ok(unknown)
+    }
+
+    pub(super) fn one_topic(&self, address: &str) -> Result<DocumentId, Failure> {
+        let id = self.one(address)?;
+        if self.is_kind(&id, KindOf::Topic)? {
+            Ok(id)
+        } else {
+            Err(Failure::at(address, not_a(KindOf::Topic)))
+        }
+    }
+
+    pub(super) fn address(&self, id: &DocumentId) -> Result<Option<String>, Failure> {
+        let document = self.document(id)?;
+        let Some((_, record)) = row_head(&document) else {
             return Ok(None);
         };
         self.address_of(&record.content)
     }
 
     pub(super) fn address_of(&self, content: &Content) -> Result<Option<String>, Failure> {
-        let topic = match content {
-            Content::Fact(fact) => self.topic_name(&fact.topic)?,
-            _ => None,
-        };
-        Ok(displayed(content, topic.as_ref()))
+        Ok(displayed(content, self.topic_name_for(content)?.as_ref()))
     }
 
-    /// The addresses under each former name, with the topic's name and the date it has now.
-    pub fn former_addresses(&self, id: &DocumentId) -> Result<Vec<String>, Failure> {
-        let (Some(address), Some(record)) =
-            (self.address(id)?, self.readable(id)?.into_iter().next())
-        else {
+    fn topic_name_for(&self, content: &Content) -> Result<Option<Name>, Failure> {
+        match content {
+            Content::Fact(fact) => self.topic_name(&fact.topic),
+            _ => Ok(None),
+        }
+    }
+
+    // A former address differs from the current one in the name alone.
+    pub(super) fn former_addresses(&self, id: &DocumentId) -> Result<Vec<String>, Failure> {
+        let document = self.document(id)?;
+        let Some((_, record)) = row_head(&document) else {
             return Ok(Vec::new());
         };
-        let Some((name, former)) = record.content.naming() else {
+        let (Some(address), Some((name, former))) =
+            (self.address_of(&record.content)?, record.content.naming())
+        else {
             return Ok(Vec::new());
         };
         let stem = address.strip_suffix(name.as_str()).unwrap_or_default();
         Ok(former.iter().map(|old| format!("{stem}{old}")).collect())
     }
 
-    /// The address, or the short id when it has none.
-    pub fn label(&self, id: &DocumentId) -> Result<String, Failure> {
-        Ok(self.address(id)?.unwrap_or_else(|| id.short().to_owned()))
+    pub(super) fn label(&self, id: &DocumentId) -> Result<String, Failure> {
+        Ok(label_or_short(self.address(id)?, id))
     }
 
-    /// The documents of the kind with a head that is not ended and whose field `key` holds
-    /// `value`, forked documents included.
-    pub fn holders(
+    pub(super) fn holders<V: AsRef<str>>(
         &self,
         kind: KindOf,
         key: &str,
-        value: &str,
-    ) -> Result<Vec<DocumentId>, Failure> {
-        let mut ids = Vec::new();
-        for id in self.holding(key, value)? {
-            let held = self.document(&id)?.heads().into_iter().any(|head| {
-                holds_value(&head.fields, key, value)
-                    && read_or_skip(head).is_some_and(|record| {
-                        record.content.kind() == kind && record.ending.is_none()
-                    })
-            });
-            if held {
-                ids.push(id);
+        values: &[V],
+        ended: bool,
+    ) -> Result<Vec<Rc<Document>>, Failure> {
+        let values: BTreeSet<&str> = values.iter().map(AsRef::as_ref).collect();
+        let mut holders = Vec::new();
+        for id in self.holding(key, &values)? {
+            let document = self.document(&id)?;
+            if is_holder(&document, kind, key, &values, ended) {
+                holders.push(document);
             }
         }
-        Ok(ids)
+        Ok(holders)
     }
 
-    fn holding(&self, key: &str, value: &str) -> Result<Vec<DocumentId>, Failure> {
-        let question = (key.to_owned(), value.to_owned());
+    fn holding(&self, key: &str, values: &BTreeSet<&str>) -> Result<Vec<DocumentId>, Failure> {
+        if values.is_empty() {
+            return Ok(Vec::new());
+        }
+        let question: Question = (
+            key.to_owned(),
+            values.iter().map(|value| (*value).to_owned()).collect(),
+        );
         if let Some(answer) = self.holding.borrow().get(&question) {
             return Ok(answer.clone());
         }
-        let answer = self.store.holding(key, value)?;
+        let asked: Vec<&str> = values.iter().copied().collect();
+        let answer: Vec<DocumentId> = self
+            .seeded(self.store.holding(key, &asked)?)
+            .iter()
+            .map(|document| document.id().clone())
+            .collect();
         self.holding.borrow_mut().insert(question, answer.clone());
         Ok(answer)
     }
 
-    pub(super) fn readable(&self, id: &DocumentId) -> Result<Vec<Record>, Failure> {
-        Ok(self
-            .document(id)?
-            .heads()
-            .into_iter()
-            .filter_map(read_or_skip)
-            .collect())
-    }
-
-    fn topic_name(&self, topic: &DocumentId) -> Result<Option<Name>, Failure> {
-        Ok(self
-            .readable(topic)?
-            .into_iter()
-            .find_map(|record| match record.content {
+    pub(super) fn topic_name(&self, topic: &DocumentId) -> Result<Option<Name>, Failure> {
+        let document = self.document(topic)?;
+        Ok(
+            row_head(&document).and_then(|(_, record)| match record.content {
                 Content::Topic(topic) => Some(topic.name),
                 _ => None,
-            }))
+            }),
+        )
     }
 
     fn topic_named(&self, name: &Name) -> Result<Found, Failure> {
@@ -262,15 +347,15 @@ impl<'a> Lookup<'a> {
     ) -> Result<Found, Failure> {
         let mut candidates = Vec::new();
         for key in ["name", "former_names"] {
-            for id in self.holding(key, name.as_str())? {
-                if self.document(&id)?.kind().map(Kind::as_str) != Some(kind.word()) {
+            for id in self.holding(key, &BTreeSet::from([name.as_str()]))? {
+                let document = self.document(&id)?;
+                if kind_of(&document) != Some(kind) {
                     continue;
                 }
-                let strongest = self
-                    .readable(&id)?
+                let strongest = readable_heads(&document)
                     .iter()
-                    .filter(|record| wanted(record))
-                    .filter_map(|record| holds(record, name))
+                    .filter(|(_, record)| wanted(record))
+                    .filter_map(|(_, record)| holds(record, name))
                     .min();
                 if let Some(held) = strongest {
                     candidates.push(Candidate { id, holds: held });
@@ -287,14 +372,6 @@ impl<'a> Lookup<'a> {
     }
 }
 
-fn holds_value(fields: &Fields, key: &str, value: &str) -> bool {
-    match fields.get(key) {
-        Some(Value::String(text)) => text == value,
-        Some(Value::Array(items)) => items.iter().any(|item| item.as_str() == Some(value)),
-        _ => false,
-    }
-}
-
 fn by_prefix(mut ids: Vec<DocumentId>) -> Found {
     match ids.len() {
         0 => Found::None,
@@ -305,34 +382,27 @@ fn by_prefix(mut ids: Vec<DocumentId>) -> Found {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::Cell;
-
     use super::*;
-    use crate::app::testing::{ENDED, TOPIC, World, fact, found, topic};
-    use crate::domain::id::VersionId;
-    use crate::domain::ports::StoreError;
-    use crate::domain::testing::{MemoryStore, after, first, lantern};
+    use crate::app::testing::{
+        Counting, ENDED, ENDED_FACT, TOPIC, World, entry, fact, found, topic, topic_fields,
+    };
+    use crate::domain::testing::{after, first, lantern};
+    use crate::domain::version::ReadError;
 
-    fn lantern_topic(world: &World, rest: &str) -> DocumentId {
-        let version = first(
-            &lantern(),
-            "topic",
-            &format!("name = \"lantern\"\n{TOPIC}{rest}"),
-            "\n",
-        );
-        world.store.put(&version).unwrap();
-        lantern()
+    fn holder_ids<V: AsRef<str>>(
+        lookup: &Lookup,
+        kind: KindOf,
+        key: &str,
+        values: &[V],
+    ) -> Result<Vec<DocumentId>, Failure> {
+        let holders = lookup.holders(kind, key, values, false)?;
+        Ok(holders.iter().map(|held| held.id().clone()).collect())
     }
 
-    fn entry(world: &World, date: &str, name: &str) -> DocumentId {
-        world.put(
-            "entry",
-            &format!(
-                "name = \"{name}\"\ndate = {date}\nmachine = \"{}\"\nsummary = \"s\"\n",
-                world.host.0.clone().unwrap()
-            ),
-            "\n",
-        )
+    fn lantern_topic(world: &World, rest: &str) -> DocumentId {
+        let version = first(&lantern(), "topic", &topic_fields("lantern", rest), "\n");
+        world.store.put(&version).unwrap();
+        lantern()
     }
 
     #[test]
@@ -382,8 +452,8 @@ mod tests {
     fn an_entry_is_found_by_date_and_name() {
         let world = World::new();
         let _machine = topic(&world, "desk", "");
-        let today = entry(&world, "2026-10-09", "lamp-driver");
-        let earlier = entry(&world, "2026-10-08", "lamp-driver");
+        let today = entry(&world, "2026-10-09", "lamp-driver", &[]);
+        let earlier = entry(&world, "2026-10-08", "lamp-driver", &[]);
         assert_eq!(found(&world, "2026-10-09-lamp-driver"), Found::One(today));
         assert_eq!(found(&world, "2026-10-08-lamp-driver"), Found::One(earlier));
         assert_eq!(found(&world, "2026-10-07-lamp-driver"), Found::None);
@@ -431,8 +501,8 @@ mod tests {
         let _machine = topic(&world, "desk", "");
         let lantern = topic(&world, "lantern", "");
         let root = world.store.document(&lantern).unwrap().heads()[0].clone();
-        let left = after(&[&root], &format!("name = \"lantern\"\n{TOPIC}"), "left\n");
-        let right = after(&[&root], &format!("name = \"phone\"\n{TOPIC}"), "right\n");
+        let left = after(&[&root], &topic_fields("lantern", ""), "left\n");
+        let right = after(&[&root], &topic_fields("phone", ""), "right\n");
         world.store.put(&left).unwrap();
         world.store.put(&right).unwrap();
         assert_eq!(found(&world, "lantern"), Found::One(lantern.clone()));
@@ -464,69 +534,29 @@ mod tests {
     }
 
     #[test]
-    fn records_are_one_per_head_and_refuse_a_head_that_does_not_read() {
-        let world = World::new();
-        let _machine = topic(&world, "desk", "");
-        let lantern = topic(&world, "lantern", "");
-        let names = |records: Vec<Record>| -> Vec<String> {
-            records
-                .into_iter()
-                .map(|record| match record.content {
-                    Content::Topic(topic) => topic.name.to_string(),
-                    other => panic!("{other:?}"),
-                })
-                .collect()
-        };
-        let lookup = Lookup::new(&world.store);
-        let absent = DocumentId::from_bytes([0x42; 16]);
-        assert_eq!(lookup.records(&absent).unwrap(), vec![]);
-        assert_eq!(names(lookup.records(&lantern).unwrap()), ["lantern"]);
-
-        let root = world.store.document(&lantern).unwrap().heads()[0].clone();
-        let mut heads = Vec::new();
-        for name in ["lantern", "phone"] {
-            let head = after(&[&root], &format!("name = \"{name}\"\n{TOPIC}"), name);
-            world.store.put(&head).unwrap();
-            heads.push((head.id.clone(), name));
-        }
-        heads.sort();
-        let in_head_order: Vec<&str> = heads.iter().map(|(_, name)| *name).collect();
-        assert_eq!(
-            names(Lookup::new(&world.store).records(&lantern).unwrap()),
-            in_head_order
-        );
-
-        let broken = world.put("topic", "name = \"atlas\"\n", "\n");
-        let Err(Failure::Refused(text)) = Lookup::new(&world.store).records(&broken) else {
-            panic!("a head that does not read must be refused");
-        };
-        assert!(text.contains(broken.short()), "{text}");
-    }
-
-    #[test]
-    fn a_forked_document_prints_the_address_of_its_first_head() {
+    fn a_forked_document_prints_the_address_of_its_row_head() {
         let world = World::new();
         let _machine = topic(&world, "desk", "");
         let lantern = topic(&world, "lantern", "");
         let root = world.store.document(&lantern).unwrap().heads()[0].clone();
         let mut heads = Vec::new();
         for name in ["lantern", "phone"] {
-            let head = after(&[&root], &format!("name = \"{name}\"\n{TOPIC}"), name);
+            let head = after(&[&root], &topic_fields(name, ""), name);
             world.store.put(&head).unwrap();
             heads.push((head.id.clone(), name));
         }
         heads.sort();
-        let lookup = Lookup::new(&world.store);
+        let lookup = world.lookup();
         assert_eq!(
             lookup.address(&lantern).unwrap().as_deref(),
-            Some(heads[0].1)
+            Some(heads[1].1)
         );
     }
 
     #[test]
     fn a_text_that_is_no_address_is_a_usage_error() {
         let world = World::new();
-        let result = Lookup::new(&world.store).find("Lantern");
+        let result = world.lookup().find("Lantern");
         assert!(matches!(result, Err(Failure::Usage(_))), "{result:?}");
     }
 
@@ -536,7 +566,7 @@ mod tests {
         let _machine = topic(&world, "desk", "");
         topic(&world, "lantern", "");
         topic(&world, "lantern", "");
-        let lookup = Lookup::new(&world.store);
+        let lookup = world.lookup();
         let Err(Failure::Refused(text)) = lookup.one("atlas") else {
             panic!("a name held by nothing must be refused");
         };
@@ -546,73 +576,7 @@ mod tests {
         };
         assert!(text.contains("several documents"), "{text}");
         let phone = topic(&world, "phone", "");
-        assert_eq!(Lookup::new(&world.store).one("phone"), Ok(phone));
-    }
-
-    #[test]
-    fn a_referencable_document_is_of_the_kind_and_has_a_head_that_is_not_ended() {
-        let world = World::new();
-        let _machine = topic(&world, "desk", "");
-        let lantern = topic(&world, "lantern", "");
-        topic(&world, "atlas", ENDED);
-        let driver = entry(&world, "2026-10-09", "lamp-driver");
-        let lookup = Lookup::new(&world.store);
-        let topic_of = |address| lookup.referencable(address, Some(KindOf::Topic));
-        assert_eq!(topic_of("lantern"), Ok(lantern.clone()));
-        assert_eq!(
-            lookup.referencable("2026-10-09-lamp-driver", None),
-            Ok(driver)
-        );
-        let Err(Failure::Refused(text)) = topic_of("2026-10-09-lamp-driver") else {
-            panic!("an entry is no topic");
-        };
-        assert!(text.contains("is not a topic"), "{text}");
-        let Err(Failure::Refused(text)) = lookup.referencable("lantern", Some(KindOf::Entry))
-        else {
-            panic!("a topic is no entry");
-        };
-        assert!(text.contains("is not an entry"), "{text}");
-        let Err(Failure::Refused(text)) = topic_of("atlas") else {
-            panic!("an ended topic must be refused");
-        };
-        assert!(text.contains("atlas: is ended"), "{text}");
-        let Err(Failure::Refused(text)) = topic_of("phone") else {
-            panic!("a name held by nothing must be refused");
-        };
-        assert!(text.contains("phone: names no document"), "{text}");
-    }
-
-    #[test]
-    fn a_forked_document_is_referencable_while_a_head_is_not_ended() {
-        let world = World::new();
-        let _machine = topic(&world, "desk", "");
-        let lantern = topic(&world, "lantern", "");
-        let root = world.store.document(&lantern).unwrap().heads()[0].clone();
-        let left = after(&[&root], &format!("name = \"lantern\"\n{TOPIC}"), "left\n");
-        let right = after(
-            &[&root],
-            &format!("name = \"lantern\"\n{TOPIC}{ENDED}"),
-            "right\n",
-        );
-        world.store.put(&left).unwrap();
-        world.store.put(&right).unwrap();
-        assert_eq!(
-            Lookup::new(&world.store).referencable("lantern", Some(KindOf::Topic)),
-            Ok(lantern.clone())
-        );
-
-        let last = after(
-            &[&left],
-            &format!("name = \"lantern\"\n{TOPIC}{ENDED}"),
-            "left\n",
-        );
-        world.store.put(&last).unwrap();
-        let Err(Failure::Refused(text)) =
-            Lookup::new(&world.store).referencable("lantern", Some(KindOf::Topic))
-        else {
-            panic!("a fork whose heads are all ended must be refused");
-        };
-        assert!(text.contains("lantern: is ended"), "{text}");
+        assert_eq!(world.lookup().one("phone"), Ok(phone));
     }
 
     #[test]
@@ -620,7 +584,7 @@ mod tests {
         let world = World::new();
         let _machine = topic(&world, "desk", "");
         let lantern = topic(&world, "lantern", "");
-        let lookup = Lookup::new(&world.store);
+        let lookup = world.lookup();
         let (version, record) = lookup.writable(&lantern, "lantern").unwrap();
         assert_eq!(version.envelope.document, lantern);
         assert_eq!(record.content.kind(), KindOf::Topic);
@@ -633,11 +597,10 @@ mod tests {
 
         let root = world.store.document(&lantern).unwrap().heads()[0].clone();
         for body in ["left\n", "right\n"] {
-            let fork = after(&[&root], &format!("name = \"lantern\"\n{TOPIC}"), body);
+            let fork = after(&[&root], &topic_fields("lantern", ""), body);
             world.store.put(&fork).unwrap();
         }
-        let Err(Failure::Refused(text)) = Lookup::new(&world.store).writable(&lantern, "lantern")
-        else {
+        let Err(Failure::Refused(text)) = world.lookup().writable(&lantern, "lantern") else {
             panic!("a forked document must be refused");
         };
         assert!(
@@ -647,18 +610,37 @@ mod tests {
     }
 
     #[test]
+    fn a_document_holding_a_file_that_does_not_read_is_not_writable() {
+        let world = World::new();
+        let _machine = topic(&world, "desk", "");
+        let lantern = topic(&world, "lantern", "");
+        world
+            .store
+            .plant_unreadable(&lantern, VersionId::of(b"damaged"), ReadError::Corrupt);
+        let lookup = world.lookup();
+        let Err(Failure::Refused(text)) = lookup.writable(&lantern, "lantern") else {
+            panic!("a document holding an unreadable file must be refused");
+        };
+        assert!(
+            text.contains("lantern: holds a version this worklog cannot read"),
+            "{text}"
+        );
+        assert!(lookup.only_head(&lantern, "lantern").is_ok());
+    }
+
+    #[test]
     fn a_document_prints_as_its_address_or_its_short_id() {
         let world = World::new();
         let _machine = topic(&world, "desk", "");
         let lantern = topic(&world, "lantern", "");
         let relay = fact(&world, &lantern, "relay-pin", "");
-        let driver = entry(&world, "2026-10-09", "lamp-driver");
+        let driver = entry(&world, "2026-10-09", "lamp-driver", &[]);
         let followup = world.put(
             "followup",
             &format!("created = 2026-09-04\ntopics = [\"{lantern}\"]\nsummary = \"s\"\n"),
             "\n",
         );
-        let lookup = Lookup::new(&world.store);
+        let lookup = world.lookup();
         assert_eq!(
             lookup.address(&lantern).unwrap().as_deref(),
             Some("lantern")
@@ -691,61 +673,93 @@ mod tests {
         let atlas = topic(&world, "atlas", "");
         let relay = fact(&world, &lantern, "relay-pin", "");
         let pin = fact(&world, &lantern, "lamp-pin", "");
-        fact(
-            &world,
-            &lantern,
-            "old-pin",
-            "ended = \"false\"\nended_on = 2026-10-09\nnote = \"n\"\n",
-        );
+        fact(&world, &lantern, "old-pin", ENDED_FACT);
         fact(&world, &atlas, "map", "");
-        let lookup = Lookup::new(&world.store);
-        let mut held = lookup
-            .holders(KindOf::Fact, "topic", lantern.as_str())
-            .unwrap();
+        let lookup = world.lookup();
+        let mut held = holder_ids(&lookup, KindOf::Fact, "topic", &[&lantern]).unwrap();
         held.sort();
         let mut expected = vec![relay, pin];
         expected.sort();
         assert_eq!(held, expected);
         assert!(
             lookup
-                .holders(KindOf::Topic, "topic", lantern.as_str())
+                .holders(KindOf::Topic, "topic", &[&lantern], false)
                 .unwrap()
                 .is_empty()
         );
     }
 
-    struct Counting {
-        inner: MemoryStore,
-        documents: Cell<usize>,
-        holdings: Cell<usize>,
+    #[test]
+    fn holders_of_several_values_are_found_with_one_question() {
+        let world = World::new();
+        let _machine = topic(&world, "desk", "");
+        let lantern = topic(&world, "lantern", "");
+        let atlas = topic(&world, "atlas", "");
+        let phone = topic(&world, "phone", "");
+        let relay = fact(&world, &lantern, "relay-pin", "");
+        let map = fact(&world, &atlas, "map", "");
+        fact(&world, &atlas, "old-map", ENDED_FACT);
+        let counting = Counting::over(world.store);
+        let lookup = Lookup::new(Stored::new(&counting));
+        let topics = [&lantern, &atlas, &phone];
+        let held = holder_ids(&lookup, KindOf::Fact, "topic", &topics).unwrap();
+        assert_eq!(held, [relay, map]);
+        assert_eq!(counting.holdings.get(), 1);
+        assert_eq!(counting.documents.get(), 0);
+        lookup
+            .holders(KindOf::Fact, "topic", &topics, false)
+            .unwrap();
+        assert_eq!(counting.holdings.get(), 1);
+        let none: [&DocumentId; 0] = [];
+        assert!(
+            lookup
+                .holders(KindOf::Fact, "topic", &none, false)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(counting.holdings.get(), 1);
     }
 
-    impl Store for Counting {
-        fn document(&self, id: &DocumentId) -> Result<Document, StoreError> {
-            self.documents.set(self.documents.get() + 1);
-            self.inner.document(id)
-        }
+    #[test]
+    fn one_set_of_values_in_two_orders_is_one_question() {
+        let world = World::new();
+        let _machine = topic(&world, "desk", "");
+        let lantern = topic(&world, "lantern", "");
+        let atlas = topic(&world, "atlas", "");
+        let relay = fact(&world, &lantern, "relay-pin", "");
+        let map = fact(&world, &atlas, "map", "");
+        let counting = Counting::over(world.store);
+        let lookup = Lookup::new(Stored::new(&counting));
+        let forward = holder_ids(&lookup, KindOf::Fact, "topic", &[&lantern, &atlas]);
+        let backward = holder_ids(&lookup, KindOf::Fact, "topic", &[&atlas, &lantern, &atlas]);
+        assert_eq!(backward, forward);
+        assert_eq!(forward.unwrap(), [relay, map]);
+        assert_eq!(counting.holdings.get(), 1);
+    }
 
-        fn put(&self, version: &Version) -> Result<(), StoreError> {
-            self.inner.put(version)
-        }
-
-        fn of_kind(&self, kind: &Kind) -> Result<Vec<DocumentId>, StoreError> {
-            self.inner.of_kind(kind)
-        }
-
-        fn holding(&self, key: &str, value: &str) -> Result<Vec<DocumentId>, StoreError> {
-            self.holdings.set(self.holdings.get() + 1);
-            self.inner.holding(key, value)
-        }
-
-        fn documents_under(&self, prefix: &str) -> Result<Vec<DocumentId>, StoreError> {
-            self.inner.documents_under(prefix)
-        }
-
-        fn versions_under(&self, prefix: &str) -> Result<Vec<(DocumentId, VersionId)>, StoreError> {
-            self.inner.versions_under(prefix)
-        }
+    #[test]
+    fn a_document_of_a_kind_is_not_asked_for_again() {
+        let world = World::new();
+        let _machine = topic(&world, "desk", "");
+        let lantern = topic(&world, "lantern", "");
+        topic(&world, "atlas", ENDED);
+        fact(&world, &lantern, "relay-pin", "");
+        let counting = Counting::over(world.store);
+        let lookup = Lookup::new(Stored::new(&counting));
+        let topics = lookup.of_kind(KindOf::Topic).unwrap();
+        assert_eq!(topics.len(), 3);
+        let listed = topics
+            .iter()
+            .find(|document| document.id() == &lantern)
+            .unwrap();
+        assert!(Rc::ptr_eq(listed, &lookup.document(&lantern).unwrap()));
+        assert_eq!(lookup.label(&lantern).unwrap(), "lantern");
+        assert_eq!(counting.documents.get(), 0);
+        let again = lookup.of_kind(KindOf::Topic).unwrap();
+        assert!(Rc::ptr_eq(&again[0], &topics[0]));
+        assert_eq!(counting.kinds.get(), 1);
+        lookup.of_kind(KindOf::Fact).unwrap();
+        assert_eq!(counting.kinds.get(), 2);
     }
 
     #[test]
@@ -755,14 +769,10 @@ mod tests {
         let lantern = topic(&world, "lantern", "");
         topic(&world, "phone", "former_names = [\"lantern\", \"lamp\"]\n");
         let atlas = topic(&world, "atlas", ENDED);
-        let counting = Counting {
-            inner: world.store,
-            documents: Cell::new(0),
-            holdings: Cell::new(0),
-        };
+        let counting = Counting::over(world.store);
         let asked = |address: &str| {
             let before = counting.holdings.get();
-            let found = Lookup::new(&counting).find(address).unwrap();
+            let found = Lookup::new(Stored::new(&counting)).find(address).unwrap();
             (found, counting.holdings.get() - before)
         };
         assert_eq!(asked("lantern"), (Found::One(lantern), 1));
@@ -776,12 +786,8 @@ mod tests {
         let world = World::new();
         let _machine = topic(&world, "desk", "");
         let lantern = topic(&world, "lantern", "");
-        let counting = Counting {
-            inner: world.store,
-            documents: Cell::new(0),
-            holdings: Cell::new(0),
-        };
-        let lookup = Lookup::new(&counting);
+        let counting = Counting::over(world.store);
+        let lookup = Lookup::new(Stored::new(&counting));
 
         let first = lookup.document(&lantern).unwrap();
         let second = lookup.document(&lantern).unwrap();
@@ -794,10 +800,10 @@ mod tests {
         assert!(holdings > 0);
         lookup.find("lantern").unwrap();
         lookup
-            .holders(KindOf::Fact, "topic", lantern.as_str())
+            .holders(KindOf::Fact, "topic", &[&lantern], false)
             .unwrap();
         lookup
-            .holders(KindOf::Fact, "topic", lantern.as_str())
+            .holders(KindOf::Fact, "topic", &[&lantern], false)
             .unwrap();
         assert_eq!(counting.documents.get(), documents);
         assert_eq!(counting.holdings.get(), holdings + 1);

@@ -71,17 +71,18 @@ pub struct Ending {
 }
 
 impl Ending {
-    pub(super) const KEYS: [&'static str; 4] = ["ended", "ended_on", "ended_by", "note"];
+    pub(super) const BY: &'static str = "ended_by";
+    pub(super) const KEYS: [&'static str; 4] = ["ended", "ended_on", Ending::BY, "note"];
 
     pub(super) fn read(reader: &mut Reader) -> Result<Option<Ending>, SchemaError> {
         let reason = reader.optional_line("ended")?;
         let on = reader.optional_date("ended_on")?;
-        let by = reader.optional_id("ended_by")?;
+        let by = reader.optional_id(Ending::BY)?;
         let note = reader.optional_text("note")?;
         let Some(reason) = reason else {
             let stray = [
                 ("ended_on", on.is_some()),
-                ("ended_by", by.is_some()),
+                (Ending::BY, by.is_some()),
                 ("note", note.is_some()),
             ];
             return match stray.iter().find(|(_, present)| *present) {
@@ -102,7 +103,7 @@ impl Ending {
         writer
             .text("ended", self.reason.word())
             .date("ended_on", self.on)
-            .optional_id("ended_by", self.by.as_ref())
+            .optional_id(Ending::BY, self.by.as_ref())
             .optional_text("note", note)
     }
 }

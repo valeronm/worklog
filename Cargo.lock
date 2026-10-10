@@ -1370,6 +1370,7 @@ version = "0.0.0"
 dependencies = [
  "blake3",
  "getrandom 0.4.3",
+ "regex",
  "tempfile",
  "toml",
 ]

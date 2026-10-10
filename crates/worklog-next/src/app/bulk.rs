@@ -2,10 +2,11 @@ use toml::Value;
 
 use crate::app::live::{Open, open};
 use crate::app::lookup::Lookup;
+use crate::app::rules::referencable;
 use crate::app::save::Admitted;
 use crate::app::{Deps, Failure, Written, text};
 use crate::domain::id::DocumentId;
-use crate::domain::schema::{Content, KindOf};
+use crate::domain::schema::Content;
 use crate::domain::version::Fields;
 
 /// Writes nothing unless every document passes its checks.
@@ -16,8 +17,8 @@ pub fn move_to(
     to: &str,
 ) -> Result<Vec<Written>, Failure> {
     let lookup = Lookup::new(deps.store);
-    let from_id = lookup.referencable(from, Some(KindOf::Topic))?;
-    let to_id = lookup.referencable(to, Some(KindOf::Topic))?;
+    let from_id = referencable(&lookup, from)?;
+    let to_id = referencable(&lookup, to)?;
     if from_id == to_id {
         return Err(Failure::Usage(format!("{from} and {to} are one topic")));
     }
@@ -43,12 +44,14 @@ fn moved(target: &Open, from: &DocumentId, to: &DocumentId) -> Option<Fields> {
     let mut fields = target.shown();
     let holds = |value: Option<&Value>| value.and_then(Value::as_str) == Some(from.as_str());
     let to_text = || text(to.as_str());
+    let kind = target.record.content.kind();
+    let filed_under = kind.key_where(|reference| reference.membership)?;
     match &target.record.content {
-        Content::Fact(_) if holds(fields.get("topic")) => {
-            fields.insert("topic".to_owned(), to_text());
+        Content::Fact(_) if holds(fields.get(filed_under)) => {
+            fields.insert(filed_under.to_owned(), to_text());
         }
         Content::Entry(_) | Content::Followup(_) => {
-            let topics = fields.get("topics")?.as_array()?;
+            let topics = fields.get(filed_under)?.as_array()?;
             if !topics.iter().any(|topic| holds(Some(topic))) {
                 return None;
             }
@@ -63,7 +66,7 @@ fn moved(target: &Open, from: &DocumentId, to: &DocumentId) -> Option<Fields> {
                     replaced.push(topic);
                 }
             }
-            fields.insert("topics".to_owned(), Value::Array(replaced));
+            fields.insert(filed_under.to_owned(), Value::Array(replaced));
             if holds(fields.get("touching")) {
                 fields.insert("touching".to_owned(), to_text());
             }

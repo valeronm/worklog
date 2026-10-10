@@ -1,5 +1,6 @@
 //! The five kinds of document and the fields each carries.
 
+use super::directory::Directory;
 use super::ending::{Ending, Reason};
 use super::error::SchemaError;
 use super::field::{Date, Name, Reader, Writer};
@@ -24,6 +25,15 @@ pub struct Reference {
     pub unended_when_made: bool,
     /// Whether a document holding this reference keeps its target from being ended.
     pub holds_open: bool,
+    /// Whether the document belongs to the topics this field names.
+    pub membership: bool,
+}
+
+impl Reference {
+    const fn filed(mut self) -> Reference {
+        self.membership = true;
+        self
+    }
 }
 
 const fn reference(
@@ -37,6 +47,7 @@ const fn reference(
         target,
         unended_when_made,
         holds_open,
+        membership: false,
     }
 }
 
@@ -45,20 +56,20 @@ const TOPIC_REFERENCES: [Reference; 2] = [
     reference("part_of", TOPIC, true, true),
     reference("uses", TOPIC, true, true),
 ];
-const FACT_REFERENCES: [Reference; 1] = [reference("topic", TOPIC, true, true)];
+const FACT_REFERENCES: [Reference; 1] = [reference("topic", TOPIC, true, true).filed()];
 const ENTRY_REFERENCES: [Reference; 2] = [
     reference("machine", TOPIC, true, false),
-    reference("topics", TOPIC, true, false),
+    reference("topics", TOPIC, true, false).filed(),
 ];
 const FOLLOWUP_REFERENCES: [Reference; 4] = [
-    reference("topics", TOPIC, true, true),
+    reference("topics", TOPIC, true, true).filed(),
     reference("entry", Some(KindOf::Entry), false, false),
     reference("about", None, false, false),
     reference("touching", TOPIC, true, true),
 ];
 const CLAIM_REFERENCES: [Reference; 2] = [
     reference("machine", TOPIC, true, true),
-    reference("topic", TOPIC, true, true),
+    reference("topic", TOPIC, true, true).filed(),
 ];
 
 impl KindOf {
@@ -82,6 +93,17 @@ impl KindOf {
     }
 
     #[must_use]
+    pub fn plural(self) -> &'static str {
+        match self {
+            KindOf::Topic => "topics",
+            KindOf::Fact => "facts",
+            KindOf::Entry => "entries",
+            KindOf::Followup => "followups",
+            KindOf::Claim => "claims",
+        }
+    }
+
+    #[must_use]
     pub fn references(self) -> &'static [Reference] {
         match self {
             KindOf::Topic => &TOPIC_REFERENCES,
@@ -90,6 +112,15 @@ impl KindOf {
             KindOf::Followup => &FOLLOWUP_REFERENCES,
             KindOf::Claim => &CLAIM_REFERENCES,
         }
+    }
+
+    /// The key of the kind's first reference `wanted` picks.
+    #[must_use]
+    pub fn key_where(self, wanted: impl Fn(&Reference) -> bool) -> Option<&'static str> {
+        self.references()
+            .iter()
+            .find(|reference| wanted(reference))
+            .map(|reference| reference.key)
     }
 
     /// The keys that never change after a document's first version.
@@ -168,7 +199,7 @@ pub struct Claim {
     pub machine: DocumentId,
     pub topic: DocumentId,
     /// Absent for a topic loaded where no claim's directory matches.
-    pub directory: Option<String>,
+    pub directory: Option<Directory>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -207,13 +238,11 @@ fn trigger(reader: &mut Reader, topics: &[DocumentId]) -> Result<Option<Trigger>
     }
 }
 
-fn directory(reader: &mut Reader) -> Result<Option<String>, SchemaError> {
-    match reader.optional_line("directory")? {
-        Some(path) if path != "~" && !path.starts_with("~/") && !path.starts_with('/') => Err(
-            SchemaError::field("directory", "is neither under `~/` nor an absolute path"),
-        ),
-        path => Ok(path),
-    }
+fn directory(reader: &mut Reader) -> Result<Option<Directory>, SchemaError> {
+    reader
+        .optional_line("directory")?
+        .map(|path| Directory::parse(&path).map_err(|error| SchemaError::field("directory", error)))
+        .transpose()
 }
 
 fn content(kind: KindOf, reader: &mut Reader) -> Result<Content, SchemaError> {
@@ -350,7 +379,7 @@ impl Content {
             Content::Claim(claim) => writer
                 .id("machine", &claim.machine)
                 .id("topic", &claim.topic)
-                .optional_text("directory", claim.directory.as_deref()),
+                .optional_text("directory", claim.directory.as_ref().map(Directory::as_str)),
         }
     }
 }
@@ -486,6 +515,22 @@ mod tests {
     }
 
     #[test]
+    fn every_kind_has_a_plural() {
+        assert_eq!(
+            KindOf::ALL.map(KindOf::plural),
+            ["topics", "facts", "entries", "followups", "claims"]
+        );
+    }
+
+    #[test]
+    fn a_kind_s_word_is_the_singular_of_its_plural() {
+        assert_eq!(
+            KindOf::ALL.map(KindOf::word),
+            ["topic", "fact", "entry", "followup", "claim"]
+        );
+    }
+
+    #[test]
     fn a_kinds_key_lists_name_the_keys_it_writes() {
         let holds_ids = |value: &toml::Value| match value {
             toml::Value::String(text) => DocumentId::parse(text).is_ok(),
@@ -516,7 +561,8 @@ mod tests {
                 kind.references()
                     .iter()
                     .all(|reference| !reference.holds_open
-                        || reference.target == Some(KindOf::Topic)),
+                        || (reference.target == Some(KindOf::Topic)
+                            && reference.unended_when_made)),
                 "{}",
                 kind.word()
             );
@@ -528,6 +574,33 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_key_is_found_by_what_its_reference_is_for() {
+        let filed = |kind: KindOf| kind.key_where(|reference| reference.membership);
+        assert_eq!(
+            KindOf::ALL.map(filed),
+            [
+                None,
+                Some("topic"),
+                Some("topics"),
+                Some("topics"),
+                Some("topic")
+            ]
+        );
+        assert_eq!(
+            KindOf::Followup.key_where(|reference| reference.target == Some(KindOf::Entry)),
+            Some("entry")
+        );
+        assert_eq!(
+            KindOf::Claim.key_where(|reference| reference.target == TOPIC && !reference.membership),
+            Some("machine")
+        );
+        assert_eq!(
+            KindOf::Topic.key_where(|reference| reference.target.is_none()),
+            None
+        );
     }
 
     #[test]
@@ -544,6 +617,24 @@ mod tests {
             read("fact", &fact().replace("confirmed = 2026-10-09\n", "")),
             Err(SchemaError::Field { key, .. }) if key == "confirmed"
         ));
+    }
+
+    #[test]
+    fn a_claim_stored_with_a_trailing_slash_reads_as_the_directory_without_it() {
+        let claim = |directory: &str| {
+            read(
+                "claim",
+                &format!(
+                    "machine = \"{DESK}\"\ntopic = \"{LANTERN}\"\ndirectory = \"{directory}\"\n"
+                ),
+            )
+            .unwrap()
+        };
+        assert_eq!(claim("~/lantern/"), claim("~/lantern"));
+        assert_eq!(
+            claim("~/lantern/").fields().get("directory"),
+            Some(&"~/lantern".into())
+        );
     }
 
     #[test]

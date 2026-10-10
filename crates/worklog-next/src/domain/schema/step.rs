@@ -82,16 +82,10 @@ pub fn next(
     {
         return Err(SchemaError::SetOnce((*key).to_owned()));
     }
-    if let (Some((old, _)), Some((new, _))) = (was.content.naming(), next.content.naming())
-        && old != new
+    if let Some((old, _)) = was.content.naming()
+        && next.content.naming().is_some_and(|(new, _)| new != old)
     {
-        let (old, new) = (old.clone(), new.clone());
-        if let Some(former) = next.content.former_names_mut() {
-            former.retain(|held| *held != new);
-            if !former.contains(&old) {
-                former.push(old);
-            }
-        }
+        keep_names(&mut next.content, std::slice::from_ref(&was));
     }
     if let (Content::Fact(was), Content::Fact(is)) = (&was.content, &mut next.content)
         && (body_changed || was.summary != is.summary)
@@ -100,6 +94,47 @@ pub fn next(
         is.confirmed = today;
     }
     Ok(next)
+}
+
+fn keep_names(content: &mut Content, held: &[Record]) {
+    let Some(new) = content.naming().map(|(name, _)| name.clone()) else {
+        return;
+    };
+    let Some(former) = content.former_names_mut() else {
+        return;
+    };
+    former.retain(|name| *name != new);
+    let names = held
+        .iter()
+        .filter_map(|head| head.content.naming())
+        .flat_map(|(name, former)| former.iter().chain([name]));
+    for name in names {
+        if *name != new && !former.contains(name) {
+            former.push(name.clone());
+        }
+    }
+}
+
+/// `next` for a version that joins several heads: `speaking` is the head
+/// the draft was shown from and steps as the parent, an ended one as if
+/// reopened, and `others` are the remaining heads in head order. The
+/// former names kept are the parent's, the parent's name, then each other
+/// head's former names and name, each once and never the saved name.
+pub fn joined(
+    kind: &Kind,
+    draft: &Fields,
+    speaking: &Fields,
+    others: &[Record],
+    body_changed: bool,
+    today: Date,
+) -> Result<Record, SchemaError> {
+    let reopened = Record::read(kind, speaking)?
+        .reopen()
+        .map(|record| record.fields());
+    let parent = reopened.as_ref().unwrap_or(speaking);
+    let mut joined = next(kind, draft, Some(parent), body_changed, today)?;
+    keep_names(&mut joined.content, others);
+    Ok(joined)
 }
 
 #[cfg(test)]
@@ -305,5 +340,55 @@ mod tests {
             confirmed(&after(&stored, &refiled, false).unwrap()),
             day("2026-09-04")
         );
+    }
+
+    fn topic(name: &str, former: &str) -> Fields {
+        fields(&format!(
+            "name = \"{name}\"\nformer_names = [{former}]\ncreated = 2026-09-04\nsummary = \"s\"\n"
+        ))
+    }
+
+    fn former_after(base: &Fields, others: &[&Fields], saved: &str) -> Vec<String> {
+        let kind = kind("topic");
+        let others: Vec<Record> = others
+            .iter()
+            .map(|other| Record::read(&kind, other).unwrap())
+            .collect();
+        let draft = fields(&format!("name = \"{saved}\"\nsummary = \"s\"\n"));
+        let stored = joined(&kind, &draft, base, &others, false, today()).unwrap();
+        let (_, former) = stored.content.naming().unwrap();
+        former.iter().map(ToString::to_string).collect()
+    }
+
+    #[test]
+    fn a_step_from_several_heads_keeps_what_each_was_called_but_the_saved_name() {
+        let plain = topic("lantern", "");
+        let renamed = topic("lamp-two", "\"lantern\", \"lamp\"");
+        assert_eq!(
+            former_after(&plain, &[&renamed], "lamp-two"),
+            ["lantern", "lamp"]
+        );
+        assert_eq!(
+            former_after(&renamed, &[&plain], "lamp-two"),
+            ["lantern", "lamp"]
+        );
+        assert_eq!(
+            former_after(&plain, &[&renamed], "beacon"),
+            ["lantern", "lamp", "lamp-two"]
+        );
+        assert_eq!(
+            former_after(&renamed, &[&plain], "beacon"),
+            ["lantern", "lamp", "lamp-two"]
+        );
+        assert_eq!(
+            former_after(&renamed, &[&plain], "lamp"),
+            ["lantern", "lamp-two"]
+        );
+        assert_eq!(
+            former_after(&renamed, &[&renamed], "lamp-two"),
+            ["lantern", "lamp"]
+        );
+        assert_eq!(former_after(&renamed, &[], "lamp-two"), ["lantern", "lamp"]);
+        assert_eq!(former_after(&plain, &[], "lamp"), ["lantern"]);
     }
 }

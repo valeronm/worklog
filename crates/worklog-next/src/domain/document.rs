@@ -18,6 +18,7 @@ pub struct Unreadable {
 pub struct Document {
     id: DocumentId,
     versions: Vec<Version>,
+    heads: Vec<usize>,
     unreadable: Vec<Unreadable>,
 }
 
@@ -27,6 +28,13 @@ pub enum State<'a> {
     Live(&'a Version),
     /// Versions none of which is behind another.
     Forked(Vec<&'a Version>),
+}
+
+fn behind(versions: &[Version]) -> BTreeSet<&VersionId> {
+    versions
+        .iter()
+        .flat_map(|version| &version.envelope.ancestors)
+        .collect()
 }
 
 impl Document {
@@ -49,11 +57,24 @@ impl Document {
         versions.sort_by(|a, b| a.id.cmp(&b.id));
         versions.dedup_by(|a, b| a.id == b.id);
         unreadable.sort_by(|a, b| a.id.cmp(&b.id));
+        let behind = behind(&versions);
+        let heads = (0..versions.len())
+            .filter(|at| !behind.contains(&versions[*at].id))
+            .collect();
         Document {
             id,
             versions,
+            heads,
             unreadable,
         }
+    }
+
+    /// A version already held changes nothing.
+    #[must_use]
+    pub fn with_version(&self, version: Version) -> Document {
+        let mut versions = self.versions.clone();
+        versions.push(version);
+        Document::new(self.id.clone(), versions, self.unreadable.clone())
     }
 
     #[must_use]
@@ -61,21 +82,10 @@ impl Document {
         &self.id
     }
 
-    fn behind(&self) -> BTreeSet<&VersionId> {
-        self.versions
-            .iter()
-            .flat_map(|version| &version.envelope.ancestors)
-            .collect()
-    }
-
     /// The held versions no held version lists as an ancestor, by id.
     #[must_use]
     pub fn heads(&self) -> Vec<&Version> {
-        let behind = self.behind();
-        self.versions
-            .iter()
-            .filter(|version| !behind.contains(&version.id))
-            .collect()
+        self.heads.iter().map(|at| &self.versions[*at]).collect()
     }
 
     #[must_use]
@@ -110,7 +120,7 @@ impl Document {
     /// The ancestors a held version lists that are not held.
     #[must_use]
     pub fn missing(&self) -> Vec<&VersionId> {
-        self.behind()
+        behind(&self.versions)
             .into_iter()
             .filter(|id| self.get(id).is_none())
             .collect()
@@ -192,6 +202,29 @@ mod tests {
         assert_eq!(merged.envelope.document, lantern());
         let stamp = root.envelope.written.clone();
         assert_eq!(Envelope::following(&[], stamp, lantern(), "save"), None);
+    }
+
+    #[test]
+    fn a_document_with_one_more_version_is_the_one_built_from_them_all() {
+        let root = root();
+        let left = after(&[&root], RELAY, "left\n");
+        let right = after(&[&root], RELAY, "right\n");
+        let damaged = Unreadable {
+            id: VersionId::of(b"damaged"),
+            why: ReadError::Corrupt,
+        };
+        let held = Document::new(
+            lantern(),
+            vec![root.clone(), left.clone()],
+            vec![damaged.clone()],
+        );
+        let forked = held.with_version(right.clone());
+        assert_eq!(
+            forked,
+            Document::new(lantern(), vec![root, left.clone(), right], vec![damaged])
+        );
+        assert!(matches!(forked.state(), State::Forked(_)));
+        assert_eq!(held.with_version(left), held);
     }
 
     #[test]

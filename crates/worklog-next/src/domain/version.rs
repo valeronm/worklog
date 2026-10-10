@@ -107,6 +107,53 @@ impl Stamp {
     }
 }
 
+impl Stamp {
+    /// Nanoseconds since the epoch, whatever offset the stamp is written in.
+    #[must_use]
+    pub fn instant(&self) -> i128 {
+        let datetime = &self.0;
+        let (Some(date), Some(time), Some(offset)) =
+            (datetime.date, datetime.time, datetime.offset)
+        else {
+            return 0;
+        };
+        let offset = match offset {
+            toml::value::Offset::Z => 0,
+            toml::value::Offset::Custom { minutes } => i64::from(minutes),
+        };
+        let (year, month, day) = (
+            i64::from(date.year) - i64::from(date.month <= 2),
+            i64::from(date.month),
+            i64::from(date.day),
+        );
+        let era = year.div_euclid(400);
+        let year_of_era = year - era * 400;
+        let day_of_year = (153 * (month + if month > 2 { -3 } else { 9 }) + 2) / 5 + day - 1;
+        let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+        let days = era * 146_097 + day_of_era - 719_468;
+        let seconds = days * 86_400
+            + i64::from(time.hour) * 3_600
+            + i64::from(time.minute) * 60
+            + i64::from(time.second.unwrap_or(0))
+            - offset * 60;
+        i128::from(seconds) * 1_000_000_000 + i128::from(time.nanosecond.unwrap_or(0))
+    }
+}
+
+impl Ord for Stamp {
+    fn cmp(&self, other: &Stamp) -> std::cmp::Ordering {
+        self.instant()
+            .cmp(&other.instant())
+            .then_with(|| self.to_string().cmp(&other.to_string()))
+    }
+}
+
+impl PartialOrd for Stamp {
+    fn partial_cmp(&self, other: &Stamp) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 impl fmt::Display for Stamp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
@@ -356,6 +403,24 @@ impl Version {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stamps_order_by_the_moment_whatever_the_offset() {
+        let stamp = |text| Stamp::parse(text).unwrap();
+        let later = stamp("2026-10-09T11:30:00+02:00");
+        let earlier = stamp("2026-10-09T09:00:00+00:00");
+        assert!(earlier < later);
+        assert!(stamp("2026-10-09T08:30:00+00:00") < stamp("2026-10-09T08:30:00.5+00:00"));
+        assert!(stamp("2026-02-28T23:00:00Z") < stamp("2026-03-01T00:00:00Z"));
+        assert!(stamp("2025-12-31T23:59:59Z") < stamp("2026-01-01T00:00:00Z"));
+        let (zulu, shifted) = (
+            stamp("2026-10-09T10:00:00Z"),
+            stamp("2026-10-09T11:00:00+01:00"),
+        );
+        assert_eq!(zulu.instant(), shifted.instant());
+        assert_ne!(zulu, shifted);
+        assert_eq!(zulu.cmp(&zulu), std::cmp::Ordering::Equal);
+    }
 
     const LANTERN: &str = "7f3a91c05be2446d8a10c3f29b7e6d54";
     const DESK: &str = "03be552100000000000000000000000a";

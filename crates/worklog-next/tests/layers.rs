@@ -88,3 +88,84 @@ fn the_app_reaches_the_host_only_through_ports() {
         ],
     );
 }
+
+// A chain rustfmt breaks across lines matches only with all whitespace removed.
+fn outside_tests(text: &str) -> String {
+    text.split("#[cfg(test)]\nmod tests")
+        .next()
+        .unwrap_or_default()
+        .split_whitespace()
+        .collect()
+}
+
+fn app() -> std::path::PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("src")
+        .join("app")
+}
+
+const WRITES: [&str; 8] = [
+    "amend", "bulk", "claim", "draft", "followup", "fork", "live", "save",
+];
+const SHARED: [&str; 5] = ["heads", "lookup", "mod", "rules", "testing"];
+const WRITES_A_READ_MAY_NOT_USE: [&str; 7] =
+    ["amend", "bulk", "claim", "followup", "fork", "live", "save"];
+
+const TEST_SUPPORT: &str = "testing";
+
+fn module_of(path: &str) -> String {
+    Path::new(path)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .expect("a module name")
+        .to_owned()
+}
+
+#[test]
+fn one_use_case_puts_a_version_in_the_store() {
+    let mut found = Vec::new();
+    sources(&app(), &mut found);
+    let mut writers = Vec::new();
+    for (path, text) in found {
+        let module = module_of(&path);
+        if module == TEST_SUPPORT {
+            continue;
+        }
+        for _ in outside_tests(&text).matches(".store.put(") {
+            writers.push(module.clone());
+        }
+    }
+    assert_eq!(writers, ["save"]);
+}
+
+#[test]
+fn a_read_decides_no_ending_and_writes_nothing() {
+    let mut found = Vec::new();
+    sources(&app(), &mut found);
+    let mut forbidden: Vec<String> = [
+        ".ending",
+        "Record::read",
+        "drafts.write",
+        "drafts.delete",
+        "store.put",
+    ]
+    .map(str::to_owned)
+    .into();
+    for module in WRITES_A_READ_MAY_NOT_USE {
+        forbidden.push(format!("crate::app::{module}"));
+        forbidden.push(format!("super::{module}"));
+    }
+    let mut reads = 0;
+    for (path, text) in found {
+        let module = module_of(&path);
+        if WRITES.contains(&module.as_str()) || SHARED.contains(&module.as_str()) {
+            continue;
+        }
+        reads += 1;
+        let text = outside_tests(&text);
+        for needle in &forbidden {
+            assert!(!text.contains(needle.as_str()), "{path} holds `{needle}`");
+        }
+    }
+    assert!(reads > 0);
+}

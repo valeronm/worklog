@@ -4,24 +4,36 @@ use std::fmt;
 use toml::Value;
 
 use crate::domain::id::{DocumentId, VersionId};
-use crate::domain::ports::{Clock, Drafts, Host, Ids, Store, StoreError};
-use crate::domain::schema::{Date, KindOf, SchemaError};
+use crate::domain::ports::{Clock, Drafts, Host, Ids, StoreError};
+use crate::domain::schema::{Date, Directory, KindOf, SchemaError};
 use crate::domain::version::Kind;
 
 pub mod amend;
 pub mod bulk;
+pub mod check;
 pub mod claim;
+pub mod context;
 pub mod draft;
 pub mod followup;
 pub mod fork;
+mod heads;
+mod index;
+pub mod list;
 mod live;
-pub mod lookup;
+mod lookup;
+mod rows;
+mod rules;
 pub mod save;
+pub mod search;
+pub mod show;
 #[cfg(test)]
 mod testing;
 
+pub use lookup::Stored;
+pub use rows::{FollowupRow, Row, TriggerShown};
+
 pub struct Deps<'a> {
-    pub store: &'a dyn Store,
+    pub store: Stored<'a>,
     pub drafts: &'a dyn Drafts,
     pub ids: &'a dyn Ids,
     pub clock: &'a dyn Clock,
@@ -86,6 +98,10 @@ impl Failed {
     }
 }
 
+pub(super) fn counted(count: usize, one: &str, several: &str) -> String {
+    format!("{count} {}", if count == 1 { one } else { several })
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Written {
     pub document: DocumentId,
@@ -108,6 +124,11 @@ impl Deps<'_> {
         self.host.machine()?.ok_or_else(|| {
             Failure::Refused("this host has no machine topic; set the host up first".to_owned())
         })
+    }
+
+    pub(super) fn directory(&self, given: &str) -> Result<Directory, Failure> {
+        Directory::on_host(given, self.host.home()?.as_deref())
+            .map_err(|error| Failure::Usage(format!("{given:?}: {error}")))
     }
 }
 
@@ -135,15 +156,22 @@ mod tests {
     }
 
     #[test]
+    fn a_count_takes_the_singular_for_one_alone() {
+        assert_eq!(counted(1, "entry", "entries"), "1 entry");
+        assert_eq!(counted(0, "entry", "entries"), "0 entries");
+        assert_eq!(counted(2, "entry", "entries"), "2 entries");
+    }
+
+    #[test]
     fn today_is_the_clock_s_day_and_the_machine_needs_a_host() {
         let store = MemoryStore::default();
         let drafts = MemoryDrafts::default();
         let ids = SequenceIds::default();
         let clock = FixedClock::at("2026-10-09T18:22:41.118204+01:00");
-        let bare = FixedHost(None);
-        let set_up = FixedHost(Some(atlas()));
+        let bare = FixedHost(None, None);
+        let set_up = FixedHost(Some(atlas()), None);
         let deps = |host| Deps {
-            store: &store,
+            store: Stored::new(&store),
             drafts: &drafts,
             ids: &ids,
             clock: &clock,

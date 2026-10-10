@@ -2,7 +2,7 @@
 //! contract every implementation of a port is held to.
 
 use std::cell::{Cell, RefCell};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::document::{Document, State, Unreadable};
 use super::draft::Draft;
@@ -17,7 +17,7 @@ pub struct MemoryStore {
 }
 
 impl MemoryStore {
-    /// Makes `document(id)` report an unreadable version beside what it holds.
+    /// Makes the document hold an unreadable version beside its stored ones.
     pub fn plant_unreadable(&self, document: &DocumentId, version: VersionId, why: ReadError) {
         self.unreadable
             .borrow_mut()
@@ -26,20 +26,7 @@ impl MemoryStore {
             .push(Unreadable { id: version, why });
     }
 
-    fn matching(&self, wanted: impl Fn(&Document) -> bool) -> Vec<DocumentId> {
-        self.versions
-            .borrow()
-            .iter()
-            .filter(|(id, versions)| {
-                wanted(&Document::new((*id).clone(), (*versions).clone(), vec![]))
-            })
-            .map(|(id, _)| id.clone())
-            .collect()
-    }
-}
-
-impl Store for MemoryStore {
-    fn document(&self, id: &DocumentId) -> Result<Document, StoreError> {
+    fn held(&self, id: &DocumentId) -> Document {
         let versions = self.versions.borrow().get(id).cloned().unwrap_or_default();
         let unreadable = self
             .unreadable
@@ -47,7 +34,27 @@ impl Store for MemoryStore {
             .get(id)
             .cloned()
             .unwrap_or_default();
-        Ok(Document::new(id.clone(), versions, unreadable))
+        Document::new(id.clone(), versions, unreadable)
+    }
+
+    fn matching(&self, wanted: impl Fn(&Document) -> bool) -> Vec<Document> {
+        let ids: BTreeSet<DocumentId> = self
+            .versions
+            .borrow()
+            .keys()
+            .chain(self.unreadable.borrow().keys())
+            .cloned()
+            .collect();
+        ids.iter()
+            .map(|id| self.held(id))
+            .filter(|document| wanted(document))
+            .collect()
+    }
+}
+
+impl Store for MemoryStore {
+    fn document(&self, id: &DocumentId) -> Result<Document, StoreError> {
+        Ok(self.held(id))
     }
 
     fn put(&self, version: &Version) -> Result<(), StoreError> {
@@ -59,22 +66,44 @@ impl Store for MemoryStore {
         Ok(())
     }
 
-    fn of_kind(&self, kind: &Kind) -> Result<Vec<DocumentId>, StoreError> {
+    fn of_kind(&self, kind: &Kind) -> Result<Vec<Document>, StoreError> {
         Ok(self.matching(|document| document.kind() == Some(kind)))
     }
 
-    fn holding(&self, key: &str, value: &str) -> Result<Vec<DocumentId>, StoreError> {
-        Ok(self.matching(|document| document.holds(key, value)))
+    fn holding(&self, key: &str, values: &[&str]) -> Result<Vec<Document>, StoreError> {
+        if values.is_empty() {
+            return Ok(Vec::new());
+        }
+        Ok(self.matching(|document| values.iter().any(|value| document.holds(key, value))))
+    }
+
+    fn unreadable(&self) -> Result<Vec<Document>, StoreError> {
+        Ok(self.matching(|document| !document.unreadable().is_empty()))
+    }
+
+    fn forked(&self) -> Result<Vec<Document>, StoreError> {
+        Ok(self.matching(|document| matches!(document.state(), State::Forked(_))))
+    }
+
+    fn kinds(&self) -> Result<Vec<Kind>, StoreError> {
+        let held: BTreeSet<Kind> = self
+            .matching(|_| true)
+            .iter()
+            .filter_map(|document| document.kind().cloned())
+            .collect();
+        Ok(held.into_iter().collect())
     }
 
     fn documents_under(&self, prefix: &str) -> Result<Vec<DocumentId>, StoreError> {
-        Ok(self
+        let held: BTreeSet<DocumentId> = self
             .versions
             .borrow()
             .keys()
+            .chain(self.unreadable.borrow().keys())
             .filter(|id| !prefix.is_empty() && id.as_str().starts_with(prefix))
             .cloned()
-            .collect())
+            .collect();
+        Ok(held.into_iter().collect())
     }
 
     fn versions_under(&self, prefix: &str) -> Result<Vec<(DocumentId, VersionId)>, StoreError> {
@@ -88,6 +117,17 @@ impl Store for MemoryStore {
                     .filter(|version| version.id.starts_with(prefix))
                     .map(|version| (document.clone(), version.id.clone()))
             })
+            .chain(
+                self.unreadable
+                    .borrow()
+                    .iter()
+                    .flat_map(|(document, files)| {
+                        files
+                            .iter()
+                            .filter(|file| file.id.starts_with(prefix))
+                            .map(|file| (document.clone(), file.id.clone()))
+                    }),
+            )
             .collect();
         found.sort();
         Ok(found)
@@ -125,6 +165,7 @@ impl Drafts for MemoryDrafts {
     }
 }
 
+/// Counts in the leading bytes, so the short ids differ.
 #[derive(Default)]
 pub struct SequenceIds {
     minted: Cell<u128>,
@@ -133,8 +174,15 @@ pub struct SequenceIds {
 impl Ids for SequenceIds {
     fn mint(&self) -> Result<DocumentId, StoreError> {
         self.minted.set(self.minted.get() + 1);
-        Ok(DocumentId::from_bytes(self.minted.get().to_be_bytes()))
+        Ok(DocumentId::from_bytes(
+            (self.minted.get() << 96).to_be_bytes(),
+        ))
     }
+}
+
+#[must_use]
+pub fn first_minted() -> DocumentId {
+    DocumentId::from_bytes((1u128 << 96).to_be_bytes())
 }
 
 pub struct FixedClock(pub Stamp);
@@ -155,11 +203,16 @@ impl Clock for FixedClock {
     }
 }
 
-pub struct FixedHost(pub Option<DocumentId>);
+/// The machine topic and the home directory.
+pub struct FixedHost(pub Option<DocumentId>, pub Option<String>);
 
 impl Host for FixedHost {
     fn machine(&self) -> Result<Option<DocumentId>, StoreError> {
         Ok(self.0.clone())
+    }
+
+    fn home(&self) -> Result<Option<String>, StoreError> {
+        Ok(self.1.clone())
     }
 }
 
@@ -218,7 +271,7 @@ pub fn after(heads: &[&Version], fields: &str, body: &str) -> Version {
 /// # Panics
 ///
 /// When the store answers otherwise.
-pub fn store_contract(store: &dyn Store, ids: &dyn Ids) {
+pub fn store_contract(store: &dyn Store, ids: &dyn Ids, damage: &dyn Fn(&DocumentId, &VersionId)) {
     let lantern = ids.mint().expect("an id");
     let atlas = ids.mint().expect("an id");
     assert_ne!(lantern, atlas);
@@ -226,6 +279,8 @@ pub fn store_contract(store: &dyn Store, ids: &dyn Ids) {
         store.document(&lantern).expect("a read").state(),
         State::Absent
     );
+    assert!(store.kinds().expect("a read").is_empty());
+    assert!(store.forked().expect("a read").is_empty());
 
     let topics = "topics = [\"lantern\", \"phone\"]";
     let relay = first(
@@ -257,45 +312,154 @@ pub fn store_contract(store: &dyn Store, ids: &dyn Ids) {
         .put(&first(&atlas, "topic", "name = \"atlas\"", "\n"))
         .expect("a write");
 
-    let kind = |word: &str| Kind::parse(word).expect("a kind");
-    assert_eq!(
-        store.of_kind(&kind("fact")).expect("a read"),
-        std::slice::from_ref(&lantern)
-    );
-    assert_eq!(
-        store.of_kind(&kind("topic")).expect("a read"),
-        std::slice::from_ref(&atlas)
-    );
-    assert!(store.of_kind(&kind("entry")).expect("a read").is_empty());
+    answers_with_whole_documents(store, &lantern, &atlas);
+    reports_what_does_not_read(store, ids, damage, &renamed);
+    finds_by_prefix(store, &renamed);
+    lists_the_kinds_held(store, ids);
+    lists_what_is_forked(store, ids);
+}
 
-    assert_eq!(
-        store.holding("name", "relay-pin").expect("a read"),
-        std::slice::from_ref(&lantern)
-    );
-    assert_eq!(
-        store.holding("topics", "phone").expect("a read"),
-        std::slice::from_ref(&lantern)
-    );
+fn lists_what_is_forked(store: &dyn Store, ids: &dyn Ids) {
+    let forked = || store.forked().expect("a read");
+    assert!(forked().is_empty(), "no document held has two heads");
+    let fork = |kind: &str| {
+        let id = ids.mint().expect("an id");
+        let root = first(&id, kind, "name = \"compass\"", "root\n");
+        store.put(&root).expect("a write");
+        for body in ["left\n", "right\n"] {
+            store
+                .put(&after(&[&root], "name = \"compass\"", body))
+                .expect("a write");
+        }
+        id
+    };
+    let fact = fork("fact");
+    assert_eq!(forked(), by_id(store, &[&fact]));
+    let sketch = fork("sketch");
+    assert_eq!(forked(), by_id(store, &[&fact, &sketch]));
+}
+
+fn lists_the_kinds_held(store: &dyn Store, ids: &dyn Ids) {
+    let kinds = || -> Vec<String> {
+        let held = store.kinds().expect("a read");
+        held.iter().map(ToString::to_string).collect()
+    };
+    assert_eq!(kinds(), ["fact", "topic"], "a damaged file has no kind");
+    for name in ["desk", "phone"] {
+        let id = ids.mint().expect("an id");
+        store
+            .put(&first(&id, "sketch", &format!("name = \"{name}\""), "\n"))
+            .expect("a write");
+    }
+    assert_eq!(kinds(), ["fact", "sketch", "topic"]);
+    let found = of_kind(store, "sketch");
+    assert_eq!(found.len(), 2);
+}
+
+fn by_id(store: &dyn Store, ids: &[&DocumentId]) -> Vec<Document> {
+    let mut documents: Vec<Document> = ids
+        .iter()
+        .map(|id| store.document(id).expect("a read"))
+        .collect();
+    documents.sort_by(|a, b| a.id().cmp(b.id()));
+    documents
+}
+
+fn of_kind(store: &dyn Store, word: &str) -> Vec<Document> {
+    store
+        .of_kind(&Kind::parse(word).expect("a kind"))
+        .expect("a read")
+}
+
+fn answers_with_whole_documents(store: &dyn Store, lantern: &DocumentId, atlas: &DocumentId) {
+    let by_id = |ids: &[&DocumentId]| by_id(store, ids);
+    let of_kind = |word: &str| of_kind(store, word);
+    assert_eq!(of_kind("fact"), by_id(&[lantern]));
+    assert_eq!(of_kind("topic"), by_id(&[atlas]));
+    assert!(of_kind("entry").is_empty());
+
+    let holding = |key: &str, values: &[&str]| store.holding(key, values).expect("a read");
+    assert_eq!(holding("name", &["relay-pin"]), by_id(&[lantern]));
+    assert_eq!(holding("topics", &["phone"]), by_id(&[lantern]));
     assert!(
-        store.holding("name", "relay").expect("a read").is_empty(),
+        holding("name", &["relay"]).is_empty(),
         "only an older version has it"
     );
-    assert!(store.holding("name", "desk").expect("a read").is_empty());
+    assert!(holding("name", &["desk"]).is_empty());
+    assert_eq!(
+        holding("name", &["desk", "atlas", "relay-pin"]),
+        by_id(&[lantern, atlas])
+    );
+    assert_eq!(
+        holding("topics", &["lantern", "phone"]),
+        by_id(&[lantern]),
+        "a document holding two of the values is one answer"
+    );
+    assert!(holding("name", &[]).is_empty());
+}
 
+fn reports_what_does_not_read(
+    store: &dyn Store,
+    ids: &dyn Ids,
+    damage: &dyn Fn(&DocumentId, &VersionId),
+    head: &Version,
+) {
+    let lantern = &head.envelope.document;
+    let whole = |id: &DocumentId| store.document(id).expect("a read");
+    let holding = |values: &[&str]| store.holding("name", values).expect("a read");
+    assert!(store.unreadable().expect("a read").is_empty());
+    let phone = ids.mint().expect("an id");
+    let lost = first(&phone, "topic", "name = \"phone\"", "\n").id;
+    damage(&phone, &lost);
+    let alone = whole(&phone);
+    assert_eq!(alone.state(), State::Absent);
+    assert_eq!(alone.kind(), None);
+    assert_eq!(alone.unreadable().len(), 1);
+    assert_eq!(store.unreadable().expect("a read"), [alone]);
+    let under = store.documents_under(phone.as_str()).expect("a read");
+    assert_eq!(under, std::slice::from_ref(&phone));
+    let named = store.versions_under(lost.as_str()).expect("a read");
+    assert_eq!(named, [(phone.clone(), lost.clone())]);
+    for word in ["topic", "fact", "entry", "followup", "claim"] {
+        let found = of_kind(store, word);
+        assert!(
+            found.iter().all(|document| document.id() != &phone),
+            "{word}"
+        );
+    }
+    assert!(holding(&["phone"]).is_empty());
+
+    let torn = after(&[head], "name = \"relay\"", "third\n").id;
+    damage(lantern, &torn);
+    let beside = whole(lantern);
+    let named = store.versions_under(torn.short()).expect("a read");
+    assert_eq!(named, [(lantern.clone(), torn.clone())]);
+    assert_eq!(beside.state(), State::Live(head));
+    assert_eq!(beside.unreadable().len(), 1);
+    assert_eq!(
+        store.unreadable().expect("a read"),
+        by_id(store, &[lantern, &phone])
+    );
+    assert_eq!(of_kind(store, "fact"), std::slice::from_ref(&beside));
+    assert_eq!(holding(&["relay-pin"]), [beside]);
+}
+
+fn finds_by_prefix(store: &dyn Store, head: &Version) {
+    let lantern = &head.envelope.document;
     for length in [1, 2, 5] {
         let under = store
             .documents_under(&lantern.as_str()[..length])
             .expect("a read");
-        assert!(under.contains(&lantern), "{length}: {under:?}");
+        assert!(under.contains(lantern), "{length}: {under:?}");
     }
     assert_eq!(
         store.documents_under(lantern.as_str()).expect("a read"),
-        std::slice::from_ref(&lantern)
+        std::slice::from_ref(lantern)
     );
     assert!(store.documents_under("").expect("a read").is_empty());
 
-    let found = [(lantern.clone(), renamed.id.clone())];
-    for prefix in [renamed.id.short(), renamed.id.as_str()] {
+    let found = [(lantern.clone(), head.id.clone())];
+    for prefix in [head.id.short(), head.id.as_str()] {
         assert_eq!(store.versions_under(prefix).expect("a read"), found);
     }
     for all in ["", "b3-"] {
@@ -353,7 +517,10 @@ mod tests {
 
     #[test]
     fn the_memory_store_keeps_the_contract() {
-        store_contract(&MemoryStore::default(), &SequenceIds::default());
+        let store = MemoryStore::default();
+        store_contract(&store, &SequenceIds::default(), &|document, version| {
+            store.plant_unreadable(document, version.clone(), ReadError::Corrupt);
+        });
     }
 
     #[test]
@@ -366,8 +533,11 @@ mod tests {
         let clock = FixedClock::at("2026-10-09T18:22:41.118204+01:00");
         assert_eq!(clock.now(), clock.now());
         assert_eq!(clock.now().day(), "2026-10-09");
-        assert_eq!(FixedHost(Some(atlas())).machine(), Ok(Some(atlas())));
-        assert_eq!(FixedHost(None).machine(), Ok(None));
+        let host = FixedHost(Some(atlas()), Some("/home/desk".to_owned()));
+        assert_eq!(host.machine(), Ok(Some(atlas())));
+        assert_eq!(host.home(), Ok(Some("/home/desk".to_owned())));
+        assert_eq!(FixedHost(None, None).machine(), Ok(None));
+        assert_eq!(FixedHost(None, None).home(), Ok(None));
     }
 
     #[test]
@@ -393,11 +563,11 @@ mod tests {
         let ids = SequenceIds::default();
         assert_eq!(
             ids.mint().unwrap().as_str(),
-            "00000000000000000000000000000001"
+            "00000001000000000000000000000000"
         );
         assert_eq!(
             ids.mint().unwrap().as_str(),
-            "00000000000000000000000000000002"
+            "00000002000000000000000000000000"
         );
     }
 }

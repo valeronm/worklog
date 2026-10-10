@@ -94,20 +94,14 @@ pub fn reopen(deps: &Deps, address: &str, why: &str) -> Result<Written, Failure>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::testing::{entry, fact, fork, found, head, record, refused, topic, world};
+    use crate::app::testing::{
+        entry, fact, fact_fields, fork, found, head, record, refused, topic, world,
+    };
     use crate::app::{claim, draft};
     use crate::domain::draft::Draft;
-    use crate::domain::id::DocumentId;
     use crate::domain::ports::Drafts;
     use crate::domain::schema::address::Found;
     use crate::domain::schema::{Content, Name, Reason};
-
-    fn fact_fields(topic: &DocumentId, name: &str, confirmed: &str) -> String {
-        format!(
-            "name = \"{name}\"\ntopic = \"{topic}\"\ncreated = 2026-09-04\n\
-             confirmed = {confirmed}\nsummary = \"s\"\n"
-        )
-    }
 
     #[test]
     fn a_renamed_fact_is_found_by_both_names() {
@@ -166,7 +160,7 @@ mod tests {
             &relay,
             &format!(
                 "{}ended = \"false\"\nended_on = 2026-10-09\nnote = \"n\"\n",
-                fact_fields(&lantern, "relay", "2026-09-04")
+                fact_fields(&lantern, "relay", "s", "")
             ),
             "The relay.\n",
         );
@@ -178,7 +172,7 @@ mod tests {
     fn ending_a_fact_records_who_when_and_why() {
         let (world, lantern) = world();
         let relay = fact(&world, &lantern, "relay", "");
-        let by = entry(&world, &[&lantern]);
+        let by = entry(&world, "2026-10-08", "lamp-driver", &[&lantern]);
         end(
             &world.deps(),
             "lantern/relay",
@@ -213,10 +207,10 @@ mod tests {
     fn a_topic_with_live_dependents_does_not_end() {
         let (world, lantern) = world();
         fact(&world, &lantern, "relay", "");
-        entry(&world, &[&lantern]);
+        entry(&world, "2026-10-08", "lamp-driver", &[&lantern]);
         let deps = world.deps();
         let text = refused(end(&deps, "lantern", "retired", "n", None));
-        assert!(text.contains("still has 1 facts"), "{text}");
+        assert!(text.ends_with("still has 1 fact"), "{text}");
         assert!(!text.contains("topics"), "{text}");
         end(&deps, "lantern/relay", "false", "n", None).unwrap();
         end(&deps, "lantern", "retired", "n", None).unwrap();
@@ -228,7 +222,7 @@ mod tests {
         let (world, lantern) = world();
         topic(&world, "atlas", &format!("part_of = [\"{lantern}\"]\n"));
         let text = refused(end(&world.deps(), "lantern", "retired", "n", None));
-        assert!(text.contains("still has 1 topics"), "{text}");
+        assert!(text.ends_with("still has 1 topic"), "{text}");
     }
 
     #[test]
@@ -269,7 +263,7 @@ mod tests {
     fn verifying_confirms_a_fact_once_a_day() {
         let (world, lantern) = world();
         let relay = fact(&world, &lantern, "relay", "");
-        entry(&world, &[&lantern]);
+        entry(&world, "2026-10-08", "lamp-driver", &[&lantern]);
         let deps = world.deps();
         verify(&deps, "lantern/relay").unwrap();
         let Content::Fact(fact) = record(&world, &relay).content else {
@@ -307,11 +301,7 @@ mod tests {
         let deps = world.deps();
         end(&deps, "lantern/relay", "false", "n", None).unwrap();
         let other = fact(&world, &lantern, "relay", "");
-        fork(
-            &world,
-            &other,
-            &fact_fields(&lantern, "relay", "2026-09-04"),
-        );
+        fork(&world, &other, &fact_fields(&lantern, "relay", "s", ""));
         let text = refused(reopen(&deps, relay.as_str(), "back"));
         assert!(
             text.contains("lantern/relay: name: relay is taken by lantern/relay"),
@@ -330,16 +320,13 @@ mod tests {
         );
         world.put(
             "claim",
-            &format!(
-                "machine = \"{}\"\ntopic = \"{lantern}\"\n",
-                world.host.0.clone().unwrap()
-            ),
+            &format!("machine = \"{}\"\ntopic = \"{lantern}\"\n", world.machine()),
             "\n",
         );
         topic(&world, "atlas", &format!("uses = [\"{lantern}\"]\n"));
         let text = refused(end(&world.deps(), "lantern", "retired", "n", None));
         assert!(
-            text.contains("still has 1 facts, 1 followups, 1 claims, 1 topics"),
+            text.contains("still has 1 fact, 1 followup, 1 claim, 1 topic"),
             "{text}"
         );
     }
@@ -353,7 +340,7 @@ mod tests {
             &format!("part_of = [\"{lantern}\"]\nuses = [\"{lantern}\"]\n"),
         );
         let text = refused(end(&world.deps(), "lantern", "retired", "n", None));
-        assert!(text.ends_with("still has 1 topics"), "{text}");
+        assert!(text.ends_with("still has 1 topic"), "{text}");
     }
 
     #[test]
@@ -388,13 +375,9 @@ mod tests {
     fn a_forked_fact_with_a_live_head_keeps_its_topic_from_ending() {
         let (world, lantern) = world();
         let relay = fact(&world, &lantern, "relay-pin", "");
-        fork(
-            &world,
-            &relay,
-            &fact_fields(&lantern, "relay-pin", "2026-09-04"),
-        );
+        fork(&world, &relay, &fact_fields(&lantern, "relay-pin", "s", ""));
         let text = refused(end(&world.deps(), "lantern", "retired", "n", None));
-        assert!(text.contains("lantern: still has 1 facts"), "{text}");
+        assert!(text.ends_with("lantern: still has 1 fact"), "{text}");
     }
 
     #[test]
@@ -406,7 +389,7 @@ mod tests {
             &relay,
             &format!(
                 "{}ended = \"false\"\nended_on = 2026-10-09\nnote = \"n\"\n",
-                fact_fields(&lantern, "relay-pin", "2026-09-04")
+                fact_fields(&lantern, "relay-pin", "s", "")
             ),
         );
         end(&world.deps(), "lantern", "retired", "n", None).unwrap();
@@ -415,7 +398,7 @@ mod tests {
     #[test]
     fn a_machine_topic_with_live_claims_does_not_end() {
         let (world, lantern) = world();
-        let desk = world.host.0.clone().unwrap();
+        let desk = world.machine();
         world.put(
             "claim",
             &format!("machine = \"{desk}\"\ntopic = \"{lantern}\"\ndirectory = \"~/lantern\"\n"),

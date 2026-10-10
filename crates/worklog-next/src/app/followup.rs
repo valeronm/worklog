@@ -3,6 +3,7 @@ use toml::Value;
 use crate::app::draft::named;
 use crate::app::live::open;
 use crate::app::lookup::Lookup;
+use crate::app::rules::referencable;
 use crate::app::save::stepped;
 use crate::app::{Deps, DraftRef, Failure, Written, kind_named, text};
 use crate::domain::draft::Draft;
@@ -31,10 +32,8 @@ pub enum Made {
 const TRIGGER_KEYS: [&str; 3] = ["look_again", "why", "touching"];
 
 fn trigger_fields(
-    lookup: &Lookup,
     trigger: &TriggerArg,
-    topics: &[DocumentId],
-    reference: impl Fn(&DocumentId) -> Result<String, Failure>,
+    touching: impl Fn(&str) -> Result<String, Failure>,
 ) -> Result<Vec<(&'static str, Value)>, Failure> {
     match trigger {
         TriggerArg::LookAgain { on, why } => {
@@ -45,14 +44,16 @@ fn trigger_fields(
             }
             Ok(vec![("look_again", on.value()), ("why", text(why))])
         }
-        TriggerArg::Touching(address) => {
-            let topic = lookup.referencable(address, Some(KindOf::Topic))?;
-            if !topics.contains(&topic) {
-                return Err(Failure::at(address, "is not one of the followup's topics"));
-            }
-            Ok(vec![("touching", text(reference(&topic)?))])
-        }
+        TriggerArg::Touching(address) => Ok(vec![("touching", text(touching(address)?))]),
     }
+}
+
+fn touched(lookup: &Lookup, address: &str, topics: &[DocumentId]) -> Result<String, Failure> {
+    let topic = referencable(lookup, address)?;
+    if !topics.contains(&topic) {
+        return Err(Failure::at(address, "is not one of the followup's topics"));
+    }
+    Ok(topic.to_string())
 }
 
 /// Stored at once when a summary is given, otherwise opened as a draft.
@@ -92,7 +93,14 @@ pub fn new_followup(deps: &Deps, what: &NewFollowup) -> Result<Made, Failure> {
         fields.insert("about".to_owned(), text(reference(about)?));
     }
     if let Some(trigger) = &what.trigger {
-        for (key, value) in trigger_fields(&lookup, trigger, &topics, reference)? {
+        let touching = |address: &str| {
+            if shown {
+                named(&lookup, &lookup.one(address)?)
+            } else {
+                touched(&lookup, address, &topics)
+            }
+        };
+        for (key, value) in trigger_fields(trigger, touching)? {
             fields.insert(key.to_owned(), value);
         }
     }
@@ -128,9 +136,8 @@ pub fn set_trigger(
         fields.remove(key);
     }
     if let Some(trigger) = trigger {
-        for (key, value) in
-            trigger_fields(&lookup, trigger, &followup.topics, |id| Ok(id.to_string()))?
-        {
+        let touching = |address: &str| touched(&lookup, address, &followup.topics);
+        for (key, value) in trigger_fields(trigger, touching)? {
             fields.insert(key.to_owned(), value);
         }
     }
@@ -140,7 +147,7 @@ pub fn set_trigger(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::lookup::read_or_skip;
+    use crate::app::heads::read_or_skip;
     use crate::app::save::save;
     use crate::app::testing::{World, head, refused, world_with_atlas};
     use crate::domain::id::DocumentId;
@@ -195,7 +202,7 @@ mod tests {
             &format!(
                 "name = \"lamp-driver\"\ndate = 2026-10-08\nmachine = \"{}\"\n\
                  topics = [\"{lantern}\"]\nsummary = \"s\"\n",
-                world.host.0.clone().unwrap()
+                world.machine()
             ),
             "\n",
         );
@@ -279,6 +286,35 @@ mod tests {
         world.drafts.write(&draft).unwrap();
         let saved = save(&deps, opened.document.as_str()).unwrap();
         assert_eq!(followup(&world, &saved.document).topics, [lantern]);
+    }
+
+    #[test]
+    fn a_draft_opens_whatever_it_touches_and_the_save_refuses() {
+        let (world, _, _) = world_with_atlas();
+        let deps = world.deps();
+        let filled = |topics: &[&str]| {
+            let mut what = plain(topics, "");
+            what.summary = None;
+            what.trigger = Some(TriggerArg::Touching("atlas"));
+            let Ok(Made::Draft(opened)) = new_followup(&deps, &what) else {
+                panic!("a draft");
+            };
+            let mut draft = world.drafts.read(&opened.document).unwrap().unwrap();
+            assert_eq!(draft.fields["touching"].as_str(), Some("atlas"));
+            draft.fields.insert("summary".to_owned(), "Check".into());
+            world.drafts.write(&draft).unwrap();
+            opened.document
+        };
+
+        let apart = filled(&["lantern"]);
+        let text = refused(save(&deps, apart.as_str()));
+        assert!(text.contains("is not among `topics`"), "{text}");
+
+        crate::app::amend::end(&deps, "atlas", "retired", "n", None).unwrap();
+        let ended = filled(&["atlas"]);
+        let text = refused(save(&deps, ended.as_str()));
+        assert!(text.contains("topics: atlas is ended"), "{text}");
+        assert!(world.drafts.read(&ended).unwrap().is_some());
     }
 
     #[test]
@@ -378,7 +414,7 @@ mod tests {
                 "name = \"lamp-driver\"\ndate = 2026-10-08\nmachine = \"{}\"\n\
                  topics = [\"{lantern}\"]\nsummary = \"s\"\nended = \"removed\"\n\
                  ended_on = 2026-10-09\nnote = \"n\"\n",
-                world.host.0.clone().unwrap()
+                world.machine()
             ),
             "\n",
         );

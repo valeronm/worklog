@@ -37,16 +37,23 @@ pub trait Store {
     /// Adds a version; a version already present is not an error.
     fn put(&self, version: &Version) -> Result<(), StoreError>;
     /// The documents of the kind, by id.
-    fn of_kind(&self, kind: &Kind) -> Result<Vec<DocumentId>, StoreError>;
-    /// The documents a head of which carries `key` as `value`, or as a
-    /// list with `value` in it, by id.
-    fn holding(&self, key: &str, value: &str) -> Result<Vec<DocumentId>, StoreError>;
+    fn of_kind(&self, kind: &Kind) -> Result<Vec<Document>, StoreError>;
+    /// The documents a head of which carries `key` as one of `values`, or as a
+    /// list with one of them in it, by id; none for no values.
+    fn holding(&self, key: &str, values: &[&str]) -> Result<Vec<Document>, StoreError>;
+    /// The documents holding a file that does not read as a version, by id.
+    fn unreadable(&self) -> Result<Vec<Document>, StoreError>;
+    /// The documents with more than one head, by id.
+    fn forked(&self) -> Result<Vec<Document>, StoreError>;
+    /// The kinds of the documents held, each once, sorted; a document none of whose files
+    /// read has no kind.
+    fn kinds(&self) -> Result<Vec<Kind>, StoreError>;
     /// The documents whose id starts with `prefix`, by id; none for an
     /// empty prefix.
     fn documents_under(&self, prefix: &str) -> Result<Vec<DocumentId>, StoreError>;
     /// The versions whose id starts with `prefix`, with or without the
     /// algorithm before it, each with its document; none for an empty
-    /// prefix.
+    /// prefix. A file named as a version counts whether or not it reads.
     fn versions_under(&self, prefix: &str) -> Result<Vec<(DocumentId, VersionId)>, StoreError>;
 }
 
@@ -74,4 +81,6 @@ pub trait Clock {
 pub trait Host {
     /// The id of this machine's topic; `None` before the host is set up.
     fn machine(&self) -> Result<Option<DocumentId>, StoreError>;
+    /// The home directory as an absolute path; `None` for a host with none.
+    fn home(&self) -> Result<Option<String>, StoreError>;
 }

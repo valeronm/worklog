@@ -65,6 +65,12 @@ impl DocumentId {
     }
 }
 
+impl AsRef<str> for DocumentId {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
 impl fmt::Display for DocumentId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.0)

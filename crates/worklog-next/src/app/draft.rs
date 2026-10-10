@@ -1,13 +1,14 @@
 use toml::Value;
 
-use crate::app::lookup::{Lookup, ended, unreadable};
-use crate::app::save::name_is_free;
+use crate::app::heads::label_or_short;
+use crate::app::lookup::{Lookup, refuse_ended};
+use crate::app::rules::{name_is_free, referencable};
 use crate::app::{Deps, DraftRef, Failed, Failure, kind_named, text};
 use crate::domain::draft::Draft;
 use crate::domain::id::{DocumentId, is_id_prefix};
 use crate::domain::schema::address::{Address, Found};
 use crate::domain::schema::{Content, Date, Entry, Fact, KindOf, Name, Topic, step, translate};
-use crate::domain::version::Fields;
+use crate::domain::version::{Fields, Kind, Version};
 
 pub enum New<'a> {
     Topic {
@@ -62,7 +63,7 @@ pub fn new(deps: &Deps, what: &New) -> Result<DraftRef, Failure> {
             let Address::Fact { topic, name } = Address::parse(address).map_err(usage)? else {
                 return Err(usage(format!("{address}: a fact is addressed topic/name")));
             };
-            let topic_id = lookup.referencable(topic.as_str(), Some(KindOf::Topic))?;
+            let topic_id = referencable(&lookup, topic.as_str())?;
             let topic_name = named(&lookup, &topic_id)?;
             fields.insert("name".to_owned(), text(name.as_str()));
             fields.insert("topic".to_owned(), text(&topic_name));
@@ -111,7 +112,7 @@ pub fn new(deps: &Deps, what: &New) -> Result<DraftRef, Failure> {
     let id = deps.ids.mint()?;
     name_is_free(&lookup, &id, &content)?;
     for open in deps.drafts.list()? {
-        if spelled(&open).as_deref() == Some(address.as_str()) {
+        if spelled(&open.kind, &open.fields).as_deref() == Some(address.as_str()) {
             return Err(draft_open(&address));
         }
     }
@@ -140,20 +141,13 @@ pub fn checkout(deps: &Deps, address: &str) -> Result<DraftRef, Failure> {
     let id = lookup.one(address)?;
     let label = lookup.label(&id)?;
     refuse_open(deps, &id, &label)?;
-    let document = lookup.document(&id)?;
-    if !document.unreadable().is_empty() {
-        return Err(unreadable(&label));
-    }
-    let (head, record) = lookup.writable(&id, id.short())?;
+    let (head, record) = lookup.writable(&id, &label)?;
     let kind = KindOf::of(&head.envelope.kind)?;
     if kind == KindOf::Claim {
         return Err(Failure::at(&label, "a claim is never edited"));
     }
-    if record.ending.is_some() {
-        return Err(ended(&label));
-    }
-    let mut draft = Draft::of(&head);
-    draft.fields = names(&lookup, &step::shown(&head.fields), kind)?;
+    refuse_ended(&record, &label)?;
+    let draft = opened(&lookup, &head, kind)?;
     let location = deps.drafts.write(&draft)?;
     Ok(DraftRef {
         document: id,
@@ -161,10 +155,24 @@ pub fn checkout(deps: &Deps, address: &str) -> Result<DraftRef, Failure> {
     })
 }
 
+pub(super) fn opened(lookup: &Lookup, version: &Version, kind: KindOf) -> Result<Draft, Failure> {
+    let mut draft = Draft::of(version);
+    draft.fields = names(lookup, &step::shown(&version.fields), kind)?;
+    Ok(draft)
+}
+
 pub(super) fn names(lookup: &Lookup, fields: &Fields, kind: KindOf) -> Result<Fields, Failure> {
+    shown_as(fields, kind, |id| lookup.address(id))
+}
+
+pub(super) fn shown_as(
+    fields: &Fields,
+    kind: KindOf,
+    name_of: impl Fn(&DocumentId) -> Result<Option<String>, Failure>,
+) -> Result<Fields, Failure> {
     let failed = Failed::default();
     let shown = translate::to_names(fields, kind, |id| {
-        lookup.address(id).unwrap_or_else(|failure| {
+        name_of(id).unwrap_or_else(|failure| {
             failed.keep(failure);
             None
         })
@@ -196,14 +204,14 @@ pub fn drafts(deps: &Deps) -> Result<Vec<DraftRow>, Failure> {
         .map(|draft| DraftRow {
             document: draft.document.clone(),
             kind: draft.kind.to_string(),
-            label: spelled(draft).unwrap_or_else(|| draft.document.short().to_owned()),
+            label: draft_label(draft),
             location: deps.drafts.location(&draft.document),
         })
         .collect())
 }
 
-/// The draft of the stored document the address finds, else the one draft whose document's id
-/// starts with the address or whose fields spell it; refuses none and several.
+// The draft of a stored document the address finds is tried before a draft whose document's
+// id starts with the address or whose fields spell it.
 pub(super) fn draft_for(deps: &Deps, lookup: &Lookup, address: &str) -> Result<Draft, Failure> {
     match lookup.find(address) {
         Ok(Found::One(id)) => {
@@ -223,7 +231,7 @@ pub(super) fn draft_for(deps: &Deps, lookup: &Lookup, address: &str) -> Result<D
         .into_iter()
         .filter(|draft| {
             (is_id_prefix(address) && draft.document.as_str().starts_with(address))
-                || spelled(draft).as_deref() == Some(address)
+                || spelled(&draft.kind, &draft.fields).as_deref() == Some(address)
         })
         .collect();
     match matching.len() {
@@ -233,11 +241,14 @@ pub(super) fn draft_for(deps: &Deps, lookup: &Lookup, address: &str) -> Result<D
     }
 }
 
-/// None for a kind without a name and for a draft lacking the fields that spell its address.
-pub(super) fn spelled(draft: &Draft) -> Option<String> {
-    let field = |key: &str| draft.fields.get(key);
+pub(super) fn draft_label(draft: &Draft) -> String {
+    label_or_short(spelled(&draft.kind, &draft.fields), &draft.document)
+}
+
+pub(super) fn spelled(kind: &Kind, fields: &Fields) -> Option<String> {
+    let field = |key: &str| fields.get(key);
     let name = field("name")?.as_str()?;
-    match draft.kind.as_str() {
+    match kind.as_str() {
         "topic" => Some(name.to_owned()),
         "fact" => Some(format!("{}/{name}", field("topic")?.as_str()?)),
         "entry" => match field("date")? {
@@ -251,7 +262,7 @@ pub(super) fn spelled(draft: &Draft) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::testing::{ENDED, TOPIC, World, fact, refused, topic, world};
+    use crate::app::testing::{ENDED, ENDED_FACT, TOPIC, World, fact, refused, topic, world};
     use crate::domain::ports::{Drafts, Store};
     use crate::domain::version::{Kind, ReadError};
 
@@ -455,12 +466,7 @@ mod tests {
     #[test]
     fn a_checkout_refuses_what_cannot_be_edited() {
         let (world, lantern) = world();
-        fact(
-            &world,
-            &lantern,
-            "old-pin",
-            "ended = \"false\"\nended_on = 2026-10-09\nnote = \"n\"\n",
-        );
+        fact(&world, &lantern, "old-pin", ENDED_FACT);
         let text = refused(checkout(&world.deps(), "lantern/old-pin"));
         assert!(text.contains("is ended; reopen it first"), "{text}");
 
@@ -479,10 +485,7 @@ mod tests {
 
         let claim = world.put(
             "claim",
-            &format!(
-                "machine = \"{}\"\ntopic = \"{lantern}\"\n",
-                world.host.0.clone().unwrap()
-            ),
+            &format!("machine = \"{}\"\ntopic = \"{lantern}\"\n", world.machine()),
             "\n",
         );
         let text = refused(checkout(&world.deps(), claim.as_str()));
@@ -504,7 +507,7 @@ mod tests {
     fn an_address_means_a_draft_by_document_by_id_or_by_what_it_spells() {
         let (world, lantern) = world();
         let deps = world.deps();
-        let lookup = Lookup::new(&world.store);
+        let lookup = world.lookup();
         let relay = fact(&world, &lantern, "relay-pin", "");
         checkout(&deps, "lantern/relay-pin").unwrap();
         let fresh = new(&deps, &New::Topic { name: "phone" }).unwrap();
@@ -541,7 +544,7 @@ mod tests {
         let (world, _) = world();
         topic(&world, "lantern", "");
         let deps = world.deps();
-        let lookup = Lookup::new(&world.store);
+        let lookup = world.lookup();
         let text = refused(draft_for(&deps, &lookup, "lantern"));
         assert!(text.contains("several documents"), "{text}");
     }
@@ -550,7 +553,7 @@ mod tests {
     fn a_stored_document_without_a_draft_is_no_draft() {
         let (world, _) = world();
         let deps = world.deps();
-        let lookup = Lookup::new(&world.store);
+        let lookup = world.lookup();
         let text = refused(draft_for(&deps, &lookup, "lantern"));
         assert!(text.contains("no draft"), "{text}");
     }
@@ -613,7 +616,7 @@ mod tests {
             &format!(
                 "name = \"lamp-driver\"\ndate = 2026-10-08\nmachine = \"{}\"\n\
                  topics = [\"{lantern}\"]\nsummary = \"s\"\n",
-                world.host.0.clone().unwrap()
+                world.machine()
             ),
             "\n",
         );
@@ -658,7 +661,7 @@ mod tests {
             "\n",
         );
         let opened = new(&deps, &New::Topic { name: "lantern" }).unwrap();
-        let lookup = Lookup::new(&world.store);
+        let lookup = world.lookup();
         let draft = draft_for(&deps, &lookup, "lantern").unwrap();
         assert_eq!(draft.document, opened.document);
         discard(&deps, "lantern").unwrap();

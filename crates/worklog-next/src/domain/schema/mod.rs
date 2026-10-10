@@ -3,6 +3,7 @@
 //! store anything.
 
 pub mod address;
+pub mod directory;
 pub mod ending;
 pub mod error;
 pub mod field;
@@ -16,6 +17,7 @@ pub mod translate;
 mod testing;
 
 pub use address::{Address, Candidate, Found, Holds};
+pub use directory::Directory;
 pub use ending::{Ending, Reason};
 pub use error::SchemaError;
 pub use field::{Date, Name};

@@ -6,6 +6,7 @@ use std::convert::Infallible;
 use toml::Value;
 
 use super::address::Found;
+use super::ending::Ending;
 use super::error::SchemaError;
 use super::kind::KindOf;
 use crate::domain::id::DocumentId;
@@ -13,12 +14,11 @@ use crate::domain::version::Fields;
 
 fn each<E>(
     fields: &Fields,
-    kind: KindOf,
+    keys: impl IntoIterator<Item = &'static str>,
     turn: impl Fn(&str, &str) -> Result<String, E>,
 ) -> Result<Fields, E> {
     let mut turned = fields.clone();
-    for reference in kind.references() {
-        let key = reference.key;
+    for key in keys {
         match turned.get_mut(key) {
             Some(Value::String(text)) => *text = turn(key, text)?,
             Some(Value::Array(items)) => {
@@ -34,15 +34,20 @@ fn each<E>(
     Ok(turned)
 }
 
-/// The fields with each reference shown as its document's name; one to
-/// a document with no name stays the whole id.
+/// The fields with each reference, and the document that ended it, shown
+/// as its document's name; one to a document with no name stays the whole id.
 #[must_use]
 pub fn to_names(
     fields: &Fields,
     kind: KindOf,
     name_of: impl Fn(&DocumentId) -> Option<String>,
 ) -> Fields {
-    let shown = each(fields, kind, |_, text| {
+    let keys = kind
+        .references()
+        .iter()
+        .map(|reference| reference.key)
+        .chain([Ending::BY]);
+    let shown = each(fields, keys, |_, text| {
         let name = DocumentId::parse(text).ok().and_then(|id| name_of(&id));
         Ok::<_, Infallible>(name.unwrap_or_else(|| text.to_owned()))
     });
@@ -59,7 +64,8 @@ pub fn to_ids(
     kind: KindOf,
     id_of: impl Fn(&str) -> Found,
 ) -> Result<Fields, SchemaError> {
-    each(fields, kind, |key, text| {
+    let keys = kind.references().iter().map(|reference| reference.key);
+    each(fields, keys, |key, text| {
         if DocumentId::parse(text).is_ok() {
             return Ok(text.to_owned());
         }
@@ -121,6 +127,17 @@ mod tests {
         let shown = to_names(&fact, KindOf::Fact, name_of);
         assert_eq!(shown.get("topic").and_then(Value::as_str), Some("lantern"));
         assert_eq!(to_ids(&shown, KindOf::Fact, id_of), Ok(fact));
+    }
+
+    #[test]
+    fn the_document_that_ended_one_is_shown_as_a_name_and_a_draft_leaves_it_alone() {
+        let stored = fields(&format!("ended_by = \"{LANTERN}\"\n"));
+        let shown = to_names(&stored, KindOf::Topic, name_of);
+        assert_eq!(
+            shown.get("ended_by").and_then(Value::as_str),
+            Some("lantern")
+        );
+        assert_eq!(to_ids(&stored, KindOf::Topic, id_of), Ok(stored));
     }
 
     #[test]

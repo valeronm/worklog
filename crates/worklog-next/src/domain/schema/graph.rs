@@ -1,6 +1,7 @@
 //! How topics reach each other: upward through `part_of` and `uses`,
 //! and downward through `part_of` alone.
 
+use std::borrow::Borrow;
 use std::collections::VecDeque;
 
 use crate::domain::id::DocumentId;
@@ -27,23 +28,26 @@ fn walk(roots: &[DocumentId], next: impl Fn(&DocumentId) -> Vec<DocumentId>) -> 
 /// The roots and every topic they reach through either edge, breadth
 /// first, each once.
 #[must_use]
-pub fn reach(
+pub fn reach<E: Borrow<Edges>>(
     roots: &[DocumentId],
-    edges: impl Fn(&DocumentId) -> Option<Edges>,
+    edges: impl Fn(&DocumentId) -> Option<E>,
 ) -> Vec<DocumentId> {
     walk(roots, |topic| {
         edges(topic)
-            .map(|edges| [edges.part_of, edges.uses].concat())
+            .map(|edges| {
+                let edges = edges.borrow();
+                [edges.part_of.as_slice(), edges.uses.as_slice()].concat()
+            })
             .unwrap_or_default()
     })
 }
 
 /// Whether giving `topic` these edges would let it reach itself.
 #[must_use]
-pub fn closes_cycle(
+pub fn closes_cycle<E: Borrow<Edges>>(
     topic: &DocumentId,
     proposed: &Edges,
-    edges: impl Fn(&DocumentId) -> Option<Edges>,
+    edges: impl Fn(&DocumentId) -> Option<E>,
 ) -> bool {
     let targets = [proposed.part_of.as_slice(), proposed.uses.as_slice()].concat();
     reach(&targets, edges).contains(topic)
