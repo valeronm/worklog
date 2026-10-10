@@ -3,7 +3,7 @@ use std::fmt;
 use std::rc::Rc;
 
 use crate::app::Failure;
-use crate::app::heads::{all_ended, kind_of, label_or_short, readable_heads, unended_heads};
+use crate::app::heads::{all_ended, kind_of, readable_heads, unended_heads};
 use crate::app::lookup::{Lookup, no_such_document, not_a};
 use crate::domain::document::{Document, State};
 use crate::domain::id::DocumentId;
@@ -128,7 +128,7 @@ pub(super) fn name_is_free(
 ) -> Result<(), Failure> {
     let what = match lookup.address(id)? {
         Some(address) => address,
-        None => label_or_short(lookup.address_of(content)?, id),
+        None => lookup.label_of(content, id)?,
     };
     name_is_free_as(lookup, id, &what, content)
 }

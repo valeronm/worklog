@@ -36,12 +36,42 @@ fn parse(bytes: Vec<u8>, name: &VersionId) -> Result<Version, ReadError> {
 }
 
 impl FsStore {
+    /// A `root` that is not there reads as a store holding nothing, and the first version
+    /// put makes it.
     #[must_use]
     pub fn new(root: PathBuf) -> FsStore {
         FsStore {
             root,
             walked: OnceCell::new(),
         }
+    }
+
+    /// Refuses a `root` that is not a directory.
+    pub fn open(root: PathBuf) -> Result<FsStore, StoreError> {
+        if !root.is_dir() {
+            return Err(StoreError::io(
+                root.display(),
+                "this host's store is not a directory",
+            ));
+        }
+        Ok(FsStore::new(root))
+    }
+
+    /// Refuses a `root` that is a file, or a directory holding an entry whose name starts
+    /// with no dot while none of its buckets holds a document's directory.
+    pub fn chosen(root: PathBuf) -> Result<FsStore, StoreError> {
+        let store = FsStore::new(root);
+        let root = &store.root;
+        let mut entries = directories(root)?;
+        entries.extend(files(root)?);
+        let other = entries.iter().any(|name| !name.starts_with('.'));
+        if other && store.documents("")?.is_empty() {
+            return Err(StoreError::io(
+                root.display(),
+                "is not empty and holds no store",
+            ));
+        }
+        Ok(store)
     }
 
     fn document_dir(&self, id: &DocumentId) -> PathBuf {
@@ -76,7 +106,7 @@ impl FsStore {
         for name in self.version_ids(id)? {
             match parse(self.bytes(id, &name)?, &name) {
                 Ok(version) => versions.push(version),
-                Err(why) => unreadable.push(Unreadable { id: name, why }),
+                Err(why) => unreadable.push(Unreadable { version: name, why }),
             }
         }
         Ok(Document::new(id.clone(), versions, unreadable))
@@ -269,6 +299,96 @@ mod tests {
     }
 
     #[test]
+    fn a_store_is_opened_only_on_a_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("store");
+        let Err(refused) = FsStore::open(missing.clone()) else {
+            panic!("a store that is not there must be refused");
+        };
+        assert_eq!(
+            refused.to_string(),
+            format!(
+                "{}: this host's store is not a directory",
+                missing.display()
+            )
+        );
+        fs::write(&missing, "a file").unwrap();
+        assert!(FsStore::open(missing.clone()).is_err());
+        assert!(!missing.is_dir());
+
+        let opened = FsStore::open(dir.path().to_path_buf()).unwrap();
+        assert!(opened.kinds().unwrap().is_empty());
+        assert!(
+            FsStore::new(dir.path().join("atlas"))
+                .kinds()
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_store_is_chosen_where_nothing_is_or_a_store_is() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("store");
+        assert!(FsStore::chosen(root.clone()).is_ok());
+        assert!(!root.exists());
+        fs::create_dir(&root).unwrap();
+        assert!(FsStore::chosen(root.clone()).is_ok());
+
+        let store = FsStore::new(root.clone());
+        store.put(&first(&lantern(), "fact", RELAY, "\n")).unwrap();
+        assert!(FsStore::chosen(root.clone()).is_ok());
+        fs::create_dir(root.join(".stfolder")).unwrap();
+        fs::write(root.join(".stignore"), ".DS_Store\n").unwrap();
+        fs::write(root.join(".DS_Store"), "x").unwrap();
+        let chosen = FsStore::chosen(root).unwrap();
+        assert_eq!(chosen.documents_under("7f").unwrap(), [lantern()]);
+    }
+
+    #[test]
+    fn a_directory_of_dot_named_entries_alone_is_chosen_as_an_empty_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let synced = dir.path().join("atlas");
+        fs::create_dir_all(synced.join(".stfolder")).unwrap();
+        assert!(FsStore::chosen(synced.clone()).is_ok());
+        let ignoring = dir.path().join("phone");
+        fs::create_dir(&ignoring).unwrap();
+        fs::write(ignoring.join(".stignore"), ".DS_Store\n").unwrap();
+        assert!(FsStore::chosen(ignoring).is_ok());
+
+        fs::write(synced.join("notes.txt"), "a person's own").unwrap();
+        let Err(refused) = FsStore::chosen(synced.clone()) else {
+            panic!("a directory that holds no store must be refused");
+        };
+        assert_eq!(
+            refused.to_string(),
+            format!("{}: is not empty and holds no store", synced.display())
+        );
+    }
+
+    #[test]
+    fn a_directory_of_other_files_is_not_chosen_for_a_store() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("atlas");
+        fs::create_dir_all(root.join("7f").join("not-a-document")).unwrap();
+        fs::create_dir(root.join("ab")).unwrap();
+        fs::write(root.join("7f").join(LANTERN), "a file named as a document").unwrap();
+        fs::write(root.join("notes.md"), "a person's own").unwrap();
+        fs::write(root.join(".stignore"), ".DS_Store\n").unwrap();
+        let Err(refused) = FsStore::chosen(root.clone()) else {
+            panic!("a directory that holds no store must be refused");
+        };
+        assert_eq!(
+            refused.to_string(),
+            format!("{}: is not empty and holds no store", root.display())
+        );
+
+        let file = dir.path().join("phone");
+        fs::write(&file, "a file").unwrap();
+        assert!(FsStore::chosen(file).is_err());
+    }
+
+    #[test]
     fn a_version_is_one_file_under_its_documents_bucket() {
         let (dir, store) = scratch();
         let relay = first(&lantern(), "fact", RELAY, "first\n");
@@ -295,7 +415,7 @@ mod tests {
         assert_eq!(
             held.unreadable(),
             [Unreadable {
-                id: relay.id.clone(),
+                version: relay.id.clone(),
                 why: ReadError::Corrupt
             }]
         );

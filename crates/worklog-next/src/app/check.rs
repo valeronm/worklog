@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
+use serde::Serialize;
+
 use crate::app::heads::{kind_of, texts, unended_heads, unread_heads};
 use crate::app::index::Topics;
 use crate::app::lookup::Lookup;
@@ -13,19 +15,19 @@ use crate::domain::version::{ReadError, Version};
 
 /// What a store holds that a write would have refused to make, and what a person may want
 /// to look at.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct Check {
     pub problems: Vec<Finding>,
     pub notices: Vec<Finding>,
     /// The documents with more than one head, of the kinds this worklog knows.
-    pub forks: usize,
+    pub fork_count: usize,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Finding {
-    /// The label of the document the finding is about, or the kind's word for a kind this
-    /// worklog does not know.
-    pub document: String,
+    /// Of the document the finding is about, or the kind's word for a kind this worklog does
+    /// not know.
+    pub label: String,
     pub what: String,
 }
 
@@ -63,20 +65,20 @@ impl Fits {
 /// machine topic or no home has none.
 pub fn check(deps: &Deps) -> Result<Check, Failure> {
     let lookup = Lookup::new(deps.store);
-    let here = deps.host.machine()?.zip(deps.host.home()?);
+    let here = deps.host.machine()?.zip(deps.home()?);
     let (problems, notices) = found(&lookup, here.as_ref())?;
     let mut notices = labeled(&lookup, notices)?;
     for unknown in lookup.unknown()? {
         let documents = counted(unknown.documents.len(), "document", "documents");
         notices.push(Finding {
-            document: unknown.kind.to_string(),
+            label: unknown.kind.to_string(),
             what: format!("{documents} of a kind this worklog does not know"),
         });
     }
     Ok(Check {
         problems: sorted(labeled(&lookup, problems)?),
         notices: sorted(notices),
-        forks: lookup.forks()?.len(),
+        fork_count: lookup.forks()?.len(),
     })
 }
 
@@ -96,7 +98,7 @@ fn found(lookup: &Lookup, here: Option<&Here>) -> Result<(Reported, Reported), F
     let mut fits = Fits::default();
     for (id, document) in &seen {
         for file in document.unreadable() {
-            let what = format!("{}: {}", file.id.short(), file.why);
+            let what = format!("{}: {}", file.version.short(), file.why);
             match file.why {
                 ReadError::Newer { .. } => notices.insert((id.clone(), what)),
                 _ => problems.insert((id.clone(), what)),
@@ -128,7 +130,7 @@ fn found(lookup: &Lookup, here: Option<&Here>) -> Result<(Reported, Reported), F
 }
 
 fn sorted(mut findings: Vec<Finding>) -> Vec<Finding> {
-    findings.sort_by(|a, b| (&a.document, &a.what).cmp(&(&b.document, &b.what)));
+    findings.sort_by(|a, b| (&a.label, &a.what).cmp(&(&b.label, &b.what)));
     findings
 }
 
@@ -154,7 +156,7 @@ fn labeled(lookup: &Lookup, found: Reported) -> Result<Vec<Finding>, Failure> {
     let mut findings = Vec::new();
     for (id, what) in found {
         findings.push(Finding {
-            document: lookup.label(&id)?,
+            label: lookup.label(&id)?,
             what,
         });
     }
@@ -268,9 +270,9 @@ mod tests {
         check(&world.deps()).unwrap()
     }
 
-    fn finding(document: &str, what: &str) -> Finding {
+    fn finding(label: &str, what: &str) -> Finding {
         Finding {
-            document: document.to_owned(),
+            label: label.to_owned(),
             what: what.to_owned(),
         }
     }
@@ -426,7 +428,7 @@ mod tests {
         world.store.put(&live).unwrap();
         let found = checked(&world);
         assert_eq!(found.problems, []);
-        assert_eq!(found.forks, 1);
+        assert_eq!(found.fork_count, 1);
 
         let last = after(
             &[&live],
@@ -439,7 +441,7 @@ mod tests {
             found.problems,
             [finding("atlas/relay-pin", "topic: atlas is ended")]
         );
-        assert_eq!(found.forks, 1);
+        assert_eq!(found.fork_count, 1);
     }
 
     #[test]
@@ -455,7 +457,7 @@ mod tests {
         let unread = finding("atlas", &format!("{}: {why}", unread.id.short()));
         let found = checked(&world);
         assert_eq!(found.problems, std::slice::from_ref(&unread));
-        assert_eq!(found.forks, 1);
+        assert_eq!(found.fork_count, 1);
 
         let ended = after(
             &[&live],
@@ -548,7 +550,7 @@ mod tests {
 
         let found = checked(&world);
         assert_eq!(found.problems, []);
-        assert_eq!(found.forks, 1);
+        assert_eq!(found.fork_count, 1);
     }
 
     #[test]
@@ -566,7 +568,7 @@ mod tests {
                 .unwrap();
         }
         let found = checked(&world);
-        assert_eq!(found.forks, 1);
+        assert_eq!(found.fork_count, 1);
         let whats: Vec<&str> = found.problems.iter().map(|f| f.what.as_str()).collect();
         assert_eq!(whats, ["topic: abababab is missing"]);
     }
@@ -866,7 +868,7 @@ mod tests {
             );
             world.put("claim", &fields, "\n")
         };
-        let stored = claim(&desk, "/home/desk/lantern", "");
+        claim(&desk, "/home/desk/lantern", "");
         claim(&phone, "/home/desk/lantern", "");
         claim(
             &desk,
@@ -878,19 +880,24 @@ mod tests {
         claim(&desk, "/home/desktop/lantern", "");
         assert_eq!(checked(&world), Check::default());
 
-        world.host.1 = Some("/home/desk".to_owned());
+        world.host.set_home(Some("/home/desk".to_owned()));
         let found = checked(&world);
         assert_eq!(found.problems, []);
         assert_eq!(
             found.notices,
             [finding(
-                stored.short(),
+                "lantern at /home/desk/lantern",
                 "directory: /home/desk/lantern is under this host's home; \
                  end this claim and claim ~/lantern"
             )]
         );
 
-        world.host.0 = None;
+        world.host.set_home(Some("/home/link".to_owned()));
+        assert_eq!(checked(&world), Check::default());
+        world.host.link("/home/link", "/home/desk");
+        assert_eq!(checked(&world), found);
+
+        world.host.set_machine(None);
         assert_eq!(checked(&world), Check::default());
     }
 
@@ -925,7 +932,7 @@ mod tests {
                 finding("sketch", &unknown("2 documents")),
             ]
         );
-        assert_eq!(found.forks, 0);
+        assert_eq!(found.fork_count, 0);
         assert_eq!(counting.kind_lists.get(), 1);
         assert_eq!(counting.kinds.get(), KindOf::ALL.len() + 2);
     }
@@ -963,7 +970,7 @@ mod tests {
         let claim = world.put("claim", &fields, "\n");
         fork(&world, &claim, &fields);
         let before = checked(&world);
-        assert_eq!(before.forks, 1);
+        assert_eq!(before.fork_count, 1);
         assert_eq!(before.problems, []);
 
         forks::resolve(&deps, claim.as_str()).unwrap();

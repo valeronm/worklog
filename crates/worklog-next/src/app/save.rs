@@ -78,15 +78,19 @@ pub(super) fn stepped(
     target.checked(deps, &next, body, label, Fork::Refused)
 }
 
-/// A version that passed every check against the store as it was, not stored yet.
-pub(super) struct Admitted(Version);
+// A version that passed every check against the store as it was, not stored yet.
+pub(super) struct Admitted {
+    version: Version,
+    label: String,
+}
 
 impl Admitted {
     pub(super) fn store(self, deps: &Deps) -> Result<Written, Failure> {
-        deps.store.put(&self.0)?;
+        deps.store.put(&self.version)?;
         Ok(Written {
-            document: self.0.envelope.document,
-            version: self.0.id,
+            document: self.version.envelope.document,
+            label: self.label,
+            version: self.version.id,
         })
     }
 }
@@ -127,7 +131,7 @@ impl<'a, 'b> Target<'a, 'b> {
                 None if origin == Origin::Direct && document.heads().is_empty() => {
                     format!("new {kind}")
                 }
-                None => id.short().to_owned(),
+                None => lookup.label(id)?,
             },
         };
         Ok(Target {
@@ -295,7 +299,11 @@ impl<'a, 'b> Target<'a, 'b> {
                 Origin::Direct => self.refusal("nothing would change"),
             });
         }
-        self.composed(deps, fields, body, label).map(Admitted)
+        let id = self.document.id();
+        Ok(Admitted {
+            label: self.lookup.label_of(&next.content, id)?,
+            version: self.composed(deps, fields, body, label)?,
+        })
     }
 
     fn dependents(&self) -> Result<(), Failure> {
@@ -516,6 +524,28 @@ mod tests {
     }
 
     #[test]
+    fn what_was_stored_carries_the_label_the_version_gives_the_document() {
+        let (world, lantern) = world();
+        new_topic(&world, "phone");
+        assert_eq!(save(&world.deps(), "phone").unwrap().label, "phone");
+        let renamed = crate::app::amend::rename(&world.deps(), "lantern", "lamp").unwrap();
+        assert_eq!(
+            (&renamed.document, renamed.label.as_str()),
+            (&lantern, "lamp")
+        );
+
+        crate::app::testing::topic(&world, "atlas", "");
+        let relay = crate::app::testing::fact(&world, &lantern, "relay", "");
+        let moved = crate::app::bulk::move_to(&world.deps(), &["lamp/relay"], "lamp", "atlas");
+        let moved = moved.unwrap();
+        assert_eq!(moved.len(), 1);
+        assert_eq!(
+            (&moved[0].document, moved[0].label.as_str()),
+            (&relay, "atlas/relay")
+        );
+    }
+
+    #[test]
     fn a_new_topic_is_stored_as_a_first_version_and_its_draft_is_gone() {
         let (world, _) = world();
         let phone = new_topic(&world, "phone");
@@ -529,7 +559,7 @@ mod tests {
         );
         assert_eq!(stored.envelope.change, "new");
         assert!(stored.envelope.parents.is_empty());
-        assert_eq!(Some(&stored.envelope.machine), world.host.0.as_ref());
+        assert_eq!(Some(&stored.envelope.machine), world.host.bound().as_ref());
         assert_eq!(stored.envelope.written, world.clock.0);
         assert!(!open(&world, &phone));
     }
@@ -1102,7 +1132,7 @@ mod tests {
         assert_eq!(stored.fields, ended);
         assert_eq!(stored.envelope.change, "end");
         assert_eq!(stored.envelope.parents, vec![root.id]);
-        assert_eq!(stored.links.0.get("desk"), Some(&world.host.0));
+        assert_eq!(stored.links.0.get("desk"), Some(&world.host.bound()));
 
         let planted = first(&lantern, "topic", "name = \"x\"", "\n").id;
         world

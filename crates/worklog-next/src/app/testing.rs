@@ -30,7 +30,7 @@ impl World {
             drafts: MemoryDrafts::default(),
             ids: SequenceIds::default(),
             clock: FixedClock::at("2026-10-09T18:22:41.118204+01:00"),
-            host: FixedHost(Some(first_minted()), None),
+            host: FixedHost::new(Some(first_minted()), None),
         }
     }
 
@@ -44,12 +44,12 @@ impl World {
         }
     }
 
-    pub fn lookup(&self) -> Lookup<'_> {
+    pub(in crate::app) fn lookup(&self) -> Lookup<'_> {
         Lookup::new(Stored::new(&self.store))
     }
 
     pub fn machine(&self) -> DocumentId {
-        self.host.0.clone().expect("a host with a machine topic")
+        self.host.bound().expect("a host with a machine topic")
     }
 
     /// Stores a first version with these fields (TOML, references as ids) and returns its id.

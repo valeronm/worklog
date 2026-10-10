@@ -1,19 +1,20 @@
 use std::collections::BTreeSet;
 use std::rc::Rc;
 
-use crate::app::heads::{ended_for, held_under, is_forked, label_or_short, row_head};
+use serde::Serialize;
+
+use crate::app::heads::{ended_for, held_under, is_forked, label_of, labeling_topic, row_head};
 use crate::app::index::Topics;
 use crate::app::lookup::Lookup;
 use crate::app::{Deps, Failure};
 use crate::domain::document::Document;
 use crate::domain::id::DocumentId;
-use crate::domain::schema::address::displayed;
 use crate::domain::schema::{Content, Date, KindOf, Record, Trigger};
 use crate::domain::version::Version;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Row {
-    pub id: DocumentId,
+    pub document: DocumentId,
     pub kind: KindOf,
     pub label: String,
     /// Empty for a claim.
@@ -45,14 +46,11 @@ pub(super) fn row<'d>(topics: &Topics, document: &'d Document) -> Option<Shown<'
         Content::Followup(followup) => (followup.summary.clone(), labels(&followup.topics)),
         Content::Claim(claim) => (String::new(), labels(std::slice::from_ref(&claim.topic))),
     };
-    let topic_name = match &record.content {
-        Content::Fact(fact) => topics.name(&fact.topic),
-        _ => None,
-    };
+    let topic_name = labeling_topic(&record.content).and_then(|topic| topics.name(topic));
     let row = Row {
         kind: record.content.kind(),
-        label: label_or_short(displayed(&record.content, topic_name), &id),
-        id,
+        label: label_of(&record.content, topic_name, &id),
+        document: id,
         summary,
         topics: shown,
         forked: is_forked(document),
@@ -97,13 +95,14 @@ pub(super) fn reading<'a>(
     Ok((lookup, topics, topic))
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum TriggerShown {
     LookAgain { on: Date, why: String },
-    Touching(String),
+    Touching { topic: String },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct FollowupRow {
     pub row: Row,
     pub trigger: Option<TriggerShown>,
@@ -130,7 +129,9 @@ pub(super) fn followup_rows(
                 (Some(TriggerShown::LookAgain { on, why }), on <= today)
             }
             Some(Trigger::Touching(topic)) => (
-                Some(TriggerShown::Touching(topics.label(&topic))),
+                Some(TriggerShown::Touching {
+                    topic: topics.label(&topic),
+                }),
                 counted.contains(&topic),
             ),
             None => (None, false),
@@ -147,10 +148,10 @@ pub(super) fn followup_rows(
         let (rank, on) = match (&row.trigger, row.due) {
             (Some(TriggerShown::LookAgain { on, .. }), true) => (0, Some(*on)),
             (Some(TriggerShown::LookAgain { on, .. }), false) => (1, Some(*on)),
-            (Some(TriggerShown::Touching(_)), _) => (2, None),
+            (Some(TriggerShown::Touching { .. }), _) => (2, None),
             (None, _) => (3, None),
         };
-        (rank, on, row.row.id.short().to_owned())
+        (rank, on, row.row.document.short().to_owned())
     });
     Ok(rows)
 }
@@ -158,7 +159,7 @@ pub(super) fn followup_rows(
 pub(super) fn by_label<T>(rows: &mut [T], row_of: impl Fn(&T) -> &Row) {
     rows.sort_by(|a, b| {
         let (a, b) = (row_of(a), row_of(b));
-        (&a.label, &a.id).cmp(&(&b.label, &b.id))
+        (&a.label, &a.document).cmp(&(&b.label, &b.document))
     });
 }
 
@@ -244,7 +245,7 @@ mod tests {
         assert_eq!(fact_row.kind, KindOf::Fact);
         assert_eq!(fact_row.label, "lantern/relay-pin");
         assert_eq!(fact_row.topics, ["lantern"]);
-        assert_eq!(fact_row.id, relay);
+        assert_eq!(fact_row.document, relay);
 
         let entry_row = shown(&driver);
         assert_eq!(entry_row.label, "2026-10-08-lamp-driver");
@@ -257,7 +258,8 @@ mod tests {
 
         let claim_row = shown(&claim);
         assert_eq!(claim_row.kind, KindOf::Claim);
-        assert_eq!(claim_row.label, claim.short());
+        assert_eq!(claim_row.label, "lantern anywhere");
+        assert_eq!(claim_row.document, claim);
         assert_eq!(claim_row.summary, "");
         assert_eq!(claim_row.topics, ["lantern"]);
     }
@@ -606,12 +608,15 @@ mod tests {
         let mut documents = lookup.of_kind(KindOf::Followup).unwrap();
         documents.reverse();
         let given = shown(&topics, &documents, false);
-        let given_shorts: Vec<&str> = given.iter().map(|shown| shown.row.id.short()).collect();
+        let given_shorts: Vec<&str> = given
+            .iter()
+            .map(|shown| shown.row.document.short())
+            .collect();
         assert_eq!(given_shorts, ["c1c1c1c1", "b1b1b1b1", "a1a1a1a1"]);
 
         let today = Date::parse("2026-10-09").unwrap();
         let rows = followup_rows(&lookup, &topics, given, today, &BTreeSet::new()).unwrap();
-        let shorts: Vec<&str> = rows.iter().map(|row| row.row.id.short()).collect();
+        let shorts: Vec<&str> = rows.iter().map(|row| row.row.document.short()).collect();
         assert_eq!(shorts, ["a1a1a1a1", "b1b1b1b1", "c1c1c1c1"]);
     }
 }

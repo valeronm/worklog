@@ -23,7 +23,7 @@ impl MemoryStore {
             .borrow_mut()
             .entry(document.clone())
             .or_default()
-            .push(Unreadable { id: version, why });
+            .push(Unreadable { version, why });
     }
 
     fn held(&self, id: &DocumentId) -> Document {
@@ -124,8 +124,8 @@ impl Store for MemoryStore {
                     .flat_map(|(document, files)| {
                         files
                             .iter()
-                            .filter(|file| file.id.starts_with(prefix))
-                            .map(|file| (document.clone(), file.id.clone()))
+                            .filter(|file| file.version.starts_with(prefix))
+                            .map(|file| (document.clone(), file.version.clone()))
                     }),
             )
             .collect();
@@ -203,16 +203,75 @@ impl Clock for FixedClock {
     }
 }
 
-/// The machine topic and the home directory.
-pub struct FixedHost(pub Option<DocumentId>, pub Option<String>);
+pub struct FixedHost {
+    machine: RefCell<Option<DocumentId>>,
+    home: Option<String>,
+    binds: bool,
+    links: Vec<(String, String)>,
+}
+
+const FIXED_HOST: &str = "memory:host";
+
+impl FixedHost {
+    #[must_use]
+    pub fn new(machine: Option<DocumentId>, home: Option<String>) -> FixedHost {
+        FixedHost {
+            machine: RefCell::new(machine),
+            home,
+            binds: true,
+            links: Vec::new(),
+        }
+    }
+
+    #[must_use]
+    pub fn bound(&self) -> Option<DocumentId> {
+        self.machine.borrow().clone()
+    }
+
+    pub fn set_machine(&mut self, machine: Option<DocumentId>) {
+        self.machine.replace(machine);
+    }
+
+    pub fn set_home(&mut self, home: Option<String>) {
+        self.home = home;
+    }
+
+    pub fn set_binds(&mut self, binds: bool) {
+        self.binds = binds;
+    }
+
+    /// Makes `link`, and every path under it, resolve to `target` and the same path under it.
+    pub fn link(&mut self, link: &str, target: &str) {
+        self.links.push((link.to_owned(), target.to_owned()));
+    }
+}
 
 impl Host for FixedHost {
     fn machine(&self) -> Result<Option<DocumentId>, StoreError> {
-        Ok(self.0.clone())
+        Ok(self.bound())
     }
 
     fn home(&self) -> Result<Option<String>, StoreError> {
-        Ok(self.1.clone())
+        Ok(self.home.clone())
+    }
+
+    fn bind(&self, machine: &DocumentId) -> Result<(), StoreError> {
+        if !self.binds {
+            return Err(StoreError::io(FIXED_HOST, "does not bind"));
+        }
+        if self.bound().is_some() {
+            return Err(StoreError::io(FIXED_HOST, "is already bound"));
+        }
+        self.machine.replace(Some(machine.clone()));
+        Ok(())
+    }
+
+    fn resolve(&self, absolute: &str) -> Result<String, StoreError> {
+        let through = self.links.iter().find_map(|(link, target)| {
+            let rest = absolute.strip_prefix(link.as_str())?;
+            (rest.is_empty() || rest.starts_with('/')).then(|| format!("{target}{rest}"))
+        });
+        Ok(through.unwrap_or_else(|| absolute.to_owned()))
     }
 }
 
@@ -533,11 +592,50 @@ mod tests {
         let clock = FixedClock::at("2026-10-09T18:22:41.118204+01:00");
         assert_eq!(clock.now(), clock.now());
         assert_eq!(clock.now().day(), "2026-10-09");
-        let host = FixedHost(Some(atlas()), Some("/home/desk".to_owned()));
+        let host = FixedHost::new(Some(atlas()), Some("/home/desk".to_owned()));
         assert_eq!(host.machine(), Ok(Some(atlas())));
         assert_eq!(host.home(), Ok(Some("/home/desk".to_owned())));
-        assert_eq!(FixedHost(None, None).machine(), Ok(None));
-        assert_eq!(FixedHost(None, None).home(), Ok(None));
+        assert_eq!(FixedHost::new(None, None).machine(), Ok(None));
+        assert_eq!(FixedHost::new(None, None).home(), Ok(None));
+    }
+
+    #[test]
+    fn a_fixed_host_reads_a_path_through_the_links_it_is_given() {
+        let mut host = FixedHost::new(None, None);
+        assert_eq!(
+            host.resolve("/home/desk/link"),
+            Ok("/home/desk/link".to_owned())
+        );
+        host.link("/home/desk/link", "/home/desk/projects/lantern");
+        for (given, read) in [
+            ("/home/desk/link", "/home/desk/projects/lantern"),
+            ("/home/desk/link/case", "/home/desk/projects/lantern/case"),
+            ("/home/desk/linked", "/home/desk/linked"),
+            ("/home/desk", "/home/desk"),
+        ] {
+            assert_eq!(host.resolve(given), Ok(read.to_owned()), "{given}");
+        }
+    }
+
+    #[test]
+    fn a_fixed_host_is_bound_once_and_only_when_it_binds() {
+        let mut host = FixedHost::new(None, Some("/home/desk".to_owned()));
+        host.set_binds(false);
+        assert!(host.bind(&lantern()).is_err());
+        assert_eq!(host.machine(), Ok(None));
+
+        host.set_binds(true);
+        host.bind(&lantern()).unwrap();
+        assert_eq!(host.machine(), Ok(Some(lantern())));
+        assert_eq!(host.bound(), Some(lantern()));
+        assert_eq!(host.home(), Ok(Some("/home/desk".to_owned())));
+        assert!(host.bind(&atlas()).is_err());
+        assert_eq!(host.machine(), Ok(Some(lantern())));
+
+        host.set_machine(None);
+        host.set_home(None);
+        assert_eq!(host.machine(), Ok(None));
+        assert_eq!(host.home(), Ok(None));
     }
 
     #[test]

@@ -2,7 +2,9 @@ use std::cmp::Reverse;
 use std::collections::BTreeSet;
 use std::rc::Rc;
 
-use crate::app::heads::{is_forked, label_or_short, machine_label, version_is_ended};
+use serde::Serialize;
+
+use crate::app::heads::{ended_of, is_forked, label_or_short, machine_label};
 use crate::app::index::Topics;
 use crate::app::lookup::Lookup;
 use crate::app::rows::{FollowupRow, Row, by_label, documents, followup_rows, reading, row, shown};
@@ -14,45 +16,47 @@ use crate::domain::schema::kind::Reference;
 use crate::domain::schema::{Content, Date, KindOf};
 use crate::domain::version::Stamp;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct TopicRow {
     pub row: Row,
     pub part_of: Vec<String>,
     pub uses: Vec<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct FactRow {
     pub row: Row,
     pub confirmed: Date,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct EntryRow {
     pub row: Row,
     pub date: Date,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ClaimRow {
-    pub id: DocumentId,
+    pub document: DocumentId,
     pub machine: String,
     pub topic: String,
     pub directory: Option<String>,
     pub forked: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ForkHead {
-    pub id: VersionId,
+    pub version: VersionId,
     pub written: Stamp,
     pub machine: String,
-    pub ended: bool,
+    pub ended: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ForkRow {
-    pub id: DocumentId,
+    pub document: DocumentId,
+    /// The label of `row`, or the start of the document's id when there is none.
+    pub label: String,
     /// None when no head reads as a record.
     pub row: Option<Row>,
     /// In head order; one that does not read as a record is not ended.
@@ -68,8 +72,8 @@ pub fn topics(deps: &Deps, ended: bool) -> Result<Vec<TopicRow>, Failure> {
     let mut rows: Vec<TopicRow> = shown(&topics, &documents, ended)
         .into_iter()
         .map(|shown| TopicRow {
-            part_of: labels(topics.part_of(&shown.row.id)),
-            uses: labels(topics.uses(&shown.row.id)),
+            part_of: labels(topics.part_of(&shown.row.document)),
+            uses: labels(topics.uses(&shown.row.document)),
             row: shown.row,
         })
         .collect();
@@ -194,14 +198,16 @@ pub fn where_(
         .into_iter()
         .filter(|(_, claim)| topic.as_ref().is_none_or(|topic| *topic == claim.topic))
         .map(|(document, claim)| ClaimRow {
-            id: document.id().clone(),
+            document: document.id().clone(),
             machine: topics.label(&claim.machine),
             topic: topics.label(&claim.topic),
             directory: claim.directory.map(|directory| directory.to_string()),
             forked: is_forked(&document),
         });
     let mut rows: Vec<ClaimRow> = rows.collect();
-    rows.sort_by(|a, b| (&a.topic, &a.directory, &a.id).cmp(&(&b.topic, &b.directory, &b.id)));
+    rows.sort_by(|a, b| {
+        (&a.topic, &a.directory, &a.document).cmp(&(&b.topic, &b.directory, &b.document))
+    });
     Ok(rows)
 }
 
@@ -216,22 +222,22 @@ pub fn forks(deps: &Deps) -> Result<Vec<ForkRow>, Failure> {
             .heads()
             .into_iter()
             .map(|head| ForkHead {
-                id: head.id.clone(),
+                version: head.id.clone(),
                 written: head.envelope.written.clone(),
                 machine: machine_label(head, topics.name(&head.envelope.machine)),
-                ended: version_is_ended(head),
+                ended: ended_of(head),
             })
             .collect();
+        let row = row(&topics, &document).map(|shown| shown.row);
+        let label = row.as_ref().map(|row| row.label.clone());
         rows.push(ForkRow {
-            id: document.id().clone(),
-            row: row(&topics, &document).map(|shown| shown.row),
+            document: document.id().clone(),
+            label: label_or_short(label, document.id()),
+            row,
             heads,
         });
     }
-    rows.sort_by_cached_key(|fork| {
-        let label = fork.row.as_ref().map(|row| row.label.clone());
-        (label_or_short(label, &fork.id), fork.id.clone())
-    });
+    rows.sort_by(|a, b| (&a.label, &a.document).cmp(&(&b.label, &b.document)));
     Ok(rows)
 }
 
@@ -461,7 +467,7 @@ mod tests {
         let deps = world.deps();
 
         let rows = followups(&deps, None, false).unwrap();
-        let ids: Vec<&DocumentId> = rows.iter().map(|r| &r.row.id).collect();
+        let ids: Vec<&DocumentId> = rows.iter().map(|r| &r.row.document).collect();
         assert_eq!(ids, [&early, &today, &later, &touching, &bare]);
         let due: Vec<bool> = rows.iter().map(|r| r.due).collect();
         assert_eq!(due, [true, true, false, false, false]);
@@ -474,7 +480,9 @@ mod tests {
         );
         assert_eq!(
             rows[3].trigger,
-            Some(TriggerShown::Touching("atlas".to_owned()))
+            Some(TriggerShown::Touching {
+                topic: "atlas".to_owned()
+            })
         );
         assert_eq!(rows[4].trigger, None);
 
@@ -499,7 +507,7 @@ mod tests {
 
         let rows = followups(&deps, Some("2026-10-08-lamp-driver"), false).unwrap();
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].row.id, named);
+        assert_eq!(rows[0].row.document, named);
         assert_eq!(rows[0].entry.as_deref(), Some("2026-10-08-lamp-driver"));
         assert_eq!(rows[0].about.as_deref(), Some("lantern/relay-pin"));
         let text = refused(followups(&deps, Some("lantern/relay-pin"), false));
@@ -560,7 +568,7 @@ mod tests {
                 ("lantern", Some("~/b"))
             ]
         );
-        assert_eq!(mine[1].id, bare);
+        assert_eq!(mine[1].document, bare);
         assert_eq!(mine[0].machine, "desk");
         assert!(!mine[0].forked);
 
@@ -615,20 +623,24 @@ mod tests {
             ["atlas", "lantern/relay-pin"]
         );
         assert!(rows.iter().all(|f| f.row.as_ref().unwrap().forked));
-        assert_eq!(rows[1].id, relay);
+        assert_eq!(
+            rows.iter().map(|f| f.label.as_str()).collect::<Vec<_>>(),
+            ["atlas", "lantern/relay-pin"]
+        );
+        assert_eq!(rows[1].document, relay);
         let stored = world.store.document(&relay).unwrap();
         let in_store: Vec<VersionId> = stored.heads().iter().map(|h| h.id.clone()).collect();
-        let listed: Vec<VersionId> = rows[1].heads.iter().map(|h| h.id.clone()).collect();
+        let listed: Vec<VersionId> = rows[1].heads.iter().map(|h| h.version.clone()).collect();
         assert_eq!(listed, in_store);
         for shown in &rows[1].heads {
             assert_eq!(shown.machine, "desk");
-            let (written, ended) = if shown.id == left.id {
-                (&left.envelope.written, false)
+            let (written, ended) = if shown.version == left.id {
+                (&left.envelope.written, None)
             } else {
-                assert_eq!(shown.id, right.id);
-                (&right.envelope.written, true)
+                assert_eq!(shown.version, right.id);
+                (&right.envelope.written, Some("false"))
             };
-            assert_eq!((&shown.written, shown.ended), (written, ended));
+            assert_eq!((&shown.written, shown.ended.as_deref()), (written, ended));
         }
     }
 
@@ -654,7 +666,7 @@ mod tests {
         let shown: Vec<(VersionId, &str)> = rows[0]
             .heads
             .iter()
-            .map(|head| (head.id.clone(), head.machine.as_str()))
+            .map(|head| (head.version.clone(), head.machine.as_str()))
             .collect();
         assert_eq!(shown, written);
     }
@@ -707,18 +719,26 @@ mod tests {
         let rows = forks(&deps).unwrap();
         let shown: Vec<(&DocumentId, Option<&str>)> = rows
             .iter()
-            .map(|fork| (&fork.id, fork.row.as_ref().map(|row| row.label.as_str())))
+            .map(|fork| {
+                (
+                    &fork.document,
+                    fork.row.as_ref().map(|row| row.label.as_str()),
+                )
+            })
             .collect();
         assert_eq!(shown, [(&atlas, None), (&relay, Some("lantern/relay-pin"))]);
-        let mut listed: Vec<&VersionId> = rows[0].heads.iter().map(|head| &head.id).collect();
+        let mut listed: Vec<&VersionId> = rows[0].heads.iter().map(|head| &head.version).collect();
         listed.sort();
         let mut stored: Vec<&VersionId> = unread.iter().map(|version| &version.id).collect();
         stored.sort();
         assert_eq!(listed, stored);
         for shown in &rows[0].heads {
-            assert_eq!((shown.machine.as_str(), shown.ended), ("desk", false));
+            assert_eq!((shown.machine.as_str(), &shown.ended), ("desk", &None));
         }
-        assert_eq!(crate::app::check::check(&deps).unwrap().forks, rows.len());
+        assert_eq!(
+            crate::app::check::check(&deps).unwrap().fork_count,
+            rows.len()
+        );
     }
 
     #[test]
@@ -828,7 +848,7 @@ mod tests {
         let deps = world.deps();
 
         let rows = followups(&deps, None, false).unwrap();
-        let shorts: Vec<&str> = rows.iter().map(|r| r.row.id.short()).collect();
+        let shorts: Vec<&str> = rows.iter().map(|r| r.row.document.short()).collect();
         assert_eq!(
             shorts,
             [

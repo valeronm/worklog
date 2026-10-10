@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::fmt;
 
+use serde::Serialize;
 use toml::Value;
 
 use crate::domain::id::{DocumentId, VersionId};
@@ -25,13 +26,15 @@ mod rows;
 mod rules;
 pub mod save;
 pub mod search;
+pub mod setup;
 pub mod show;
 #[cfg(test)]
-mod testing;
+pub(crate) mod testing;
 
 pub use lookup::Stored;
 pub use rows::{FollowupRow, Row, TriggerShown};
 
+#[derive(Clone, Copy)]
 pub struct Deps<'a> {
     pub store: Stored<'a>,
     pub drafts: &'a dyn Drafts,
@@ -52,6 +55,11 @@ pub enum Failure {
 impl Failure {
     pub fn at(what: impl fmt::Display, why: impl fmt::Display) -> Failure {
         Failure::Refused(format!("{what}: {why}"))
+    }
+
+    #[must_use]
+    pub fn not_set_up() -> Failure {
+        Failure::Refused("this host is not set up; run `worklog-next init`".to_owned())
     }
 }
 
@@ -98,19 +106,22 @@ impl Failed {
     }
 }
 
-pub(super) fn counted(count: usize, one: &str, several: &str) -> String {
+pub(crate) fn counted(count: usize, one: &str, several: &str) -> String {
     format!("{count} {}", if count == 1 { one } else { several })
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Written {
     pub document: DocumentId,
+    /// The document's label as of the stored version.
+    pub label: String,
     pub version: VersionId,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct DraftRef {
     pub document: DocumentId,
+    #[serde(rename = "path")]
     pub location: String,
 }
 
@@ -119,15 +130,28 @@ impl Deps<'_> {
         Ok(Date::parse(&self.clock.now().day())?)
     }
 
-    /// Refuses when the host has no machine topic.
+    /// Refuses when the host is not set up.
     pub fn machine(&self) -> Result<DocumentId, Failure> {
-        self.host.machine()?.ok_or_else(|| {
-            Failure::Refused("this host has no machine topic; set the host up first".to_owned())
-        })
+        self.host.machine()?.ok_or_else(Failure::not_set_up)
+    }
+
+    // Only a path from the root is one the host's file system reads, and `..` after a link
+    // means the directory the link is in only while the link is not yet followed.
+    fn on_host(&self, path: &str) -> Result<String, StoreError> {
+        if path.starts_with('/') {
+            self.host.resolve(&Directory::folded(path))
+        } else {
+            Ok(path.to_owned())
+        }
+    }
+
+    pub(super) fn home(&self) -> Result<Option<String>, Failure> {
+        let home = self.host.home()?;
+        Ok(home.map(|home| self.on_host(&home)).transpose()?)
     }
 
     pub(super) fn directory(&self, given: &str) -> Result<Directory, Failure> {
-        Directory::on_host(given, self.host.home()?.as_deref())
+        Directory::on_host(&self.on_host(given)?, self.home()?.as_deref())
             .map_err(|error| Failure::Usage(format!("{given:?}: {error}")))
     }
 }
@@ -163,13 +187,47 @@ mod tests {
     }
 
     #[test]
+    fn a_directory_and_the_home_it_is_folded_under_are_read_as_the_host_resolves_them() {
+        let store = MemoryStore::default();
+        let drafts = MemoryDrafts::default();
+        let ids = SequenceIds::default();
+        let clock = FixedClock::at("2026-10-09T18:22:41.118204+01:00");
+        let mut host = FixedHost::new(Some(atlas()), Some("/home/desk".to_owned()));
+        host.link("/home/desk", "/atlas/desk");
+        host.link("/srv/link", "/atlas/desk/projects/lantern");
+        host.link("/srv/phone", "/atlas/phone");
+        let deps = Deps {
+            store: Stored::new(&store),
+            drafts: &drafts,
+            ids: &ids,
+            clock: &clock,
+            host: &host,
+        };
+        for (given, held) in [
+            ("/home/desk/projects/lantern", "~/projects/lantern"),
+            ("/atlas/desk/projects/lantern", "~/projects/lantern"),
+            ("/srv/link/case", "~/projects/lantern/case"),
+            ("/home/desk", "~"),
+            ("/srv/phone/case", "/atlas/phone/case"),
+            ("/srv/lantern", "/srv/lantern"),
+            ("~/projects/lantern", "~/projects/lantern"),
+        ] {
+            assert_eq!(deps.directory(given).unwrap().as_str(), held, "{given}");
+        }
+        let Err(Failure::Usage(text)) = deps.directory("srv/link") else {
+            panic!("a path that is not from the root is no directory");
+        };
+        assert!(text.starts_with("\"srv/link\": "), "{text}");
+    }
+
+    #[test]
     fn today_is_the_clock_s_day_and_the_machine_needs_a_host() {
         let store = MemoryStore::default();
         let drafts = MemoryDrafts::default();
         let ids = SequenceIds::default();
         let clock = FixedClock::at("2026-10-09T18:22:41.118204+01:00");
-        let bare = FixedHost(None, None);
-        let set_up = FixedHost(Some(atlas()), None);
+        let bare = FixedHost::new(None, None);
+        let set_up = FixedHost::new(Some(atlas()), None);
         let deps = |host| Deps {
             store: Stored::new(&store),
             drafts: &drafts,
@@ -185,7 +243,7 @@ mod tests {
         let Err(Failure::Refused(text)) = deps(&bare).machine() else {
             panic!("a host with no machine topic must be refused");
         };
-        assert!(text.contains("has no machine topic"), "{text}");
+        assert_eq!(text, "this host is not set up; run `worklog-next init`");
         assert_eq!(deps(&set_up).machine(), Ok(atlas()));
     }
 }

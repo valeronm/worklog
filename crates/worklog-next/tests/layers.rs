@@ -75,6 +75,41 @@ fn no_module_outside_the_schema_names_it() {
 }
 
 #[test]
+fn a_result_is_given_its_json_form_by_the_command_line_alone() {
+    for layer in ["domain", "app", "fs"] {
+        reaches_nothing_in(layer, &["serde_json"]);
+    }
+}
+
+#[test]
+fn a_result_s_json_carries_every_field_under_the_convention() {
+    let mut found = Vec::new();
+    sources(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+        &mut found,
+    );
+    assert!(!found.is_empty());
+    for (path, text) in found {
+        let text: String = text.split_whitespace().collect();
+        for needle in [
+            "serde(skip",
+            "skip_serializing",
+            "serde(flatten",
+            "serde(untagged",
+        ] {
+            assert!(!text.contains(needle), "{path} holds `{needle}`");
+        }
+        for (at, _) in text.match_indices("rename_all") {
+            let cased = &text[at..];
+            assert!(
+                cased.starts_with("rename_all=\"snake_case\""),
+                "{path} renames its keys to another case"
+            );
+        }
+    }
+}
+
+#[test]
 fn the_app_reaches_the_host_only_through_ports() {
     reaches_nothing_in(
         "app",
@@ -87,6 +122,11 @@ fn the_app_reaches_the_host_only_through_ports() {
             "crate::fs",
         ],
     );
+}
+
+#[test]
+fn the_command_line_builds_no_adapter() {
+    reaches_nothing_in("cli", &["crate::fs"]);
 }
 
 // A chain rustfmt breaks across lines matches only with all whitespace removed.
@@ -104,12 +144,13 @@ fn app() -> std::path::PathBuf {
         .join("app")
 }
 
-const WRITES: [&str; 8] = [
-    "amend", "bulk", "claim", "draft", "followup", "fork", "live", "save",
+const WRITES: [&str; 9] = [
+    "amend", "bulk", "claim", "draft", "followup", "fork", "live", "save", "setup",
 ];
 const SHARED: [&str; 5] = ["heads", "lookup", "mod", "rules", "testing"];
-const WRITES_A_READ_MAY_NOT_USE: [&str; 7] =
-    ["amend", "bulk", "claim", "followup", "fork", "live", "save"];
+const WRITES_A_READ_MAY_NOT_USE: [&str; 8] = [
+    "amend", "bulk", "claim", "followup", "fork", "live", "save", "setup",
+];
 
 const TEST_SUPPORT: &str = "testing";
 

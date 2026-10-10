@@ -2,6 +2,8 @@ use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
+use serde::Serialize;
+
 use crate::app::heads::is_forked;
 use crate::app::index::Topics;
 use crate::app::lookup::Lookup;
@@ -14,7 +16,7 @@ use crate::domain::document::Document;
 use crate::domain::id::DocumentId;
 use crate::domain::schema::{Claim, Content, Date, Directory, KindOf};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Context {
     pub machine: String,
     /// The claimed topics, closest directory first, then what they reach, then what the
@@ -23,16 +25,16 @@ pub struct Context {
     /// By date, then those waiting on a topic.
     pub due: Vec<FollowupRow>,
     /// The open followups that are not due.
-    pub open: usize,
+    pub open_count: usize,
     /// The forked ones among the loaded topics, their facts and ideas, the open followups and
     /// the claims that loaded a topic, by label.
     pub forks: Vec<Row>,
-    pub drafts: usize,
+    pub draft_count: usize,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Loaded {
-    pub id: DocumentId,
+    pub document: DocumentId,
     pub label: String,
     pub summary: String,
     pub via: Via,
@@ -43,25 +45,27 @@ pub struct Loaded {
     pub parts: Vec<Part>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum Via {
     Claim { directory: Option<String> },
     Edge,
     Machine,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Part {
     pub label: String,
     /// The facts and ideas of the part and of everything it covers.
-    pub facts: usize,
-    pub open: usize,
+    pub fact_count: usize,
+    pub open_count: usize,
 }
 
-/// What a session starting in `directory` is opened with. A `directory` at or under the
-/// host's home is compared with a claim's in the `~/` form, any other as given, and one no
-/// claim could carry is a usage failure. Refuses a host with no machine topic or with an
-/// ended one.
+/// What a session starting in `directory` is opened with. A `directory` from the root is
+/// read as the host resolves it, `.` and `..` folded as typed first, and at or under the
+/// host's home is compared with a claim's in the `~/` form; one no claim could carry is a
+/// usage failure. A host with no machine topic is refused as not set up, and one whose
+/// machine topic is ended until that topic is reopened.
 pub fn context(deps: &Deps, directory: &str) -> Result<Context, Failure> {
     let directory = &deps.directory(directory)?;
     let machine = deps.machine()?;
@@ -120,7 +124,7 @@ pub fn context(deps: &Deps, directory: &str) -> Result<Context, Failure> {
             None => Via::Machine,
         };
         shown_topics.push(Loaded {
-            id: id.clone(),
+            document: id.clone(),
             label: topics.label(id),
             summary: topics.summary(id).unwrap_or_default().to_owned(),
             via,
@@ -129,8 +133,8 @@ pub fn context(deps: &Deps, directory: &str) -> Result<Context, Failure> {
             parts: (parts.remove(id).unwrap_or_default().into_iter())
                 .map(|(label, covered)| Part {
                     label,
-                    facts: filed(&facts, &covered).len(),
-                    open: filed(&followups, &covered).len(),
+                    fact_count: filed(&facts, &covered).len(),
+                    open_count: filed(&followups, &covered).len(),
                 })
                 .collect(),
         });
@@ -143,14 +147,14 @@ pub fn context(deps: &Deps, directory: &str) -> Result<Context, Failure> {
         work.into_iter().partition(|followup| followup.due);
 
     by_label(&mut forks, |fork| fork);
-    forks.dedup_by(|a, b| a.id == b.id);
+    forks.dedup_by(|a, b| a.document == b.document);
     Ok(Context {
         machine: topics.label(&machine),
         topics: shown_topics,
-        open: waiting.len(),
+        open_count: waiting.len(),
         due,
         forks,
-        drafts: deps.drafts.list()?.len(),
+        draft_count: deps.drafts.list()?.len(),
     })
 }
 
@@ -378,7 +382,7 @@ mod tests {
                 ("desk", Via::Machine)
             ]
         );
-        assert_eq!(context.topics[0].id, lantern);
+        assert_eq!(context.topics[0].document, lantern);
         assert_eq!(context.topics[0].summary, "s");
     }
 
@@ -578,11 +582,11 @@ mod tests {
 
         let inside = at(&world, "/work");
         assert_eq!(summaries(&inside.due), Vec::<&str>::new());
-        assert_eq!(inside.open, 1);
+        assert_eq!(inside.open_count, 1);
 
         let outside = at(&world, "/other");
         assert_eq!(summaries(&outside.due), ["desk due"]);
-        assert_eq!(outside.open, 2);
+        assert_eq!(outside.open_count, 2);
     }
 
     #[test]
@@ -611,13 +615,15 @@ mod tests {
         assert!(inside.due.iter().all(|row| row.due));
         assert_eq!(
             inside.due[2].trigger,
-            Some(TriggerShown::Touching("lantern".to_owned()))
+            Some(TriggerShown::Touching {
+                topic: "lantern".to_owned()
+            })
         );
-        assert_eq!(inside.open, 3);
+        assert_eq!(inside.open_count, 3);
 
         let outside = at(&world, "/other");
         assert_eq!(summaries(&outside.due), ["touching desk"]);
-        assert_eq!(outside.open, 0);
+        assert_eq!(outside.open_count, 0);
     }
 
     #[test]
@@ -645,20 +651,20 @@ mod tests {
             [
                 Part {
                     label: "atlas".to_owned(),
-                    facts: 3,
-                    open: 2
+                    fact_count: 3,
+                    open_count: 2
                 },
                 Part {
                     label: "compass".to_owned(),
-                    facts: 0,
-                    open: 0
+                    fact_count: 0,
+                    open_count: 0
                 }
             ]
         );
         assert_eq!(of(&context, "relay").parts, []);
         assert!(of(&context, "lantern").facts.is_empty());
         assert_eq!(summaries(&context.due), Vec::<&str>::new());
-        assert_eq!(context.open, 1);
+        assert_eq!(context.open_count, 1);
     }
 
     #[test]
@@ -695,7 +701,7 @@ mod tests {
             [("lantern", claimed("/work")), ("desk", Via::Machine)]
         );
         assert!(context.due.is_empty());
-        assert_eq!(context.open, 0);
+        assert_eq!(context.open_count, 0);
     }
 
     #[test]
@@ -720,16 +726,16 @@ mod tests {
             labels(&context.forks, |row| row),
             [due.short(), waiting.short(), "lantern/pin"]
         );
-        let ids: Vec<&DocumentId> = context.forks.iter().map(|row| &row.id).collect();
+        let ids: Vec<&DocumentId> = context.forks.iter().map(|row| &row.document).collect();
         assert_eq!(ids, [&due, &waiting, &pin]);
         assert!(context.forks.iter().all(|row| row.forked));
-        assert_eq!(context.open, 1);
+        assert_eq!(context.open_count, 1);
     }
 
     #[test]
     fn the_drafts_on_this_machine_are_counted() {
         let (world, [lantern, atlas]) = world_of(["lantern", "atlas"]);
-        assert_eq!(at(&world, "/work").drafts, 0);
+        assert_eq!(at(&world, "/work").draft_count, 0);
         for id in [lantern, atlas] {
             let draft = Draft::first(
                 id,
@@ -739,16 +745,16 @@ mod tests {
             );
             world.drafts.write(&draft).unwrap();
         }
-        assert_eq!(at(&world, "/work").drafts, 2);
+        assert_eq!(at(&world, "/work").draft_count, 2);
     }
 
     #[test]
     fn a_host_with_no_machine_topic_is_refused() {
         let (mut world, [lantern]) = world_of(["lantern"]);
         claim(&world, &lantern, "/work");
-        world.host = FixedHost(None, None);
+        world.host = FixedHost::new(None, None);
         let text = refused(context(&world.deps(), "/work"));
-        assert!(text.contains("has no machine topic"), "{text}");
+        assert!(text.contains("this host is not set up"), "{text}");
     }
 
     #[test]
@@ -821,7 +827,7 @@ mod tests {
             stored_as_given
         );
 
-        world.host.1 = Some("/home/desk".to_owned());
+        world.host.set_home(Some("/home/desk".to_owned()));
         let in_the_home_form = [("lantern", claimed("~/lantern")), ("desk", Via::Machine)];
         assert_eq!(
             loaded(&at(&world, "/home/desk/lantern/src")),
@@ -835,7 +841,7 @@ mod tests {
 
         let (mut world, [lantern]) = world_of(["lantern"]);
         claim(&world, &lantern, "~");
-        world.host.1 = Some("/home/desk".to_owned());
+        world.host.set_home(Some("/home/desk".to_owned()));
         assert_eq!(
             loaded(&at(&world, "/home/desk"))[0],
             ("lantern", claimed("~"))
@@ -848,6 +854,30 @@ mod tests {
             loaded(&at(&world, "/home/desktop/x")),
             [("desk", Via::Machine)]
         );
+    }
+
+    #[test]
+    fn a_directory_reached_through_a_link_is_covered_by_a_claim_on_what_it_links_to() {
+        let (mut world, [lantern]) = world_of(["lantern"]);
+        claim(&world, &lantern, "~/projects/lantern");
+        world.host.set_home(Some("/home/link".to_owned()));
+        world.host.link("/home/link", "/home/desk");
+        world
+            .host
+            .link("/srv/lantern", "/home/desk/projects/lantern");
+        let through = [
+            ("lantern", claimed("~/projects/lantern")),
+            ("desk", Via::Machine),
+        ];
+        for directory in [
+            "/srv/lantern",
+            "/srv/lantern/case",
+            "/home/link/projects/lantern",
+            "/home/desk/projects/lantern/case",
+        ] {
+            assert_eq!(loaded(&at(&world, directory)), through, "{directory}");
+        }
+        assert_eq!(loaded(&at(&world, "/srv")), [("desk", Via::Machine)]);
     }
 
     #[test]
@@ -867,7 +897,8 @@ mod tests {
             loaded(&context),
             [("lantern", claimed("/work")), ("desk", Via::Machine)]
         );
-        assert_eq!(labels(&context.forks, |row| row), [forked.short()]);
+        assert_eq!(labels(&context.forks, |row| row), ["lantern at /work"]);
+        assert_eq!(context.forks[0].document, forked);
         assert_eq!(context.forks[0].kind, KindOf::Claim);
     }
 
@@ -880,7 +911,7 @@ mod tests {
         followup(&world, &[&atlas, &lantern], "due", &dated("2026-10-01"));
 
         let context = at(&world, "/work");
-        assert_eq!(context.open, 1);
+        assert_eq!(context.open_count, 1);
         assert_eq!(summaries(&context.due), ["due"]);
     }
 
@@ -915,8 +946,8 @@ mod tests {
         let context = at(&world, "/work");
         let part = Part {
             label: "compass".to_owned(),
-            facts: 1,
-            open: 0,
+            fact_count: 1,
+            open_count: 0,
         };
         assert_eq!(of(&context, "lantern").parts, std::slice::from_ref(&part));
         assert_eq!(of(&context, "atlas").parts, [part]);
@@ -976,7 +1007,7 @@ mod tests {
                 && topic
                     .parts
                     .iter()
-                    .all(|part| (part.facts, part.open) == (1, 1))
+                    .all(|part| (part.fact_count, part.open_count) == (1, 1))
         }));
         counting.scans()
     }

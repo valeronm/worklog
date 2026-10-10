@@ -51,7 +51,7 @@ impl fmt::Display for SchemaError {
                 f,
                 "`{text}` is not a name: lowercase letters, digits and hyphens, with a letter, not opening with a date and not shaped as a document id"
             ),
-            SchemaError::NotADate(text) => write!(f, "`{text}` is not a date"),
+            SchemaError::NotADate(text) => write!(f, "`{text}` is not a date (YYYY-MM-DD)"),
             SchemaError::NotAnAddress(text) => write!(f, "`{text}` names no document"),
             SchemaError::ToolOwned(key) => write!(f, "`{key}` is not a draft's to set"),
             SchemaError::SetOnce(key) => write!(f, "`{key}` never changes after it is first set"),

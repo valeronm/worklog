@@ -1,7 +1,9 @@
 use std::rc::Rc;
 
+use serde::Serialize;
+
 use crate::app::draft::{draft_for, draft_label, opened, shown_as};
-use crate::app::heads::{kind_of, machine_label, version_is_ended};
+use crate::app::heads::{ended_of, is_forked, machine_label};
 use crate::app::lookup::{Lookup, names_no_document};
 use crate::app::{Deps, Failure};
 use crate::domain::document::{Document, Unreadable};
@@ -9,59 +11,110 @@ use crate::domain::draft::Draft;
 use crate::domain::id::{DocumentId, VersionId, is_id_prefix};
 use crate::domain::schema::KindOf;
 use crate::domain::schema::address::Found;
-use crate::domain::version::{Stamp, Version};
+use crate::domain::version::{ReadError, Stamp, Version};
 
-#[derive(Clone, Debug, PartialEq)]
+/// A file of the document that does not read as a version.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Unread {
+    pub version: VersionId,
+    pub why: Why,
+}
+
+/// `text` is the reason as a person reads it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum Why {
+    Corrupt { text: String },
+    Newer { format: u32, text: String },
+    Malformed { text: String },
+}
+
+impl Why {
+    #[must_use]
+    pub fn text(&self) -> &str {
+        match self {
+            Why::Corrupt { text } | Why::Newer { text, .. } | Why::Malformed { text } => text,
+        }
+    }
+}
+
+impl From<&Unreadable> for Unread {
+    fn from(file: &Unreadable) -> Unread {
+        let text = file.why.to_string();
+        Unread {
+            version: file.version.clone(),
+            why: match file.why {
+                ReadError::Corrupt => Why::Corrupt { text },
+                ReadError::Newer { format } => Why::Newer { format, text },
+                ReadError::Malformed(_) => Why::Malformed { text },
+            },
+        }
+    }
+}
+
+fn unread(document: &Document) -> Vec<Unread> {
+    document.unreadable().iter().map(Unread::from).collect()
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum Shown {
     Document(ShownDocument),
     Version(ShownVersion),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct ShownDocument {
-    pub id: DocumentId,
-    pub kind: Option<KindOf>,
+    pub document: DocumentId,
+    /// As stored, also for a kind this worklog does not know; `None` when no version reads.
+    pub kind: Option<String>,
     pub label: String,
     pub former: Vec<String>,
+    pub forked: bool,
     /// One when live, several when forked, in head order.
     pub heads: Vec<ShownVersion>,
-    pub unreadable: Vec<Unreadable>,
+    pub unreadable: Vec<Unread>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct ShownVersion {
     pub document: DocumentId,
     pub label: String,
-    pub id: VersionId,
+    pub version: VersionId,
     pub written: Stamp,
     pub machine: String,
     pub change: String,
     pub parents: Vec<VersionId>,
     pub head: bool,
-    pub ended: bool,
+    /// The reason; `None` too for a version that does not read as a record.
+    pub ended: Option<String>,
     /// Every field the version holds, tool-owned ones included, references as labels.
     pub text: String,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct History {
-    pub id: DocumentId,
+    pub document: DocumentId,
     pub label: String,
     /// The one with the most behind it first.
     pub versions: Vec<ShownVersion>,
-    pub unreadable: Vec<Unreadable>,
+    pub unreadable: Vec<Unread>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Diff {
     pub label: String,
     pub sides: Vec<Side>,
     pub after: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Side {
-    pub against: String,
+    /// The version compared against; `None` when there is nothing before `after`.
+    pub against: Option<VersionId>,
+    /// False only when `against` is a version that is not held; true when there is nothing to
+    /// compare against.
+    pub held: bool,
     pub before: String,
 }
 
@@ -87,7 +140,7 @@ fn resolved(lookup: &Lookup, address: &str) -> Result<Option<Resolved>, Failure>
                         .document(&document)?
                         .unreadable()
                         .iter()
-                        .find(|broken| broken.id == version)
+                        .find(|broken| broken.version == version)
                     {
                         return Err(Failure::at(
                             address,
@@ -135,7 +188,7 @@ fn shown_version(
     Ok(ShownVersion {
         document: version.envelope.document.clone(),
         label: label.to_owned(),
-        id: version.id.clone(),
+        version: version.id.clone(),
         written: version.envelope.written.clone(),
         machine: machine_label(
             version,
@@ -144,7 +197,7 @@ fn shown_version(
         change: version.envelope.change.clone(),
         parents: version.envelope.parents.clone(),
         head,
-        ended: version_is_ended(version),
+        ended: ended_of(version),
         text: shown_text(lookup, version)?,
     })
 }
@@ -179,10 +232,11 @@ pub fn show(deps: &Deps, address: &str) -> Result<Shown, Failure> {
                 .map(|head| shown_version(&lookup, &label, head, true))
                 .collect::<Result<_, _>>()?;
             Ok(Shown::Document(ShownDocument {
-                kind: kind_of(&document),
+                kind: document.kind().map(ToString::to_string),
+                forked: is_forked(&document),
                 former: lookup.former_addresses(&id)?,
-                unreadable: document.unreadable().to_vec(),
-                id,
+                unreadable: unread(&document),
+                document: id,
                 label,
                 heads,
             }))
@@ -218,8 +272,8 @@ pub fn history(deps: &Deps, address: &str) -> Result<History, Failure> {
         .map(|version| shown_version(&lookup, &label, version, is_head(&document, version)))
         .collect::<Result<_, _>>()?;
     Ok(History {
-        unreadable: document.unreadable().to_vec(),
-        id,
+        unreadable: unread(&document),
+        document: id,
         label,
         versions,
     })
@@ -232,7 +286,8 @@ fn sides(
 ) -> Result<Vec<Side>, Failure> {
     if parents.is_empty() {
         return Ok(vec![Side {
-            against: "nothing".to_owned(),
+            against: None,
+            held: true,
             before: String::new(),
         }]);
     }
@@ -240,11 +295,13 @@ fn sides(
         .iter()
         .map(|parent| match document.get(parent) {
             Some(version) => Ok(Side {
-                against: parent.short().to_owned(),
+                against: Some(parent.clone()),
+                held: true,
                 before: before(version)?,
             }),
             None => Ok(Side {
-                against: format!("{} (not held)", parent.short()),
+                against: Some(parent.clone()),
+                held: false,
                 before: String::new(),
             }),
         })
@@ -335,7 +392,8 @@ pub fn diff(deps: &Deps, first: &str, second: Option<&str>) -> Result<Diff, Fail
     Ok(Diff {
         label: lookup.label(&later.envelope.document)?,
         sides: vec![Side {
-            against: earlier.id.short().to_owned(),
+            against: Some(earlier.id.clone()),
+            held: true,
             before: shown_text(&lookup, earlier)?,
         }],
         after: shown_text(&lookup, later)?,
@@ -390,13 +448,13 @@ mod tests {
         );
         for address in ["lantern", "lamp", "7f3a91"] {
             let shown = shown_document(&world, address);
-            assert_eq!(shown.id, lantern);
+            assert_eq!(shown.document, lantern);
             assert_eq!(shown.label, "lantern");
-            assert_eq!(shown.kind, Some(KindOf::Topic));
+            assert_eq!(shown.kind.as_deref(), Some("topic"));
             assert_eq!(shown.former, vec!["lamp".to_owned()]);
-            assert_eq!(shown.heads.len(), 1);
+            assert_eq!((shown.heads.len(), shown.forked), (1, false));
             let head = &shown.heads[0];
-            assert!(head.head && !head.ended);
+            assert!(head.head && head.ended.is_none());
             assert_eq!(head.label, "lantern");
             assert_eq!(head.machine, "desk");
             assert_eq!(head.change, "save");
@@ -453,7 +511,7 @@ mod tests {
             .map(|version| version.machine.as_str())
             .collect();
         assert_eq!(machines, [absent.short(), relay.short(), "desk"]);
-        assert_eq!(history.versions[0].id, newest.id);
+        assert_eq!(history.versions[0].version, newest.id);
     }
 
     #[test]
@@ -461,7 +519,7 @@ mod tests {
         let (world, lantern) = world();
         world.amend(&lantern, &topic_fields("lantern", ENDED), "\n");
         let shown = shown_document(&world, "lantern");
-        assert!(shown.heads[0].ended);
+        assert_eq!(shown.heads[0].ended.as_deref(), Some("retired"));
         assert!(shown.heads[0].text.contains("ended = \"retired\""));
     }
 
@@ -470,9 +528,10 @@ mod tests {
         let (world, lantern) = world();
         let heads = fork(&world, &lantern, &topic_fields("lantern", ""));
         let shown = shown_document(&world, "lantern");
-        let shown_heads: Vec<&VersionId> = shown.heads.iter().map(|head| &head.id).collect();
+        let shown_heads: Vec<&VersionId> = shown.heads.iter().map(|head| &head.version).collect();
         assert_eq!(shown_heads, heads.iter().collect::<Vec<_>>());
         assert!(shown.heads.iter().all(|head| head.head));
+        assert!(shown.forked);
 
         topic(&world, "phone", "");
         topic(&world, "phone", "");
@@ -490,7 +549,7 @@ mod tests {
             second.as_str(),
         ] {
             let shown = shown_version(&world, prefix);
-            assert_eq!(shown.id, second);
+            assert_eq!(shown.version, second);
             assert_eq!(shown.document, lantern);
             assert_eq!(shown.label, "lantern");
             assert!(shown.head);
@@ -543,9 +602,9 @@ mod tests {
             .iter()
             .find(|id| id.as_str()[3..].starts_with(&named))
             .unwrap();
-        assert_eq!(shown_version(&world, &named).id, *version);
+        assert_eq!(shown_version(&world, &named).version, *version);
         let wins = topic(&world, &named, "");
-        assert_eq!(shown_document(&world, &named).id, wins);
+        assert_eq!(shown_document(&world, &named).document, wins);
     }
 
     #[test]
@@ -553,7 +612,7 @@ mod tests {
         let (world, lantern) = world();
         let relay = fact(&world, &lantern, "relay-pin", "");
         let shown = shown_document(&world, "lantern/relay-pin");
-        assert_eq!(shown.id, relay);
+        assert_eq!(shown.document, relay);
         assert_eq!(shown.label, "lantern/relay-pin");
         assert!(shown.heads[0].text.contains("topic = \"lantern\""));
 
@@ -587,7 +646,7 @@ mod tests {
         assert_eq!(shown.label, stray.short());
         assert!(shown.heads.is_empty());
         assert_eq!(shown.unreadable.len(), 1);
-        assert_eq!(shown.unreadable[0].id, version);
+        assert_eq!(shown.unreadable[0].version, version);
     }
 
     #[test]
@@ -596,9 +655,9 @@ mod tests {
         let second = world.amend(&lantern, &topic_fields("lantern", ""), "second\n");
         let third = world.amend(&lantern, &topic_fields("lantern", ""), "third\n");
         let history = history(&world.deps(), "lantern").unwrap();
-        assert_eq!(history.id, lantern);
+        assert_eq!(history.document, lantern);
         assert_eq!(history.label, "lantern");
-        let ids: Vec<&VersionId> = history.versions.iter().map(|v| &v.id).collect();
+        let ids: Vec<&VersionId> = history.versions.iter().map(|v| &v.version).collect();
         assert_eq!(ids[..2], [&third, &second]);
         assert_eq!(ids.len(), 3);
         let heads: Vec<bool> = history.versions.iter().map(|v| v.head).collect();
@@ -626,7 +685,7 @@ mod tests {
         let diff = diff(&world.deps(), "lantern", None).unwrap();
         assert_eq!(diff.label, "lantern");
         let side = only_side(&diff);
-        assert_eq!(side.against, root.id.short());
+        assert_eq!((side.against.as_ref(), side.held), (Some(&root.id), true));
         assert_eq!(side.before, diff.after);
 
         let draft = world.drafts.read(&lantern).unwrap().unwrap();
@@ -671,7 +730,7 @@ mod tests {
         let diff = diff(&world.deps(), "phone", None).unwrap();
         assert_eq!(diff.label, "phone");
         let side = only_side(&diff);
-        assert_eq!(side.against, "nothing");
+        assert_eq!((&side.against, side.held), (&None, true));
         assert_eq!(side.before, "");
         assert!(diff.after.contains("name = \"phone\""), "{}", diff.after);
     }
@@ -734,18 +793,19 @@ mod tests {
         let diff = diff(&world.deps(), &joined.id.as_str()[3..13], None).unwrap();
         assert_eq!(diff.label, "lantern");
         assert_eq!(diff.sides.len(), 2);
-        let mut against: Vec<&str> = diff.sides.iter().map(|s| s.against.as_str()).collect();
+        let mut against: Vec<&VersionId> = diff.sides.iter().flat_map(|s| &s.against).collect();
         against.sort_unstable();
-        let mut parents: Vec<&str> = one.iter().map(VersionId::short).collect();
+        let mut parents: Vec<&VersionId> = one.iter().collect();
         parents.sort_unstable();
         assert_eq!(against, parents);
+        assert!(diff.sides.iter().all(|s| s.held));
         assert!(diff.after.ends_with("joined\n"));
         assert!(diff.sides.iter().any(|s| s.before.ends_with("left\n")));
 
         let first_version = super::diff(&world.deps(), &root.id.as_str()[3..13], None).unwrap();
         let side = only_side(&first_version);
         assert_eq!(side.before, "");
-        assert_eq!(side.against, "nothing");
+        assert_eq!((&side.against, side.held), (&None, true));
     }
 
     #[test]
@@ -758,8 +818,7 @@ mod tests {
         let diff = diff(&world.deps(), &child.id.as_str()[3..13], None).unwrap();
         let side = only_side(&diff);
         assert_eq!(side.before, "");
-        assert!(side.against.contains(root.id.short()), "{}", side.against);
-        assert!(side.against.contains("not held"), "{}", side.against);
+        assert_eq!((side.against.as_ref(), side.held), (Some(&root.id), false));
     }
 
     #[test]
@@ -771,7 +830,7 @@ mod tests {
         for (typed_first, typed_second) in [(a, b), (b, a)] {
             let diff = diff(&world.deps(), typed_first, Some(typed_second)).unwrap();
             let side = only_side(&diff);
-            assert_eq!(side.against, root.id.short());
+            assert_eq!((side.against.as_ref(), side.held), (Some(&root.id), true));
             assert!(side.before.ends_with("+++\n\n"), "{}", side.before);
             assert!(diff.after.ends_with("second\n"), "{}", diff.after);
         }
@@ -779,7 +838,7 @@ mod tests {
         let other = topic(&world, "atlas", "");
         let other = head(&world, &other);
         let diff = diff(&world.deps(), &other.id.as_str()[3..13], Some(a)).unwrap();
-        assert_eq!(only_side(&diff).against, root.id.short());
+        assert_eq!(only_side(&diff).against.as_ref(), Some(&root.id));
 
         let usage = super::diff(&world.deps(), "lantern", Some(a));
         assert!(matches!(usage, Err(Failure::Usage(_))), "{usage:?}");
@@ -816,7 +875,7 @@ mod tests {
             .versions
             .iter()
             .filter(|version| version.head)
-            .map(|version| &version.id)
+            .map(|version| &version.version)
             .collect();
         assert_eq!(flagged.len(), 2);
         assert!(heads.iter().all(|head| flagged.contains(&head)));
@@ -829,7 +888,7 @@ mod tests {
         let shown = history(&world.deps(), stray.as_str()).unwrap();
         assert_eq!(shown.label, stray.short());
         assert!(shown.versions.is_empty());
-        assert_eq!(shown.unreadable[0].id, version);
+        assert_eq!(shown.unreadable[0].version, version);
     }
 
     #[test]
@@ -846,7 +905,7 @@ mod tests {
         let diff = diff(&world.deps(), "lantern", None).unwrap();
         assert_eq!(diff.sides.len(), 2);
         for (side, head) in diff.sides.iter().zip(&heads) {
-            assert_eq!(side.against, head.short());
+            assert_eq!((side.against.as_ref(), side.held), (Some(head), true));
         }
         assert!(
             diff.sides[0].before.ends_with("left\n") || diff.sides[0].before.ends_with("right\n")

@@ -2,6 +2,8 @@
 
 use std::fmt;
 
+use serde::Serialize;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum IdError {
     NotADocumentId(String),
@@ -30,7 +32,8 @@ pub fn is_id_prefix(text: &str) -> bool {
 }
 
 /// Minted when a document is created and carried by every version of it.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
+#[serde(transparent)]
 pub struct DocumentId(String);
 
 impl DocumentId {
@@ -78,7 +81,8 @@ impl fmt::Display for DocumentId {
 }
 
 /// The hash of a version file's bytes, behind the name of the algorithm.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
+#[serde(transparent)]
 pub struct VersionId(String);
 
 impl VersionId {

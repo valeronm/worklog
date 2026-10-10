@@ -2,8 +2,11 @@
 
 use std::fmt;
 
+use serde::Serialize;
+
 /// `~`, a path under `~/`, or an absolute path, held without a trailing slash.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(transparent)]
 pub struct Directory(String);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -37,6 +40,27 @@ impl Directory {
         } else {
             Err(NotADirectory)
         }
+    }
+
+    /// A path from the root with `.` and `..` folded as typed, following no link: `..` drops
+    /// the component before it and stops at the root, and a slash that ends the path or
+    /// repeats goes. Any other text is returned as given.
+    #[must_use]
+    pub fn folded(path: &str) -> String {
+        if !path.starts_with('/') {
+            return path.to_owned();
+        }
+        let mut kept: Vec<&str> = Vec::new();
+        for component in path.split('/') {
+            match component {
+                "" | "." => {}
+                ".." => {
+                    kept.pop();
+                }
+                other => kept.push(other),
+            }
+        }
+        format!("/{}", kept.join("/"))
     }
 
     /// `given` as a claim carries it on a host whose home directory is `home`: `~` for the
@@ -167,6 +191,28 @@ mod tests {
         }
         assert_eq!(fold_home("/srv", Some("/")), "~/srv");
         assert_eq!(fold_home("/", Some("/")), "~");
+    }
+
+    #[test]
+    fn a_path_from_the_root_is_folded_as_it_is_typed() {
+        for (typed, folded) in [
+            ("/a/./b", "/a/b"),
+            ("/a/../b", "/b"),
+            ("/a/b/..", "/a"),
+            ("/a/b/../..", "/"),
+            ("/..", "/"),
+            ("/../../a", "/a"),
+            ("/a/b/", "/a/b"),
+            ("/a//b", "/a/b"),
+            ("/", "/"),
+            ("/a/b", "/a/b"),
+            ("a/../b", "a/../b"),
+            ("~/a/../b", "~/a/../b"),
+            ("./a", "./a"),
+            ("", ""),
+        ] {
+            assert_eq!(Directory::folded(typed), folded, "{typed}");
+        }
     }
 
     #[test]

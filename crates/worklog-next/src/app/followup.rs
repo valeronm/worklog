@@ -1,3 +1,4 @@
+use serde::{Serialize, Serializer};
 use toml::Value;
 
 use crate::app::draft::named;
@@ -29,6 +30,15 @@ pub enum Made {
     Draft(DraftRef),
 }
 
+impl Serialize for Made {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Made::Written(written) => written.serialize(serializer),
+            Made::Draft(draft) => draft.serialize(serializer),
+        }
+    }
+}
+
 const TRIGGER_KEYS: [&str; 3] = ["look_again", "why", "touching"];
 
 fn trigger_fields(
@@ -37,10 +47,10 @@ fn trigger_fields(
 ) -> Result<Vec<(&'static str, Value)>, Failure> {
     match trigger {
         TriggerArg::LookAgain { on, why } => {
-            let on = Date::parse(on).map_err(|error| Failure::Usage(format!("on: {error}")))?;
+            let on = Date::parse(on).map_err(|error| Failure::Usage(error.to_string()))?;
             let why = why.trim();
             if why.is_empty() {
-                return Err(Failure::Usage("why: a look-again date says why".to_owned()));
+                return Err(Failure::Usage("a look-again date says why".to_owned()));
             }
             Ok(vec![("look_again", on.value()), ("why", text(why))])
         }

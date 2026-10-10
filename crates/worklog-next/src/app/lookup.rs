@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
-use crate::app::heads::{is_holder, kind_of, label_or_short, readable_heads, row_head};
+use crate::app::heads::{is_holder, kind_of, label_of, labeling_topic, readable_heads, row_head};
 use crate::app::{Failure, kind_named};
 use crate::domain::document::{Document, State};
 use crate::domain::id::{DocumentId, VersionId};
@@ -44,6 +44,17 @@ pub(super) fn refuse_ended(record: &Record, what: &str) -> Result<(), Failure> {
 
 pub(super) fn names_no_document(address: &str) -> Failure {
     Failure::at(address, "names no document")
+}
+
+pub(super) fn held_by_several<'i>(
+    address: &str,
+    ids: impl IntoIterator<Item = &'i DocumentId>,
+) -> Failure {
+    let shorts: Vec<&str> = ids.into_iter().map(DocumentId::short).collect();
+    Failure::at(
+        address,
+        format!("is held by several documents: {}", shorts.join(", ")),
+    )
 }
 
 pub(super) fn no_such_document(what: &str) -> Failure {
@@ -195,13 +206,7 @@ impl<'a> Lookup<'a> {
         match self.find(address)? {
             Found::One(id) => Ok(id),
             Found::None => Err(names_no_document(address)),
-            Found::Collision(ids) => {
-                let shorts: Vec<&str> = ids.iter().map(DocumentId::short).collect();
-                Err(Failure::at(
-                    address,
-                    format!("is held by several documents: {}", shorts.join(", ")),
-                ))
-            }
+            Found::Collision(ids) => Err(held_by_several(address, &ids)),
         }
     }
 
@@ -283,7 +288,19 @@ impl<'a> Lookup<'a> {
     }
 
     pub(super) fn label(&self, id: &DocumentId) -> Result<String, Failure> {
-        Ok(label_or_short(self.address(id)?, id))
+        let document = self.document(id)?;
+        match row_head(&document) {
+            Some((_, record)) => self.label_of(&record.content, id),
+            None => Ok(id.short().to_owned()),
+        }
+    }
+
+    pub(super) fn label_of(&self, content: &Content, id: &DocumentId) -> Result<String, Failure> {
+        let topic_name = match labeling_topic(content) {
+            Some(topic) => self.topic_name(topic)?,
+            None => None,
+        };
+        Ok(label_of(content, topic_name.as_ref(), id))
     }
 
     pub(super) fn holders<V: AsRef<str>>(
@@ -384,7 +401,8 @@ fn by_prefix(mut ids: Vec<DocumentId>) -> Found {
 mod tests {
     use super::*;
     use crate::app::testing::{
-        Counting, ENDED, ENDED_FACT, TOPIC, World, entry, fact, found, topic, topic_fields,
+        Counting, ENDED, ENDED_FACT, TOPIC, World, claim_fields, entry, fact, fork, found, topic,
+        topic_fields,
     };
     use crate::domain::testing::{after, first, lantern};
     use crate::domain::version::ReadError;
@@ -662,6 +680,53 @@ mod tests {
         assert_eq!(
             lookup.address(&DocumentId::from_bytes([0x43; 16])).unwrap(),
             None
+        );
+    }
+
+    #[test]
+    fn a_claim_is_labeled_by_its_topic_and_its_directory_and_found_by_its_id() {
+        let world = World::new();
+        let desk = topic(&world, "desk", "");
+        let lantern = topic(&world, "lantern", "");
+        let placed = world.put("claim", &claim_fields(&desk, &lantern, "~/lantern"), "\n");
+        let anywhere = world.put("claim", &claim_fields(&desk, &lantern, ""), "\n");
+        let lookup = world.lookup();
+        assert_eq!(lookup.label(&placed).unwrap(), "lantern at ~/lantern");
+        assert_eq!(lookup.label(&anywhere).unwrap(), "lantern anywhere");
+        assert_eq!(lookup.address(&placed).unwrap(), None);
+        assert_eq!(found(&world, placed.short()), Found::One(placed));
+        assert!(lookup.find("lantern at ~/lantern").is_err());
+        assert!(lookup.find("lantern anywhere").is_err());
+    }
+
+    #[test]
+    fn a_claim_s_label_keeps_the_name_of_an_ended_topic_and_the_short_id_of_one_not_read() {
+        let world = World::new();
+        let desk = topic(&world, "desk", "");
+        let lantern = topic(&world, "lantern", "");
+        let placed = world.put("claim", &claim_fields(&desk, &lantern, "~/lantern"), "\n");
+        world.amend(&lantern, &topic_fields("lantern", ENDED), "\n");
+        let gone = DocumentId::from_bytes([0x42; 16]);
+        let orphan = world.put("claim", &claim_fields(&desk, &gone, ""), "\n");
+        let lookup = world.lookup();
+        assert_eq!(lookup.label(&placed).unwrap(), "lantern at ~/lantern");
+        assert_eq!(
+            lookup.label(&orphan).unwrap(),
+            format!("{} anywhere", gone.short())
+        );
+    }
+
+    #[test]
+    fn a_forked_claim_is_labeled_from_its_row_head() {
+        let world = World::new();
+        let desk = topic(&world, "desk", "");
+        let lantern = topic(&world, "lantern", "");
+        let fields = claim_fields(&desk, &lantern, "~/lantern");
+        let placed = world.put("claim", &fields, "\n");
+        fork(&world, &placed, &fields);
+        assert_eq!(
+            world.lookup().label(&placed).unwrap(),
+            "lantern at ~/lantern"
         );
     }
 

@@ -220,11 +220,11 @@ mod tests {
         assert!(world.drafts.list().unwrap().is_empty());
         let found = crate::app::check::check(&deps).unwrap();
         let on_atlas: Vec<&str> = (found.problems.iter())
-            .filter(|finding| finding.document == atlas.short())
+            .filter(|finding| finding.label == atlas.short())
             .map(|finding| finding.what.as_str())
             .collect();
         assert_eq!(on_atlas.len(), 2, "{:?}", found.problems);
-        assert_eq!(found.forks, 1);
+        assert_eq!(found.fork_count, 1);
 
         let held = world.store.document(&atlas).unwrap();
         let mut draft = Draft::of(held.heads()[0]);

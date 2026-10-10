@@ -4,6 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
+use serde::{Serialize, Serializer};
 use toml::value::Datetime;
 use toml::{Table, Value};
 
@@ -58,7 +59,8 @@ fn malformed(why: impl fmt::Display) -> ReadError {
     ReadError::Malformed(why.to_string())
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
+#[serde(transparent)]
 pub struct Kind(String);
 
 impl Kind {
@@ -157,6 +159,12 @@ impl PartialOrd for Stamp {
 impl fmt::Display for Stamp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
+    }
+}
+
+impl Serialize for Stamp {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
     }
 }
 

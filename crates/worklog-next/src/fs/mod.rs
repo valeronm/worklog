@@ -1,11 +1,19 @@
 //! The ports implemented on a directory tree.
 
+pub mod clock;
+pub mod config;
 pub mod drafts;
+pub mod host;
 pub mod ids;
+pub mod paths;
 pub mod store;
 
+pub use clock::SystemClock;
+pub use config::Config;
 pub use drafts::FsDrafts;
+pub use host::FsHost;
 pub use ids::RandomIds;
+pub use paths::Paths;
 pub use store::FsStore;
 
 use std::path::Path;

@@ -1,3 +1,4 @@
+use serde::Serialize;
 use toml::Value;
 
 use crate::app::heads::label_or_short;
@@ -29,7 +30,7 @@ pub enum New<'a> {
 const FACT_BODY: &str = "\n\n**Why:** \n\n**How to apply:** \n";
 const ENTRY_BODY: &str = "\n## What\n\n## Why\n\n## Changes\n\n## Notes\n";
 
-fn usage(error: impl std::fmt::Display) -> Failure {
+pub(super) fn usage(error: impl std::fmt::Display) -> Failure {
     Failure::Usage(error.to_string())
 }
 
@@ -188,11 +189,12 @@ pub fn discard(deps: &Deps, address: &str) -> Result<(), Failure> {
     Ok(())
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct DraftRow {
     pub document: DocumentId,
     pub kind: String,
     pub label: String,
+    #[serde(rename = "path")]
     pub location: String,
 }
 

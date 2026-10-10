@@ -10,7 +10,7 @@ use super::version::{Kind, ReadError, Version};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Unreadable {
-    pub id: VersionId,
+    pub version: VersionId,
     pub why: ReadError,
 }
 
@@ -52,11 +52,11 @@ impl Document {
                 "a version of document {}, not of {id}",
                 stray.envelope.document
             )),
-            id: stray.id,
+            version: stray.id,
         }));
         versions.sort_by(|a, b| a.id.cmp(&b.id));
         versions.dedup_by(|a, b| a.id == b.id);
-        unreadable.sort_by(|a, b| a.id.cmp(&b.id));
+        unreadable.sort_by(|a, b| a.version.cmp(&b.version));
         let behind = behind(&versions);
         let heads = (0..versions.len())
             .filter(|at| !behind.contains(&versions[*at].id))
@@ -210,7 +210,7 @@ mod tests {
         let left = after(&[&root], RELAY, "left\n");
         let right = after(&[&root], RELAY, "right\n");
         let damaged = Unreadable {
-            id: VersionId::of(b"damaged"),
+            version: VersionId::of(b"damaged"),
             why: ReadError::Corrupt,
         };
         let held = Document::new(
@@ -262,7 +262,7 @@ mod tests {
     fn what_did_not_read_or_is_of_another_document_is_reported_beside_the_rest() {
         let root = root();
         let damaged = Unreadable {
-            id: VersionId::of(b"damaged"),
+            version: VersionId::of(b"damaged"),
             why: ReadError::Corrupt,
         };
         let atlas = DocumentId::from_bytes([0xa7; 16]);
@@ -276,7 +276,7 @@ mod tests {
         assert_eq!(held.kind().map(Kind::as_str), Some("fact"));
         assert_eq!(held.unreadable().len(), 2);
         assert!(held.unreadable().contains(&damaged));
-        let reported = held.unreadable().iter().find(|u| u.id == stray.id);
+        let reported = held.unreadable().iter().find(|u| u.version == stray.id);
         match reported.map(|u| &u.why) {
             Some(ReadError::Malformed(why)) => assert!(why.contains(atlas.as_str()), "{why}"),
             other => panic!("{other:?}"),

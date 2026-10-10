@@ -422,10 +422,7 @@ mod tests {
         claim::claim(&deps, "lantern", Some("~/lantern")).unwrap();
         let text = refused(reopen(&deps, placed.document.as_str(), "again"));
         assert!(
-            text.contains(&format!(
-                "{}: a claim is never reopened; claim again",
-                placed.document.short()
-            )),
+            text.contains("lantern at ~/lantern: a claim is never reopened; claim again"),
             "{text}"
         );
     }

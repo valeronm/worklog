@@ -4,8 +4,9 @@ use toml::Value;
 
 use crate::domain::document::{Document, State};
 use crate::domain::id::DocumentId;
+use crate::domain::schema::address::displayed;
 use crate::domain::schema::graph::Edges;
-use crate::domain::schema::{Content, KindOf, Name, Record, SchemaError};
+use crate::domain::schema::{Content, Directory, KindOf, Name, Record, SchemaError};
 use crate::domain::version::{Fields, Version};
 
 pub(super) fn read_or_skip(head: &Version) -> Option<Record> {
@@ -93,6 +94,10 @@ pub(super) fn ended_for(record: &Record) -> Option<String> {
     Some(ending.reason.word().to_owned())
 }
 
+pub(super) fn ended_of(version: &Version) -> Option<String> {
+    ended_for(&read_or_skip(version)?)
+}
+
 fn row_head_at(heads: &[Read]) -> Option<usize> {
     let ended = all_ended(heads);
     (0..heads.len())
@@ -115,6 +120,32 @@ pub(super) fn row_head(document: &Document) -> Option<Read<'_>> {
 
 pub(super) fn label_or_short(label: Option<String>, id: &DocumentId) -> String {
     label.unwrap_or_else(|| id.short().to_owned())
+}
+
+pub(super) fn place(topic: &str, directory: Option<&Directory>) -> String {
+    match directory {
+        Some(directory) => format!("{topic} at {directory}"),
+        None => format!("{topic} anywhere"),
+    }
+}
+
+pub(super) fn labeling_topic(content: &Content) -> Option<&DocumentId> {
+    match content {
+        Content::Fact(fact) => Some(&fact.topic),
+        Content::Claim(claim) => Some(&claim.topic),
+        Content::Topic(_) | Content::Entry(_) | Content::Followup(_) => None,
+    }
+}
+
+// A label is not an address: a claim has one and is still named by its id.
+pub(super) fn label_of(content: &Content, topic_name: Option<&Name>, id: &DocumentId) -> String {
+    match content {
+        Content::Claim(claim) => {
+            let topic = label_or_short(topic_name.map(ToString::to_string), &claim.topic);
+            place(&topic, claim.directory.as_ref())
+        }
+        _ => label_or_short(displayed(content, topic_name), id),
+    }
 }
 
 pub(super) fn machine_label(version: &Version, topic_name: Option<&Name>) -> String {

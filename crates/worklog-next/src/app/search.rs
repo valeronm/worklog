@@ -2,8 +2,9 @@ use std::cmp::Reverse;
 use std::collections::BTreeMap;
 
 use regex::{Regex, RegexBuilder};
+use serde::Serialize;
 
-use crate::app::heads::machine_label;
+use crate::app::heads::{ended_of, label_or_short, machine_label};
 use crate::app::rows::{Row, by_label, documents, reading, row, shown};
 use crate::app::{Deps, Failure};
 use crate::domain::document::Document;
@@ -20,18 +21,23 @@ pub struct Query<'a> {
     pub ended: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Hit {
     pub row: Row,
     pub lines: Vec<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Logged {
-    pub id: VersionId,
+    pub document: DocumentId,
+    /// The label of `row`, or the start of the document's id when there is none.
+    pub label: String,
+    pub version: VersionId,
     pub written: Stamp,
     pub machine: String,
     pub change: String,
+    /// The reason; `None` too for a version that does not read as a record.
+    pub ended: Option<String>,
     pub row: Option<Row>,
 }
 
@@ -115,11 +121,15 @@ pub fn log(deps: &Deps, limit: usize, machine: Option<&str>) -> Result<Vec<Logge
         let of_document = rows
             .entry(document.id())
             .or_insert_with(|| row(&topics, document).map(|found| found.row));
+        let label = of_document.as_ref().map(|row| row.label.clone());
         Logged {
-            id: version.id.clone(),
+            document: document.id().clone(),
+            label: label_or_short(label, document.id()),
+            version: version.id.clone(),
             written: version.envelope.written.clone(),
             machine: machine_label(version, topics.name(&version.envelope.machine)),
             change: version.envelope.change.clone(),
+            ended: ended_of(version),
             row: of_document.clone(),
         }
     });
@@ -449,18 +459,19 @@ mod tests {
         let newer = rewritten(&world, &relay, "2026-10-11T09:00:00+00:00", &desk);
         let all = logged(&world, usize::MAX, None);
         assert_eq!(all.len(), 6);
-        assert_eq!((&all[0].id, &all[1].id), (&newer, &older));
+        assert_eq!((&all[0].version, &all[1].version), (&newer, &older));
         assert_eq!(all[0].machine, "desk");
         assert_eq!(all[1].machine, "phone");
         assert_eq!(all[0].change, "save");
         assert_eq!(all[0].row.as_ref().unwrap().label, "lantern/relay-pin");
+        assert_eq!(all[0].label, "lantern/relay-pin");
         assert_eq!(all[1].row, all[0].row);
-        let tied: Vec<&VersionId> = all[2..].iter().map(|entry| &entry.id).collect();
+        let tied: Vec<&VersionId> = all[2..].iter().map(|entry| &entry.version).collect();
         let mut sorted = tied.clone();
         sorted.sort();
         assert_eq!(tied, sorted);
         assert_eq!(logged(&world, 2, None).len(), 2);
-        assert_eq!(logged(&world, 2, None)[1].id, older);
+        assert_eq!(logged(&world, 2, None)[1].version, older);
         assert!(logged(&world, 0, None).is_empty());
     }
 
@@ -472,7 +483,7 @@ mod tests {
         let older = rewritten(&world, &lantern, "2026-10-10T09:00:00+00:00", &relay);
         let newer = rewritten(&world, &lantern, "2026-10-11T09:00:00+00:00", &absent);
         let all = logged(&world, 2, None);
-        assert_eq!((&all[0].id, &all[1].id), (&newer, &older));
+        assert_eq!((&all[0].version, &all[1].version), (&newer, &older));
         assert_eq!(all[0].machine, absent.short());
         assert_eq!(all[1].machine, relay.short());
     }
@@ -484,7 +495,7 @@ mod tests {
         let relay = fact(&world, &lantern, "relay-pin", "");
         let older = rewritten(&world, &relay, "2026-10-10T09:00:00+00:00", &phone);
         let only = logged(&world, usize::MAX, Some("phone"));
-        let ids: Vec<&VersionId> = only.iter().map(|entry| &entry.id).collect();
+        let ids: Vec<&VersionId> = only.iter().map(|entry| &entry.version).collect();
         assert!(ids.contains(&&older));
         assert!(only.iter().all(|entry| entry.machine == "phone"));
         let refused = log(&world.deps(), 5, Some("nowhere"));
@@ -502,11 +513,11 @@ mod tests {
         let heads = fork(&world, &relay, &fields);
         let mine: Vec<Logged> = logged(&world, usize::MAX, None)
             .into_iter()
-            .filter(|entry| entry.row.as_ref().is_some_and(|row| row.id == relay))
+            .filter(|entry| entry.row.as_ref().is_some_and(|row| row.document == relay))
             .collect();
         assert_eq!(mine.len(), 3);
         for head in &heads {
-            assert!(mine.iter().any(|entry| &entry.id == head));
+            assert!(mine.iter().any(|entry| &entry.version == head));
         }
         assert!(mine.iter().all(|entry| entry.row.as_ref().unwrap().forked));
     }
@@ -606,7 +617,7 @@ mod tests {
             labels(&hits, |hit| &hit.row),
             ["2026-10-08-on-part", mine.short()]
         );
-        assert_eq!(hits[1].row.id, mine);
+        assert_eq!(hits[1].row.document, mine);
     }
 
     #[test]
@@ -617,10 +628,12 @@ mod tests {
         let second = world.amend(&relay, "name = \"relay-pin\"\n", "\n");
         let mine: Vec<Logged> = logged(&world, usize::MAX, None)
             .into_iter()
-            .filter(|entry| entry.id == first || entry.id == second)
+            .filter(|entry| entry.version == first || entry.version == second)
             .collect();
         assert_eq!(mine.len(), 2);
         assert!(mine.iter().all(|entry| entry.row.is_none()));
+        assert!(mine.iter().all(|entry| entry.label == relay.short()));
+        assert!(mine.iter().all(|entry| entry.ended.is_none()));
     }
 
     #[test]
@@ -642,7 +655,7 @@ mod tests {
         assert_eq!(all.len(), 4);
         let mine: Vec<&Logged> = all
             .iter()
-            .filter(|entry| entry.id == first || entry.id == second)
+            .filter(|entry| entry.version == first || entry.version == second)
             .collect();
         assert_eq!(mine.len(), 2);
         assert!(mine.iter().all(|entry| entry.row.is_none()));
@@ -663,12 +676,16 @@ mod tests {
         let second = world.amend(&relay, &fields, "\n");
         let mine: Vec<Logged> = logged(&world, usize::MAX, None)
             .into_iter()
-            .filter(|entry| entry.id == first || entry.id == second)
+            .filter(|entry| entry.version == first || entry.version == second)
             .collect();
         assert_eq!(mine.len(), 2);
         assert!(
             mine.iter()
                 .all(|entry| { entry.row.as_ref().unwrap().ended.as_deref() == Some("retired") })
         );
+        for entry in &mine {
+            let ended = (entry.version == second).then_some("retired");
+            assert_eq!(entry.ended.as_deref(), ended);
+        }
     }
 }

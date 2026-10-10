@@ -1,5 +1,7 @@
 //! The five kinds of document and the fields each carries.
 
+use serde::{Serialize, Serializer};
+
 use super::directory::Directory;
 use super::ending::{Ending, Reason};
 use super::error::SchemaError;
@@ -14,6 +16,12 @@ pub enum KindOf {
     Entry,
     Followup,
     Claim,
+}
+
+impl Serialize for KindOf {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.word())
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -90,6 +98,33 @@ impl KindOf {
             KindOf::Followup => "followup",
             KindOf::Claim => "claim",
         }
+    }
+
+    /// The reasons a document of the kind ends for; `idea` is a fact flagged as one.
+    #[must_use]
+    pub fn endings(self, idea: bool) -> &'static [Reason] {
+        match self {
+            KindOf::Topic => &[Reason::Retired, Reason::Merged],
+            KindOf::Fact if idea => &[Reason::Built, Reason::Abandoned],
+            KindOf::Fact => &[Reason::False, Reason::Moved, Reason::Superseded],
+            KindOf::Entry => &[Reason::Removed, Reason::Merged],
+            KindOf::Followup => &[Reason::Done, Reason::Dropped],
+            KindOf::Claim => &[Reason::Removed],
+        }
+    }
+
+    /// Each word a document is made under, a kind's or `idea` for a fact flagged as one, with
+    /// the reasons it ends for, an idea after the fact.
+    #[must_use]
+    pub fn endings_by_word() -> Vec<(&'static str, &'static [Reason])> {
+        let mut rows = Vec::new();
+        for kind in KindOf::ALL {
+            rows.push((kind.word(), kind.endings(false)));
+            if kind == KindOf::Fact {
+                rows.push(("idea", kind.endings(true)));
+            }
+        }
+        rows
     }
 
     #[must_use]
@@ -327,14 +362,8 @@ impl Content {
 
     #[must_use]
     pub fn endings(&self) -> &'static [Reason] {
-        match self {
-            Content::Topic(_) => &[Reason::Retired, Reason::Merged],
-            Content::Fact(fact) if fact.idea => &[Reason::Built, Reason::Abandoned],
-            Content::Fact(_) => &[Reason::False, Reason::Moved, Reason::Superseded],
-            Content::Entry(_) => &[Reason::Removed, Reason::Merged],
-            Content::Followup(_) => &[Reason::Done, Reason::Dropped],
-            Content::Claim(_) => &[Reason::Removed],
-        }
+        let idea = matches!(self, Content::Fact(fact) if fact.idea);
+        self.kind().endings(idea)
     }
 
     fn write(&self, writer: Writer) -> Writer {
@@ -512,6 +541,25 @@ mod tests {
             assert_eq!(record.content.kind().word(), word);
             assert_eq!(toml::to_string(&record.fields()).unwrap(), toml, "{word}");
         }
+    }
+
+    #[test]
+    fn the_endings_are_listed_under_each_kind_and_under_idea_after_fact() {
+        let rows: Vec<(&str, Vec<&str>)> = KindOf::endings_by_word()
+            .into_iter()
+            .map(|(word, reasons)| (word, reasons.iter().map(Reason::word).collect()))
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                ("topic", vec!["retired", "merged"]),
+                ("fact", vec!["false", "moved", "superseded"]),
+                ("idea", vec!["built", "abandoned"]),
+                ("entry", vec!["removed", "merged"]),
+                ("followup", vec!["done", "dropped"]),
+                ("claim", vec!["removed"]),
+            ]
+        );
     }
 
     #[test]

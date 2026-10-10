@@ -1,3 +1,4 @@
+use crate::app::heads::place;
 use crate::app::lookup::Lookup;
 use crate::app::rules::claims_of;
 use crate::app::save::admit;
@@ -42,7 +43,7 @@ pub fn unclaim(deps: &Deps, topic: &str, directory: Option<&str>) -> Result<Writ
     let Some(id) = held(&lookup, &machine, &topic_id, directory)? else {
         return Err(Failure::at(&place, "is not claimed"));
     };
-    let (head, record) = lookup.only_head(&id, id.short())?;
+    let (head, record) = lookup.only_head(&id, &lookup.label(&id)?)?;
     let ending = Ending {
         reason: Reason::Removed,
         on: deps.today()?,
@@ -53,13 +54,6 @@ pub fn unclaim(deps: &Deps, topic: &str, directory: Option<&str>) -> Result<Writ
         .end(ending)
         .map_err(|error| Failure::at(&place, error))?;
     admit(deps, &lookup, &id, &ended, &head.body, "unclaim")
-}
-
-fn place(topic: &str, directory: Option<&Directory>) -> String {
-    match directory {
-        Some(directory) => format!("{topic} at {directory}"),
-        None => topic.to_owned(),
-    }
 }
 
 fn held(
@@ -78,7 +72,7 @@ fn held(
 mod tests {
     use super::*;
     use crate::app::heads::read_or_skip;
-    use crate::app::testing::{ENDED, TOPIC, World, claim_fields, refused, topic};
+    use crate::app::testing::{ENDED, TOPIC, World, claim_fields, fork, refused, topic};
     use crate::domain::ports::Store;
     use crate::domain::schema::Content;
     use crate::domain::version::{Kind, Version};
@@ -109,7 +103,7 @@ mod tests {
         let Content::Claim(claim) = record.content else {
             panic!("a claim was stored");
         };
-        assert_eq!(Some(&claim.machine), world.host.0.as_ref());
+        assert_eq!(Some(&claim.machine), world.host.bound().as_ref());
         assert!(lantern.iter().any(|topic| topic.id() == &claim.topic));
         assert_eq!(
             claim.directory.as_ref().map(Directory::as_str),
@@ -222,7 +216,7 @@ mod tests {
 
     fn at_home() -> World {
         let mut world = world();
-        world.host.1 = Some("/home/desk".to_owned());
+        world.host.set_home(Some("/home/desk".to_owned()));
         world
     }
 
@@ -254,9 +248,45 @@ mod tests {
     }
 
     #[test]
+    fn a_claim_made_through_a_link_is_ended_through_it_and_by_the_directory_itself() {
+        let mut world = at_home();
+        world
+            .host
+            .link("/home/desk/link", "/home/desk/projects/lantern");
+        let deps = world.deps();
+        let written = claim(&deps, "lantern", Some("/home/desk/link")).unwrap();
+        assert_eq!(
+            directory_of(&world, &written).as_deref(),
+            Some("~/projects/lantern")
+        );
+        let text = refused(claim(&deps, "lantern", Some("/home/desk/projects/lantern")));
+        assert!(text.contains("is already claimed"), "{text}");
+        let ended = unclaim(&deps, "lantern", Some("/home/desk/link")).unwrap();
+        assert_eq!(ended.document, written.document);
+
+        let again = claim(&deps, "lantern", Some("/home/desk/link/case")).unwrap();
+        let ended = unclaim(&deps, "lantern", Some("/home/desk/projects/lantern/case")).unwrap();
+        assert_eq!(ended.document, again.document);
+    }
+
+    #[test]
+    fn a_directory_is_folded_as_typed_before_the_host_reads_it() {
+        let mut world = at_home();
+        let deps = world.deps();
+        let written = claim(&deps, "lantern", Some("/home/desk/gone/../lantern")).unwrap();
+        assert_eq!(directory_of(&world, &written).as_deref(), Some("~/lantern"));
+        let ended = unclaim(&deps, "lantern", Some("/home/desk/./lantern/")).unwrap();
+        assert_eq!(ended.document, written.document);
+
+        world.host.link("/home/desk/link", "/srv/lantern/case");
+        let through = claim(&world.deps(), "lantern", Some("/home/desk/link/../atlas")).unwrap();
+        assert_eq!(directory_of(&world, &through).as_deref(), Some("~/atlas"));
+    }
+
+    #[test]
     fn an_empty_directory_is_refused_whatever_the_home() {
         let mut world = world();
-        world.host.1 = Some("/".to_owned());
+        world.host.set_home(Some("/".to_owned()));
         let text = usage(claim(&world.deps(), "lantern", Some("")));
         assert!(text.contains("absolute path"), "{text}");
         let Err(Failure::Usage(text)) = crate::app::context::context(&world.deps(), "") else {
@@ -361,6 +391,37 @@ mod tests {
 
     fn named(world: &World, name: &str) -> DocumentId {
         world.lookup().one(name).unwrap()
+    }
+
+    #[test]
+    fn a_stored_claim_carries_its_topic_and_its_directory_for_a_label() {
+        let world = world();
+        let deps = world.deps();
+        let text = refused(unclaim(&deps, "lantern", None));
+        assert_eq!(text, "lantern anywhere: is not claimed");
+        let placed = claim(&deps, "lantern", Some("~/lantern")).unwrap();
+        assert_eq!(placed.label, "lantern at ~/lantern");
+        let anywhere = claim(&deps, "lantern", None).unwrap();
+        assert_eq!(anywhere.label, "lantern anywhere");
+        let text = refused(claim(&deps, "lantern", None));
+        assert_eq!(text, "lantern anywhere: is already claimed");
+        let ended = unclaim(&deps, "lantern", Some("~/lantern")).unwrap();
+        assert_eq!(ended.label, "lantern at ~/lantern");
+    }
+
+    #[test]
+    fn an_unclaim_of_a_forked_claim_is_refused_by_its_label() {
+        let world = world();
+        let deps = world.deps();
+        let placed = claim(&deps, "lantern", Some("~/lantern")).unwrap();
+        let lantern = named(&world, "lantern");
+        fork(
+            &world,
+            &placed.document,
+            &claim_fields(&world.machine(), &lantern, "~/lantern"),
+        );
+        let text = refused(unclaim(&deps, "lantern", Some("~/lantern")));
+        assert_eq!(text, "lantern at ~/lantern: is forked; resolve it first");
     }
 
     #[test]

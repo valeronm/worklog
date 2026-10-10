@@ -83,4 +83,9 @@ pub trait Host {
     fn machine(&self) -> Result<Option<DocumentId>, StoreError>;
     /// The home directory as an absolute path; `None` for a host with none.
     fn home(&self) -> Result<Option<String>, StoreError>;
+    /// Makes `machine` this host's machine topic, refusing a host that already has one.
+    fn bind(&self, machine: &DocumentId) -> Result<(), StoreError>;
+    /// `absolute` with the links followed through the longest part of it that exists on this
+    /// host's file system, the rest kept as given.
+    fn resolve(&self, absolute: &str) -> Result<String, StoreError>;
 }
