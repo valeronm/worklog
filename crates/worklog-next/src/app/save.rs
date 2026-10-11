@@ -396,11 +396,7 @@ impl<'a, 'b> Target<'a, 'b> {
             .unwrap_or_default();
         let mut resolved = BTreeMap::new();
         for target in links::links(summary).into_iter().chain(links::links(body)) {
-            let found = match self.lookup.find(&target) {
-                Ok(Found::One(id)) => Some(id),
-                Ok(_) | Err(Failure::Usage(_)) => None,
-                Err(failure) => return Err(failure),
-            };
+            let found = self.lookup.linked(&target)?;
             resolved.insert(target, found);
         }
         Ok(Links(resolved))
@@ -810,6 +806,26 @@ mod tests {
                 ("Not A Name".to_owned(), None),
                 ("lantern/relay-pin".to_owned(), Some(relay)),
                 ("unknown".to_owned(), None),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_body_with_a_bracket_after_a_character_of_several_bytes_is_saved() {
+        let (world, lantern) = world();
+        let relay = new_fact(&world, "lantern/relay-pin");
+        set(&world, &relay, "summary", "Реле [[тема[черновик]]");
+        edit(&world, &relay, |draft| {
+            "См. [[тема[черновик]], [[é[x]] и [[lantern]], затем [[итог]].\n"
+                .clone_into(&mut draft.body);
+        });
+        save(&world.deps(), "lantern/relay-pin").unwrap();
+        let links = head(&world, &relay).links.0;
+        assert_eq!(
+            links.into_iter().collect::<Vec<_>>(),
+            vec![
+                ("lantern".to_owned(), Some(lantern)),
+                ("итог".to_owned(), None),
             ]
         );
     }

@@ -1368,16 +1368,19 @@ dependencies = [
 name = "worklog-next"
 version = "0.0.0"
 dependencies = [
+ "askama",
  "assert_cmd",
  "blake3",
  "chrono",
  "clap",
  "getrandom 0.4.3",
+ "pulldown-cmark",
  "regex",
  "serde",
  "serde_json",
  "similar",
  "tempfile",
+ "tiny_http",
  "toml",
 ]
 

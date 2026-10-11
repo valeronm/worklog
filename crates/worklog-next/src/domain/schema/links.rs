@@ -22,6 +22,42 @@ fn past_closing(text: &str, run: usize) -> Option<&str> {
     None
 }
 
+#[cfg(test)]
+thread_local! {
+    static TRIED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn tried() -> usize {
+    TRIED.with(std::cell::Cell::get)
+}
+
+/// The link `text` opens with: its target, trimmed, and the bytes the link takes. A link is
+/// `[[`, then a target on one line that holds no `[` and more than spaces, then the first
+/// `]]`. `Err` is how many bytes to pass before a link can start again, in text that holds
+/// no code. Either count ends on a character boundary of `text` and is zero only for an
+/// empty text.
+pub fn link_at(text: &str) -> Result<(&str, usize), usize> {
+    #[cfg(test)]
+    TRIED.with(|tried| tried.set(tried.get() + 1));
+    let Some(inner) = text.strip_prefix("[[") else {
+        return Err(text.chars().next().map_or(0, char::len_utf8));
+    };
+    let Some((inside, _)) = inner.split_once("]]") else {
+        return Err(text.len());
+    };
+    if let Some(last) = inside.rfind('[') {
+        // A link that opens earlier than the character before the last `[` would hold that `[`.
+        let before = &text[.."[[".len() + last];
+        return Err(before.len() - before.chars().next_back().map_or(0, char::len_utf8));
+    }
+    let target = inside.trim();
+    if target.is_empty() || inside.contains('\n') {
+        return Err(1);
+    }
+    Ok((target, inside.len() + 4))
+}
+
 fn in_line(line: &str, found: &mut Vec<String>) {
     let mut rest = line;
     while let Some(at) = rest.find(['`', '[']) {
@@ -32,19 +68,17 @@ fn in_line(line: &str, found: &mut Vec<String>) {
             rest = past_closing(after, rest.len() - after.len()).unwrap_or(after);
             continue;
         }
-        let target = rest
-            .strip_prefix("[[")
-            .and_then(|inner| inner.split_once("]]"))
-            .map(|(target, after)| (target.trim(), after))
-            .filter(|(target, _)| !target.is_empty() && !target.contains('['));
-        match target {
-            Some((target, after)) => {
+        match link_at(rest) {
+            Ok((target, taken)) => {
                 if !found.iter().any(|held| held == target) {
                     found.push(target.to_owned());
                 }
-                rest = after;
+                rest = &rest[taken..];
             }
-            None => rest = &rest[1..],
+            Err(passed) => {
+                let code = rest[1..passed].find('`').map_or(passed, |at| at + 1);
+                rest = &rest[code..];
+            }
         }
     }
 }
@@ -68,7 +102,84 @@ pub fn links(body: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::links;
+    use super::{link_at, links, tried};
+
+    #[test]
+    fn a_link_is_read_where_one_opens_and_what_to_pass_is_told_where_none_does() {
+        assert_eq!(link_at("[[atlas]] and more"), Ok(("atlas", 9)));
+        assert_eq!(
+            link_at("[[ lantern/relay-pin ]]]"),
+            Ok(("lantern/relay-pin", 23))
+        );
+        assert_eq!(link_at("[[a]][[b]]"), Ok(("a", 5)));
+        assert_eq!(link_at("[atlas]]"), Err(1));
+        assert_eq!(link_at("atlas"), Err(1));
+        assert_eq!(link_at("[[ ]] [[a]]"), Err(1));
+        assert_eq!(link_at("[[]]"), Err(1));
+        assert_eq!(link_at("[[at\nlas]]"), Err(1));
+        assert_eq!(link_at("[[atlas and [[desk"), Err(18));
+        assert_eq!(link_at("[[[atlas]]]"), Err(1));
+        assert_eq!(link_at("[[a [b [[c]] d"), Err(7));
+        assert_eq!(link_at(&"[[a [b [[c]] d"[7..]), Ok(("c", 5)));
+        assert_eq!(link_at("[[a [b]]"), Err(3));
+    }
+
+    #[test]
+    fn what_to_pass_never_ends_inside_a_character() {
+        assert_eq!(link_at("[[é[x]]"), Err(2));
+        assert_eq!(link_at("[[тема[черновик]]"), Err(8));
+        assert_eq!(link_at("[[é[[x]]"), Err(4));
+        assert_eq!(link_at(&"[[é[[x]]"[4..]), Ok(("x", 5)));
+        assert_eq!(link_at("[[ тема ]]é"), Ok(("тема", 14)));
+        assert_eq!(link_at("é[[x]]"), Err(2));
+        assert_eq!(link_at(""), Err(0));
+        for text in [
+            "[[é[x]]",
+            "[[тема[черновик]]",
+            "é[[é]]é",
+            "[[é[é[[é]é]]é",
+            "[é[[é[é]]é]",
+            "[[日[[本]]語[[",
+            "[[é\n[ü]]",
+            "[[ é ]]",
+            "[[é",
+        ] {
+            for (at, _) in text.char_indices() {
+                let rest = &text[at..];
+                let count = match link_at(rest) {
+                    Ok((_, taken)) => taken,
+                    Err(passed) => passed,
+                };
+                assert!(count > 0 && rest.is_char_boundary(count), "{rest}: {count}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_line_holding_characters_of_several_bytes_is_scanned() {
+        assert!(links("[[é[x]]\n").is_empty());
+        assert_eq!(links("[[тема[черновик]] и [[итог]]\n"), ["итог"]);
+        assert_eq!(
+            links("é[[é]]é [[é[[x]]é `é[[y]]é` [[ ü ]]\n"),
+            ["é", "x", "ü"]
+        );
+        assert_eq!(links("[[é ` [[b]] ` [[日本]]\n"), ["日本"]);
+    }
+
+    #[test]
+    fn a_line_of_brackets_is_scanned_without_trying_each_as_a_link() {
+        let line = format!("{}]] then [[atlas]]\n", "[".repeat(200_000));
+        let before = tried();
+        assert_eq!(links(&line), ["atlas"]);
+        assert!(tried() - before <= 8, "{} tries", tried() - before);
+    }
+
+    #[test]
+    fn a_code_span_that_opens_in_what_is_passed_still_quotes() {
+        assert!(links("[[a ` [[b]] ` c\n").is_empty());
+        assert_eq!(links("[[a ` [[b]] c\n"), ["b"]);
+        assert_eq!(links("[[a [ ` [[b]] ` [[c]]\n"), ["c"]);
+    }
 
     #[test]
     fn each_target_is_found_once_in_order() {

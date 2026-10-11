@@ -1,23 +1,37 @@
 use std::fmt::Write as _;
 
-use similar::TextDiff;
-
 use super::{Render, change_or_ending, line, written};
+use crate::app::Reference;
 use crate::app::show::{Diff, History, Shown, ShownVersion, Unread};
+use crate::domain::id::VersionId;
+use crate::domain::version::Stamp;
+use crate::render::diff::{UNTERMINATED, hunks};
+use crate::render::{against, unread_notes};
 
-const CONTEXT_LINES: usize = 3;
-
-fn version_fields(version: &ShownVersion) -> Vec<String> {
+fn naming(
+    version: &VersionId,
+    at: &Stamp,
+    machine: &Reference,
+    change: &str,
+    ended: Option<&str>,
+) -> Vec<String> {
     vec![
-        version.version.short().to_owned(),
-        written(&version.written),
-        version.machine.clone(),
-        change_or_ending(&version.change, version.ended.as_deref()),
+        version.short().to_owned(),
+        written(at),
+        machine.label.clone(),
+        change_or_ending(change, ended),
     ]
 }
 
 fn named(text: &mut String, version: &ShownVersion) {
-    let _ = writeln!(text, "==== {}", version_fields(version).join("  "));
+    let fields = naming(
+        &version.version,
+        &version.written,
+        &version.machine,
+        &version.change,
+        version.ended.as_deref(),
+    );
+    let _ = writeln!(text, "==== {}", fields.join("  "));
     text.push_str(&version.text);
     if !version.text.is_empty() && !version.text.ends_with('\n') {
         text.push('\n');
@@ -25,13 +39,8 @@ fn named(text: &mut String, version: &ShownVersion) {
 }
 
 fn unread(label: &str, files: &[Unread]) -> Vec<String> {
-    files
-        .iter()
-        .map(|file| {
-            let version = file.version.short();
-            let why = file.why.text();
-            format!("{label}: version {version} does not read: {why}")
-        })
+    (unread_notes(files).iter())
+        .map(|note| format!("{label}: {note}"))
         .collect()
 }
 
@@ -49,7 +58,7 @@ impl Render for Shown {
                     }
                 }
             }
-            Shown::Version(version) => named(&mut text, version),
+            Shown::Version(compared) => named(&mut text, &compared.version),
         }
         text
     }
@@ -70,7 +79,13 @@ impl Render for History {
     fn text(&self) -> String {
         let mut text = String::new();
         for version in &self.versions {
-            let mut fields = version_fields(version);
+            let mut fields = naming(
+                &version.version,
+                &version.written,
+                &version.machine,
+                &version.change,
+                version.ended.as_deref(),
+            );
             if version.head {
                 fields.push("head".to_owned());
             }
@@ -85,25 +100,28 @@ impl Render for History {
 }
 
 fn changes(before: &str, after: &str) -> String {
-    if before == after {
+    let hunks = hunks(before, after);
+    if hunks.is_empty() {
         return "no changes\n".to_owned();
     }
-    TextDiff::from_lines(before, after)
-        .unified_diff()
-        .context_radius(CONTEXT_LINES)
-        .to_string()
+    let mut text = String::new();
+    for hunk in hunks {
+        let _ = writeln!(text, "{}", hunk.header);
+        for line in hunk.lines {
+            let _ = write!(text, "{}{}{}", line.mark.sign(), line.text, line.terminator);
+            if line.terminator.is_empty() {
+                let _ = writeln!(text, "\n{UNTERMINATED}");
+            }
+        }
+    }
+    text
 }
 
 impl Render for Diff {
     fn text(&self) -> String {
         let mut text = String::new();
         for side in &self.sides {
-            let against = match &side.against {
-                None => "nothing".to_owned(),
-                Some(version) if side.held => version.short().to_owned(),
-                Some(version) => format!("{} (not held)", version.short()),
-            };
-            let _ = writeln!(text, "--- {against}\n+++ {}", self.label);
+            let _ = writeln!(text, "--- {}\n+++ {}", against(side).words, self.label);
             text.push_str(&changes(&side.before, &self.after));
         }
         text
@@ -112,9 +130,9 @@ impl Render for Diff {
 
 #[cfg(test)]
 mod tests {
-    use super::super::testing::{WRITTEN, stamp};
+    use super::super::testing::{WRITTEN, stamp, to};
     use super::*;
-    use crate::app::show::{ShownDocument, ShownVersion, Side};
+    use crate::app::show::{Compared, HistoryRow, Linked, ShownDocument, ShownVersion, Side};
     use crate::domain::document::Unreadable;
     use crate::domain::id::VersionId;
     use crate::domain::testing::lantern;
@@ -124,16 +142,17 @@ mod tests {
 
     fn version(seed: &[u8], text: &str) -> ShownVersion {
         ShownVersion {
-            document: lantern(),
-            label: "lantern".to_owned(),
             version: VersionId::of(seed),
             written: stamp(WRITTEN),
-            machine: "desk".to_owned(),
+            machine: to("desk"),
             change: "save".to_owned(),
             parents: Vec::new(),
             head: true,
             ended: None,
             text: text.to_owned(),
+            fields: Vec::new(),
+            body: String::new(),
+            links: Vec::new(),
         }
     }
 
@@ -141,16 +160,64 @@ mod tests {
         ShownDocument {
             document: lantern(),
             kind: Some("topic".to_owned()),
+            reads_as: None,
             label: "lantern".to_owned(),
             former: Vec::new(),
             forked: heads.len() > 1,
+            ended: None,
             heads,
             unreadable: Vec::new(),
         }
     }
 
+    fn row(version: ShownVersion) -> HistoryRow {
+        HistoryRow {
+            version: version.version,
+            written: version.written,
+            machine: version.machine,
+            change: version.change,
+            parents: version.parents,
+            head: version.head,
+            ended: version.ended,
+        }
+    }
+
+    fn alone(version: ShownVersion) -> Shown {
+        Shown::Version(Compared {
+            document: lantern(),
+            label: "lantern".to_owned(),
+            version,
+            sides: vec![Side {
+                against: None,
+                held: true,
+                before: "before\n".to_owned(),
+            }],
+        })
+    }
+
     fn short(seed: &[u8]) -> String {
         VersionId::of(seed).short().to_owned()
+    }
+
+    #[test]
+    fn the_links_of_a_version_add_nothing_to_its_text() {
+        let body = "+++\nname = \"lantern\"\n+++\nSee [[atlas]] and [[phone]].\n";
+        let plain = version(b"left", body);
+        let mut linking = plain.clone();
+        linking.links = vec![
+            Linked {
+                text: "atlas".to_owned(),
+                target: Some(to("atlas")),
+            },
+            Linked {
+                text: "phone".to_owned(),
+                target: None,
+            },
+        ];
+        assert_eq!(alone(linking.clone()).text(), alone(plain.clone()).text());
+        let shown = Shown::Document(document(vec![linking]));
+        assert_eq!(shown.text(), body);
+        assert_eq!(shown.notes(), Vec::<String>::new());
     }
 
     #[test]
@@ -166,7 +233,7 @@ mod tests {
     #[test]
     fn a_forked_document_names_each_head_and_notes_the_fork() {
         let mut right = version(b"right", "right\n");
-        right.machine = "phone".to_owned();
+        right.machine = to("phone");
         right.change = "rename".to_owned();
         let shown = Shown::Document(document(vec![version(b"left", "left\n"), right]));
         assert_eq!(
@@ -242,7 +309,7 @@ mod tests {
         let history = History {
             document: lantern(),
             label: "lantern".to_owned(),
-            versions: held.heads,
+            versions: held.heads.into_iter().map(row).collect(),
             unreadable: held.unreadable,
         };
         assert_eq!(history.notes(), notes);
@@ -252,7 +319,7 @@ mod tests {
     fn a_version_is_its_text_under_a_line_naming_it() {
         let mut old = version(b"left", "left\n");
         old.head = false;
-        let shown = Shown::Version(old);
+        let shown = alone(old);
         assert_eq!(
             shown.text(),
             format!("==== {}  {SHOWN}  desk  save\nleft\n", short(b"left"))
@@ -265,11 +332,11 @@ mod tests {
         let mut first = version(b"first", "");
         first.head = false;
         first.change = "new".to_owned();
-        first.machine = "phone".to_owned();
+        first.machine = to("phone");
         let history = History {
             document: lantern(),
             label: "lantern".to_owned(),
-            versions: vec![version(b"left", ""), first],
+            versions: vec![row(version(b"left", "")), row(first)],
             unreadable: Vec::new(),
         };
         assert_eq!(
@@ -285,7 +352,7 @@ mod tests {
         ended.ended = Some("false".to_owned());
         ended.change = "end".to_owned();
         let closed = History {
-            versions: vec![ended],
+            versions: vec![row(ended)],
             ..history.clone()
         };
         assert_eq!(
@@ -357,6 +424,43 @@ mod tests {
         assert_eq!(
             unheld.text(),
             "--- 1a2b3c4d5e6f (not held)\n+++ lantern\n@@ -0,0 +1 @@\n+a\n"
+        );
+    }
+
+    #[test]
+    fn a_diff_is_what_the_differ_s_own_unified_text_is() {
+        let texts = [
+            "",
+            "a\n",
+            "a",
+            "a\nb\nc\n",
+            "a\r\nb\rc\n",
+            "a\r\nB\rc",
+            "a\rb\r",
+            "\r\n\r",
+            "a\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk\n",
+            "A\nb\nc\nd\ne\nf\ng\nh\ni\nj\nK",
+        ];
+        for before in texts {
+            for after in texts {
+                let unified = if before == after {
+                    "no changes\n".to_owned()
+                } else {
+                    similar::TextDiff::from_lines(before, after)
+                        .unified_diff()
+                        .context_radius(3)
+                        .to_string()
+                };
+                assert_eq!(changes(before, after), unified, "{before:?} to {after:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_line_that_ends_in_a_carriage_return_is_printed_with_it_and_nothing_after() {
+        assert_eq!(
+            diff(&[(Some("1a2b3c4d5e6f"), "a\r\nb\rc\n")], "a\r\nB\rc\n").text(),
+            "--- 1a2b3c4d5e6f\n+++ lantern\n@@ -1,3 +1,3 @@\n a\r\n-b\r+B\r c\n"
         );
     }
 

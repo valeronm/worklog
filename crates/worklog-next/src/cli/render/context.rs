@@ -1,7 +1,7 @@
 use std::fmt::Write as _;
 
-use super::Render;
 use super::listings::followup_line;
+use super::{Render, filed_counts};
 use crate::app::context::{Context, Loaded, Part, Via};
 use crate::app::{Row, counted};
 
@@ -60,19 +60,9 @@ fn names(rows: &[Row]) -> Vec<&str> {
 }
 
 fn part(part: &Part) -> String {
-    let some = |count: usize, one: &str, more: &str| (count > 0).then(|| counted(count, one, more));
-    let counts: Vec<String> = [
-        some(part.fact_count, "fact", "facts"),
-        some(part.idea_count, "idea", "ideas"),
-        some(part.open_count, "open", "open"),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
-    if counts.is_empty() {
-        part.label.clone()
-    } else {
-        format!("{} ({})", part.label, counts.join(", "))
+    match filed_counts(part.fact_count, part.idea_count, part.open_count) {
+        Some(counts) => format!("{} {counts}", part.label),
+        None => part.label.clone(),
     }
 }
 
@@ -85,7 +75,7 @@ fn via(via: &Via) -> String {
         Via::Claim {
             directory: None, ..
         } => "claimed anywhere".to_owned(),
-        Via::Edge { from } | Via::Machine { from: Some(from) } => format!("via {from}"),
+        Via::Edge { from } | Via::Machine { from: Some(from) } => format!("via {}", from.label),
         Via::Machine { from: None } => "this machine".to_owned(),
     }
 }
@@ -301,7 +291,7 @@ impl Render for Context {
 
 #[cfg(test)]
 mod tests {
-    use super::super::testing::{assert_case_fits, assert_fits, followup, look_again, row};
+    use super::super::testing::{assert_case_fits, assert_fits, followup, look_again, row, to};
     use super::*;
     use crate::app::{FollowupRow, TriggerShown};
     use crate::domain::testing::{atlas, lantern};
@@ -319,9 +309,7 @@ mod tests {
     }
 
     fn edge(from: &str) -> Via {
-        Via::Edge {
-            from: from.to_owned(),
-        }
+        Via::Edge { from: to(from) }
     }
 
     fn machine() -> Via {
@@ -384,7 +372,7 @@ mod tests {
 
     fn context(topics: Vec<Loaded>, due: Vec<FollowupRow>) -> Context {
         Context {
-            machine: "desk".to_owned(),
+            machine: to("desk"),
             directory: "~/projects/lantern".to_owned(),
             topics,
             due,
@@ -423,13 +411,13 @@ mod tests {
         map.summary = String::new();
         let desk = loaded("desk", machine(), named("desk", &["keys"]), Vec::new());
         let through = Via::Machine {
-            from: Some("desk".to_owned()),
+            from: Some(to("desk")),
         };
         let phone = loaded("phone", through, Vec::new(), Vec::new());
         let mut waiting = due_on("2026-10-02", "Fit the lens");
         waiting.row = row(&atlas(), "a71a5000", "Fit the lens");
         waiting.trigger = Some(TriggerShown::Touching {
-            topic: "lantern".to_owned(),
+            topic: to("lantern"),
         });
         let mut relay = row(&lantern(), "lantern/relay", "Pin four");
         relay.forked = true;

@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% import "macros.html" as m %}
+{% block title %}Search{% endblock %}
+{% block query %}{{ asked.term }}{% endblock %}
+{% block content %}
+<h1>Search</h1>
+<form action="{{ nav.search }}" method="get"><input type="search" name="q" value="{{ asked.term }}" autofocus> <input class="narrow" type="search" name="topic" placeholder="Topic" value="{{ asked.topic.unwrap_or_default() }}"> <label><input type="checkbox" name="regex" value="1"{% if asked.regex %} checked{% endif %}> pattern</label> <label><input type="checkbox" name="ended" value="1"{% if asked.ended %} checked{% endif %}> ended too</label> <button>Find</button></form>
+{% if let Some(message) = problem -%}
+<p class="problem">{{ message }}</p>
+{%- else if let Some(count) = count -%}
+<p class="summary">{{ count }}</p>
+{% if !rows.is_empty() %}{% call m::items(rows) %}{% endcall %}{% endif %}
+{%- else -%}
+<p class="muted">A term, and optionally the topic to search under.</p>
+{%- endif %}
+{% endblock %}

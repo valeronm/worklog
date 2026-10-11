@@ -1,9 +1,13 @@
 use std::fmt::Write as _;
 use std::path::PathBuf;
 
-use clap::{Parser, Subcommand};
+use std::net::SocketAddr;
+
+use clap::error::ErrorKind;
+use clap::{CommandFactory as _, Parser, Subcommand};
 
 use crate::domain::schema::{KindOf, Reason};
+use crate::web::Server;
 
 fn reasons() -> String {
     let mut text = "The reasons a document ends for, by its kind:".to_owned();
@@ -29,7 +33,40 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub json: bool,
     #[command(subcommand)]
-    pub command: Command,
+    pub command: Invoked,
+}
+
+impl Cli {
+    // `--json` is refused beside `serve`, which prints no result.
+    pub fn parsed<I, T>(args: I) -> Result<Cli, clap::Error>
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<std::ffi::OsString> + Clone,
+    {
+        let cli = Cli::try_parse_from(args)?;
+        if cli.json && matches!(cli.command, Invoked::Serve { .. }) {
+            return Err(Cli::command().error(
+                ErrorKind::ArgumentConflict,
+                "the argument '--json' cannot be used with 'serve'",
+            ));
+        }
+        Ok(cli)
+    }
+}
+
+#[derive(Subcommand)]
+pub enum Invoked {
+    #[command(flatten)]
+    Run(Command),
+    /// Serve the store as read-only pages until stopped, printing the address to open
+    Serve {
+        /// The address and port to listen on
+        #[arg(long, value_name = "ADDR:PORT", default_value = "127.0.0.1:8080")]
+        bind: SocketAddr,
+        /// A name a browser may reach this server by, beside localhost and an IP address
+        #[arg(long = "host", value_name = "NAME", value_parser = Server::host_name)]
+        hosts: Vec<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -230,10 +267,12 @@ pub enum ReadCommand {
 pub enum ListCommand {
     /// Every draft on this host
     Drafts,
-    /// Every topic with what it is
+    /// Every topic with what it is, or the topics that are part of one
     Topics {
+        /// A topic, to list the topics that are part of it
+        topic: Option<String>,
         /// The ended ones too
-        #[arg(long)]
+        #[arg(long, conflicts_with = "topic")]
         ended: bool,
     },
     /// The facts, or those under a topic and its parts
@@ -281,13 +320,10 @@ pub enum ListCommand {
 
 #[cfg(test)]
 mod tests {
-    use clap::CommandFactory as _;
-    use clap::error::ErrorKind;
-
     use super::*;
 
     fn parsed(line: &str) -> Result<Cli, clap::Error> {
-        Cli::try_parse_from(line.split(' '))
+        Cli::parsed(line.split(' '))
     }
 
     #[test]
@@ -344,6 +380,7 @@ mod tests {
             "worklog-next search relay --regex --topic lantern --ended",
             "worklog-next topics",
             "worklog-next topics --ended",
+            "worklog-next topics lantern",
             "worklog-next facts",
             "worklog-next facts lantern --ended",
             "worklog-next ideas",
@@ -358,6 +395,9 @@ mod tests {
             "worklog-next due",
             "worklog-next due /atlas/lantern",
             "worklog-next check",
+            "worklog-next serve",
+            "worklog-next serve --bind 127.0.0.1:0",
+            "worklog-next serve --bind [::1]:8080 --host desk.local --host atlas",
         ] {
             assert!(parsed(line).is_ok(), "{line}");
         }
@@ -373,9 +413,9 @@ mod tests {
     #[test]
     fn the_topics_of_a_followup_split_at_commas() {
         let cli = parsed("worklog-next new followup --topics lantern,atlas").unwrap();
-        let Command::Draft(DraftCommand::New {
+        let Invoked::Run(Command::Draft(DraftCommand::New {
             what: NewWhat::Followup { topics, .. },
-        }) = cli.command
+        })) = cli.command
         else {
             panic!("expected a new followup");
         };
@@ -384,7 +424,8 @@ mod tests {
 
     #[test]
     fn a_log_with_no_count_shows_twenty() {
-        let Command::Read(ReadCommand::Log { n, .. }) = parsed("worklog-next log").unwrap().command
+        let Invoked::Run(Command::Read(ReadCommand::Log { n, .. })) =
+            parsed("worklog-next log").unwrap().command
         else {
             panic!("expected a log");
         };
@@ -427,7 +468,60 @@ mod tests {
             refused("worklog-next claim lantern /atlas/lantern --anywhere"),
             ErrorKind::ArgumentConflict
         );
-        assert_eq!(refused("worklog-next serve"), ErrorKind::InvalidSubcommand);
+        assert_eq!(
+            refused("worklog-next topics lantern --ended"),
+            ErrorKind::ArgumentConflict
+        );
+        assert_eq!(refused("worklog-next polish"), ErrorKind::InvalidSubcommand);
+    }
+
+    #[test]
+    fn serve_listens_on_the_loopback_unless_told_and_takes_each_host_it_is_given() {
+        let served = |line: &str| match parsed(line).unwrap().command {
+            Invoked::Serve { bind, hosts } => (bind.to_string(), hosts),
+            Invoked::Run(_) => panic!("{line}: expected a serve"),
+        };
+        assert_eq!(
+            served("worklog-next serve"),
+            ("127.0.0.1:8080".to_owned(), Vec::new())
+        );
+        assert_eq!(
+            served("worklog-next serve --host desk.local --bind [::]:0 --host atlas"),
+            (
+                "[::]:0".to_owned(),
+                vec!["desk.local".to_owned(), "atlas".to_owned()]
+            )
+        );
+        for line in [
+            "worklog-next serve --bind desk",
+            "worklog-next serve --bind localhost:8080",
+            "worklog-next serve --bind 127.0.0.1",
+            "worklog-next serve --bind 127.0.0.1:port",
+            "worklog-next serve --bind 127.0.0.1:99999",
+        ] {
+            assert_eq!(refused(line), ErrorKind::ValueValidation, "{line}");
+        }
+        for name in [
+            "desk.local:8080",
+            "http://desk.local",
+            "desk.local/",
+            "[::1]",
+            "",
+            " ",
+            "desk local",
+            "desk.local\t",
+        ] {
+            let refusal = Cli::try_parse_from(["worklog-next", "serve", "--host", name])
+                .err()
+                .map(|error| error.kind());
+            assert_eq!(refusal, Some(ErrorKind::ValueValidation), "{name:?}");
+        }
+        for line in [
+            "worklog-next serve --json",
+            "worklog-next --json serve --bind 127.0.0.1:0",
+        ] {
+            assert_eq!(refused(line), ErrorKind::ArgumentConflict, "{line}");
+        }
     }
 
     #[test]

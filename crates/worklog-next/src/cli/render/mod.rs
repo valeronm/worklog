@@ -18,7 +18,7 @@ use crate::app::draft::DraftRow;
 use crate::app::followup::Made;
 use crate::app::setup::Bound;
 use crate::app::{DraftRef, Row, Written};
-use crate::domain::version::Stamp;
+use crate::render::{change_or_ending, ended, written};
 
 #[cfg(test)]
 pub(super) use context::CONTEXT_BYTES;
@@ -97,34 +97,18 @@ fn row_fields(row: &Row, between: Vec<String>) -> Vec<String> {
         fields.push("forked".to_owned());
     }
     if let Some(reason) = &row.ended {
-        fields.push(format!("ended {reason}"));
+        fields.push(ended(reason));
     }
     fields
 }
 
+fn filed_counts(fact_count: usize, idea_count: usize, open_count: usize) -> Option<String> {
+    let counts = crate::render::filed_counts(fact_count, idea_count, open_count);
+    (!counts.is_empty()).then(|| format!("({})", counts.join(", ")))
+}
+
 fn row_line(text: &mut String, row: &Row) {
     line(text, &row_fields(row, Vec::new()));
-}
-
-fn change_or_ending(change: &str, ended: Option<&str>) -> String {
-    match ended {
-        Some(reason) => format!("ended {reason}"),
-        None => change.to_owned(),
-    }
-}
-
-fn written(stamp: &Stamp) -> String {
-    let stamp = stamp.to_string();
-    let Some(dot) = stamp.find('.') else {
-        return stamp;
-    };
-    let fraction = dot + 1;
-    let digits = stamp[fraction..]
-        .bytes()
-        .take_while(u8::is_ascii_digit)
-        .count();
-    let shown = fraction + digits.min(3);
-    format!("{}{}", &stamp[..shown], &stamp[fraction + digits..])
 }
 
 impl Render for () {
@@ -231,9 +215,11 @@ mod tests {
         let unheld = Shown::Document(ShownDocument {
             document: lantern(),
             kind: Some("topic".to_owned()),
+            reads_as: None,
             label: "lantern".to_owned(),
             former: Vec::new(),
             forked: false,
+            ended: None,
             heads: Vec::new(),
             unreadable: vec![Unread::from(&crate::domain::document::Unreadable {
                 version: VersionId::of(b"lost"),

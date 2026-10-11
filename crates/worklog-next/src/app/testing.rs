@@ -2,18 +2,20 @@ use std::cell::Cell;
 
 use crate::app::heads::read_or_skip;
 use crate::app::lookup::{Lookup, Stored};
-use crate::app::rows::Row;
+use crate::app::rows::{Reference, Row};
 use crate::app::{Deps, Failure};
 use crate::domain::document::Document;
 use crate::domain::document::State;
 use crate::domain::id::{DocumentId, VersionId};
 use crate::domain::ports::{Clock, Ids, Store, StoreError};
-use crate::domain::schema::Record;
 use crate::domain::schema::address::Found;
+use crate::domain::schema::{KindOf, Record};
 use crate::domain::testing::{
     FixedClock, FixedHost, MemoryDrafts, MemoryStore, SequenceIds, after, first_minted,
 };
 use crate::domain::version::{Envelope, Fields, Kind, Links, Stamp, Version};
+
+pub const NOW: &str = "2026-10-09T18:22:41.118204+01:00";
 
 pub struct World {
     pub store: MemoryStore,
@@ -29,7 +31,7 @@ impl World {
             store: MemoryStore::default(),
             drafts: MemoryDrafts::default(),
             ids: SequenceIds::default(),
-            clock: FixedClock::at("2026-10-09T18:22:41.118204+01:00"),
+            clock: FixedClock::at(NOW),
             host: FixedHost::new(Some(first_minted()), None),
         }
     }
@@ -46,6 +48,16 @@ impl World {
 
     pub(in crate::app) fn lookup(&self) -> Lookup<'_> {
         Lookup::new(Stored::new(&self.store))
+    }
+
+    pub fn counted(self) -> Counted {
+        Counted {
+            store: Counting::over(self.store),
+            drafts: self.drafts,
+            ids: self.ids,
+            clock: self.clock,
+            host: self.host,
+        }
     }
 
     pub fn machine(&self) -> DocumentId {
@@ -70,12 +82,27 @@ impl World {
     }
 
     pub fn amend(&self, id: &DocumentId, fields: &str, body: &str) -> VersionId {
+        self.amend_linking(id, fields, body, &[])
+    }
+
+    pub fn amend_linking(
+        &self,
+        id: &DocumentId,
+        fields: &str,
+        body: &str,
+        links: &[(&str, Option<&DocumentId>)],
+    ) -> VersionId {
         let held = self.store.document(id).expect("a read");
         let envelope = Envelope::following(&held.heads(), self.clock.now(), self.machine(), "save")
             .expect("a head to follow");
         let fields: Fields = fields.parse().expect("fields in TOML");
-        let version = Version::compose(envelope, fields, Links::default(), body.to_owned())
-            .expect("a version");
+        let links = Links(
+            (links.iter())
+                .map(|(text, target)| ((*text).to_owned(), target.cloned()))
+                .collect(),
+        );
+        let version =
+            Version::compose(envelope, fields, links, body.to_owned()).expect("a version");
         self.store.put(&version).expect("a write");
         version.id
     }
@@ -213,6 +240,29 @@ pub fn written_at(
     version
 }
 
+pub fn to(document: &DocumentId, label: &str) -> Reference {
+    Reference::to(document, label.to_owned())
+}
+
+pub fn row(id: &DocumentId, label: &str, summary: &str) -> Row {
+    Row {
+        document: id.clone(),
+        kind: KindOf::Topic,
+        label: label.to_owned(),
+        name: None,
+        summary: summary.to_owned(),
+        topics: Vec::new(),
+        forked: false,
+        ended: None,
+    }
+}
+
+pub fn referred(references: &[Reference]) -> Vec<&str> {
+    (references.iter())
+        .map(|reference| reference.label.as_str())
+        .collect()
+}
+
 pub fn labels<T>(items: &[T], row_of: impl Fn(&T) -> &Row) -> Vec<String> {
     items
         .iter()
@@ -282,6 +332,26 @@ impl Counting {
             + self.prefixes.get()
             + self.unreadables.get()
             + self.forks.get()
+    }
+}
+
+pub struct Counted {
+    pub store: Counting,
+    drafts: MemoryDrafts,
+    ids: SequenceIds,
+    clock: FixedClock,
+    host: FixedHost,
+}
+
+impl Counted {
+    pub fn deps(&self) -> Deps<'_> {
+        Deps {
+            store: Stored::new(&self.store),
+            drafts: &self.drafts,
+            ids: &self.ids,
+            clock: &self.clock,
+            host: &self.host,
+        }
     }
 }
 

@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% import "macros.html" as m %}
+{% block title %}Log{% endblock %}
+{% block content %}
+<h1>Log</h1>
+<p class="summary">{{ count }}</p>
+<table>
+<tr><th>Version</th><th>Written</th><th>Machine</th><th>Change</th><th>Document</th></tr>
+{% for row in rows -%}
+<tr>{% call m::version_row(row.stamp) %}{% endcall %}<td><a href="{{ row.document.href }}">{{ row.document.text }}</a></td></tr>
+{% endfor -%}
+</table>
+{% endblock %}

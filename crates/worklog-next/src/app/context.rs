@@ -4,21 +4,22 @@ use std::rc::Rc;
 
 use serde::Serialize;
 
-use crate::app::heads::{is_forked, row_head};
+use crate::app::heads::is_forked;
 use crate::app::index::Topics;
 use crate::app::lookup::Lookup;
 use crate::app::rows::{
-    FollowupRow, Row, by_label, followup_rows, members, memberships, row, shown,
+    Filed, Filings, FollowupRow, Reference, Row, by_label, filed, filed_by_topic, followup_rows,
+    is_idea, row, shown,
 };
 use crate::app::rules::claims_of;
 use crate::app::{Deps, Failure};
 use crate::domain::document::Document;
 use crate::domain::id::DocumentId;
-use crate::domain::schema::{Claim, Content, Date, Directory, KindOf};
+use crate::domain::schema::{Claim, Date, Directory, KindOf};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Context {
-    pub machine: String,
+    pub machine: Reference,
     /// Where the session is, in the form a claim's directory is compared in.
     pub directory: String,
     /// The claimed topics, closest directory first, then what they reach, then what the
@@ -57,9 +58,9 @@ pub enum Via {
         closest: bool,
     },
     /// `from` is the loaded topic this one was first reached from.
-    Edge { from: String },
+    Edge { from: Reference },
     /// `from` is none for the machine topic itself.
-    Machine { from: Option<String> },
+    Machine { from: Option<Reference> },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -98,7 +99,7 @@ impl<'a> Scope<'a> {
         }
 
         let claimed = Claimed::read(&lookup, &topics, &machine, &directory)?;
-        let label = |from: DocumentId| topics.label(&from);
+        let label = |from: DocumentId| topics.reference(&from);
         let mut vias: Vec<(DocumentId, Via)> = Vec::new();
         for (id, from) in topics.reach_from(&claimed.order) {
             // A root of this walk is a claimed topic.
@@ -130,11 +131,6 @@ impl<'a> Scope<'a> {
         })
     }
 
-    fn followups(&self, topics: &BTreeSet<DocumentId>) -> Result<Filed, Failure> {
-        let held = members(&self.lookup, KindOf::Followup, topics, false)?;
-        Ok(by_topic(&held, KindOf::Followup))
-    }
-
     fn open_work(&self, followups: &Filed) -> Result<Vec<FollowupRow>, Failure> {
         let counted_work = filed(followups, &self.counted);
         let rows = shown(&self.topics, &counted_work, false);
@@ -160,8 +156,7 @@ pub fn context(deps: &Deps, directory: &str) -> Result<Context, Failure> {
     let loaded: Vec<DocumentId> = vias.iter().map(|(id, _)| id.clone()).collect();
 
     let (asked, mut parts) = parts_of(topics, &loaded);
-    let facts = by_topic(&members(lookup, KindOf::Fact, &asked, false)?, KindOf::Fact);
-    let followups = scope.followups(&asked)?;
+    let filings = Filings::of(lookup, &asked)?;
     let mut forks: Vec<Row> = (scope.claims.iter())
         .filter(|claim| is_forked(claim))
         .filter_map(|claim| row(topics, claim))
@@ -169,7 +164,7 @@ pub fn context(deps: &Deps, directory: &str) -> Result<Context, Failure> {
         .collect();
     let mut shown_topics = Vec::new();
     for (id, via) in vias {
-        let (plain, ideas) = filed_on(topics, &facts, id);
+        let (plain, ideas) = filed_on(topics, &filings.facts, id);
         let document = lookup.document(id)?;
         if is_forked(&document) {
             forks.extend(row(topics, &document).map(|found| found.row));
@@ -185,23 +180,20 @@ pub fn context(deps: &Deps, directory: &str) -> Result<Context, Failure> {
             ideas,
             parts: (parts.remove(id).unwrap_or_default().into_iter())
                 .map(|(document, label, covered)| {
-                    let held = filed(&facts, &covered);
-                    let idea_count = (held.iter().filter_map(|fact| row_head(fact)))
-                        .filter(|(_, record)| is_idea(&record.content))
-                        .count();
+                    let counts = filings.counts(&covered);
                     Part {
                         document,
                         label,
-                        fact_count: held.len() - idea_count,
-                        idea_count,
-                        open_count: filed(&followups, &covered).len(),
+                        fact_count: counts.facts,
+                        idea_count: counts.ideas,
+                        open_count: counts.open,
                     }
                 })
                 .collect(),
         });
     }
 
-    let work = scope.open_work(&followups)?;
+    let work = scope.open_work(&filings.followups)?;
     let forked = work.iter().filter(|followup| followup.row.forked);
     forks.extend(forked.map(|followup| followup.row.clone()));
     let (due, waiting): (Vec<FollowupRow>, Vec<FollowupRow>) =
@@ -210,7 +202,7 @@ pub fn context(deps: &Deps, directory: &str) -> Result<Context, Failure> {
     by_label(&mut forks, |fork| fork);
     forks.dedup_by(|a, b| a.document == b.document);
     Ok(Context {
-        machine: topics.label(machine),
+        machine: topics.reference(machine),
         directory: directory.to_string(),
         topics: shown_topics,
         open_count: waiting.len(),
@@ -224,7 +216,8 @@ pub fn context(deps: &Deps, directory: &str) -> Result<Context, Failure> {
 /// that order, with the same reading of `directory` and the same refusals.
 pub fn due(deps: &Deps, directory: &str) -> Result<Vec<FollowupRow>, Failure> {
     let scope = Scope::of(deps, directory)?;
-    let mut work = scope.open_work(&scope.followups(&scope.counted)?)?;
+    let followups = filed_by_topic(&scope.lookup, KindOf::Followup, &scope.counted)?;
+    let mut work = scope.open_work(&followups)?;
     work.retain(|followup| followup.due);
     Ok(work)
 }
@@ -248,32 +241,6 @@ fn parts_of<'l>(topics: &Topics, loaded: &'l [DocumentId]) -> (BTreeSet<Document
         parts.insert(id, of_topic);
     }
     (asked, parts)
-}
-
-type Filed = BTreeMap<DocumentId, Vec<Rc<Document>>>;
-
-fn by_topic(documents: &[Rc<Document>], kind: KindOf) -> Filed {
-    let mut grouped = Filed::new();
-    for document in documents {
-        for topic in memberships(document, kind) {
-            grouped.entry(topic).or_default().push(Rc::clone(document));
-        }
-    }
-    grouped
-}
-
-fn filed(grouped: &Filed, topics: &BTreeSet<DocumentId>) -> Vec<Rc<Document>> {
-    let mut found: BTreeMap<&DocumentId, &Rc<Document>> = BTreeMap::new();
-    for topic in topics {
-        for document in grouped.get(topic).into_iter().flatten() {
-            found.insert(document.id(), document);
-        }
-    }
-    found.into_values().cloned().collect()
-}
-
-fn is_idea(content: &Content) -> bool {
-    matches!(content, Content::Fact(fact) if fact.idea)
 }
 
 fn filed_on(topics: &Topics, facts: &Filed, topic: &DocumentId) -> (Vec<Row>, Vec<Row>) {
@@ -372,11 +339,10 @@ impl Claimed {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::lookup::Stored;
     use crate::app::rows::TriggerShown;
     use crate::app::testing::{
-        Counting, ENDED, ENDED_FACT, World, claim_fields, fact, followup, fork, head, labels,
-        part_of, refused, topic, topic_fields, uses, world_of,
+        ENDED, ENDED_FACT, World, claim_fields, fact, followup, fork, head, labels, part_of,
+        refused, to, topic, topic_fields, uses, world_of,
     };
     use crate::domain::draft::Draft;
     use crate::domain::ports::{Drafts, Store};
@@ -413,15 +379,15 @@ mod tests {
         }
     }
 
-    fn via(from: &str) -> Via {
+    fn via(from: &DocumentId, label: &str) -> Via {
         Via::Edge {
-            from: from.to_owned(),
+            from: to(from, label),
         }
     }
 
-    fn through(from: &str) -> Via {
+    fn through(from: &DocumentId, label: &str) -> Via {
         Via::Machine {
-            from: Some(from.to_owned()),
+            from: Some(to(from, label)),
         }
     }
 
@@ -465,7 +431,7 @@ mod tests {
         );
 
         let context = at(&world, "/work/lantern");
-        assert_eq!(context.machine, "desk");
+        assert_eq!(context.machine, to(&world.machine(), "desk"));
         assert_eq!(
             loaded(&context),
             [
@@ -650,8 +616,8 @@ mod tests {
             [
                 ("phone", claimed("/work")),
                 ("relay", claimed("/work")),
-                ("atlas", via("phone")),
-                ("lantern", via("atlas")),
+                ("atlas", via(&phone, "phone")),
+                ("lantern", via(&atlas, "atlas")),
                 ("desk", Via::Machine { from: None })
             ]
         );
@@ -673,15 +639,15 @@ mod tests {
             [
                 ("lantern", claimed("/work")),
                 ("desk", Via::Machine { from: None }),
-                ("relay", through("desk"))
+                ("relay", through(&world.machine(), "desk"))
             ]
         );
         assert_eq!(
             loaded(&at(&world, "/other")),
             [
                 ("desk", Via::Machine { from: None }),
-                ("relay", through("desk")),
-                ("lantern", through("relay"))
+                ("relay", through(&world.machine(), "desk")),
+                ("lantern", through(&relay, "relay"))
             ]
         );
     }
@@ -778,7 +744,7 @@ mod tests {
         assert_eq!(
             inside.due[2].trigger,
             Some(TriggerShown::Touching {
-                topic: "lantern".to_owned()
+                topic: to(&lantern, "lantern")
             })
         );
         assert_eq!(inside.open_count, 3);
@@ -906,7 +872,10 @@ mod tests {
         shown.sort_by_key(|(label, _)| *label);
         assert_eq!(
             shown,
-            [("atlas", via("lantern")), ("phone", via("lantern"))]
+            [
+                ("atlas", via(&lantern, "lantern")),
+                ("phone", via(&lantern, "lantern"))
+            ]
         );
         assert_eq!(labels(&context.forks, |row| row), ["lantern"]);
     }
@@ -989,7 +958,7 @@ mod tests {
     fn a_machine_topic_the_store_lacks_is_shown_by_its_short_id() {
         let world = World::new();
         let context = at(&world, "/work");
-        assert_eq!(context.machine, world.machine().short());
+        assert_eq!(context.machine.label, world.machine().short());
         assert!(context.topics.is_empty());
     }
 
@@ -1171,7 +1140,7 @@ mod tests {
             loaded(&at(&world, "/work")),
             [
                 ("phone", claimed("/work")),
-                ("lantern", via("phone")),
+                ("lantern", via(&phone, "phone")),
                 ("desk", Via::Machine { from: None })
             ]
         );
@@ -1232,21 +1201,8 @@ mod tests {
                 followup(&world, &[&part], "open", "");
             }
         }
-        let World {
-            store,
-            drafts,
-            ids,
-            clock,
-            host,
-        } = world;
-        let counting = Counting::over(store);
-        let deps = Deps {
-            store: Stored::new(&counting),
-            drafts: &drafts,
-            ids: &ids,
-            clock: &clock,
-            host: &host,
-        };
+        let world = world.counted();
+        let deps = world.deps();
         let context = context(&deps, "/work/src").unwrap();
         assert_eq!(context.topics.len(), claimed + 1);
         assert_eq!(context.due.len(), claimed);
@@ -1257,7 +1213,7 @@ mod tests {
                     .iter()
                     .all(|part| (part.fact_count, part.open_count) == (1, 1))
         }));
-        counting.scans()
+        world.store.scans()
     }
 
     #[test]

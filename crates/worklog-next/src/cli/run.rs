@@ -209,7 +209,9 @@ fn read(
 fn listed(deps: &Deps, json: bool, command: &ListCommand) -> Result<Output, Failure> {
     Ok(match command {
         ListCommand::Drafts => output(&draft::drafts(deps)?, json),
-        ListCommand::Topics { ended } => output(&list::topics(deps, *ended)?, json),
+        ListCommand::Topics { topic, ended } => {
+            output(&list::topics(deps, topic.as_deref(), *ended)?, json)
+        }
         ListCommand::Facts { topic, ended } => {
             output(&list::facts(deps, topic.as_deref(), *ended)?, json)
         }
@@ -251,13 +253,11 @@ pub(super) fn run(
 mod tests {
     use std::path::PathBuf;
 
-    use clap::Parser as _;
-
     use super::*;
     use crate::app::testing::{
         World, claim_fields, entry, fact, followup, fork, topic, world_with_atlas,
     };
-    use crate::cli::args::Cli;
+    use crate::cli::args::{Cli, Invoked};
     use crate::cli::render::{CONTEXT_BYTES, assert_fits};
     use crate::domain::id::DocumentId;
 
@@ -277,12 +277,15 @@ mod tests {
         }
 
         fn run_in(&self, cwd: Option<&str>, line: &[&str]) -> Result<Output, Failure> {
-            let cli = Cli::try_parse_from([&["worklog-next"], line].concat()).expect("a command");
+            let cli = Cli::parsed([&["worklog-next"], line].concat()).expect("a command");
+            let Invoked::Run(command) = &cli.command else {
+                panic!("{line:?} returns no result");
+            };
             let environment = Environment {
                 cwd: cwd.map(PathBuf::from),
                 variable: &|_| None,
             };
-            run(&self.world.deps(), &environment, cli.json, &cli.command)
+            run(&self.world.deps(), &environment, cli.json, command)
         }
 
         fn run(&self, line: &[&str]) -> Result<Output, Failure> {

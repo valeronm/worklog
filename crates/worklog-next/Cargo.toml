@@ -19,15 +19,18 @@ name = "worklog-next"
 path = "src/main.rs"
 
 [dependencies]
+askama = "0.16"
 blake3 = "1"
 clap = { version = "4", features = ["derive", "wrap_help"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 getrandom = "0.4"
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
 regex = "1"
 serde = { version = "1", features = ["derive"] }
 # preserve_order so a value read back keeps the order its keys were printed in.
 serde_json = { version = "1", features = ["preserve_order"] }
 similar = "2"
+tiny_http = "0.12"
 # preserve_order so a header keeps the order its keys were written in.
 toml = { version = "1.1.8", features = ["preserve_order"] }
 

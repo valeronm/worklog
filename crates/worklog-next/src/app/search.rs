@@ -4,8 +4,8 @@ use std::collections::BTreeMap;
 use regex::{Regex, RegexBuilder};
 use serde::Serialize;
 
-use crate::app::heads::{ended_of, label_or_short, machine_label};
-use crate::app::rows::{Row, by_label, documents, reading, row, shown};
+use crate::app::heads::{ended_of, label_or_short};
+use crate::app::rows::{Reference, Row, by_label, documents, reading, row, shown};
 use crate::app::{Deps, Failure};
 use crate::domain::document::Document;
 use crate::domain::id::{DocumentId, VersionId};
@@ -34,7 +34,7 @@ pub struct Logged {
     pub label: String,
     pub version: VersionId,
     pub written: Stamp,
-    pub machine: String,
+    pub machine: Reference,
     pub change: String,
     /// The reason; `None` too for a version that does not read as a record.
     pub ended: Option<String>,
@@ -127,7 +127,7 @@ pub fn log(deps: &Deps, limit: usize, machine: Option<&str>) -> Result<Vec<Logge
             label: label_or_short(label, document.id()),
             version: version.id.clone(),
             written: version.envelope.written.clone(),
-            machine: machine_label(version, topics.name(&version.envelope.machine)),
+            machine: topics.reference(&version.envelope.machine),
             change: version.envelope.change.clone(),
             ended: ended_of(version),
             row: of_document.clone(),
@@ -140,9 +140,8 @@ pub fn log(deps: &Deps, limit: usize, machine: Option<&str>) -> Result<Vec<Logge
 mod tests {
     use super::*;
     use crate::app::heads::row_head;
-    use crate::app::lookup::Stored;
     use crate::app::testing::{
-        ENDED, World, fact, fact_fields, fork, head, labels, topic, world, written_at,
+        ENDED, World, fact, fact_fields, fork, head, labels, to, topic, world, written_at,
     };
     use crate::domain::id::DocumentId;
     use crate::domain::ports::Store;
@@ -238,6 +237,33 @@ mod tests {
             },
         );
         assert_eq!(literal, Ok(Vec::new()));
+    }
+
+    #[test]
+    fn a_pattern_too_large_to_compile_is_a_usage_failure_and_a_wide_class_repeated_is_not() {
+        let (world, lantern) = world();
+        fact(&world, &lantern, "relay-pin", "");
+        let deps = world.deps();
+        let asked = |term: &str| {
+            search(
+                &deps,
+                &Query {
+                    term,
+                    regex: true,
+                    topic: None,
+                    ended: false,
+                },
+            )
+        };
+        let Err(Failure::Usage(text)) = asked("[a-z]{60000}") else {
+            panic!("expected a usage failure");
+        };
+        assert!(text.starts_with("bad pattern: "), "{text}");
+        assert!(text.contains("size limit"), "{text}");
+        assert_eq!(asked(r"\w{40}"), Ok(Vec::new()));
+        assert_eq!(asked(r"\pL{50}"), Ok(Vec::new()));
+        assert_eq!(asked(r"^the \pL{5}\.$").unwrap().len(), 1);
+        assert_eq!(asked(r"(?:rel|del)ay-p[a-z]{2}\b").unwrap().len(), 1);
     }
 
     #[test]
@@ -406,17 +432,10 @@ mod tests {
 
     #[test]
     fn a_whole_store_search_asks_one_question_per_kind() {
-        use crate::app::testing::Counting;
         let (world, lantern) = world();
         fact(&world, &lantern, "relay-pin", "");
-        let counting = Counting::over(world.store);
-        let deps = Deps {
-            store: Stored::new(&counting),
-            drafts: &world.drafts,
-            ids: &world.ids,
-            clock: &world.clock,
-            host: &world.host,
-        };
+        let world = world.counted();
+        let deps = world.deps();
         search(
             &deps,
             &Query {
@@ -427,9 +446,9 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(counting.kinds.get(), KindOf::ALL.len() - 1);
-        assert_eq!(counting.documents.get(), 0);
-        assert_eq!(counting.holdings.get(), 0);
+        assert_eq!(world.store.kinds.get(), KindOf::ALL.len() - 1);
+        assert_eq!(world.store.documents.get(), 0);
+        assert_eq!(world.store.holdings.get(), 0);
     }
 
     fn rewritten(world: &World, id: &DocumentId, stamp: &str, machine: &DocumentId) -> VersionId {
@@ -460,8 +479,8 @@ mod tests {
         let all = logged(&world, usize::MAX, None);
         assert_eq!(all.len(), 6);
         assert_eq!((&all[0].version, &all[1].version), (&newer, &older));
-        assert_eq!(all[0].machine, "desk");
-        assert_eq!(all[1].machine, "phone");
+        assert_eq!(all[0].machine, to(&world.machine(), "desk"));
+        assert_eq!(all[1].machine.label, "phone");
         assert_eq!(all[0].change, "save");
         assert_eq!(all[0].row.as_ref().unwrap().label, "lantern/relay-pin");
         assert_eq!(all[0].label, "lantern/relay-pin");
@@ -484,8 +503,8 @@ mod tests {
         let newer = rewritten(&world, &lantern, "2026-10-11T09:00:00+00:00", &absent);
         let all = logged(&world, 2, None);
         assert_eq!((&all[0].version, &all[1].version), (&newer, &older));
-        assert_eq!(all[0].machine, absent.short());
-        assert_eq!(all[1].machine, relay.short());
+        assert_eq!(all[0].machine, to(&absent, absent.short()));
+        assert_eq!(all[1].machine, to(&relay, relay.short()));
     }
 
     #[test]
@@ -497,7 +516,7 @@ mod tests {
         let only = logged(&world, usize::MAX, Some("phone"));
         let ids: Vec<&VersionId> = only.iter().map(|entry| &entry.version).collect();
         assert!(ids.contains(&&older));
-        assert!(only.iter().all(|entry| entry.machine == "phone"));
+        assert!(only.iter().all(|entry| entry.machine.label == "phone"));
         let refused = log(&world.deps(), 5, Some("nowhere"));
         assert!(matches!(refused, Err(Failure::Refused(_))), "{refused:?}");
     }
@@ -524,21 +543,14 @@ mod tests {
 
     #[test]
     fn a_whole_store_log_asks_one_question_per_kind() {
-        use crate::app::testing::Counting;
         let (world, lantern) = world();
         fact(&world, &lantern, "relay-pin", "");
-        let counting = Counting::over(world.store);
-        let deps = Deps {
-            store: Stored::new(&counting),
-            drafts: &world.drafts,
-            ids: &world.ids,
-            clock: &world.clock,
-            host: &world.host,
-        };
+        let world = world.counted();
+        let deps = world.deps();
         log(&deps, 10, None).unwrap();
-        assert_eq!(counting.kinds.get(), KindOf::ALL.len());
-        assert_eq!(counting.holdings.get(), 0);
-        assert_eq!(counting.documents.get(), 0);
+        assert_eq!(world.store.kinds.get(), KindOf::ALL.len());
+        assert_eq!(world.store.holdings.get(), 0);
+        assert_eq!(world.store.documents.get(), 0);
     }
 
     #[test]
@@ -638,19 +650,12 @@ mod tests {
 
     #[test]
     fn the_log_lists_the_versions_of_a_kind_this_worklog_does_not_know() {
-        use crate::app::testing::Counting;
         let (world, _) = world();
         let sketch = world.put("sketch", "name = \"one\"\n", "\n");
         let first = head(&world, &sketch).id;
         let second = world.amend(&sketch, "name = \"two\"\n", "\n");
-        let counting = Counting::over(world.store);
-        let deps = Deps {
-            store: Stored::new(&counting),
-            drafts: &world.drafts,
-            ids: &world.ids,
-            clock: &world.clock,
-            host: &world.host,
-        };
+        let world = world.counted();
+        let deps = world.deps();
         let all = log(&deps, usize::MAX, None).unwrap();
         assert_eq!(all.len(), 4);
         let mine: Vec<&Logged> = all
@@ -659,9 +664,9 @@ mod tests {
             .collect();
         assert_eq!(mine.len(), 2);
         assert!(mine.iter().all(|entry| entry.row.is_none()));
-        assert!(mine.iter().all(|entry| entry.machine == "desk"));
-        assert_eq!(counting.kind_lists.get(), 1);
-        assert_eq!(counting.kinds.get(), KindOf::ALL.len() + 1);
+        assert!(mine.iter().all(|entry| entry.machine.label == "desk"));
+        assert_eq!(world.store.kind_lists.get(), 1);
+        assert_eq!(world.store.kinds.get(), KindOf::ALL.len() + 1);
     }
 
     #[test]

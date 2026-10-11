@@ -2,20 +2,15 @@ use std::fmt::Write as _;
 
 use super::{INDENT, Render, change_or_ending, line, row_line, written};
 use crate::app::search::{Hit, Logged};
-
-const LINES_SHOWN: usize = 3;
+use crate::render::hit_lines;
 
 impl Render for Vec<Hit> {
     fn text(&self) -> String {
         let mut text = String::new();
         for hit in self {
             row_line(&mut text, &hit.row);
-            for matching in hit.lines.iter().take(LINES_SHOWN) {
-                let _ = writeln!(text, "{INDENT}{matching}");
-            }
-            let more = hit.lines.len().saturating_sub(LINES_SHOWN);
-            if more > 0 {
-                let _ = writeln!(text, "{INDENT}… {more} more");
+            for shown in hit_lines(&hit.lines) {
+                let _ = writeln!(text, "{INDENT}{shown}");
             }
         }
         text
@@ -28,7 +23,7 @@ impl Render for Vec<Logged> {
         for version in self {
             let fields = [
                 &written(&version.written),
-                &version.machine,
+                &version.machine.label,
                 version.version.short(),
                 &version.label,
                 &change_or_ending(&version.change, version.ended.as_deref()),
@@ -41,7 +36,7 @@ impl Render for Vec<Logged> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::testing::{WRITTEN, row, stamp};
+    use super::super::testing::{WRITTEN, row, stamp, to};
     use super::*;
     use crate::domain::id::VersionId;
     use crate::domain::testing::{atlas, lantern};
@@ -84,7 +79,7 @@ mod tests {
             label: atlas().short().to_owned(),
             version: VersionId::of(seed),
             written: stamp(WRITTEN),
-            machine: machine.to_owned(),
+            machine: to(machine),
             change: change.to_owned(),
             ended: None,
             row: None,

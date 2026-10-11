@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% import "macros.html" as m %}
+{% block title %}{{ document.label }}{% endblock %}
+{% block content %}
+{% call m::sheet(document) %}{% endcall %}
+{% endblock %}

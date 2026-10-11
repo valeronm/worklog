@@ -2,7 +2,7 @@ use std::fmt::Write as _;
 
 use super::Render;
 use crate::app::check::Check;
-use crate::app::counted;
+use crate::render::check_summary;
 
 impl Render for Check {
     fn text(&self) -> String {
@@ -13,12 +13,11 @@ impl Render for Check {
         for notice in &self.notices {
             let _ = writeln!(text, "notice: {}: {}", notice.label, notice.what);
         }
+        let summary = check_summary(self);
         let _ = writeln!(
             text,
             "{}, {}, {}",
-            counted(self.problems.len(), "problem", "problems"),
-            counted(self.notices.len(), "notice", "notices"),
-            counted(self.fork_count, "fork", "forks")
+            summary.problems, summary.notices, summary.forks
         );
         text
     }
@@ -37,6 +36,7 @@ mod tests {
     #[test]
     fn a_check_counts_what_it_found_marks_a_notice_and_exits_one_on_a_problem() {
         let finding = |label: &str, what: &str| Finding {
+            document: None,
             label: label.to_owned(),
             what: what.to_owned(),
         };

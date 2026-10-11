@@ -1,0 +1,51 @@
+{% macro text(t, class) %}{% if let Some(href) = t.href %}<a{% if !class.is_empty() %} class="{{ class }}"{% endif %} href="{{ href }}">{{ t.text }}</a>{% else if !class.is_empty() %}<span class="{{ class }}">{{ t.text }}</span>{% else %}{{ t.text }}{% endif %}{% endmacro %}
+
+{% macro words(ts) %}{% for t in ts.iter() %}{% if !loop.first %} {% endif %}{% call text(t, "") %}{% endcall %}{% endfor %}{% endmacro %}
+
+{% macro marks(ms) %}{% for mark in ms.iter() %} <span class="mark">{{ mark }}</span>{% endfor %}{% endmacro %}
+
+{% macro line(l) %}<a class="title" href="{{ l.href }}">{{ l.label }}</a> <span class="what">{{ l.summary }}</span>{% for count in l.counts %} <span class="label">{{ count }}</span>{% endfor %}{% call marks(l.marks) %}{% endcall %}{% endmacro %}
+
+{% macro stamp(s) %}<a href="{{ s.version.href }}">{{ s.version.text }}</a>{% if let Some(change) = s.change %} · {{ change }}{% endif %} on <a href="{{ s.machine.href }}">{{ s.machine.text }}</a> · <span title="{{ s.written_full }}">{{ s.written }}</span>{% endmacro %}
+
+{% macro head(h, heading) %}
+<article class="head">
+{% if heading %}<h2 class="stamp">{% else %}<p class="stamp">{% endif %}{% call stamp(h.stamp) %}{% endcall %}{% if let Some(ended) = h.stamp.ended %} <span class="mark">{{ ended }}</span>{% endif %}{% if heading %}</h2>{% else %}</p>{% endif %}
+{% if !h.fields.is_empty() -%}
+<dl class="fields">
+{% for field in h.fields -%}
+<dt>{{ field.name }}</dt><dd>{% for value in field.values %}{% if !loop.first %}, {% endif %}{% call text(value, "") %}{% endcall %}{% endfor %}</dd>
+{% endfor -%}
+</dl>
+{% endif -%}
+<div class="body">{{ h.body }}</div>
+</article>
+{% endmacro %}
+
+{% macro sheet(d) %}
+<h1>{{ d.label }}</h1>
+<p class="meta">{% if let Some(kind) = d.kind %}<span class="kind">{{ kind }}</span>{% endif %}<a href="{{ d.history }}">history</a>{% call marks(d.marks) %}{% endcall %}</p>
+{% if !d.former.is_empty() %}<p class="muted">formerly {% for name in d.former %}{% if !loop.first %}, {% endif %}{{ name }}{% endfor %}</p>
+{% endif -%}
+{% for note in d.notes %}<p class="notice">{{ note }}</p>
+{% endfor -%}
+{% for h in d.heads %}{% call head(h, d.forked) %}{% endcall %}{% endfor %}
+{% endmacro %}
+
+{% macro items(rows) %}
+<ul class="items">
+{% for row in rows %}
+  <li{% if row.due %} class="due"{% endif %}><span class="label">{% call words(row.lead) %}{% endcall %}</span> {% call line(row.line) %}{% endcall %}
+{%- if !row.topics.is_empty() %} <span class="chips">{% for link in row.topics %}<a href="{{ link.href }}">{{ link.text }}</a>{% endfor %}</span>{% endif -%}
+{%- if !row.details.is_empty() %}<span class="details">{% for detail in row.details %}{% if !loop.first %} · {% endif %}{% call words(detail) %}{% endcall %}{% endfor %}</span>{% endif -%}
+{%- for line in row.lines %}<span class="details">{{ line }}</span>{% endfor -%}
+</li>
+{% endfor %}
+</ul>
+{% endmacro %}
+
+{% macro topic(t) %}{% call line(t.line) %}{% endcall %}
+{%- if !t.uses.is_empty() %} <span class="muted">uses {% for link in t.uses %}{% if !loop.first %}, {% endif %}<a href="{{ link.href }}">{{ link.text }}</a>{% endfor %}</span>{% endif -%}
+{% endmacro %}
+
+{% macro version_row(s) %}<td class="mono"><a href="{{ s.version.href }}">{{ s.version.text }}</a>{% if s.head %} <span class="label">head</span>{% endif %}</td><td class="mono" title="{{ s.written_full }}">{{ s.written }}</td><td class="mono"><a href="{{ s.machine.href }}">{{ s.machine.text }}</a></td><td class="mono">{% if let Some(change) = s.change %}{{ change }}{% endif %}</td>{% endmacro %}

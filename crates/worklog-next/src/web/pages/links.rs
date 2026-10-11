@@ -1,0 +1,275 @@
+//! The places a page links to and the pieces every page is built of.
+
+use std::fmt::Write as _;
+
+use askama::Template;
+
+use crate::app::{Reference, Row};
+use crate::domain::id::{DocumentId, VersionId};
+use crate::domain::version::Stamp;
+use crate::render::{ended, written};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Place {
+    Topics,
+    Entries,
+    Facts,
+    Ideas,
+    Followups,
+    Search,
+    Log,
+    Check,
+    Forks,
+}
+
+impl Place {
+    const FIRST: Place = Place::Topics;
+
+    // A place no other is followed by, `FIRST` aside, has a route that answers 404.
+    const fn following(self) -> Option<Place> {
+        match self {
+            Place::Topics => Some(Place::Entries),
+            Place::Entries => Some(Place::Facts),
+            Place::Facts => Some(Place::Ideas),
+            Place::Ideas => Some(Place::Followups),
+            Place::Followups => Some(Place::Search),
+            Place::Search => Some(Place::Log),
+            Place::Log => Some(Place::Check),
+            Place::Check => Some(Place::Forks),
+            Place::Forks => None,
+        }
+    }
+
+    fn all() -> impl Iterator<Item = Place> {
+        std::iter::successors(Some(Place::FIRST), |place| place.following())
+    }
+
+    const IN_THE_NAVIGATION: [Place; 8] = [
+        Place::Topics,
+        Place::Entries,
+        Place::Facts,
+        Place::Ideas,
+        Place::Followups,
+        Place::Log,
+        Place::Check,
+        Place::Forks,
+    ];
+
+    const fn titled(self) -> (&'static str, &'static str) {
+        match self {
+            Place::Topics => ("Topics", "/"),
+            Place::Entries => ("Entries", "/entries"),
+            Place::Facts => ("Facts", "/facts"),
+            Place::Ideas => ("Ideas", "/ideas"),
+            Place::Followups => ("Follow-ups", "/followups"),
+            Place::Search => ("Search", "/search"),
+            Place::Log => ("Log", "/log"),
+            Place::Check => ("Check", "/check"),
+            Place::Forks => ("Forks", "/forks"),
+        }
+    }
+
+    pub const fn title(self) -> &'static str {
+        self.titled().0
+    }
+
+    pub const fn route(self) -> &'static str {
+        self.titled().1
+    }
+
+    pub fn at(path: &str) -> Option<Place> {
+        let wanted = path.trim_end_matches('/');
+        Place::all().find(|place| place.route().trim_end_matches('/') == wanted)
+    }
+
+    pub(super) fn links(listed: &[Place], current: Option<Place>) -> Vec<NavLink> {
+        (listed.iter())
+            .map(|place| NavLink {
+                text: place.title(),
+                href: place.route(),
+                current: current == Some(*place),
+            })
+            .collect()
+    }
+}
+
+// What follows it in a path names a document or a version, by anything `show` resolves.
+pub const DOC: &str = "/doc/";
+// What follows it in a path names a document.
+pub const HISTORY: &str = "/history/";
+
+pub struct Link {
+    pub text: String,
+    pub href: String,
+}
+
+pub struct Text {
+    pub text: String,
+    pub href: Option<String>,
+}
+
+impl Text {
+    pub(super) fn plain(text: &str) -> Text {
+        Text {
+            text: text.to_owned(),
+            href: None,
+        }
+    }
+
+    pub(super) fn naming(document: &Reference) -> Text {
+        Text {
+            text: document.label.clone(),
+            href: Some(doc_href(&document.document)),
+        }
+    }
+}
+
+pub struct NavLink {
+    pub text: &'static str,
+    pub href: &'static str,
+    pub current: bool,
+}
+
+pub struct Nav {
+    pub home: &'static str,
+    pub search: &'static str,
+    pub places: Vec<NavLink>,
+}
+
+impl Nav {
+    pub(super) fn at(current: Option<Place>) -> Nav {
+        Nav {
+            home: Place::Topics.route(),
+            search: Place::Search.route(),
+            places: Place::links(&Place::IN_THE_NAVIGATION, current),
+        }
+    }
+}
+
+pub fn encoded(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for byte in text.bytes() {
+        if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) {
+            out.push(char::from(byte));
+        } else {
+            let _ = write!(out, "%{byte:02X}");
+        }
+    }
+    out
+}
+
+pub(super) fn doc_href(document: &DocumentId) -> String {
+    format!("{DOC}{document}")
+}
+
+pub(super) fn history_href(document: &DocumentId) -> String {
+    format!("{HISTORY}{document}")
+}
+
+pub(super) fn version_link(version: &VersionId) -> Link {
+    Link {
+        text: version.short().to_owned(),
+        href: format!("{DOC}{version}"),
+    }
+}
+
+pub(super) fn doc_link(document: &Reference) -> Link {
+    Link {
+        text: document.label.clone(),
+        href: doc_href(&document.document),
+    }
+}
+
+pub(super) fn doc_links(documents: &[Reference]) -> Vec<Link> {
+    documents.iter().map(doc_link).collect()
+}
+
+pub(super) fn marks(forked: bool, ended_for: Option<&str>) -> Vec<String> {
+    let forked = forked.then(|| "forked".to_owned());
+    forked.into_iter().chain(ended_for.map(ended)).collect()
+}
+
+pub struct Line {
+    pub href: String,
+    pub label: String,
+    pub summary: String,
+    pub counts: Vec<String>,
+    pub marks: Vec<String>,
+}
+
+impl From<&Row> for Line {
+    fn from(row: &Row) -> Line {
+        Line {
+            href: doc_href(&row.document),
+            label: row.label.clone(),
+            summary: row.summary.clone(),
+            counts: Vec::new(),
+            marks: marks(row.forked, row.ended.as_deref()),
+        }
+    }
+}
+
+pub struct Stamped {
+    pub version: Link,
+    pub head: bool,
+    pub written: String,
+    pub written_full: String,
+    pub machine: Link,
+    pub change: Option<String>,
+    pub ended: Option<String>,
+}
+
+impl Stamped {
+    pub(super) fn new(version: &VersionId, at: &Stamp, machine: &Reference) -> Stamped {
+        Stamped {
+            version: version_link(version),
+            head: false,
+            written: written(at),
+            written_full: at.to_string(),
+            machine: doc_link(machine),
+            change: None,
+            ended: None,
+        }
+    }
+}
+
+#[derive(Template)]
+#[template(path = "error.html")]
+pub struct ErrorPage {
+    pub nav: Nav,
+    pub status: u16,
+    pub message: String,
+}
+
+impl ErrorPage {
+    pub fn new(status: u16, message: String) -> ErrorPage {
+        ErrorPage {
+            nav: Nav::at(None),
+            status,
+            message,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_place_is_found_at_its_route() {
+        let places: Vec<Place> = Place::all().collect();
+        for place in &places {
+            assert_eq!(Place::at(place.route()), Some(*place), "{place:?}");
+        }
+        for listed in Place::IN_THE_NAVIGATION {
+            assert!(places.contains(&listed), "{listed:?}");
+        }
+    }
+
+    #[test]
+    fn a_link_escapes_what_is_not_a_plain_character() {
+        assert_eq!(encoded("lantern-2.b_c~"), "lantern-2.b_c~");
+        assert_eq!(encoded("a b/é?&=%+"), "a%20b%2F%C3%A9%3F%26%3D%25%2B");
+        assert_eq!(encoded(""), "");
+    }
+}

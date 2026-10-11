@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% import "macros.html" as m %}
+{% block title %}Topics{% endblock %}
+{% block content %}
+<h1>Topics</h1>
+{% if steps.is_empty() %}<p class="muted">No topics.</p>{% endif %}
+{%- for step in steps -%}
+{%- match step -%}
+{%- when Step::Open -%}
+<ul class="topics">
+{%- when Step::Close -%}
+</ul>
+{%- when Step::End -%}
+</li>
+{%- when Step::Again with (link) -%}
+<li><a href="{{ link.href }}">{{ link.text }}</a> <span class="muted">shown above</span></li>
+{%- when Step::Topic with (t) -%}
+<li>{% call m::topic(t) %}{% endcall %}
+{%- endmatch -%}
+{%- endfor %}
+<h2>Everything</h2>
+<p class="more">{% for place in more %}{% if !loop.first %} {% endif %}<a href="{{ place.href }}">{{ place.text }}</a>{% endfor %}</p>
+{% endblock %}

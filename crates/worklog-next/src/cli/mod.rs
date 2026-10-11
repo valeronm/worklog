@@ -8,14 +8,14 @@ mod run;
 
 use std::ffi::OsString;
 use std::io::{ErrorKind, Write};
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
-use clap::Parser as _;
-
 use crate::app::Failure;
+use crate::domain::ports::StoreError;
 use crate::domain::schema::Directory;
-use crate::wiring;
-use args::{Cli, Command, ReadCommand};
+use crate::{web, wiring};
+use args::{Cli, Command, Invoked, ReadCommand};
 use render::Output;
 
 const NAME: &str = "worklog-next";
@@ -71,26 +71,105 @@ fn exit_code(failure: &Failure) -> i32 {
     }
 }
 
-fn command(cli: &Cli, environment: &Environment) -> Result<Output, Failure> {
-    let chosen = match &cli.command {
+fn answered(command: &Command, json: bool, environment: &Environment) -> Result<Output, Failure> {
+    let chosen = match command {
         Command::Init { store, .. } => Some(environment.placed(store)?),
         _ => None,
     };
     let Some(adapters) = wiring::wire(environment.variable, chosen)? else {
         let not_set_up = Failure::not_set_up();
-        return match cli.command {
+        return match command {
             // A session opens with `context` unasked, on a host set up or not.
             Command::Read(ReadCommand::Context { .. }) => {
-                Ok(Output::note(not_set_up.to_string(), cli.json))
+                Ok(Output::note(not_set_up.to_string(), json))
             }
             _ => Err(not_set_up),
         };
     };
-    run::run(&adapters.deps(), environment, cli.json, &cli.command)
+    run::run(&adapters.deps(), environment, json, command)
 }
 
 fn fail(err: &mut dyn Write, what: &dyn std::fmt::Display) {
     let _ = writeln!(err, "{NAME}: {what}");
+}
+
+fn announce(
+    address: &str,
+    bind: &SocketAddr,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> std::io::Result<()> {
+    let reach = if bind.ip().is_unspecified() {
+        Some("every network this host is on")
+    } else if bind.ip().is_loopback() {
+        None
+    } else {
+        Some("whatever reaches this address")
+    };
+    if let Some(reach) = reach {
+        fail(
+            err,
+            &format_args!(
+                "{address}: the store is served without a login to {reach}, and a client that \
+                 stalls can block the server"
+            ),
+        );
+    }
+    writeln!(out, "http://{address}")?;
+    out.flush()
+}
+
+fn wired(environment: &Environment) -> Result<wiring::Adapters, Failure> {
+    wiring::wire(environment.variable, None)?.ok_or_else(Failure::not_set_up)
+}
+
+fn listening(
+    bind: &SocketAddr,
+    hosts: &[String],
+    environment: &Environment,
+) -> Result<web::Server, Failure> {
+    wired(environment)?;
+    web::Server::bind(&bind.to_string(), hosts)
+}
+
+fn serve(
+    bind: &SocketAddr,
+    hosts: &[String],
+    environment: &Environment,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    let server = match listening(bind, hosts, environment) {
+        Ok(server) => server,
+        Err(failure) => {
+            fail(err, &failure);
+            return exit_code(&failure);
+        }
+    };
+    let address = server.address();
+    match announce(&address, bind, out, err) {
+        // A reader that stops early closes the stream, and the pages are still served.
+        Err(error) if error.kind() != ErrorKind::BrokenPipe => {
+            fail(err, &format_args!("stdout: {error}"));
+            return 1;
+        }
+        _ => {}
+    }
+    // A directory store answers from one reading of its tree, so each request has its own.
+    let settled = || {
+        let adapters = wired(environment)?;
+        adapters.settle()?;
+        Ok(adapters)
+    };
+    let ended = server.run(None, &|method, target| match settled() {
+        Ok(adapters) => web::respond(&adapters.deps(), method, target),
+        Err(Failure::Refused(why)) => web::failed(Failure::Store(StoreError::io("serve", why))),
+        Err(failure) => web::failed(failure),
+    });
+    if let Err(error) = ended {
+        fail(err, &format_args!("{address}: {error}"));
+    }
+    1
 }
 
 fn main_in<I, T>(
@@ -103,7 +182,7 @@ where
     I: IntoIterator<Item = T>,
     T: Into<OsString> + Clone,
 {
-    let cli = match Cli::try_parse_from(args) {
+    let cli = match Cli::parsed(args) {
         Ok(cli) => cli,
         Err(error) => {
             // clap sends help and the version to stdout with exit 0.
@@ -115,7 +194,11 @@ where
             return error.exit_code();
         }
     };
-    let output = match command(&cli, environment) {
+    let command = match &cli.command {
+        Invoked::Run(command) => command,
+        Invoked::Serve { bind, hosts } => return serve(bind, hosts, environment, out, err),
+    };
+    let output = match answered(command, cli.json, environment) {
         Ok(output) => output,
         Err(failure) => {
             fail(err, &failure);
@@ -200,6 +283,51 @@ mod tests {
         fn flush(&mut self) -> io::Result<()> {
             Ok(())
         }
+    }
+
+    #[test]
+    fn serve_prints_the_address_to_open_and_notes_a_bind_to_every_address() {
+        let announced = |address: &str| {
+            let (mut out, mut err) = (Vec::new(), Vec::new());
+            let bind: SocketAddr = address.parse().unwrap();
+            announce(address, &bind, &mut out, &mut err).unwrap();
+            (
+                String::from_utf8(out).unwrap(),
+                String::from_utf8(err).unwrap(),
+            )
+        };
+        for (address, line) in [
+            ("127.0.0.1:8080", "http://127.0.0.1:8080\n"),
+            ("127.8.4.1:8080", "http://127.8.4.1:8080\n"),
+            ("[::1]:8080", "http://[::1]:8080\n"),
+        ] {
+            assert_eq!(announced(address), (line.to_owned(), String::new()));
+        }
+        for (address, line) in [
+            ("192.168.7.20:4000", "http://192.168.7.20:4000\n"),
+            ("10.0.0.5:8080", "http://10.0.0.5:8080\n"),
+            ("[fe80::1]:8080", "http://[fe80::1]:8080\n"),
+        ] {
+            let note = format!(
+                "worklog-next: {address}: the store is served without a login to whatever \
+                 reaches this address, and a client that stalls can block the server\n"
+            );
+            assert_eq!(announced(address), (line.to_owned(), note));
+        }
+        for (address, line) in [
+            ("0.0.0.0:8080", "http://0.0.0.0:8080\n"),
+            ("[::]:4000", "http://[::]:4000\n"),
+        ] {
+            let note = format!(
+                "worklog-next: {address}: the store is served without a login to every network \
+                 this host is on, and a client that stalls can block the server\n"
+            );
+            assert_eq!(announced(address), (line.to_owned(), note));
+        }
+
+        let bind: SocketAddr = "127.0.0.1:8080".parse().unwrap();
+        let mut full = Failing(ErrorKind::StorageFull);
+        assert!(announce("127.0.0.1:8080", &bind, &mut full, &mut Vec::new()).is_err());
     }
 
     #[test]

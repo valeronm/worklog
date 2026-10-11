@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% import "macros.html" as m %}
+{% block title %}History of {{ document.text }}{% endblock %}
+{% block content %}
+<h1>History</h1>
+<p class="meta"><span class="kind">of</span><a href="{{ document.href }}">{{ document.text }}</a></p>
+{% for note in notes %}<p class="notice">{{ note }}</p>
+{% endfor -%}
+{% if rows.is_empty() %}<p class="muted">No version reads.</p>{% else %}
+<table>
+<tr><th>Version</th><th>Written</th><th>Machine</th><th>Change</th></tr>
+{% for row in rows -%}
+<tr>{% call m::version_row(row) %}{% endcall %}</tr>
+{% endfor -%}
+</table>
+{% endif %}
+{% endblock %}

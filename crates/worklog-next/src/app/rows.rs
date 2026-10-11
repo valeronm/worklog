@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
 use serde::Serialize;
@@ -12,6 +12,23 @@ use crate::domain::id::DocumentId;
 use crate::domain::schema::{Content, Date, KindOf, Record, Trigger};
 use crate::domain::version::Version;
 
+/// Another document as a result refers to it: the id the referring document stores, and the
+/// label the document referred to has now, or its short id.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Reference {
+    pub document: DocumentId,
+    pub label: String,
+}
+
+impl Reference {
+    pub(super) fn to(document: &DocumentId, label: String) -> Reference {
+        Reference {
+            document: document.clone(),
+            label,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Row {
     pub document: DocumentId,
@@ -21,8 +38,8 @@ pub struct Row {
     pub name: Option<String>,
     /// Empty for a claim.
     pub summary: String,
-    /// The labels of `topic` or `topics` in stored order; empty for a topic.
-    pub topics: Vec<String>,
+    /// `topic` or `topics` in stored order; empty for a topic.
+    pub topics: Vec<Reference>,
     pub forked: bool,
     pub ended: Option<String>,
 }
@@ -37,7 +54,7 @@ pub(super) struct Shown<'d> {
 pub(super) fn row<'d>(topics: &Topics, document: &'d Document) -> Option<Shown<'d>> {
     let (head, record) = row_head(document)?;
     let id = document.id().clone();
-    let labels = |ids: &[DocumentId]| ids.iter().map(|id| topics.label(id)).collect();
+    let labels = |ids: &[DocumentId]| topics.references(ids);
     let (summary, shown) = match &record.content {
         Content::Topic(topic) => (topic.summary.clone(), Vec::new()),
         Content::Fact(fact) => (
@@ -75,11 +92,73 @@ pub(super) fn members(
     lookup.holders(kind, key, &topics, ended)
 }
 
-pub(super) fn memberships(document: &Document, kind: KindOf) -> BTreeSet<DocumentId> {
+fn memberships(document: &Document, kind: KindOf) -> BTreeSet<DocumentId> {
     let held = membership_key(kind).map(|key| held_under(document, kind, key, false));
     (held.into_iter().flatten())
         .filter_map(|text| DocumentId::parse(text).ok())
         .collect()
+}
+
+pub(super) type Filed = BTreeMap<DocumentId, Vec<Rc<Document>>>;
+
+pub(super) fn filed_by_topic(
+    lookup: &Lookup,
+    kind: KindOf,
+    topics: &BTreeSet<DocumentId>,
+) -> Result<Filed, Failure> {
+    let mut grouped = Filed::new();
+    for document in members(lookup, kind, topics, false)? {
+        for topic in memberships(&document, kind) {
+            grouped.entry(topic).or_default().push(Rc::clone(&document));
+        }
+    }
+    Ok(grouped)
+}
+
+pub(super) fn filed(grouped: &Filed, topics: &BTreeSet<DocumentId>) -> Vec<Rc<Document>> {
+    let mut found: BTreeMap<&DocumentId, &Rc<Document>> = BTreeMap::new();
+    for topic in topics {
+        for document in grouped.get(topic).into_iter().flatten() {
+            found.insert(document.id(), document);
+        }
+    }
+    found.into_values().cloned().collect()
+}
+
+pub(super) fn is_idea(content: &Content) -> bool {
+    matches!(content, Content::Fact(fact) if fact.idea)
+}
+
+pub(super) struct Counts {
+    pub(super) facts: usize,
+    pub(super) ideas: usize,
+    pub(super) open: usize,
+}
+
+pub(super) struct Filings {
+    pub(super) facts: Filed,
+    pub(super) followups: Filed,
+}
+
+impl Filings {
+    pub(super) fn of(lookup: &Lookup, topics: &BTreeSet<DocumentId>) -> Result<Filings, Failure> {
+        Ok(Filings {
+            facts: filed_by_topic(lookup, KindOf::Fact, topics)?,
+            followups: filed_by_topic(lookup, KindOf::Followup, topics)?,
+        })
+    }
+
+    pub(super) fn counts(&self, topics: &BTreeSet<DocumentId>) -> Counts {
+        let held = filed(&self.facts, topics);
+        let ideas = (held.iter().filter_map(|fact| row_head(fact)))
+            .filter(|(_, record)| is_idea(&record.content))
+            .count();
+        Counts {
+            facts: held.len() - ideas,
+            ideas,
+            open: filed(&self.followups, topics).len(),
+        }
+    }
 }
 
 fn membership_key(kind: KindOf) -> Option<&'static str> {
@@ -102,7 +181,7 @@ pub(super) fn reading<'a>(
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TriggerShown {
     LookAgain { on: Date, why: String },
-    Touching { topic: String },
+    Touching { topic: Reference },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -110,8 +189,8 @@ pub struct FollowupRow {
     pub row: Row,
     pub trigger: Option<TriggerShown>,
     pub due: bool,
-    pub entry: Option<String>,
-    pub about: Option<String>,
+    pub entry: Option<Reference>,
+    pub about: Option<Reference>,
 }
 
 pub(super) fn followup_rows(
@@ -126,14 +205,15 @@ pub(super) fn followup_rows(
         let Content::Followup(followup) = record.content else {
             continue;
         };
-        let label = |id: &Option<DocumentId>| id.as_ref().map(|id| lookup.label(id)).transpose();
+        let label =
+            |id: &Option<DocumentId>| id.as_ref().map(|id| lookup.reference(id)).transpose();
         let (trigger, is_due) = match followup.trigger {
             Some(Trigger::LookAgain { on, why }) => {
                 (Some(TriggerShown::LookAgain { on, why }), on <= today)
             }
             Some(Trigger::Touching(topic)) => (
                 Some(TriggerShown::Touching {
-                    topic: topics.label(&topic),
+                    topic: topics.reference(&topic),
                 }),
                 counted.contains(&topic),
             ),
@@ -205,7 +285,7 @@ mod tests {
     use crate::app::lookup::Stored;
     use crate::app::testing::{
         Counting, ENDED_FACT, TOPIC, World, entry, fact, fact_fields, followup, head, part_of,
-        topic, written_at,
+        referred, to, topic, written_at,
     };
     use crate::domain::ports::Store;
     use crate::domain::testing::first;
@@ -247,24 +327,24 @@ mod tests {
         let fact_row = shown(&relay);
         assert_eq!(fact_row.kind, KindOf::Fact);
         assert_eq!(fact_row.label, "lantern/relay-pin");
-        assert_eq!(fact_row.topics, ["lantern"]);
+        assert_eq!(fact_row.topics, [to(&lantern, "lantern")]);
         assert_eq!(fact_row.document, relay);
 
         let entry_row = shown(&driver);
         assert_eq!(entry_row.label, "2026-10-08-lamp-driver");
-        assert_eq!(entry_row.topics, ["lantern", "atlas"]);
+        assert_eq!(referred(&entry_row.topics), ["lantern", "atlas"]);
 
         let followup_row = shown(&followup);
         assert_eq!(followup_row.label, followup.short());
         assert_eq!(followup_row.summary, "check");
-        assert_eq!(followup_row.topics, ["atlas", "lantern"]);
+        assert_eq!(referred(&followup_row.topics), ["atlas", "lantern"]);
 
         let claim_row = shown(&claim);
         assert_eq!(claim_row.kind, KindOf::Claim);
         assert_eq!(claim_row.label, "lantern anywhere");
         assert_eq!(claim_row.document, claim);
         assert_eq!(claim_row.summary, "");
-        assert_eq!(claim_row.topics, ["lantern"]);
+        assert_eq!(referred(&claim_row.topics), ["lantern"]);
 
         let names = [&lantern, &relay, &driver, &followup, &claim].map(|id| shown(id).name);
         let own = |name: &str| Some(name.to_owned());
@@ -287,7 +367,7 @@ mod tests {
         let gone = DocumentId::from_bytes([0x42; 16]);
         let orphan = fact(&world, &gone, "relay-pin", "");
         let row = row_of(&world, &orphan).unwrap();
-        assert_eq!(row.topics, [gone.short()]);
+        assert_eq!(row.topics, [to(&gone, gone.short())]);
         assert_eq!(row.label, orphan.short());
     }
 

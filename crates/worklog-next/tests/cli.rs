@@ -1,6 +1,10 @@
 use std::fs;
+use std::io::{BufRead as _, BufReader, Read as _, Write as _};
+use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::process::{Child, Stdio};
+use std::sync::{OnceLock, mpsc};
+use std::time::{Duration, Instant};
 
 use assert_cmd::Command;
 use serde_json::Value;
@@ -879,7 +883,7 @@ fn a_usage_error_exits_two() {
 
     for args in [
         &["new", "entry", "wiring", "--date", "tomorrow"][..],
-        &["serve"],
+        &["polish"],
         &["rename", "desk"],
         &["entries", "-n", "many"],
         &[],
@@ -1139,7 +1143,7 @@ fn a_failure_under_json_is_text_on_stderr_and_nothing_on_stdout() {
         2,
         "worklog-next: `soon` is not a date (YYYY-MM-DD)\n",
     );
-    let unknown = host.run(&["--json", "serve"]);
+    let unknown = host.run(&["--json", "polish"]);
     assert_eq!((unknown.stdout.as_str(), unknown.code), ("", Some(2)));
 }
 
@@ -1192,6 +1196,103 @@ fn check_exits_one_on_a_problem_and_zero_without() {
 }
 
 #[test]
+fn a_link_written_before_its_target_resolves_once_the_target_is_stored() {
+    let host = Host::set_up("desk");
+    host.topic("lantern");
+    let draft = host.drafted(
+        &["new", "topic", "phone"],
+        &[("summary = \"\"", "summary = \"A thing\"")],
+    );
+    let mut text = fs::read_to_string(&draft).unwrap();
+    text.push_str("See [[lantern/relay-pin]] and [[atlas]].\n");
+    fs::write(&draft, text).unwrap();
+    host.ok(&["save", "phone"]);
+
+    let targets = |host: &Host| -> Vec<Value> {
+        let shown = host.json(&["show", "phone"]);
+        let links = shown["heads"][0]["links"].as_array().expect("links");
+        links.iter().map(|link| link["target"].clone()).collect()
+    };
+    assert_eq!(targets(&host), [Value::Null, Value::Null]);
+    let before = host.ok(&["check"]);
+    assert!(
+        before.contains("link atlas: resolves to nothing")
+            && before.contains("link lantern/relay-pin: resolves to nothing")
+            && before.ends_with("0 problems, 2 notices, 0 forks\n"),
+        "{before}"
+    );
+
+    host.fact("fact", "lantern/relay-pin");
+    host.topic("atlas");
+    let labels: Vec<Value> = (targets(&host).iter())
+        .map(|target| target["label"].clone())
+        .collect();
+    assert_eq!(labels, ["atlas", "lantern/relay-pin"]);
+    let after = host.ok(&["check"]);
+    assert!(!after.contains("resolves to nothing"), "{after}");
+    assert_eq!(after, "0 problems, 0 notices, 0 forks\n");
+}
+
+#[test]
+fn the_topics_of_a_topic_are_its_parts_with_what_is_filed_on_each() {
+    let host = Host::stocked();
+    let part = |name: &str| {
+        let edges = "summary = \"A part\"\npart_of = [\"lantern\"]";
+        host.drafted(&["new", "topic", name], &[("summary = \"\"", edges)]);
+        host.ok(&["save", name]);
+    };
+    part("phone");
+    part("compass");
+    host.fact("fact", "phone/dial");
+    host.fact("idea", "phone/strap");
+    host.ok(&["end", "compass", "retired", "Never built"]);
+
+    let phone = host.row("phone", "phone  A part  part of lantern  (1 fact, 1 idea)");
+    assert_eq!(host.ok(&["topics", "lantern"]), phone);
+    let both = host.run(&["topics", "lantern", "--ended"]);
+    assert_eq!((both.stdout.as_str(), both.code), ("", Some(2)));
+    assert!(both.stderr.contains("--ended"), "{}", both.stderr);
+    assert_eq!(host.ok(&["topics", "phone"]), "");
+    let listed = host.ok(&["topics"]);
+    assert!(listed.contains(&phone), "{listed}");
+    assert!(
+        listed.contains(&host.row("lantern", "lantern  A thing  (2 facts, 1 idea)")),
+        "{listed}"
+    );
+
+    let parts = host.json(&["topics", "lantern"]);
+    assert_eq!(labels(&parts), ["phone"]);
+    let lantern = &host.json(&["show", "lantern"])["document"];
+    assert_eq!(
+        parts[0]["part_of"],
+        serde_json::json!([{"document": lantern, "label": "lantern"}])
+    );
+    assert_eq!(
+        (
+            &parts[0]["fact_count"],
+            &parts[0]["idea_count"],
+            &parts[0]["open_count"]
+        ),
+        (
+            &serde_json::json!(1),
+            &serde_json::json!(1),
+            &serde_json::json!(0)
+        )
+    );
+
+    assert_refused(
+        &host.run(&["topics", "nowhere"]),
+        1,
+        "worklog-next: nowhere: names no document\n",
+    );
+    assert_refused(
+        &host.run(&["topics", "lantern/relay"]),
+        1,
+        "worklog-next: lantern/relay: is not a topic\n",
+    );
+}
+
+#[test]
 fn a_listing_is_a_line_a_document_from_its_short_id() {
     let host = Host::stocked();
     let fact = |address: &str| {
@@ -1209,7 +1310,7 @@ fn a_listing_is_a_line_a_document_from_its_short_id() {
         [
             host.row("atlas", "atlas  A thing"),
             host.row("desk", "desk  A machine"),
-            host.row("lantern", "lantern  A thing"),
+            host.row("lantern", "lantern  A thing  (2 facts, 1 idea)"),
         ]
         .concat()
     );
@@ -1405,6 +1506,12 @@ fn labels_in(value: &Value, found: &mut Vec<String>) {
     match value {
         Value::Array(items) => items.iter().for_each(|item| labels_in(item, found)),
         Value::Object(fields) => {
+            let reference = fields.len() == 2
+                && fields.contains_key("document")
+                && fields.contains_key("label");
+            if reference {
+                return;
+            }
             for (key, held) in fields {
                 match held.as_str() {
                     Some(label) if key == "label" => found.push(label.to_owned()),
@@ -1598,7 +1705,10 @@ fn a_damaged_file_is_named_by_check_and_the_rest_of_the_store_still_reads() {
     assert!(lines[0].contains(&format!(": {version}: ")), "{}", lines[0]);
     assert_eq!(lines[1], "1 problem, 0 notices, 0 forks");
 
-    assert_eq!(host.ok(&["topics"]), topics);
+    assert_eq!(
+        host.ok(&["topics"]),
+        topics.replace("(2 facts, 1 idea)", "(1 fact, 1 idea)")
+    );
     assert_eq!(host.ok(&["show", "lantern/relay"]), relay);
     let left = host.ok(&["facts"]);
     assert_eq!(column(&left, 2), ["lantern/relay"], "{left}");
@@ -1679,7 +1789,7 @@ fn each_command_reads_what_the_one_before_it_wrote_on_either_machine() {
             .iter()
             .find(|version| version["parents"].as_array().map(Vec::as_slice) == Some(parents))
             .unwrap_or_else(|| panic!("a version after {parents:?}: {history}"));
-        written.push(next["machine"].as_str().expect("a machine"));
+        written.push(next["machine"]["label"].as_str().expect("a machine"));
         parents = std::slice::from_ref(&next["version"]);
         assert_eq!(next["head"], written.len() == versions.len(), "{history}");
     }
@@ -1694,5 +1804,270 @@ fn each_command_reads_what_the_one_before_it_wrote_on_either_machine() {
             "{facts}"
         );
         assert_eq!(facts.lines().count(), 1, "{facts}");
+    }
+}
+
+const PATIENCE: Duration = Duration::from_secs(30);
+
+struct Spawned(Child);
+
+impl Drop for Spawned {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+impl Spawned {
+    fn stopped(&mut self) -> String {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+        let mut stderr = String::new();
+        if let Some(mut piped) = self.0.stderr.take() {
+            piped.read_to_string(&mut stderr).expect("the stderr");
+        }
+        stderr
+    }
+}
+
+struct Serving {
+    spawned: Spawned,
+    address: String,
+}
+
+impl Serving {
+    fn asked(&self, host: &str, target: &str) -> (u16, String) {
+        let to: SocketAddr = self.address.parse().expect("the address it printed");
+        let mut stream = TcpStream::connect_timeout(&to, PATIENCE).expect("a connection");
+        stream.set_read_timeout(Some(PATIENCE)).expect("a timeout");
+        stream.set_write_timeout(Some(PATIENCE)).expect("a timeout");
+        write!(
+            stream,
+            "GET {target} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n"
+        )
+        .expect("a request");
+        let mut answer = String::new();
+        stream.read_to_string(&mut answer).expect("an answer");
+        let (head, body) = answer.split_once("\r\n\r\n").expect("a head and a body");
+        let status = head.split(' ').nth(1).and_then(|code| code.parse().ok());
+        (status.expect("a status"), body.to_owned())
+    }
+
+    fn get(&self, target: &str) -> (u16, String) {
+        self.asked(&self.address, target)
+    }
+
+    fn page(&self, target: &str) -> String {
+        let (status, body) = self.get(target);
+        assert_eq!(status, 200, "{target}: {body}");
+        body
+    }
+
+    fn running(&mut self) {
+        let ended = self.spawned.0.try_wait().expect("a child to ask");
+        assert_eq!(ended, None, "serve ended");
+    }
+}
+
+impl Host {
+    fn spawned(&self, args: &[&str]) -> Spawned {
+        let child = std::process::Command::new(env!("CARGO_BIN_EXE_worklog-next"))
+            .env("WORKLOG_NEXT_HOME", self.root.join("next"))
+            .env("HOME", self.home())
+            .env_remove("XDG_CONFIG_HOME")
+            .env_remove("XDG_STATE_HOME")
+            .current_dir(self.home())
+            .args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("the binary runs");
+        Spawned(child)
+    }
+
+    fn ends(&self, args: &[&str]) -> Ran {
+        let mut spawned = self.spawned(args);
+        let deadline = Instant::now() + PATIENCE;
+        let status = loop {
+            if let Some(status) = spawned.0.try_wait().expect("a child to ask") {
+                break status;
+            }
+            assert!(Instant::now() < deadline, "{args:?} is still running");
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        let mut stdout = String::new();
+        let mut piped = spawned.0.stdout.take().expect("a piped stdout");
+        piped.read_to_string(&mut stdout).expect("the stdout");
+        Ran {
+            stdout,
+            stderr: spawned.stopped(),
+            code: status.code(),
+        }
+    }
+
+    fn serve(&self, rest: &[&str]) -> Serving {
+        let mut spawned = self.spawned(&[&["serve", "--bind", "127.0.0.1:0"], rest].concat());
+        let stdout = spawned.0.stdout.take().expect("a piped stdout");
+        let (line, lines) = mpsc::channel();
+        std::thread::spawn(move || {
+            let mut first = String::new();
+            let _ = BufReader::new(stdout).read_line(&mut first);
+            let _ = line.send(first);
+        });
+        let printed = lines.recv_timeout(PATIENCE).unwrap_or_default();
+        let address = (printed.strip_prefix("http://127.0.0.1:"))
+            .and_then(|port| port.strip_suffix('\n'))
+            .filter(|port| port.parse::<u16>().is_ok_and(|port| port != 0))
+            .map(|port| format!("127.0.0.1:{port}"));
+        let Some(address) = address else {
+            panic!("serve printed {printed:?}: {}", spawned.stopped());
+        };
+        Serving { spawned, address }
+    }
+}
+
+#[test]
+fn serve_answers_the_home_a_topic_and_a_document_from_the_store() {
+    let host = Host::stocked();
+    let relay = host.json(&["show", "lantern/relay"]);
+    let relay = relay["document"].as_str().expect("a document");
+    let mut serving = host.serve(&[]);
+
+    let home = serving.page("/");
+    let lantern = ">lantern</a> <span class=\"what\">A thing</span> \
+                   <span class=\"label\">2 facts</span> <span class=\"label\">1 idea</span>";
+    assert!(home.contains(lantern), "{home}");
+    assert!(home.contains(">desk</a>"), "{home}");
+
+    let topic = serving.page("/doc/lantern");
+    assert!(topic.contains("<h1>lantern</h1>"), "{topic}");
+    let row =
+        format!("href=\"/doc/{relay}\">lantern/relay</a> <span class=\"what\">Pin four</span>");
+    assert!(topic.contains(&row), "{topic}");
+
+    let document = serving.page("/doc/lantern/relay");
+    assert!(document.contains("<h1>lantern/relay</h1>"), "{document}");
+    assert!(
+        document.contains("<dt>summary</dt><dd>Pin four</dd>"),
+        "{document}"
+    );
+    assert_eq!(serving.page(&format!("/doc/{relay}")), document);
+
+    serving.running();
+    assert_eq!(serving.spawned.stopped(), "");
+}
+
+#[test]
+fn serve_answers_each_request_from_the_store_as_it_then_stands() {
+    let host = Host::stocked();
+    let mut serving = host.serve(&[]);
+    assert!(!serving.page("/facts").contains("lantern/wick"));
+    assert!(
+        serving
+            .page("/")
+            .contains("<span class=\"label\">2 facts</span>")
+    );
+
+    host.fact("fact", "lantern/wick");
+
+    let facts = serving.page("/facts");
+    assert!(facts.contains(">lantern/wick</a>"), "{facts}");
+    let home = serving.page("/");
+    assert!(
+        home.contains("<span class=\"label\">3 facts</span>"),
+        "{home}"
+    );
+    serving.running();
+}
+
+#[test]
+fn serve_answers_500_while_the_store_or_the_config_is_gone_and_keeps_serving() {
+    let host = Host::stocked();
+    let mut serving = host.serve(&[]);
+    assert!(serving.page("/").contains(">lantern</a>"));
+
+    let config = host.root.join("next/config.toml");
+    for (held, why) in [
+        (host.store(), "store is not a directory"),
+        (config, "this host is not set up"),
+    ] {
+        let away = host.root.join("away");
+        fs::rename(&held, &away).unwrap();
+        for target in ["/", "/facts", "/nowhere"] {
+            let (status, body) = serving.get(target);
+            assert_eq!(status, 500, "{target} without {}: {body}", held.display());
+            assert!(body.contains("<h1>500</h1>"), "{body}");
+            assert!(body.contains(why), "{body}");
+            assert!(!body.contains(">lantern</a>"), "{body}");
+        }
+        serving.running();
+
+        fs::rename(&away, &held).unwrap();
+        assert!(serving.page("/").contains(">lantern</a>"));
+    }
+    serving.running();
+    assert_eq!(serving.spawned.stopped(), "");
+}
+
+#[test]
+fn serve_answers_only_a_request_that_names_it_by_an_address_or_a_host_it_was_given() {
+    let host = Host::stocked();
+    let mut serving = host.serve(&[]);
+    for other in ["evil.example", "desk.local"] {
+        let (status, body) = serving.asked(other, "/");
+        assert_eq!(status, 421, "{other}: {body}");
+        assert!(body.contains("<h1>421</h1>"), "{body}");
+        assert!(!body.contains(">lantern</a>"), "{body}");
+    }
+    assert_eq!(serving.asked("localhost", "/").0, 200);
+    serving.running();
+    drop(serving);
+
+    let mut named = host.serve(&["--host", "desk.local", "--host", "atlas"]);
+    for own in ["desk.local", "atlas:8080"] {
+        let (status, body) = named.asked(own, "/");
+        assert_eq!(status, 200, "{own}: {body}");
+        assert!(body.contains(">lantern</a>"), "{body}");
+    }
+    assert_eq!(named.asked("evil.example", "/").0, 421);
+    named.running();
+}
+
+#[test]
+fn serve_is_refused_before_it_listens_on_a_host_or_an_address_it_cannot_serve() {
+    let bind = ["serve", "--bind", "127.0.0.1:0"];
+    let new = Host::new();
+    assert_refused(&new.ends(&bind), 1, NOT_SET_UP);
+
+    let host = Host::set_up("desk");
+    let away = host.root.join("away");
+    fs::rename(host.store(), &away).unwrap();
+    assert_refused(
+        &host.ends(&bind),
+        1,
+        &format!(
+            "worklog-next: {}: this host's store is not a directory\n",
+            host.store().display()
+        ),
+    );
+    fs::rename(&away, host.store()).unwrap();
+
+    let taken = TcpListener::bind("127.0.0.1:0").expect("a free port");
+    let address = taken.local_addr().expect("its address").to_string();
+    let busy = host.ends(&["serve", "--bind", &address]);
+    assert_eq!((busy.stdout.as_str(), busy.code), ("", Some(1)));
+    let named = format!("worklog-next: {address}: ");
+    assert!(busy.stderr.starts_with(&named), "{}", busy.stderr);
+
+    for line in [
+        &["serve", "--bind", "desk"][..],
+        &["serve", "--bind", "localhost:8080"],
+        &["serve", "--bind", "127.0.0.1:0", "--json"],
+        &["--json", "serve", "--bind", "127.0.0.1:0"],
+    ] {
+        let ran = host.ends(line);
+        assert_eq!((ran.stdout.as_str(), ran.code), ("", Some(2)), "{line:?}");
+        assert!(ran.stderr.starts_with("error: "), "{}", ran.stderr);
     }
 }

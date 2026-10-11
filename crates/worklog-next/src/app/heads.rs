@@ -148,13 +148,6 @@ pub(super) fn label_of(content: &Content, topic_name: Option<&Name>, id: &Docume
     }
 }
 
-pub(super) fn machine_label(version: &Version, topic_name: Option<&Name>) -> String {
-    label_or_short(
-        topic_name.map(ToString::to_string),
-        &version.envelope.machine,
-    )
-}
-
 pub(super) fn held_under<'d>(
     document: &'d Document,
     kind: KindOf,

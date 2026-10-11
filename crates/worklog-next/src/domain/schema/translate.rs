@@ -6,7 +6,6 @@ use std::convert::Infallible;
 use toml::Value;
 
 use super::address::Found;
-use super::ending::Ending;
 use super::error::SchemaError;
 use super::kind::KindOf;
 use crate::domain::id::DocumentId;
@@ -34,6 +33,12 @@ fn each<E>(
     Ok(turned)
 }
 
+/// The document a text under a reference key refers to; none for a text that is no whole id.
+#[must_use]
+pub fn referred(text: &str) -> Option<DocumentId> {
+    DocumentId::parse(text).ok()
+}
+
 /// The fields with each reference, and the document that ended it, shown
 /// as its document's name; one to a document with no name stays the whole id.
 #[must_use]
@@ -42,13 +47,8 @@ pub fn to_names(
     kind: KindOf,
     name_of: impl Fn(&DocumentId) -> Option<String>,
 ) -> Fields {
-    let keys = kind
-        .references()
-        .iter()
-        .map(|reference| reference.key)
-        .chain([Ending::BY]);
-    let shown = each(fields, keys, |_, text| {
-        let name = DocumentId::parse(text).ok().and_then(|id| name_of(&id));
+    let shown = each(fields, kind.reference_keys(), |_, text| {
+        let name = referred(text).and_then(|id| name_of(&id));
         Ok::<_, Infallible>(name.unwrap_or_else(|| text.to_owned()))
     });
     match shown {
@@ -66,7 +66,7 @@ pub fn to_ids(
 ) -> Result<Fields, SchemaError> {
     let keys = kind.references().iter().map(|reference| reference.key);
     each(fields, keys, |key, text| {
-        if DocumentId::parse(text).is_ok() {
+        if referred(text).is_some() {
             return Ok(text.to_owned());
         }
         match id_of(text) {

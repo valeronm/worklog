@@ -25,6 +25,8 @@ pub struct Check {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Finding {
+    /// None for a finding about no one document.
+    pub document: Option<DocumentId>,
     /// Of the document the finding is about, or the kind's word for a kind this worklog does
     /// not know.
     pub label: String,
@@ -71,6 +73,7 @@ pub fn check(deps: &Deps) -> Result<Check, Failure> {
     for unknown in lookup.unknown()? {
         let documents = counted(unknown.documents.len(), "document", "documents");
         notices.push(Finding {
+            document: None,
             label: unknown.kind.to_string(),
             what: format!("{documents} of a kind this worklog does not know"),
         });
@@ -157,6 +160,7 @@ fn labeled(lookup: &Lookup, found: Reported) -> Result<Vec<Finding>, Failure> {
     for (id, what) in found {
         findings.push(Finding {
             label: lookup.label(&id)?,
+            document: Some(id),
             what,
         });
     }
@@ -225,15 +229,15 @@ fn name_held_twice(
 
 fn links(lookup: &Lookup, fits: &mut Fits, head: &Version) -> Result<Vec<String>, Failure> {
     let mut stale = Vec::new();
-    for (name, target) in &head.links.0 {
+    for (name, stored) in &head.links.0 {
         let nothing = format!("link {name}: resolves to nothing");
-        let Some(id) = target else {
+        let Some(id) = lookup.linked_now(name, stored.as_ref())? else {
             stale.push(nothing);
             continue;
         };
-        match fits.of(lookup, id, None, true)? {
+        match fits.of(lookup, &id, None, true)? {
             Some(Misfit::Missing) => stale.push(nothing),
-            Some(misfit) => stale.push(format!("link {name}: {} {misfit}", lookup.label(id)?)),
+            Some(misfit) => stale.push(format!("link {name}: {} {misfit}", lookup.label(&id)?)),
             None => {}
         }
     }
@@ -253,11 +257,11 @@ mod tests {
     use toml::Value;
 
     use super::*;
-    use crate::app::lookup::Stored;
     use crate::app::save::save;
+    use crate::app::show::{Linked, Shown, show};
     use crate::app::testing::{
-        Counting, ENDED, ENDED_FACT, World, claim_fields, entry, fact, fact_fields, followup, fork,
-        head, list, refused, topic, topic_fields, world, world_with_atlas,
+        ENDED, ENDED_FACT, World, claim_fields, entry, fact, fact_fields, followup, fork, head,
+        list, refused, to, topic, topic_fields, world, world_with_atlas,
     };
     use crate::app::{amend, draft, fork as forks};
     use crate::domain::id::{DocumentId, VersionId};
@@ -266,15 +270,60 @@ mod tests {
     use crate::domain::testing::{after, first};
     use crate::domain::version::{Envelope, Kind, Links, ReadError, Version};
 
+    fn labeled_only(findings: Vec<Finding>) -> Vec<Finding> {
+        let labeled = |found: Finding| Finding {
+            document: None,
+            ..found
+        };
+        findings.into_iter().map(labeled).collect()
+    }
+
     fn checked(world: &World) -> Check {
-        check(&world.deps()).unwrap()
+        let found = check(&world.deps()).unwrap();
+        Check {
+            problems: labeled_only(found.problems),
+            notices: labeled_only(found.notices),
+            fork_count: found.fork_count,
+        }
     }
 
     fn finding(label: &str, what: &str) -> Finding {
         Finding {
+            document: None,
             label: label.to_owned(),
             what: what.to_owned(),
         }
+    }
+
+    #[test]
+    fn a_finding_holds_the_document_it_is_about_and_none_for_a_kind_not_known() {
+        let (world, lantern) = world();
+        let lost = version_id("lost");
+        world
+            .store
+            .plant_unreadable(&lantern, lost.clone(), ReadError::Corrupt);
+        let newer = version_id("newer");
+        world
+            .store
+            .plant_unreadable(&lantern, newer, ReadError::Newer { format: 2 });
+        world.put("gadget", "size = 4\n", "\n");
+        let found = check(&world.deps()).unwrap();
+        let documents = |findings: &[Finding]| -> Vec<(String, Option<DocumentId>)> {
+            (findings.iter())
+                .map(|found| (found.label.clone(), found.document.clone()))
+                .collect()
+        };
+        assert_eq!(
+            documents(&found.problems),
+            [("lantern".to_owned(), Some(lantern.clone()))]
+        );
+        assert_eq!(
+            documents(&found.notices),
+            [
+                ("gadget".to_owned(), None),
+                ("lantern".to_owned(), Some(lantern)),
+            ]
+        );
     }
 
     fn linking(
@@ -707,6 +756,19 @@ mod tests {
     }
 
     #[test]
+    fn a_stored_body_with_a_bracket_after_a_character_of_several_bytes_is_checked() {
+        let (world, lantern) = world();
+        world.put(
+            "fact",
+            &fact_fields(&lantern, "relay-pin", "Реле [[тема[черновик]]", ""),
+            "См. [[тема[черновик]] и [[é[x]].\n",
+        );
+        let found = checked(&world);
+        assert_eq!(found.problems, []);
+        assert_eq!(found.notices, []);
+    }
+
+    #[test]
     fn a_link_to_an_ended_document_or_to_nothing_is_a_notice_except_from_an_entry() {
         let (world, lantern) = world();
         let nowhere = DocumentId::from_bytes([0xab; 16]);
@@ -777,6 +839,143 @@ mod tests {
         );
     }
 
+    fn forward(world: &World) -> DocumentId {
+        let deps = world.deps();
+        let new = draft::New::Topic { name: "phone" };
+        let phone = draft::new(&deps, &new).unwrap().document;
+        let mut draft = world.drafts.read(&phone).unwrap().unwrap();
+        draft.fields.insert("summary".to_owned(), Value::from("s"));
+        "See [[lantern/relay-pin]] and [[atlas]].\n".clone_into(&mut draft.body);
+        world.drafts.write(&draft).unwrap();
+        save(&deps, phone.as_str()).unwrap();
+        phone
+    }
+
+    fn shown_links(world: &World, address: &str) -> Vec<Linked> {
+        match show(&world.deps(), address).unwrap() {
+            Shown::Document(mut document) => document.heads.remove(0).links,
+            Shown::Version(_) => panic!("expected a document"),
+        }
+    }
+
+    fn linked(text: &str, target: Option<(&DocumentId, &str)>) -> Linked {
+        Linked {
+            text: text.to_owned(),
+            target: target.map(|(document, label)| to(document, label)),
+        }
+    }
+
+    #[test]
+    fn a_link_saved_before_its_target_exists_resolves_once_the_target_does() {
+        let (world, lantern) = world();
+        let phone = forward(&world);
+        assert_eq!(
+            shown_links(&world, "phone"),
+            [linked("atlas", None), linked("lantern/relay-pin", None)]
+        );
+        assert_eq!(
+            checked(&world).notices,
+            [
+                finding("phone", "link atlas: resolves to nothing"),
+                finding("phone", "link lantern/relay-pin: resolves to nothing"),
+            ]
+        );
+
+        let relay = fact(&world, &lantern, "relay-pin", "");
+        let atlas = topic(&world, "atlas", "");
+        assert_eq!(
+            shown_links(&world, "phone"),
+            [
+                linked("atlas", Some((&atlas, "atlas"))),
+                linked("lantern/relay-pin", Some((&relay, "lantern/relay-pin"))),
+            ]
+        );
+        assert_eq!(checked(&world), Check::default());
+        let stored = head(&world, &phone).links.0;
+        assert_eq!(stored.len(), 2);
+        assert!(stored.values().all(Option::is_none), "{stored:?}");
+    }
+
+    #[test]
+    fn a_link_resolved_when_saved_keeps_its_document_whatever_takes_its_name_since() {
+        let (world, lantern, atlas) = world_with_atlas();
+        let deps = world.deps();
+        draft::checkout(&deps, "lantern").unwrap();
+        let mut draft = world.drafts.read(&lantern).unwrap().unwrap();
+        "See [[atlas]].\n".clone_into(&mut draft.body);
+        world.drafts.write(&draft).unwrap();
+        save(&deps, "lantern").unwrap();
+
+        world.amend(&atlas, &topic_fields("map", ""), "\n");
+        let taker = topic(&world, "atlas", "");
+        assert_ne!(taker, atlas);
+        assert_eq!(
+            shown_links(&world, "lantern"),
+            [linked("atlas", Some((&atlas, "map")))]
+        );
+        assert_eq!(checked(&world), Check::default());
+    }
+
+    #[test]
+    fn a_link_several_documents_answer_to_stays_unresolved() {
+        let (world, _) = world();
+        forward(&world);
+        topic(&world, "atlas", "");
+        topic(&world, "atlas", "");
+        assert_eq!(shown_links(&world, "phone")[0], linked("atlas", None));
+        let nothing = finding("phone", "link atlas: resolves to nothing");
+        assert!(checked(&world).notices.contains(&nothing));
+    }
+
+    #[test]
+    fn a_link_resolved_when_read_to_an_ended_document_is_a_notice() {
+        let (world, lantern) = world();
+        forward(&world);
+        fact(&world, &lantern, "relay-pin", "");
+        let atlas = topic(&world, "atlas", ENDED);
+        assert_eq!(
+            shown_links(&world, "phone")[0],
+            linked("atlas", Some((&atlas, "atlas")))
+        );
+        let found = checked(&world);
+        assert_eq!(found.problems, []);
+        assert_eq!(
+            found.notices,
+            [finding("phone", "link atlas: atlas is ended")]
+        );
+    }
+
+    fn link_scans(holders: usize) -> usize {
+        let (world, lantern) = world();
+        fact(&world, &lantern, "relay-pin", "");
+        for index in 0..holders {
+            linking(
+                &world,
+                "topic",
+                &topic_fields(&format!("part-{index}"), ""),
+                &[
+                    ("atlas", None),
+                    ("lantern/relay-pin", None),
+                    ("lantern/spare", None),
+                    ("0f3a91c0", None),
+                ],
+            );
+        }
+        let world = world.counted();
+        let deps = world.deps();
+        let found = check(&deps).unwrap();
+        assert_eq!(found.problems, []);
+        assert_eq!(found.notices.len(), 3 * holders, "{:?}", found.notices);
+        world.store.scans() - (KindOf::ALL.len() + 3)
+    }
+
+    #[test]
+    fn check_scans_for_an_unresolved_link_once_however_many_documents_hold_its_text() {
+        assert_eq!(link_scans(0), 0);
+        assert_eq!(link_scans(1), 9);
+        assert_eq!(link_scans(25), 9);
+    }
+
     #[test]
     fn findings_come_by_label_then_text() {
         let (world, _) = world();
@@ -830,31 +1029,18 @@ mod tests {
         world
             .store
             .plant_unreadable(&lantern, version_id("damaged"), ReadError::Corrupt);
-        let World {
-            store,
-            drafts,
-            ids,
-            clock,
-            host,
-        } = world;
-        let counting = Counting::over(store);
-        let deps = Deps {
-            store: Stored::new(&counting),
-            drafts: &drafts,
-            ids: &ids,
-            clock: &clock,
-            host: &host,
-        };
+        let world = world.counted();
+        let deps = world.deps();
         let found = check(&deps).unwrap();
         assert_eq!(found.problems.len(), 5, "{:?}", found.problems);
         assert_eq!(found.notices.len(), 1, "{:?}", found.notices);
-        assert_eq!(counting.kinds.get(), KindOf::ALL.len());
-        assert_eq!(counting.kind_lists.get(), 1);
-        assert_eq!(counting.holdings.get(), 0);
-        assert_eq!(counting.unreadables.get(), 1);
-        assert_eq!(counting.forks.get(), 1);
-        assert_eq!(counting.scans(), KindOf::ALL.len() + 3);
-        assert_eq!(counting.documents.get(), 2);
+        assert_eq!(world.store.kinds.get(), KindOf::ALL.len());
+        assert_eq!(world.store.kind_lists.get(), 1);
+        assert_eq!(world.store.holdings.get(), 0);
+        assert_eq!(world.store.unreadables.get(), 1);
+        assert_eq!(world.store.forks.get(), 1);
+        assert_eq!(world.store.scans(), KindOf::ALL.len() + 3);
+        assert_eq!(world.store.documents.get(), 2);
     }
 
     #[test]
@@ -908,21 +1094,8 @@ mod tests {
         world.put("sketch", "name = \"two\"\n", "\n");
         world.put("blueprint", "name = \"one\"\n", "\n");
         let unknown = |counted: &str| format!("{counted} of a kind this worklog does not know");
-        let World {
-            store,
-            drafts,
-            ids,
-            clock,
-            host,
-        } = world;
-        let counting = Counting::over(store);
-        let deps = Deps {
-            store: Stored::new(&counting),
-            drafts: &drafts,
-            ids: &ids,
-            clock: &clock,
-            host: &host,
-        };
+        let world = world.counted();
+        let deps = world.deps();
         let found = check(&deps).unwrap();
         assert_eq!(found.problems, []);
         assert_eq!(
@@ -933,8 +1106,8 @@ mod tests {
             ]
         );
         assert_eq!(found.fork_count, 0);
-        assert_eq!(counting.kind_lists.get(), 1);
-        assert_eq!(counting.kinds.get(), KindOf::ALL.len() + 2);
+        assert_eq!(world.store.kind_lists.get(), 1);
+        assert_eq!(world.store.kinds.get(), KindOf::ALL.len() + 2);
     }
 
     #[test]

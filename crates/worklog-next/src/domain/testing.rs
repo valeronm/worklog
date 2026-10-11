@@ -10,6 +10,52 @@ use super::id::{DocumentId, VersionId};
 use super::ports::{Clock, Drafts, Host, Ids, Store, StoreError};
 use super::version::{Envelope, Fields, Kind, Links, ReadError, Stamp, Version};
 
+pub struct FailingStore;
+
+impl FailingStore {
+    fn gone<T>() -> Result<T, StoreError> {
+        Err(StoreError::io("memory:store", "gone"))
+    }
+}
+
+impl Store for FailingStore {
+    fn document(&self, _: &DocumentId) -> Result<Document, StoreError> {
+        FailingStore::gone()
+    }
+
+    fn put(&self, _: &Version) -> Result<(), StoreError> {
+        FailingStore::gone()
+    }
+
+    fn of_kind(&self, _: &Kind) -> Result<Vec<Document>, StoreError> {
+        FailingStore::gone()
+    }
+
+    fn holding(&self, _: &str, _: &[&str]) -> Result<Vec<Document>, StoreError> {
+        FailingStore::gone()
+    }
+
+    fn unreadable(&self) -> Result<Vec<Document>, StoreError> {
+        FailingStore::gone()
+    }
+
+    fn forked(&self) -> Result<Vec<Document>, StoreError> {
+        FailingStore::gone()
+    }
+
+    fn kinds(&self) -> Result<Vec<Kind>, StoreError> {
+        FailingStore::gone()
+    }
+
+    fn documents_under(&self, _: &str) -> Result<Vec<DocumentId>, StoreError> {
+        FailingStore::gone()
+    }
+
+    fn versions_under(&self, _: &str) -> Result<Vec<(DocumentId, VersionId)>, StoreError> {
+        FailingStore::gone()
+    }
+}
+
 #[derive(Default)]
 pub struct MemoryStore {
     versions: RefCell<BTreeMap<DocumentId, Vec<Version>>>,

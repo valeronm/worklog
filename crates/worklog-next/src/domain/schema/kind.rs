@@ -149,6 +149,14 @@ impl KindOf {
         }
     }
 
+    /// The keys under which a document of this kind holds another document's id: its
+    /// references and the document that ended it.
+    pub fn reference_keys(self) -> impl Iterator<Item = &'static str> {
+        (self.references().iter())
+            .map(|reference| reference.key)
+            .chain([Ending::BY])
+    }
+
     /// The key of the kind's first reference `wanted` picks.
     #[must_use]
     pub fn key_where(self, wanted: impl Fn(&Reference) -> bool) -> Option<&'static str> {
@@ -622,6 +630,18 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn the_keys_that_hold_an_id_are_a_kind_s_references_and_what_ended_it() {
+        assert_eq!(
+            KindOf::Topic.reference_keys().collect::<Vec<_>>(),
+            ["part_of", "uses", "ended_by"]
+        );
+        assert_eq!(
+            KindOf::Followup.reference_keys().collect::<Vec<_>>(),
+            ["topics", "entry", "about", "touching", "ended_by"]
+        );
     }
 
     #[test]

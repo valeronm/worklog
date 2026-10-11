@@ -30,6 +30,24 @@ fn version_named(name: &str) -> Option<VersionId> {
     VersionId::parse(name.strip_suffix(".md")?).ok()
 }
 
+// A file that does not read is still a version file of its document.
+fn files_of(document: &Document) -> Vec<VersionId> {
+    let mut ids: Vec<VersionId> = document
+        .history()
+        .into_iter()
+        .map(|version| version.id.clone())
+        .chain(
+            document
+                .unreadable()
+                .iter()
+                .map(|file| file.version.clone()),
+        )
+        .collect();
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
 fn parse(bytes: Vec<u8>, name: &VersionId) -> Result<Version, ReadError> {
     let text = String::from_utf8(bytes).map_err(|_| ReadError::Corrupt)?;
     Version::read(name, &text)
@@ -119,6 +137,12 @@ impl FsStore {
             held.insert(id, document);
         }
         Ok(self.walked.get_or_init(|| RefCell::new(held)).borrow())
+    }
+
+    /// Reads the tree now unless it was read, so every later answer of this instance comes
+    /// from one reading of it.
+    pub fn settle(&self) -> Result<(), StoreError> {
+        self.walked().map(drop)
     }
 
     fn matching(&self, wanted: impl Fn(&Document) -> bool) -> Result<Vec<Document>, StoreError> {
@@ -225,6 +249,14 @@ impl Store for FsStore {
         if prefix.is_empty() {
             return Ok(Vec::new());
         }
+        if let Some(walked) = self.walked.get() {
+            let walked = walked.borrow();
+            return Ok(walked
+                .iter()
+                .filter(|(id, held)| id.as_str().starts_with(prefix) && !files_of(held).is_empty())
+                .map(|(id, _)| id.clone())
+                .collect());
+        }
         let mut held = Vec::new();
         for id in self.documents(prefix)? {
             if !self.version_ids(&id)?.is_empty() {
@@ -236,6 +268,16 @@ impl Store for FsStore {
 
     fn versions_under(&self, prefix: &str) -> Result<Vec<(DocumentId, VersionId)>, StoreError> {
         let mut found = Vec::new();
+        if let Some(walked) = self.walked.get() {
+            for (document, held) in walked.borrow().iter() {
+                for version in files_of(held) {
+                    if version.starts_with(prefix) {
+                        found.push((document.clone(), version));
+                    }
+                }
+            }
+            return Ok(found);
+        }
         for document in self.documents("")? {
             for version in self.version_ids(&document)? {
                 if version.starts_with(prefix) {
@@ -290,6 +332,22 @@ mod tests {
                 store.of_kind(&kind).unwrap(),
                 "{word}"
             );
+        }
+        for digit in "0123456789abcdef".chars() {
+            let prefix = digit.to_string();
+            assert_eq!(
+                afresh.documents_under(&prefix).unwrap(),
+                store.documents_under(&prefix).unwrap(),
+                "{prefix}"
+            );
+        }
+        let fact = Kind::parse("fact").unwrap();
+        let known = store.of_kind(&fact).unwrap()[0].heads()[0].id.clone();
+        for prefix in [&known.as_str()[..11], known.short()] {
+            let found = store.versions_under(prefix).unwrap();
+            assert_eq!(found.len(), 1, "{prefix}");
+            assert_eq!(found[0].1, known, "{prefix}");
+            assert_eq!(afresh.versions_under(prefix).unwrap(), found, "{prefix}");
         }
         assert_eq!(afresh.unreadable().unwrap(), store.unreadable().unwrap());
         assert_eq!(afresh.kinds().unwrap(), store.kinds().unwrap());
@@ -546,6 +604,29 @@ mod tests {
     }
 
     #[test]
+    fn a_settled_store_reads_no_file_for_a_document_or_a_prefix() {
+        let (dir, store) = scratch();
+        let relay = first(&lantern(), "fact", RELAY, "first\n");
+        store.put(&relay).unwrap();
+        store.settle().unwrap();
+        store.settle().unwrap();
+
+        fs::remove_dir_all(dir.path()).unwrap();
+        let held = store.document(&lantern()).unwrap();
+        assert_eq!(held.state(), State::Live(&relay));
+        assert_eq!(store.documents_under(LANTERN).unwrap(), [lantern()]);
+        assert_eq!(
+            store.versions_under(relay.id.short()).unwrap(),
+            [(lantern(), relay.id.clone())]
+        );
+        let unsettled = FsStore::new(dir.path().to_path_buf());
+        assert_eq!(
+            unsettled.document(&lantern()).unwrap().state(),
+            State::Absent
+        );
+    }
+
+    #[test]
     fn a_version_put_after_a_question_is_in_every_later_answer() {
         let (dir, store) = scratch();
         let atlas = DocumentId::parse(ATLAS).unwrap();
@@ -607,6 +688,63 @@ mod tests {
         assert_eq!(store.kinds().unwrap(), [fact, topic.envelope.kind.clone()]);
         assert!(store.unreadable().unwrap().is_empty());
         assert!(store.forked().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_prefix_lookup_after_a_walk_reads_no_directory() {
+        let (dir, store) = scratch();
+        let atlas = DocumentId::parse(ATLAS).unwrap();
+        let relay = first(&lantern(), "fact", RELAY, "first\n");
+        store.put(&relay).unwrap();
+        let torn = VersionId::of(b"torn");
+        fs::write(store.version_path(&lantern(), &torn), "damaged").unwrap();
+        let empty = DocumentId::from_bytes([0x7f; 16]);
+        fs::create_dir_all(store.document_dir(&empty)).unwrap();
+        assert_eq!(store.kinds().unwrap().len(), 1);
+
+        let topic = first(&atlas, "topic", "name = \"atlas\"", "\n");
+        store.put(&topic).unwrap();
+        fs::remove_dir_all(dir.path()).unwrap();
+
+        assert_eq!(
+            store.documents_under("7").unwrap(),
+            [lantern(), atlas.clone()]
+        );
+        assert_eq!(
+            store.documents_under("7fd").unwrap(),
+            std::slice::from_ref(&atlas)
+        );
+        assert!(store.documents_under(empty.as_str()).unwrap().is_empty());
+        assert!(store.documents_under("").unwrap().is_empty());
+        assert_eq!(
+            store.versions_under(relay.id.short()).unwrap(),
+            [(lantern(), relay.id.clone())]
+        );
+        assert_eq!(
+            store.versions_under(torn.short()).unwrap(),
+            [(lantern(), torn)]
+        );
+        assert_eq!(
+            store.versions_under(topic.id.short()).unwrap(),
+            [(atlas, topic.id.clone())]
+        );
+    }
+
+    #[test]
+    fn a_version_put_over_its_file_that_did_not_read_is_found_once_by_its_prefix() {
+        let (_dir, store) = scratch();
+        let relay = first(&lantern(), "fact", RELAY, "first\n");
+        let path = path(&store, &relay);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, "damaged").unwrap();
+        assert_eq!(store.unreadable().unwrap().len(), 1);
+
+        store.put(&relay).unwrap();
+        assert_eq!(
+            store.versions_under(relay.id.short()).unwrap(),
+            [(lantern(), relay.id.clone())]
+        );
+        assert_eq!(store.documents_under(LANTERN).unwrap(), [lantern()]);
     }
 
     #[test]

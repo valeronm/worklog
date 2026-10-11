@@ -28,6 +28,12 @@ impl Adapters {
             host: &self.host,
         }
     }
+
+    /// Every later answer of these adapters' store comes from one reading of its tree, made
+    /// here unless one was made.
+    pub fn settle(&self) -> Result<(), Failure> {
+        Ok(self.store.settle()?)
+    }
 }
 
 /// The adapters over the store this host's config holds, or over `chosen`, the store a host

@@ -10,8 +10,9 @@
 //! it.
 //!
 //! A document's id is under `document`, as a value's own id and as a reference alike, and a
-//! version's id under `version` where the value is that version. `ended` is an ending's
-//! reason, or `null`. A count is under a key ending in `_count`, and a plural noun is a list.
+//! version's id under `version` where the value is that version. A reference to another
+//! document is an object with `document` and `label`. `ended` is an ending's reason, or
+//! `null`. A count is under a key ending in `_count`, and a plural noun is a list.
 
 use serde::Serialize;
 
@@ -47,7 +48,7 @@ mod tests {
     use crate::app::setup::Bound;
     use crate::app::show::{Diff, History, Shown};
     use crate::app::testing::{
-        ENDED as RETIRED, ENDED_FACT, World, claim_fields, entry, fact, followup, fork, head,
+        ENDED as RETIRED, ENDED_FACT, NOW, World, claim_fields, entry, fact, followup, fork, head,
         part_of, topic, topic_fields, uses, world, world_with_atlas, written_at,
     };
     use crate::app::{
@@ -59,8 +60,6 @@ mod tests {
     use crate::domain::testing::{LANTERN, atlas, first};
     use crate::domain::version::{Kind, ReadError, Stamp};
 
-    const NOW: &str = "2026-10-09T18:22:41.118204+01:00";
-
     fn snake(word: &str) -> bool {
         word.starts_with(|first: char| first.is_ascii_lowercase())
             && word
@@ -71,6 +70,12 @@ mod tests {
     fn conventional(value: &Value) -> Result<(), String> {
         match value {
             Value::Object(keyed) => keyed.iter().try_for_each(|(key, inner)| {
+                let reference = keyed.len() == 2
+                    && keyed.contains_key("document")
+                    && keyed.contains_key("label");
+                if reference && !inner.is_string() {
+                    return Err(format!("the {key} {inner} of a reference"));
+                }
                 if !snake(key) {
                     return Err(format!("the key `{key}`"));
                 }
@@ -139,7 +144,11 @@ mod tests {
         a_check_holds_its_findings_and_its_count_of_forks: Check = checks,
     }
 
-    fn row(id: &DocumentId, kind: &str, label: &str, topics: &[&str]) -> Value {
+    fn to(id: &DocumentId, label: &str) -> Value {
+        json!({"document": id, "label": label})
+    }
+
+    fn row(id: &DocumentId, kind: &str, label: &str, topics: &[Value]) -> Value {
         let name = match kind {
             "topic" => Some(label),
             "fact" => label.split_once('/').map(|(_, name)| name),
@@ -158,6 +167,10 @@ mod tests {
         })
     }
 
+    fn unheld_machine() -> Value {
+        to(&DocumentId::from_bytes([0xde; 16]), "dededede")
+    }
+
     fn with(mut object: Value, key: &str, value: Value) -> Value {
         *object.get_mut(key).expect("a key the object has") = value;
         object
@@ -168,19 +181,36 @@ mod tests {
         Value::Array(versions)
     }
 
-    fn version(world: &World, id: &DocumentId, label: &str) -> Value {
+    fn text_field(name: &str, text: &str) -> Value {
+        json!({"name": name, "values": [{"type": "text", "text": text}]})
+    }
+
+    fn reference_field(name: &str, reference: &Value) -> Value {
+        json!({"name": name, "values": [{"type": "reference", "reference": reference}]})
+    }
+
+    fn topic_shown(name: &str) -> Vec<Value> {
+        vec![
+            text_field("name", name),
+            text_field("created", "2026-09-04"),
+            text_field("summary", "s"),
+        ]
+    }
+
+    fn version(world: &World, id: &DocumentId) -> Value {
         let head = head(world, id);
         json!({
-            "document": id,
-            "label": label,
             "version": head.id,
             "written": NOW,
-            "machine": "desk",
+            "machine": to(&world.machine(), "desk"),
             "change": "new",
             "parents": [],
             "head": true,
             "ended": null,
             "text": "+++\nsize = 4\n+++\n\n",
+            "fields": [text_field("size", "4")],
+            "body": "\n",
+            "links": [],
         })
     }
 
@@ -257,6 +287,22 @@ mod tests {
             Ok(())
         );
         assert_eq!(conventional(&json!({"ended": "retired"})), Ok(()));
+        assert_eq!(
+            conventional(&json!({"from": {"document": LANTERN, "label": 4}})),
+            Err("the label 4 of a reference".to_owned())
+        );
+        assert_eq!(
+            conventional(&json!({"from": {"document": null, "label": "lantern"}})),
+            Err("the document null of a reference".to_owned())
+        );
+        assert_eq!(
+            conventional(&json!({"from": {"document": LANTERN, "label": "lantern"}})),
+            Ok(())
+        );
+        assert_eq!(
+            conventional(&json!({"text": "phone", "document": null, "label": null})),
+            Ok(())
+        );
     }
 
     #[test]
@@ -377,18 +423,50 @@ mod tests {
         let (world, lantern, atlas) = world_with_atlas();
         let edges = format!("{}{}", part_of(&[&lantern]), uses(&[&atlas]));
         let phone = topic(&world, "phone", &edges);
-        let bare = |id: &DocumentId, label: &str| json!({"row": row(id, "topic", label, &[]), "part_of": [], "uses": []});
+        fact(&world, &phone, "case", "");
+        fact(&world, &phone, "strap", "");
+        fact(&world, &phone, "dial", "idea = true\n");
+        followup(&world, &[&phone, &atlas], "s", "");
+        let counted = |id: &DocumentId, label: &str, open_count: usize, parts: Value| {
+            json!({
+                "row": row(id, "topic", label, &[]),
+                "part_of": [],
+                "uses": [],
+                "parts": parts,
+                "top": true,
+                "fact_count": 0,
+                "idea_count": 0,
+                "open_count": open_count,
+            })
+        };
+        let part = json!({
+            "row": row(&phone, "topic", "phone", &[]),
+            "part_of": [to(&lantern, "lantern")],
+            "uses": [to(&atlas, "atlas")],
+            "parts": [],
+            "top": false,
+            "fact_count": 2,
+            "idea_count": 1,
+            "open_count": 1,
+        });
         let expected = json!([
-            bare(&atlas, "atlas"),
-            bare(&world.machine(), "desk"),
-            bare(&lantern, "lantern"),
-            {
-                "row": row(&phone, "topic", "phone", &[]),
-                "part_of": ["lantern"],
-                "uses": ["atlas"],
-            },
+            counted(&atlas, "atlas", 1, json!([])),
+            counted(&world.machine(), "desk", 0, json!([])),
+            counted(&lantern, "lantern", 0, json!([to(&phone, "phone")])),
+            part,
         ]);
-        vec![(list::topics(&world.deps(), false).unwrap(), expected)]
+        let deps = world.deps();
+        vec![
+            (list::topics(&deps, None, false).unwrap(), expected),
+            (
+                list::topics(&deps, Some("lantern"), false).unwrap(),
+                json!([part]),
+            ),
+            (
+                list::topics(&deps, Some("phone"), false).unwrap(),
+                json!([]),
+            ),
+        ]
     }
 
     fn facts() -> Vec<(Vec<FactRow>, Value)> {
@@ -397,9 +475,10 @@ mod tests {
         let fuse = fact(&world, &lantern, "fuse", ENDED_FACT);
         let relay = fact(&world, &lantern, "relay", "");
         let dimmer = fact(&world, &lantern, "dimmer", "idea = true\n");
-        let filed = |id: &DocumentId, label: &str| json!({"row": row(id, "fact", label, &["lantern"]), "confirmed": "2026-09-04"});
+        let on = [to(&lantern, "lantern")];
+        let filed = |id: &DocumentId, label: &str| json!({"row": row(id, "fact", label, &on), "confirmed": "2026-09-04"});
         let ended = with(
-            row(&fuse, "fact", "lantern/fuse", &["lantern"]),
+            row(&fuse, "fact", "lantern/fuse", &on),
             "ended",
             json!("false"),
         );
@@ -422,7 +501,7 @@ mod tests {
         let (world, lantern) = world();
         let wiring = entry(&world, "2026-10-08", "wiring", &[&lantern]);
         let expected = json!([{
-            "row": row(&wiring, "entry", "2026-10-08-wiring", &["lantern"]),
+            "row": row(&wiring, "entry", "2026-10-08-wiring", &[to(&lantern, "lantern")]),
             "date": "2026-10-08",
         }]);
         let listed = list::entries(&world.deps(), None, None, false).unwrap();
@@ -444,28 +523,29 @@ mod tests {
         let touching = format!("touching = \"{lantern}\"\n");
         let waiting = followup(&world, &[&lantern], "s", &touching);
         let bare = followup(&world, &[&atlas], "s", "");
-        let labeled = |id: &DocumentId, topic: &str| row(id, "followup", id.short(), &[topic]);
+        let labeled = |id: &DocumentId, topic: Value| row(id, "followup", id.short(), &[topic]);
+        let (on_lantern, on_atlas) = (to(&lantern, "lantern"), to(&atlas, "atlas"));
         let expected = json!([
             {
-                "row": labeled(&dated, "lantern"),
+                "row": labeled(&dated, on_lantern.clone()),
                 "trigger": {
                     "type": "look_again",
                     "on": "2026-10-01",
                     "why": "The part arrives",
                 },
                 "due": true,
-                "entry": "2026-10-08-wiring",
-                "about": "atlas",
+                "entry": to(&wiring, "2026-10-08-wiring"),
+                "about": on_atlas,
             },
             {
-                "row": labeled(&waiting, "lantern"),
-                "trigger": {"type": "touching", "topic": "lantern"},
+                "row": labeled(&waiting, on_lantern.clone()),
+                "trigger": {"type": "touching", "topic": on_lantern},
                 "due": false,
                 "entry": null,
                 "about": null,
             },
             {
-                "row": labeled(&bare, "atlas"),
+                "row": labeled(&bare, on_atlas.clone()),
                 "trigger": null,
                 "due": false,
                 "entry": null,
@@ -492,15 +572,15 @@ mod tests {
         let expected = json!([
             {
                 "document": anywhere,
-                "machine": "desk",
-                "topic": "atlas",
+                "machine": to(&machine, "desk"),
+                "topic": to(&atlas, "atlas"),
                 "directory": null,
                 "forked": false,
             },
             {
                 "document": placed,
-                "machine": "desk",
-                "topic": "lantern",
+                "machine": to(&machine, "desk"),
+                "topic": to(&lantern, "lantern"),
                 "directory": "~/projects/lantern",
                 "forked": false,
             },
@@ -517,16 +597,17 @@ mod tests {
         let live = written_at(&world, &root, &fields, early, "left\n", None);
         let retired = format!("{fields}{RETIRED}");
         let retired = written_at(&world, &root, &retired, late, "right\n", None);
+        let desk = to(&world.machine(), "desk");
         let read = by_version(vec![
-            json!({"version": live.id, "written": early, "machine": "desk", "ended": null}),
-            json!({"version": retired.id, "written": late, "machine": "desk", "ended": "retired"}),
+            json!({"version": live.id, "written": early, "machine": desk, "ended": null}),
+            json!({"version": retired.id, "written": late, "machine": desk, "ended": "retired"}),
         ]);
         let unread = fork(&world, &atlas, "name = 4\n");
         let unread = unread.iter().map(|id| {
             json!({
                 "version": id,
                 "written": "2026-09-04T10:00:00+01:00",
-                "machine": "dededede",
+                "machine": unheld_machine(),
                 "ended": null,
             })
         });
@@ -557,7 +638,7 @@ mod tests {
             ended: false,
         };
         let expected = json!([{
-            "row": row(&relay, "fact", "lantern/relay", &["lantern"]),
+            "row": row(&relay, "fact", "lantern/relay", &[to(&lantern, "lantern")]),
             "lines": ["The relay."],
         }]);
         vec![(search::search(&world.deps(), &query).unwrap(), expected)]
@@ -573,7 +654,7 @@ mod tests {
                 "label": label,
                 "version": version,
                 "written": NOW,
-                "machine": "desk",
+                "machine": to(&world.machine(), "desk"),
                 "change": "new",
                 "ended": null,
                 "row": row,
@@ -625,11 +706,9 @@ mod tests {
         let sides: Vec<Value> = (heads.iter().zip(&bodies))
             .map(|(version, body)| {
                 json!({
-                    "document": phone,
-                    "label": "phone",
                     "version": version,
                     "written": "2026-09-04T10:00:00+01:00",
-                    "machine": "dededede",
+                    "machine": unheld_machine(),
                     "change": "save",
                     "parents": [root],
                     "head": true,
@@ -637,6 +716,9 @@ mod tests {
                     "text": format!(
                         "+++\nname = \"phone\"\ncreated = 2026-09-04\nsummary = \"s\"\n+++\n{body}"
                     ),
+                    "fields": topic_shown("phone"),
+                    "body": body,
+                    "links": [],
                 })
             })
             .collect();
@@ -644,13 +726,108 @@ mod tests {
             "type": "document",
             "document": phone,
             "kind": "topic",
+            "reads_as": "topic",
             "label": "phone",
             "former": [],
             "forked": true,
+            "ended": null,
             "heads": sides,
             "unreadable": [],
         });
         (of_forked, expected)
+    }
+
+    fn linking(world: &World, lantern: &DocumentId) -> (Shown, Value) {
+        let compass = topic(world, "compass", "");
+        let made = head(world, &compass).id;
+        let unheld = DocumentId::from_bytes([0x42; 16]);
+        let body = "See [[lantern]], [[phone]] and [[unknown]].\n";
+        let linking = world.amend_linking(
+            &compass,
+            &topic_fields("compass", ""),
+            body,
+            &[
+                ("lantern", Some(lantern)),
+                ("phone", Some(&unheld)),
+                ("unknown", None),
+            ],
+        );
+        let linked = json!({
+            "type": "version",
+            "document": compass,
+            "label": "compass",
+            "version": linking,
+            "written": NOW,
+            "machine": to(&world.machine(), "desk"),
+            "change": "save",
+            "parents": [made],
+            "head": true,
+            "ended": null,
+            "text": format!(
+                "+++\nname = \"compass\"\ncreated = 2026-09-04\nsummary = \"s\"\n+++\n{body}"
+            ),
+            "fields": topic_shown("compass"),
+            "body": body,
+            "links": [
+                {"text": "lantern", "target": to(lantern, "lantern")},
+                {"text": "phone", "target": to(&unheld, unheld.short())},
+                {"text": "unknown", "target": null},
+            ],
+            "sides": [{
+                "against": made,
+                "held": true,
+                "before": "+++\nname = \"compass\"\ncreated = 2026-09-04\nsummary = \"s\"\n+++\n\n",
+            }],
+        });
+        let of_linking = show::show(&world.deps(), linking.as_str()).unwrap();
+        (of_linking, linked)
+    }
+
+    fn referring(world: &World, lantern: &DocumentId) -> (Shown, Value) {
+        let machine = world.machine();
+        let driver = world.put(
+            "entry",
+            &format!(
+                "name = \"lamp-driver\"\nformer_names = [\"old-driver\"]\ndate = 2026-10-08\n\
+                 machine = \"{machine}\"\ntopics = [\"{lantern}\"]\nsummary = \"s\"\n"
+            ),
+            "Wired.\n",
+        );
+        let expected = json!({
+            "type": "document",
+            "document": driver,
+            "kind": "entry",
+            "reads_as": "entry",
+            "label": "2026-10-08-lamp-driver",
+            "former": ["2026-10-08-old-driver"],
+            "forked": false,
+            "ended": null,
+            "heads": [{
+                "version": head(world, &driver).id,
+                "written": NOW,
+                "machine": to(&machine, "desk"),
+                "change": "new",
+                "parents": [],
+                "head": true,
+                "ended": null,
+                "text": "+++\nname = \"lamp-driver\"\nformer_names = [\"old-driver\"]\n\
+                         date = 2026-10-08\nmachine = \"desk\"\ntopics = [\"lantern\"]\n\
+                         summary = \"s\"\n+++\nWired.\n",
+                "fields": [
+                    text_field("name", "lamp-driver"),
+                    text_field("former_names", "old-driver"),
+                    text_field("date", "2026-10-08"),
+                    reference_field("machine", &to(&machine, "desk")),
+                    reference_field("topics", &to(lantern, "lantern")),
+                    text_field("summary", "s"),
+                ],
+                "body": "Wired.\n",
+                "links": [],
+            }],
+            "unreadable": [],
+        });
+        let of_referring = show::show(&world.deps(), driver.as_str()).unwrap();
+        (of_referring, expected)
     }
 
     fn shown() -> Vec<(Shown, Value)> {
@@ -666,19 +843,22 @@ mod tests {
             "type": "document",
             "document": gadget,
             "kind": "gadget",
+            "reads_as": null,
             "label": label,
             "former": [],
             "forked": false,
-            "heads": [version(&world, &gadget, label)],
+            "ended": null,
+            "heads": [version(&world, &gadget)],
             "unreadable": unreadable,
         });
         let of_unknown = show::show(&deps, label).unwrap();
 
         let hash = head(&world, &gadget).id;
-        let mut one = json!({"type": "version"});
-        let rest = version(&world, &gadget, label);
+        let mut one = json!({"type": "version", "document": gadget, "label": label});
+        let rest = version(&world, &gadget);
         let fields = rest.as_object().expect("an object").clone();
         one.as_object_mut().expect("an object").extend(fields);
+        one["sides"] = json!([{"against": null, "held": true, "before": ""}]);
         let of_version = show::show(&deps, hash.short()).unwrap();
 
         let root = head(&world, &lantern).id;
@@ -687,21 +867,31 @@ mod tests {
             "type": "document",
             "document": lantern,
             "kind": "topic",
+            "reads_as": "topic",
             "label": "lantern",
             "former": [],
             "forked": false,
+            "ended": "retired",
             "heads": [{
-                "document": lantern,
-                "label": "lantern",
                 "version": retired,
                 "written": NOW,
-                "machine": "desk",
+                "machine": to(&world.machine(), "desk"),
                 "change": "save",
                 "parents": [root],
                 "head": true,
                 "ended": "retired",
                 "text": "+++\nname = \"lantern\"\ncreated = 2026-09-04\nsummary = \"s\"\n\
                              ended = \"retired\"\nended_on = 2026-10-09\nnote = \"n\"\n+++\n\n",
+                "fields": [
+                    text_field("name", "lantern"),
+                    text_field("created", "2026-09-04"),
+                    text_field("summary", "s"),
+                    text_field("ended", "retired"),
+                    text_field("ended_on", "2026-10-09"),
+                    text_field("note", "n"),
+                ],
+                "body": "\n",
+                "links": [],
             }],
             "unreadable": [],
         });
@@ -715,9 +905,11 @@ mod tests {
             "type": "document",
             "document": atlas(),
             "kind": null,
+            "reads_as": null,
             "label": atlas().short(),
             "former": [],
             "forked": false,
+            "ended": null,
             "heads": [],
             "unreadable": [{
                 "version": lost,
@@ -728,6 +920,8 @@ mod tests {
 
         vec![
             forked(&world),
+            linking(&world, &lantern),
+            referring(&world, &lantern),
             (of_unknown, unknown),
             (of_version, one),
             (of_ended, ended),
@@ -746,7 +940,15 @@ mod tests {
         let expected = json!({
             "document": gadget,
             "label": label,
-            "versions": [version(&world, &gadget, label)],
+            "versions": [{
+                "version": head(&world, &gadget).id,
+                "written": NOW,
+                "machine": to(&world.machine(), "desk"),
+                "change": "new",
+                "parents": [],
+                "head": true,
+                "ended": null,
+            }],
             "unreadable": unreadable,
         });
         vec![(show::history(&world.deps(), label).unwrap(), expected)]
@@ -817,9 +1019,10 @@ mod tests {
                 "parts": [],
             })
         };
-        let filed = |id: &DocumentId, label: &str| row(id, "fact", label, &["lantern"]);
+        let on = [to(&lantern, "lantern")];
+        let filed = |id: &DocumentId, label: &str| row(id, "fact", label, &on);
         let expected = json!({
-            "machine": "desk",
+            "machine": to(&machine, "desk"),
             "directory": "~/projects/lantern/case",
             "topics": [
                 {
@@ -837,12 +1040,12 @@ mod tests {
                         "open_count": 1,
                     }],
                 },
-                loaded(&atlas, "atlas", json!({"type": "edge", "from": "lantern"})),
+                loaded(&atlas, "atlas", json!({"type": "edge", "from": on[0]})),
                 loaded(&machine, "desk", json!({"type": "machine", "from": null})),
-                loaded(&compass, "compass", json!({"type": "machine", "from": "desk"})),
+                loaded(&compass, "compass", json!({"type": "machine", "from": to(&machine, "desk")})),
             ],
             "due": [{
-                "row": row(&due, "followup", due.short(), &["lantern"]),
+                "row": row(&due, "followup", due.short(), &on),
                 "trigger": {"type": "look_again", "on": "2026-10-01", "why": "w"},
                 "due": true,
                 "entry": null,
@@ -872,7 +1075,7 @@ mod tests {
         let label = gadget.short();
         let finding = |hashed: &[u8], what: &str| {
             let what = format!("{}: {what}", VersionId::of(hashed).short());
-            json!({"label": label, "what": what})
+            json!({"document": gadget, "label": label, "what": what})
         };
         let mut problems = [
             finding(b"corrupt", "the bytes do not hash to the file's name"),
@@ -884,6 +1087,7 @@ mod tests {
             "notices": [
                 finding(b"newer", "written in format 2, a newer one"),
                 {
+                    "document": null,
                     "label": "gadget",
                     "what": "1 document of a kind this worklog does not know",
                 },

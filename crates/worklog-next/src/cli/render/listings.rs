@@ -1,6 +1,7 @@
-use super::{INDENT, Render, line, row_fields, row_line, written};
+use super::{INDENT, Render, filed_counts, line, row_fields, row_line, written};
 use crate::app::list::{ClaimRow, EntryRow, FactRow, ForkRow, TopicRow};
-use crate::app::{FollowupRow, Row, TriggerShown};
+use crate::app::{FollowupRow, Reference, Row};
+use crate::render::trigger_state;
 
 fn dated(text: &mut String, day: &impl ToString, row: &Row) {
     let mut fields = vec![day.to_string()];
@@ -8,16 +9,21 @@ fn dated(text: &mut String, day: &impl ToString, row: &Row) {
     line(text, &fields);
 }
 
-fn edges(word: &str, topics: &[String]) -> Option<String> {
-    (!topics.is_empty()).then(|| format!("{word} {}", topics.join(", ")))
+fn edges(word: &str, topics: &[Reference]) -> Option<String> {
+    let labels: Vec<&str> = topics.iter().map(|topic| topic.label.as_str()).collect();
+    (!labels.is_empty()).then(|| format!("{word} {}", labels.join(", ")))
 }
 
 impl Render for Vec<TopicRow> {
     fn text(&self) -> String {
         let mut text = String::new();
         for topic in self {
-            let linked = [edges("part of", &topic.part_of), edges("uses", &topic.uses)];
-            let fields = row_fields(&topic.row, linked.into_iter().flatten().collect());
+            let between = [
+                edges("part of", &topic.part_of),
+                edges("uses", &topic.uses),
+                filed_counts(topic.fact_count, topic.idea_count, topic.open_count),
+            ];
+            let fields = row_fields(&topic.row, between.into_iter().flatten().collect());
             line(&mut text, &fields);
         }
         text
@@ -44,17 +50,16 @@ impl Render for Vec<EntryRow> {
     }
 }
 
-fn trigger_state(followup: &FollowupRow) -> String {
-    match &followup.trigger {
-        Some(TriggerShown::LookAgain { on, .. }) if followup.due => format!("due {on}"),
-        Some(TriggerShown::LookAgain { on, .. }) => format!("by {on}"),
-        Some(TriggerShown::Touching { topic }) => format!("touching {topic}"),
-        None => "no trigger".to_owned(),
+fn trigger_words(followup: &FollowupRow) -> String {
+    let state = trigger_state(followup);
+    match state.touching {
+        Some(topic) => format!("{} {}", state.words, topic.label),
+        None => state.words,
     }
 }
 
 pub(super) fn followup_line(text: &mut String, followup: &FollowupRow) {
-    let mut fields = vec![trigger_state(followup)];
+    let mut fields = vec![trigger_words(followup)];
     fields.extend(row_fields(&followup.row, Vec::new()));
     line(text, &fields);
 }
@@ -75,7 +80,7 @@ impl Render for Vec<ClaimRow> {
         for row in self {
             let directory = row.directory.as_deref().unwrap_or("(anywhere)");
             let forked = if row.forked { "forked" } else { "" };
-            let fields = [&row.topic, directory, row.document.short(), forked];
+            let fields = [&row.topic.label, directory, row.document.short(), forked];
             line(&mut text, &fields);
         }
         text
@@ -93,7 +98,12 @@ impl Render for Vec<ForkRow> {
             for head in &fork.heads {
                 let ended = if head.ended.is_some() { "ended" } else { "" };
                 let version = format!("{INDENT}{}", head.version.short());
-                let fields = [&version, &written(&head.written), &head.machine, ended];
+                let fields = [
+                    &version,
+                    &written(&head.written),
+                    &head.machine.label,
+                    ended,
+                ];
                 line(&mut text, &fields);
             }
         }
@@ -103,8 +113,9 @@ impl Render for Vec<ForkRow> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::testing::{followup, look_again, row, stamp};
+    use super::super::testing::{WRITTEN, followup, look_again, row, stamp, to};
     use super::*;
+    use crate::app::TriggerShown;
     use crate::app::list::ForkHead;
     use crate::domain::id::{DocumentId, VersionId};
     use crate::domain::schema::Date;
@@ -118,8 +129,13 @@ mod tests {
     fn a_topic_is_its_row_then_what_it_is_part_of_and_what_it_uses() {
         let topic = |id: DocumentId, label: &str, part_of: &[&str], uses: &[&str]| TopicRow {
             row: row(&id, label, "A thing"),
-            part_of: part_of.iter().map(ToString::to_string).collect(),
-            uses: uses.iter().map(ToString::to_string).collect(),
+            part_of: part_of.iter().map(|label| to(label)).collect(),
+            uses: uses.iter().map(|label| to(label)).collect(),
+            parts: vec![to("relay")],
+            top: false,
+            fact_count: 0,
+            idea_count: 0,
+            open_count: 0,
         };
         let mut ended = topic(atlas(), "phone", &[], &["desk"]);
         ended.row.ended = Some("retired".to_owned());
@@ -137,6 +153,41 @@ mod tests {
              a71a5000  phone  A thing  uses desk  ended retired\n"
         );
         assert_eq!(Vec::<TopicRow>::new().text(), "");
+    }
+
+    #[test]
+    fn a_topic_with_something_filed_on_it_shows_the_counts_that_are_not_zero() {
+        let topic = |label: &str, fact_count, idea_count, open_count| TopicRow {
+            row: row(&lantern(), label, "A thing"),
+            part_of: Vec::new(),
+            uses: Vec::new(),
+            parts: Vec::new(),
+            top: true,
+            fact_count,
+            idea_count,
+            open_count,
+        };
+        let mut whole = topic("relay", 1, 1, 1);
+        whole.part_of = vec![to("lantern")];
+        whole.uses = vec![to("phone")];
+        whole.row.forked = true;
+        whole.row.ended = Some("retired".to_owned());
+        let listed = vec![
+            topic("lantern", 2, 1, 3),
+            topic("atlas", 0, 0, 1),
+            topic("phone", 1, 0, 0),
+            topic("desk", 0, 2, 0),
+            whole,
+        ];
+        assert_eq!(
+            listed.text(),
+            "7f3a91c0  lantern  A thing  (2 facts, 1 idea, 3 open)\n\
+             7f3a91c0  atlas  A thing  (1 open)\n\
+             7f3a91c0  phone  A thing  (1 fact)\n\
+             7f3a91c0  desk  A thing  (2 ideas)\n\
+             7f3a91c0  relay  A thing  part of lantern  uses phone  (1 fact, 1 idea, 1 open)  \
+             forked  ended retired\n"
+        );
     }
 
     #[test]
@@ -182,7 +233,7 @@ mod tests {
             followup(
                 "Fit the lens",
                 Some(TriggerShown::Touching {
-                    topic: "lantern".to_owned(),
+                    topic: to("lantern"),
                 }),
                 false,
             ),
@@ -204,8 +255,8 @@ mod tests {
     fn a_claim_is_its_topic_its_directory_and_its_short_id() {
         let claim = |id, topic: &str, directory: Option<&str>, forked| ClaimRow {
             document: id,
-            machine: "desk".to_owned(),
-            topic: topic.to_owned(),
+            machine: to("desk"),
+            topic: to(topic),
             directory: directory.map(str::to_owned),
             forked,
         };
@@ -225,8 +276,8 @@ mod tests {
     fn a_fork_is_its_row_over_a_line_for_each_head() {
         let head = |seed: &[u8], machine: &str, ended: bool| ForkHead {
             version: VersionId::of(seed),
-            written: stamp("2026-10-09T18:22:41.118204+01:00"),
-            machine: machine.to_owned(),
+            written: stamp(WRITTEN),
+            machine: to(machine),
             ended: ended.then(|| "retired".to_owned()),
         };
         let short = |seed: &[u8]| VersionId::of(seed).short().to_owned();

@@ -32,7 +32,7 @@ pub mod show;
 pub(crate) mod testing;
 
 pub use lookup::Stored;
-pub use rows::{FollowupRow, Row, TriggerShown};
+pub use rows::{FollowupRow, Reference, Row, TriggerShown};
 
 #[derive(Clone, Copy)]
 pub struct Deps<'a> {

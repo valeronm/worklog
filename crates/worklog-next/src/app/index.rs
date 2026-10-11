@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::app::Failure;
 use crate::app::heads::{all_ended, edges_of, label_or_short, readable_heads, row_head_of};
 use crate::app::lookup::Lookup;
+use crate::app::rows::Reference;
 use crate::domain::id::DocumentId;
 use crate::domain::schema::graph::{self, Edges, Reached};
 use crate::domain::schema::{Content, KindOf, Name};
@@ -57,6 +58,14 @@ impl Topics {
         label_or_short(self.name(id).map(ToString::to_string), id)
     }
 
+    pub(super) fn reference(&self, id: &DocumentId) -> Reference {
+        Reference::to(id, self.label(id))
+    }
+
+    pub(super) fn references(&self, ids: &[DocumentId]) -> Vec<Reference> {
+        ids.iter().map(|id| self.reference(id)).collect()
+    }
+
     pub(super) fn summary(&self, id: &DocumentId) -> Option<&str> {
         self.entries.get(id).map(|entry| entry.summary.as_str())
     }
@@ -95,6 +104,36 @@ impl Topics {
 
     pub(super) fn direct_parts(&self, id: &DocumentId) -> Vec<DocumentId> {
         self.parts.get(id).cloned().unwrap_or_default()
+    }
+
+    fn unended_wholes(&self, id: &DocumentId) -> Vec<DocumentId> {
+        (self.part_of(id).iter())
+            .filter(|whole| self.unended(whole).is_some())
+            .cloned()
+            .collect()
+    }
+
+    pub(super) fn tops(&self, listed: &[DocumentId]) -> BTreeSet<DocumentId> {
+        let mut tops = BTreeSet::new();
+        let mut reached = BTreeSet::new();
+        for id in listed {
+            if self.unended_wholes(id).is_empty() {
+                tops.insert(id.clone());
+                reached.extend(self.covered(id));
+            }
+        }
+        for id in listed {
+            if reached.contains(id) {
+                continue;
+            }
+            let below = self.covered(id);
+            let above = graph::parts(id, |topic| self.unended_wholes(topic));
+            if above.iter().all(|whole| below.contains(whole)) {
+                tops.insert(id.clone());
+                reached.extend(below);
+            }
+        }
+        tops
     }
 
     pub(super) fn reach_from(&self, from: &[DocumentId]) -> Vec<Reached> {

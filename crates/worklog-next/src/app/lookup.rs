@@ -2,7 +2,10 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
-use crate::app::heads::{is_holder, kind_of, label_of, labeling_topic, readable_heads, row_head};
+use crate::app::heads::{
+    is_holder, kind_of, label_of, label_or_short, labeling_topic, readable_heads, row_head,
+};
+use crate::app::rows::Reference;
 use crate::app::{Failure, kind_named};
 use crate::domain::document::{Document, State};
 use crate::domain::id::{DocumentId, VersionId};
@@ -97,6 +100,7 @@ pub(super) struct Lookup<'a> {
     documents: RefCell<BTreeMap<DocumentId, Rc<Document>>>,
     kinds: RefCell<BTreeMap<&'static str, Vec<Rc<Document>>>>,
     holding: RefCell<BTreeMap<Question, Vec<DocumentId>>>,
+    under: RefCell<BTreeMap<String, Vec<DocumentId>>>,
 }
 
 impl<'a> Lookup<'a> {
@@ -106,6 +110,7 @@ impl<'a> Lookup<'a> {
             documents: RefCell::default(),
             kinds: RefCell::default(),
             holding: RefCell::default(),
+            under: RefCell::default(),
         }
     }
 
@@ -190,8 +195,40 @@ impl<'a> Lookup<'a> {
             return Ok(named);
         }
         match Address::id_prefix(address) {
-            Some(prefix) => Ok(by_prefix(self.store.documents_under(prefix)?)),
+            Some(prefix) => Ok(by_prefix(self.under(prefix)?)),
             None => Ok(Found::None),
+        }
+    }
+
+    fn under(&self, prefix: &str) -> Result<Vec<DocumentId>, Failure> {
+        if let Some(answer) = self.under.borrow().get(prefix) {
+            return Ok(answer.clone());
+        }
+        let answer = self.store.documents_under(prefix)?;
+        self.under
+            .borrow_mut()
+            .insert(prefix.to_owned(), answer.clone());
+        Ok(answer)
+    }
+
+    // A target that names nothing, or several documents, links to none.
+    pub(super) fn linked(&self, target: &str) -> Result<Option<DocumentId>, Failure> {
+        match self.find(target) {
+            Ok(Found::One(id)) => Ok(Some(id)),
+            Ok(_) | Err(Failure::Usage(_)) => Ok(None),
+            Err(failure) => Err(failure),
+        }
+    }
+
+    // A link stored with a document keeps it whatever its text names since.
+    pub(super) fn linked_now(
+        &self,
+        text: &str,
+        stored: Option<&DocumentId>,
+    ) -> Result<Option<DocumentId>, Failure> {
+        match stored {
+            Some(id) => Ok(Some(id.clone())),
+            None => self.linked(text),
         }
     }
 
@@ -293,6 +330,16 @@ impl<'a> Lookup<'a> {
             Some((_, record)) => self.label_of(&record.content, id),
             None => Ok(id.short().to_owned()),
         }
+    }
+
+    pub(super) fn reference(&self, id: &DocumentId) -> Result<Reference, Failure> {
+        Ok(Reference::to(id, self.label(id)?))
+    }
+
+    // A document that is held and is no topic is labeled by its short id, as one not held is.
+    pub(super) fn topic_reference(&self, id: &DocumentId) -> Result<Reference, Failure> {
+        let name = self.topic_name(id)?.map(|name| name.to_string());
+        Ok(Reference::to(id, label_or_short(name, id)))
     }
 
     pub(super) fn label_of(&self, content: &Content, id: &DocumentId) -> Result<String, Failure> {

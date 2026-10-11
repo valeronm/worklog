@@ -1,16 +1,20 @@
 use std::rc::Rc;
 
-use serde::Serialize;
+use serde::ser::SerializeStruct;
+use serde::{Serialize, Serializer};
+use toml::Value;
 
 use crate::app::draft::{draft_for, draft_label, opened, shown_as};
-use crate::app::heads::{ended_of, is_forked, machine_label};
+use crate::app::heads::{ended_for, ended_of, is_forked, kind_of, row_head};
 use crate::app::lookup::{Lookup, names_no_document};
+use crate::app::rows::Reference;
 use crate::app::{Deps, Failure};
 use crate::domain::document::{Document, Unreadable};
 use crate::domain::draft::Draft;
 use crate::domain::id::{DocumentId, VersionId, is_id_prefix};
 use crate::domain::schema::KindOf;
 use crate::domain::schema::address::Found;
+use crate::domain::schema::translate::referred;
 use crate::domain::version::{ReadError, Stamp, Version};
 
 /// A file of the document that does not read as a version.
@@ -38,6 +42,17 @@ impl Why {
     }
 }
 
+impl Unread {
+    #[must_use]
+    pub fn note(&self) -> String {
+        format!(
+            "version {} does not read: {}",
+            self.version.short(),
+            self.why.text()
+        )
+    }
+}
+
 impl From<&Unreadable> for Unread {
     fn from(file: &Unreadable) -> Unread {
         let text = file.why.to_string();
@@ -60,7 +75,53 @@ fn unread(document: &Document) -> Vec<Unread> {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Shown {
     Document(ShownDocument),
-    Version(ShownVersion),
+    Version(Compared),
+}
+
+/// A version beside what it changed. Its JSON is `document` and `label`, the version's own
+/// keys and `sides` after them.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Compared {
+    pub document: DocumentId,
+    pub label: String,
+    pub version: ShownVersion,
+    /// One for each parent in the order the version lists them, or one against nothing for a
+    /// first version; `before` is the parent's text as `version.text` is the version's.
+    pub sides: Vec<Side>,
+}
+
+impl Serialize for Compared {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let ShownVersion {
+            version,
+            written,
+            machine,
+            change,
+            parents,
+            head,
+            ended,
+            text,
+            fields,
+            body,
+            links,
+        } = &self.version;
+        let mut keyed = serializer.serialize_struct("Compared", 14)?;
+        keyed.serialize_field("document", &self.document)?;
+        keyed.serialize_field("label", &self.label)?;
+        keyed.serialize_field("version", version)?;
+        keyed.serialize_field("written", written)?;
+        keyed.serialize_field("machine", machine)?;
+        keyed.serialize_field("change", change)?;
+        keyed.serialize_field("parents", parents)?;
+        keyed.serialize_field("head", head)?;
+        keyed.serialize_field("ended", ended)?;
+        keyed.serialize_field("text", text)?;
+        keyed.serialize_field("fields", fields)?;
+        keyed.serialize_field("body", body)?;
+        keyed.serialize_field("links", links)?;
+        keyed.serialize_field("sides", &self.sides)?;
+        keyed.end()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -68,9 +129,15 @@ pub struct ShownDocument {
     pub document: DocumentId,
     /// As stored, also for a kind this worklog does not know; `None` when no version reads.
     pub kind: Option<String>,
+    /// The kind the document's row head reads as; `None` when no head reads as a record,
+    /// which none of an unknown kind does, and when that kind is not the one `kind` holds.
+    pub reads_as: Option<KindOf>,
     pub label: String,
     pub former: Vec<String>,
     pub forked: bool,
+    /// The reason when the document is ended, which a fork with a head that is not ended is
+    /// not.
+    pub ended: Option<String>,
     /// One when live, several when forked, in head order.
     pub heads: Vec<ShownVersion>,
     pub unreadable: Vec<Unread>,
@@ -78,11 +145,9 @@ pub struct ShownDocument {
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct ShownVersion {
-    pub document: DocumentId,
-    pub label: String,
     pub version: VersionId,
     pub written: Stamp,
-    pub machine: String,
+    pub machine: Reference,
     pub change: String,
     pub parents: Vec<VersionId>,
     pub head: bool,
@@ -90,6 +155,38 @@ pub struct ShownVersion {
     pub ended: Option<String>,
     /// Every field the version holds, tool-owned ones included, references as labels.
     pub text: String,
+    /// The fields `text` shows, in its order.
+    pub fields: Vec<ShownField>,
+    /// What follows the fields in `text`.
+    pub body: String,
+    /// The `[[text]]` links of its summary and body, by text.
+    pub links: Vec<Linked>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct ShownField {
+    pub name: String,
+    /// One for a field that holds one value, and one for each item of a list.
+    pub values: Vec<FieldItem>,
+}
+
+/// An id held where a kind this worklog knows holds another document's id is a reference.
+/// Anything else is the text it holds, a value that is no text as TOML writes it, and so is
+/// every field of an unknown kind.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum FieldItem {
+    Text { text: String },
+    Reference { reference: Reference },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Linked {
+    /// The target between the brackets with the spaces around it trimmed and its case kept.
+    pub text: String,
+    /// What the link resolved to when the version was saved, or what its text names now when
+    /// that was nothing; `None` when it names nothing or several documents.
+    pub target: Option<Reference>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -97,8 +194,20 @@ pub struct History {
     pub document: DocumentId,
     pub label: String,
     /// The one with the most behind it first.
-    pub versions: Vec<ShownVersion>,
+    pub versions: Vec<HistoryRow>,
     pub unreadable: Vec<Unread>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct HistoryRow {
+    pub version: VersionId,
+    pub written: Stamp,
+    pub machine: Reference,
+    pub change: String,
+    pub parents: Vec<VersionId>,
+    pub head: bool,
+    /// The reason; `None` too for a version that does not read as a record.
+    pub ended: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -142,10 +251,7 @@ fn resolved(lookup: &Lookup, address: &str) -> Result<Option<Resolved>, Failure>
                         .iter()
                         .find(|broken| broken.version == version)
                     {
-                        return Err(Failure::at(
-                            address,
-                            format!("version {} does not read: {}", version.short(), broken.why),
-                        ));
+                        return Err(Failure::at(address, Unread::from(broken).note()));
                     }
                     Ok(Some(Resolved::Version { document, version }))
                 }
@@ -179,26 +285,78 @@ fn shown_text(lookup: &Lookup, version: &Version) -> Result<String, Failure> {
     render(&draft, version.envelope.document.short())
 }
 
-fn shown_version(
-    lookup: &Lookup,
-    label: &str,
-    version: &Version,
-    head: bool,
-) -> Result<ShownVersion, Failure> {
+fn written(value: &Value) -> String {
+    match value {
+        Value::String(text) => text.clone(),
+        other => other.to_string(),
+    }
+}
+
+fn item(lookup: &Lookup, value: &Value, refers: bool) -> Result<FieldItem, Failure> {
+    let referred = if refers {
+        value.as_str().and_then(referred)
+    } else {
+        None
+    };
+    Ok(match referred {
+        Some(id) => FieldItem::Reference {
+            reference: lookup.reference(&id)?,
+        },
+        None => FieldItem::Text {
+            text: written(value),
+        },
+    })
+}
+
+fn shown_fields(lookup: &Lookup, version: &Version) -> Result<Vec<ShownField>, Failure> {
+    let references: Vec<&str> = match KindOf::of(&version.envelope.kind) {
+        Ok(kind) => kind.reference_keys().collect(),
+        Err(_) => Vec::new(),
+    };
+    (version.fields.iter())
+        .map(|(name, value)| {
+            let refers = references.contains(&name.as_str());
+            let items = match value {
+                Value::Array(items) => items.as_slice(),
+                one => std::slice::from_ref(one),
+            };
+            Ok(ShownField {
+                name: name.clone(),
+                values: (items.iter())
+                    .map(|value| item(lookup, value, refers))
+                    .collect::<Result<_, _>>()?,
+            })
+        })
+        .collect()
+}
+
+fn links(lookup: &Lookup, version: &Version) -> Result<Vec<Linked>, Failure> {
+    (version.links.0.iter())
+        .map(|(text, stored)| {
+            let target = lookup.linked_now(text, stored.as_ref())?;
+            Ok(Linked {
+                text: text.clone(),
+                target: (target.as_ref())
+                    .map(|id| lookup.reference(id))
+                    .transpose()?,
+            })
+        })
+        .collect()
+}
+
+fn shown_version(lookup: &Lookup, version: &Version, head: bool) -> Result<ShownVersion, Failure> {
     Ok(ShownVersion {
-        document: version.envelope.document.clone(),
-        label: label.to_owned(),
         version: version.id.clone(),
         written: version.envelope.written.clone(),
-        machine: machine_label(
-            version,
-            lookup.topic_name(&version.envelope.machine)?.as_ref(),
-        ),
+        machine: lookup.topic_reference(&version.envelope.machine)?,
         change: version.envelope.change.clone(),
         parents: version.envelope.parents.clone(),
         head,
         ended: ended_of(version),
         text: shown_text(lookup, version)?,
+        fields: shown_fields(lookup, version)?,
+        body: version.body.clone(),
+        links: links(lookup, version)?,
     })
 }
 
@@ -218,7 +376,8 @@ fn held<'a>(
 
 /// Resolves a document by name, id prefix or former name, and a version by the start of its
 /// hash with or without `b3-`; a name wins over a prefix. Refuses an address that names
-/// nothing or several documents or versions. An ended or unreadable document is shown too.
+/// nothing or several documents or versions, and a version whose file does not read. An ended
+/// or unreadable document is shown too.
 pub fn show(deps: &Deps, address: &str) -> Result<Shown, Failure> {
     let lookup = Lookup::new(deps.store);
     let resolved = resolve(&lookup, address)?;
@@ -229,11 +388,16 @@ pub fn show(deps: &Deps, address: &str) -> Result<Shown, Failure> {
             let heads = document
                 .heads()
                 .into_iter()
-                .map(|head| shown_version(&lookup, &label, head, true))
+                .map(|head| shown_version(&lookup, head, true))
                 .collect::<Result<_, _>>()?;
+            let speaking = row_head(&document).map(|(_, record)| record);
             Ok(Shown::Document(ShownDocument {
                 kind: document.kind().map(ToString::to_string),
+                reads_as: (speaking.as_ref())
+                    .map(|record| record.content.kind())
+                    .filter(|kind| kind_of(&document) == Some(*kind)),
                 forked: is_forked(&document),
+                ended: speaking.as_ref().and_then(ended_for),
                 former: lookup.former_addresses(&id)?,
                 unreadable: unread(&document),
                 document: id,
@@ -243,12 +407,14 @@ pub fn show(deps: &Deps, address: &str) -> Result<Shown, Failure> {
         }
         Resolved::Version { document, version } => {
             let held_document = lookup.document(&document)?;
-            let label = lookup.label(&document)?;
             let version = held(&held_document, &version, address)?;
             let head = is_head(&held_document, version);
-            Ok(Shown::Version(shown_version(
-                &lookup, &label, version, head,
-            )?))
+            Ok(Shown::Version(Compared {
+                label: lookup.label(&document)?,
+                sides: against_parents(&lookup, &held_document, version)?,
+                version: shown_version(&lookup, version, head)?,
+                document,
+            }))
         }
     }
 }
@@ -269,8 +435,18 @@ pub fn history(deps: &Deps, address: &str) -> Result<History, Failure> {
     let versions = document
         .history()
         .into_iter()
-        .map(|version| shown_version(&lookup, &label, version, is_head(&document, version)))
-        .collect::<Result<_, _>>()?;
+        .map(|version| {
+            Ok(HistoryRow {
+                version: version.id.clone(),
+                written: version.envelope.written.clone(),
+                machine: lookup.topic_reference(&version.envelope.machine)?,
+                change: version.envelope.change.clone(),
+                parents: version.envelope.parents.clone(),
+                head: is_head(&document, version),
+                ended: ended_of(version),
+            })
+        })
+        .collect::<Result<_, Failure>>()?;
     Ok(History {
         unreadable: unread(&document),
         document: id,
@@ -306,6 +482,16 @@ fn sides(
             }),
         })
         .collect()
+}
+
+fn against_parents(
+    lookup: &Lookup,
+    document: &Document,
+    version: &Version,
+) -> Result<Vec<Side>, Failure> {
+    sides(document, &version.envelope.parents, |parent| {
+        shown_text(lookup, parent)
+    })
 }
 
 fn draft_text(lookup: &Lookup, version: &Version) -> Result<String, Failure> {
@@ -376,9 +562,7 @@ pub fn diff(deps: &Deps, first: &str, second: Option<&str>) -> Result<Diff, Fail
         let version = held(&document, &version, first)?;
         return Ok(Diff {
             label: lookup.label(&version.envelope.document)?,
-            sides: sides(&document, &version.envelope.parents, |parent| {
-                shown_text(&lookup, parent)
-            })?,
+            sides: against_parents(&lookup, &document, version)?,
             after: shown_text(&lookup, version)?,
         });
     };
@@ -405,11 +589,12 @@ mod tests {
     use super::*;
     use crate::app::draft::checkout;
     use crate::app::testing::{
-        ENDED, TOPIC, World, fact, fork, head, refused, topic, topic_fields, world, written_at,
+        ENDED, TOPIC, World, fact, fact_fields, fork, head, refused, to, topic, topic_fields,
+        world, world_with_atlas, written_at,
     };
     use crate::domain::draft::Draft;
     use crate::domain::id::VersionId;
-    use crate::domain::ports::{Drafts, Store};
+    use crate::domain::ports::{Clock, Drafts, Store};
     use crate::domain::testing::{after, first, lantern};
     use crate::domain::version::ReadError;
 
@@ -420,11 +605,92 @@ mod tests {
         }
     }
 
-    fn shown_version(world: &World, address: &str) -> ShownVersion {
+    #[test]
+    fn a_document_whose_speaking_head_is_of_another_kind_than_it_is_stored_as_reads_as_none() {
+        let (world, _) = world();
+        let mixed = DocumentId::from_bytes([0x5a; 16]);
+        let as_topic = first(&mixed, "topic", &topic_fields("compass", ""), "\n");
+        let as_fact = (0..64)
+            .map(|round| {
+                first(
+                    &mixed,
+                    "fact",
+                    "name = \"compass\"\n",
+                    &format!("{round}\n"),
+                )
+            })
+            .find(|version| version.id < as_topic.id)
+            .expect("a version that sorts before the topic's");
+        world.store.put(&as_topic).unwrap();
+        world.store.put(&as_fact).unwrap();
+
+        let shown = shown_document(&world, mixed.as_str());
+        assert_eq!(shown.kind.as_deref(), Some("fact"));
+        assert_eq!(shown.label, "compass");
+        assert_eq!(shown.reads_as, None);
+    }
+
+    #[test]
+    fn a_shown_document_reads_as_the_kind_its_listing_row_has_and_as_none_when_no_head_reads() {
+        let (world, lantern, atlas) = world_with_atlas();
+        let relay = fact(&world, &lantern, "relay-pin", "");
+        world.amend(&atlas, &topic_fields("atlas", ENDED), "\n");
+        let gadget = world.put("gadget", "size = 4\n", "\n");
+        let deps = world.deps();
+
+        let listed = crate::app::list::topics(&deps, None, true).unwrap();
+        for (address, id) in [("lantern", &lantern), ("atlas", &atlas)] {
+            let row = (listed.iter().map(|topic| &topic.row)).find(|row| row.document == *id);
+            let shown = shown_document(&world, address);
+            assert_eq!(shown.reads_as, row.map(|row| row.kind), "{address}");
+            assert_eq!(shown.reads_as, Some(KindOf::Topic), "{address}");
+        }
+
+        let facts = crate::app::list::facts(&deps, None, false).unwrap();
+        assert_eq!(facts[0].row.document, relay);
+        assert_eq!(
+            shown_document(&world, "lantern/relay-pin").reads_as,
+            Some(facts[0].row.kind)
+        );
+
+        let unknown = shown_document(&world, gadget.short());
+        assert_eq!(
+            (unknown.kind.as_deref(), unknown.reads_as),
+            (Some("gadget"), None)
+        );
+        let unread = world.put("topic", "name = 4\n", "\n");
+        let unread = shown_document(&world, unread.as_str());
+        assert_eq!(
+            (unread.kind.as_deref(), unread.reads_as),
+            (Some("topic"), None)
+        );
+    }
+
+    fn walks_and_lookups(address: &dyn Fn(&DocumentId) -> String) -> (usize, usize) {
+        let (world, lantern) = world();
+        let world = world.counted();
+        let deps = world.deps();
+        show(&deps, &address(&lantern)).unwrap();
+        let lookups = world.store.prefixes.get();
+        (world.store.scans() - lookups, lookups)
+    }
+
+    #[test]
+    fn a_document_shown_by_its_whole_id_is_found_by_one_lookup_and_no_walk_of_the_store() {
+        assert_eq!(walks_and_lookups(&ToString::to_string), (0, 1));
+        let (walks, _) = walks_and_lookups(&|_| "lantern".to_owned());
+        assert!(walks > 0);
+    }
+
+    fn compared(world: &World, address: &str) -> Compared {
         match show(&world.deps(), address).unwrap() {
-            Shown::Version(version) => version,
+            Shown::Version(compared) => compared,
             Shown::Document(_) => panic!("expected a version"),
         }
+    }
+
+    fn shown_version(world: &World, address: &str) -> ShownVersion {
+        compared(world, address).version
     }
 
     #[test]
@@ -455,8 +721,7 @@ mod tests {
             assert_eq!((shown.heads.len(), shown.forked), (1, false));
             let head = &shown.heads[0];
             assert!(head.head && head.ended.is_none());
-            assert_eq!(head.label, "lantern");
-            assert_eq!(head.machine, "desk");
+            assert_eq!(head.machine, to(&world.machine(), "desk"));
             assert_eq!(head.change, "save");
             assert!(
                 head.text.starts_with("+++\nname = \"lantern\"\n"),
@@ -498,17 +763,17 @@ mod tests {
         );
         assert_eq!(
             shown_version(&world, written.id.as_str()).machine,
-            relay.short()
+            to(&relay, relay.short())
         );
         assert_eq!(
             shown_document(&world, "lantern").heads[0].machine,
-            absent.short()
+            to(&absent, absent.short())
         );
         let history = history(&world.deps(), "lantern").unwrap();
         let machines: Vec<&str> = history
             .versions
             .iter()
-            .map(|version| version.machine.as_str())
+            .map(|version| version.machine.label.as_str())
             .collect();
         assert_eq!(machines, [absent.short(), relay.short(), "desk"]);
         assert_eq!(history.versions[0].version, newest.id);
@@ -548,10 +813,11 @@ mod tests {
             &second.as_str()[..11],
             second.as_str(),
         ] {
-            let shown = shown_version(&world, prefix);
+            let compared = compared(&world, prefix);
+            assert_eq!(compared.document, lantern);
+            assert_eq!(compared.label, "lantern");
+            let shown = compared.version;
             assert_eq!(shown.version, second);
-            assert_eq!(shown.document, lantern);
-            assert_eq!(shown.label, "lantern");
             assert!(shown.head);
             assert_eq!(shown.parents.len(), 1);
             assert!(shown.text.ends_with("+++\nsecond\n"), "{}", shown.text);
@@ -633,6 +899,249 @@ mod tests {
         );
     }
 
+    fn text(text: &str) -> FieldItem {
+        FieldItem::Text {
+            text: text.to_owned(),
+        }
+    }
+
+    fn reference(document: &DocumentId, label: &str) -> FieldItem {
+        FieldItem::Reference {
+            reference: to(document, label),
+        }
+    }
+
+    fn field(name: &str, value: FieldItem) -> ShownField {
+        items(name, vec![value])
+    }
+
+    fn items(name: &str, values: Vec<FieldItem>) -> ShownField {
+        ShownField {
+            name: name.to_owned(),
+            values,
+        }
+    }
+
+    #[test]
+    fn a_version_carries_its_fields_in_stored_order_and_its_body_apart_from_them() {
+        let (world, lantern) = world();
+        fact(&world, &lantern, "relay-pin", "idea = true\n");
+        let shown = shown_document(&world, "lantern/relay-pin");
+        let head = &shown.heads[0];
+        assert_eq!(head.body, "The relay.\n");
+        assert_eq!(
+            head.fields,
+            [
+                field("name", text("relay-pin")),
+                field("topic", reference(&lantern, "lantern")),
+                field("created", text("2026-09-04")),
+                field("confirmed", text("2026-09-04")),
+                field("summary", text("s")),
+                field("idea", text("true")),
+            ]
+        );
+        assert!(head.text.ends_with("idea = true\n+++\nThe relay.\n"));
+    }
+
+    #[test]
+    fn a_field_that_refers_to_documents_carries_each_by_id_with_the_label_the_text_shows() {
+        let (world, lantern) = world();
+        let relay = fact(&world, &lantern, "relay-pin", "");
+        let absent = DocumentId::from_bytes([0xb8; 16]);
+        let atlas = topic(&world, "atlas", "");
+        let saved = world.amend(
+            &atlas,
+            &format!(
+                "name = \"atlas\"\nformer_names = [\"map\", \"chart\"]\n{TOPIC}{ENDED}\
+                 ended_by = \"{relay}\"\npart_of = [\"{absent}\", \"{lantern}\"]\nuses = []\n"
+            ),
+            "\n",
+        );
+        let shown = shown_version(&world, saved.as_str());
+        assert_eq!(
+            shown.fields,
+            [
+                field("name", text("atlas")),
+                items("former_names", vec![text("map"), text("chart")]),
+                field("created", text("2026-09-04")),
+                field("summary", text("s")),
+                field("ended", text("retired")),
+                field("ended_on", text("2026-10-09")),
+                field("note", text("n")),
+                field("ended_by", reference(&relay, "lantern/relay-pin")),
+                items(
+                    "part_of",
+                    vec![
+                        reference(&absent, absent.short()),
+                        reference(&lantern, "lantern")
+                    ]
+                ),
+                items("uses", Vec::new()),
+            ]
+        );
+        assert!(
+            shown.text.contains("ended_by = \"lantern/relay-pin\""),
+            "{}",
+            shown.text
+        );
+        assert_eq!(shown.body, "\n");
+    }
+
+    #[test]
+    fn an_item_is_a_reference_only_where_the_kind_holds_ids_and_the_item_is_an_id() {
+        let (world, lantern) = world();
+        let gadget = world.put(
+            "gadget",
+            &format!("size = 4\ntopic = \"{lantern}\"\n"),
+            "\n",
+        );
+        assert_eq!(
+            shown_document(&world, gadget.as_str()).heads[0].fields,
+            [
+                field("size", text("4")),
+                field("topic", text(lantern.as_str()))
+            ]
+        );
+
+        let loose = world.put(
+            "topic",
+            &format!(
+                "name = \"loose\"\n{TOPIC}part_of = [\"{lantern}\", \"loose\", 4]\n\
+                 uses = \"lantern\"\nended_by = 4\n"
+            ),
+            "\n",
+        );
+        let fields = shown_document(&world, loose.as_str()).heads[0]
+            .fields
+            .clone();
+        assert_eq!(
+            fields[3..],
+            [
+                items(
+                    "part_of",
+                    vec![reference(&lantern, "lantern"), text("loose"), text("4")]
+                ),
+                field("uses", text("lantern")),
+                field("ended_by", text("4")),
+            ]
+        );
+        let shown = &shown_document(&world, loose.as_str()).heads[0];
+        assert!(
+            shown.text.contains("part_of = [\"lantern\", \"loose\", 4]"),
+            "{}",
+            shown.text
+        );
+    }
+
+    fn linked(text: &str, target: Option<(&DocumentId, &str)>) -> Linked {
+        Linked {
+            text: text.to_owned(),
+            target: target.map(|(document, label)| to(document, label)),
+        }
+    }
+
+    #[test]
+    fn a_version_carries_its_links_by_text_with_the_label_each_document_has_now() {
+        let (world, lantern) = world();
+        let relay = fact(&world, &lantern, "relay-pin", "");
+        let atlas = topic(&world, "atlas", "");
+        let unheld = DocumentId::from_bytes([0x42; 16]);
+        let root = head(&world, &atlas).id;
+        let saved = world.amend_linking(
+            &atlas,
+            &topic_fields("atlas", ""),
+            "See [[lantern/relay-pin]], [[unknown]], [[Not A Name]] and [[phone]].\n",
+            &[
+                ("unknown", None),
+                ("phone", Some(&unheld)),
+                ("lantern/relay-pin", Some(&relay)),
+                ("Not A Name", None),
+            ],
+        );
+        let stored = [
+            linked("Not A Name", None),
+            linked("lantern/relay-pin", Some((&relay, "lantern/relay-pin"))),
+            linked("phone", Some((&unheld, unheld.short()))),
+            linked("unknown", None),
+        ];
+        assert_eq!(shown_document(&world, "atlas").heads[0].links, stored);
+        assert_eq!(shown_version(&world, saved.as_str()).links, stored);
+        assert_eq!(shown_version(&world, root.as_str()).links, []);
+
+        world.amend(
+            &relay,
+            &fact_fields(
+                &lantern,
+                "relay-coil",
+                "s",
+                "former_names = [\"relay-pin\"]\n",
+            ),
+            "\n",
+        );
+        let renamed = linked("lantern/relay-pin", Some((&relay, "lantern/relay-coil")));
+        assert_eq!(shown_document(&world, "atlas").heads[0].links[1], renamed);
+    }
+
+    #[test]
+    fn the_text_of_a_link_is_its_target_without_the_spaces_around_it() {
+        let (world, lantern) = world();
+        let atlas = topic(&world, "atlas", "");
+        checkout(&world.deps(), "lantern").unwrap();
+        let mut draft = world.drafts.read(&lantern).unwrap().unwrap();
+        "See [[ atlas ]] and [[  Not A Name ]].\n".clone_into(&mut draft.body);
+        world.drafts.write(&draft).unwrap();
+        crate::app::save::save(&world.deps(), "lantern").unwrap();
+        assert_eq!(
+            shown_document(&world, "lantern").heads[0].links,
+            [
+                linked("Not A Name", None),
+                linked("atlas", Some((&atlas, "atlas")))
+            ]
+        );
+    }
+
+    #[test]
+    fn a_link_to_a_document_with_no_version_that_reads_is_labeled_by_its_short_id() {
+        let (world, lantern) = world();
+        let stray = DocumentId::from_bytes([0xc4; 16]);
+        world
+            .store
+            .plant_unreadable(&stray, VersionId::of(b"x"), ReadError::Corrupt);
+        world.amend_linking(
+            &lantern,
+            &topic_fields("lantern", ""),
+            "[[phone]]\n",
+            &[("phone", Some(&stray))],
+        );
+        assert_eq!(
+            shown_document(&world, "lantern").heads[0].links,
+            [linked("phone", Some((&stray, stray.short()))),]
+        );
+    }
+
+    fn questions_showing(links: &[(&str, bool)]) -> (usize, usize) {
+        let (world, lantern, atlas) = world_with_atlas();
+        let links: Vec<(&str, Option<&DocumentId>)> = (links.iter())
+            .map(|(text, stored)| (*text, stored.then_some(&atlas)))
+            .collect();
+        world.amend_linking(&lantern, &topic_fields("lantern", ""), "\n", &links);
+        let world = world.counted();
+        let deps = world.deps();
+        show(&deps, lantern.as_str()).unwrap();
+        (world.store.scans(), world.store.questions())
+    }
+
+    #[test]
+    fn a_shown_document_asks_the_store_about_a_link_only_where_none_was_stored() {
+        let plain = questions_showing(&[]);
+        assert_eq!(
+            questions_showing(&[("atlas", true)]),
+            (plain.0, plain.1 + 1)
+        );
+        let (scans, questions) = questions_showing(&[("atlas", false), ("unknown", true)]);
+        assert_eq!((scans, questions), (plain.0 + 1, plain.1 + 1));
+    }
+
     #[test]
     fn a_document_with_no_readable_head_is_shown_with_what_is_wrong() {
         let (world, _) = world();
@@ -670,6 +1179,82 @@ mod tests {
             matches!(by_version, Err(Failure::Usage(_))),
             "{by_version:?}"
         );
+    }
+
+    #[test]
+    fn a_document_is_ended_when_the_head_that_speaks_for_it_is() {
+        let (world, lantern) = world();
+        assert_eq!(shown_document(&world, "lantern").ended, None);
+        let root = head(&world, &lantern);
+        let at = |hour: &str, rest: &str| {
+            written_at(
+                &world,
+                &root,
+                &topic_fields("lantern", rest),
+                &format!("2026-10-09T{hour}:00:00+01:00"),
+                "\n",
+                None,
+            )
+        };
+        at("10", "");
+        at("11", ENDED);
+        let forked = shown_document(&world, "lantern");
+        assert!(forked.forked);
+        assert_eq!(forked.ended, None);
+        let ended: Vec<Option<&str>> = (forked.heads.iter())
+            .map(|head| head.ended.as_deref())
+            .collect();
+        assert!(ended.contains(&Some("retired")) && ended.contains(&None));
+
+        let atlas = topic(&world, "atlas", "");
+        let root = head(&world, &atlas);
+        for (hour, reason) in [("10", "retired"), ("11", "merged")] {
+            written_at(
+                &world,
+                &root,
+                &topic_fields(
+                    "atlas",
+                    &format!("ended = \"{reason}\"\nended_on = 2026-10-09\nnote = \"n\"\n"),
+                ),
+                &format!("2026-10-09T{hour}:00:00+01:00"),
+                "\n",
+                None,
+            );
+        }
+        let closed = shown_document(&world, "atlas");
+        assert!(closed.forked);
+        assert_eq!(closed.ended.as_deref(), Some("merged"));
+
+        let phone = topic(&world, "phone", "");
+        world.amend(&phone, &topic_fields("phone", ENDED), "\n");
+        assert_eq!(
+            shown_document(&world, "phone").ended.as_deref(),
+            Some("retired")
+        );
+    }
+
+    #[test]
+    fn a_version_shown_carries_what_a_diff_of_it_gives() {
+        let (world, lantern) = world();
+        let root = head(&world, &lantern);
+        let heads = fork(&world, &lantern, &topic_fields("lantern", ""));
+        let joined = world.amend(&lantern, &topic_fields("lantern", ""), "joined\n");
+        for version in [&root.id, &heads[0], &joined] {
+            let Shown::Version(compared) = show(&world.deps(), version.as_str()).unwrap() else {
+                panic!("expected a version");
+            };
+            let diff = diff(&world.deps(), version.as_str(), None).unwrap();
+            assert_eq!(compared.sides, diff.sides);
+            assert_eq!(compared.version.text, diff.after);
+        }
+        let Shown::Version(compared) = show(&world.deps(), joined.as_str()).unwrap() else {
+            panic!("expected a version");
+        };
+        let against: Vec<Option<&VersionId>> = (compared.sides.iter())
+            .map(|side| side.against.as_ref())
+            .collect();
+        assert_eq!(against, [Some(&heads[0]), Some(&heads[1])]);
+        assert_eq!(compared.version.parents, heads);
     }
 
     fn only_side(diff: &Diff) -> &Side {
@@ -863,6 +1448,64 @@ mod tests {
         }
         let text = refused(diff(&world.deps(), &broken.as_str()[3..12], None));
         assert!(text.contains("does not read"), "{text}");
+    }
+
+    fn history_questions(versions: usize) -> usize {
+        let (world, lantern, atlas) = world_with_atlas();
+        let relay = fact(&world, &lantern, "relay-pin", "");
+        for round in 1..versions {
+            world.amend_linking(
+                &relay,
+                &fact_fields(&lantern, "relay-pin", "s", ""),
+                &format!("{round} [[atlas]]\n"),
+                &[("atlas", Some(&atlas))],
+            );
+        }
+        let world = world.counted();
+        let deps = world.deps();
+        let history = history(&deps, relay.as_str()).unwrap();
+        assert_eq!(history.versions.len(), versions);
+        assert_eq!(history.label, "lantern/relay-pin");
+        assert_eq!(history.versions[0].machine.label, "desk");
+        assert_eq!(world.store.scans(), 1);
+        world.store.questions()
+    }
+
+    #[test]
+    fn a_history_asks_the_store_no_more_for_a_document_of_many_versions() {
+        assert_eq!(history_questions(1), 3);
+        assert_eq!(history_questions(50), 3);
+    }
+
+    #[test]
+    fn a_history_row_is_what_names_a_version_and_nothing_it_holds() {
+        let (world, lantern) = world();
+        let root = head(&world, &lantern);
+        let ended = world.amend(&lantern, &topic_fields("lantern", ENDED), "gone\n");
+        let history = history(&world.deps(), "lantern").unwrap();
+        assert_eq!(
+            history.versions,
+            [
+                HistoryRow {
+                    version: ended,
+                    written: world.clock.now(),
+                    machine: to(&world.machine(), "desk"),
+                    change: "save".to_owned(),
+                    parents: vec![root.id.clone()],
+                    head: true,
+                    ended: Some("retired".to_owned()),
+                },
+                HistoryRow {
+                    version: root.id.clone(),
+                    written: root.envelope.written.clone(),
+                    machine: to(&world.machine(), "desk"),
+                    change: "new".to_owned(),
+                    parents: Vec::new(),
+                    head: false,
+                    ended: None,
+                },
+            ]
+        );
     }
 
     #[test]
