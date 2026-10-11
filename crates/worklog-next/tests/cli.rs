@@ -706,6 +706,39 @@ fn what_is_due_in_a_directory_is_listed_as_its_session_opens_on_it() {
 }
 
 #[test]
+fn a_session_opens_on_what_is_due_under_a_part_of_its_topic() {
+    let host = Host::stocked();
+    let project = host.home().join("projects/lantern");
+    host.ok_in(&project, &["claim", "lantern"]);
+    let edges = "summary = \"A part\"\npart_of = [\"lantern\"]";
+    host.drafted(&["new", "topic", "phone"], &[("summary = \"\"", edges)]);
+    host.ok(&["save", "phone"]);
+    let stored = host.ok(&[
+        "new",
+        "followup",
+        "--topics",
+        "phone",
+        "--summary",
+        "Charge the phone",
+        "--look-again",
+        "2000-01-01",
+        "--why",
+        "The cell ran flat",
+    ]);
+    let (id, _) = halves(&stored);
+
+    let listed = format!("due 2000-01-01  {id}  Charge the phone\n");
+    assert_eq!(host.ok_in(&project, &["due"]), listed);
+    let opened = host.ok_in(&project, &["context"]);
+    assert!(opened.starts_with(&format!("{DUE}{listed}\n")), "{opened}");
+    assert!(!opened.contains("not due"), "{opened}");
+    let whole = host.json_in(&project, &["context"]);
+    assert_eq!(whole["due"][0]["row"]["summary"], "Charge the phone");
+    assert_eq!(whole["open_count"], 0, "{whole}");
+    assert_eq!(whole["topics"][0]["parts"][0]["open_count"], 1, "{whole}");
+}
+
+#[test]
 fn a_session_over_an_empty_store_opens_on_the_machine_topic_alone() {
     let host = Host::set_up("desk");
     assert_eq!(host.ok(&["context"]), opened(&[DESK]));

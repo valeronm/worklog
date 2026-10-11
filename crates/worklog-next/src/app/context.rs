@@ -25,12 +25,13 @@ pub struct Context {
     /// The claimed topics, closest directory first, then what they reach, then what the
     /// machine topic reaches.
     pub topics: Vec<Loaded>,
-    /// By date, then those waiting on a topic.
+    /// Filed on a loaded topic that counts or on anything part of a claimed one, by date, then
+    /// those waiting on a topic.
     pub due: Vec<FollowupRow>,
-    /// The open followups that are not due.
+    /// The open followups filed on a loaded topic that counts and not due.
     pub open_count: usize,
-    /// The forked ones among the loaded topics, their facts and ideas, the open followups and
-    /// the claims that loaded a topic, by label.
+    /// The forked ones among the claims that loaded a topic, the loaded topics, their facts
+    /// and ideas, and the followups in `due` or counted in `open_count`, by label.
     pub forks: Vec<Row>,
     pub draft_count: usize,
 }
@@ -82,6 +83,7 @@ struct Scope<'a> {
     claims: Vec<Rc<Document>>,
     vias: Vec<(DocumentId, Via)>,
     counted: BTreeSet<DocumentId>,
+    may_be_due: BTreeSet<DocumentId>,
 }
 
 impl<'a> Scope<'a> {
@@ -119,6 +121,10 @@ impl<'a> Scope<'a> {
                 counted.insert(id);
             }
         }
+        let mut may_be_due = counted.clone();
+        for root in &claimed.order {
+            may_be_due.extend(topics.covered(root));
+        }
         Ok(Scope {
             lookup,
             topics,
@@ -128,13 +134,24 @@ impl<'a> Scope<'a> {
             claims: claimed.loading,
             vias,
             counted,
+            may_be_due,
         })
     }
 
-    fn open_work(&self, followups: &Filed) -> Result<Vec<FollowupRow>, Failure> {
-        let counted_work = filed(followups, &self.counted);
-        let rows = shown(&self.topics, &counted_work, false);
-        followup_rows(&self.lookup, &self.topics, rows, self.today, &self.counted)
+    fn open_work(
+        &self,
+        followups: &Filed,
+    ) -> Result<(Vec<FollowupRow>, Vec<FollowupRow>), Failure> {
+        let is_counted: BTreeSet<&DocumentId> = (self.counted.iter())
+            .filter_map(|topic| followups.get(topic))
+            .flatten()
+            .map(|document| document.id())
+            .collect();
+        let work = filed(followups, &self.may_be_due);
+        let rows = shown(&self.topics, &work, false);
+        let mut rows = followup_rows(&self.lookup, &self.topics, rows, self.today, &self.counted)?;
+        rows.retain(|followup| followup.due || is_counted.contains(&followup.row.document));
+        Ok(rows.into_iter().partition(|followup| followup.due))
     }
 }
 
@@ -155,7 +172,8 @@ pub fn context(deps: &Deps, directory: &str) -> Result<Context, Failure> {
     } = &scope;
     let loaded: Vec<DocumentId> = vias.iter().map(|(id, _)| id.clone()).collect();
 
-    let (asked, mut parts) = parts_of(topics, &loaded);
+    let (mut asked, mut parts) = parts_of(topics, &loaded);
+    asked.extend(scope.may_be_due.iter().cloned());
     let filings = Filings::of(lookup, &asked)?;
     let mut forks: Vec<Row> = (scope.claims.iter())
         .filter(|claim| is_forked(claim))
@@ -193,11 +211,12 @@ pub fn context(deps: &Deps, directory: &str) -> Result<Context, Failure> {
         });
     }
 
-    let work = scope.open_work(&filings.followups)?;
-    let forked = work.iter().filter(|followup| followup.row.forked);
-    forks.extend(forked.map(|followup| followup.row.clone()));
-    let (due, waiting): (Vec<FollowupRow>, Vec<FollowupRow>) =
-        work.into_iter().partition(|followup| followup.due);
+    let (due, waiting) = scope.open_work(&filings.followups)?;
+    let open = due.iter().chain(&waiting);
+    forks.extend(
+        open.filter(|open| open.row.forked)
+            .map(|open| open.row.clone()),
+    );
 
     by_label(&mut forks, |fork| fork);
     forks.dedup_by(|a, b| a.document == b.document);
@@ -216,10 +235,8 @@ pub fn context(deps: &Deps, directory: &str) -> Result<Context, Failure> {
 /// that order, with the same reading of `directory` and the same refusals.
 pub fn due(deps: &Deps, directory: &str) -> Result<Vec<FollowupRow>, Failure> {
     let scope = Scope::of(deps, directory)?;
-    let followups = filed_by_topic(&scope.lookup, KindOf::Followup, &scope.counted)?;
-    let mut work = scope.open_work(&followups)?;
-    work.retain(|followup| followup.due);
-    Ok(work)
+    let followups = filed_by_topic(&scope.lookup, KindOf::Followup, &scope.may_be_due)?;
+    Ok(scope.open_work(&followups)?.0)
 }
 
 type Parts<'l> = BTreeMap<&'l DocumentId, Vec<(DocumentId, String, BTreeSet<DocumentId>)>>;
@@ -851,7 +868,7 @@ mod tests {
         );
         assert_eq!(of(&context, "relay").parts, []);
         assert!(of(&context, "lantern").facts.is_empty());
-        assert_eq!(summaries(&context.due), Vec::<&str>::new());
+        assert_eq!(summaries(&context.due), ["b"]);
         assert_eq!(context.open_count, 1);
     }
 
@@ -1220,5 +1237,164 @@ mod tests {
     fn the_store_is_scanned_the_same_whatever_the_number_of_topics_and_parts() {
         assert_eq!(scans_for(1, 1), 4);
         assert_eq!(scans_for(3, 5), 4);
+    }
+
+    fn here(world: &World, directory: &str) -> Vec<FollowupRow> {
+        due(&world.deps(), directory).unwrap()
+    }
+
+    #[test]
+    fn what_is_due_under_a_part_of_a_claimed_topic_is_due_in_its_session() {
+        let (world, [lantern]) = world_of(["lantern"]);
+        let atlas = topic(&world, "atlas", &part_of(&[&lantern]));
+        let phone = topic(&world, "phone", &part_of(&[&atlas]));
+        claim(&world, &lantern, "/work");
+        let part = followup(&world, &[&atlas], "part", &dated("2026-10-01"));
+        let fields = head(&world, &part).fields.to_string();
+        fork(&world, &part, &fields);
+        followup(&world, &[&phone], "part of a part", &dated("2026-10-02"));
+
+        let context = at(&world, "/work");
+        assert_eq!(summaries(&context.due), ["part", "part of a part"]);
+        assert!(context.due.iter().all(|row| row.due));
+        assert!(context.due[0].row.forked);
+        assert_eq!(here(&world, "/work"), context.due);
+        assert_eq!(context.open_count, 0);
+        assert_eq!(of(&context, "lantern").parts[0].open_count, 2);
+        assert_eq!(labels(&context.forks, |row| row), [part.short()]);
+    }
+
+    #[test]
+    fn the_other_parts_of_a_topic_reached_upward_bring_nothing_due() {
+        let (world, [phone]) = world_of(["phone"]);
+        let relay = topic(&world, "relay", "");
+        let edges = format!("{}{}", part_of(&[&phone]), uses(&[&relay]));
+        let lantern = topic(&world, "lantern", &edges);
+        let atlas = topic(&world, "atlas", &part_of(&[&phone]));
+        let compass = topic(&world, "compass", &part_of(&[&relay]));
+        claim(&world, &lantern, "/work");
+        followup(&world, &[&atlas], "beside", &dated("2026-10-01"));
+        followup(
+            &world,
+            &[&compass],
+            "under a used one",
+            &dated("2026-10-01"),
+        );
+        followup(&world, &[&phone], "above", &dated("2026-10-01"));
+
+        let context = at(&world, "/work");
+        assert_eq!(summaries(&context.due), ["above"]);
+        assert_eq!(here(&world, "/work"), context.due);
+        assert_eq!(context.open_count, 0);
+    }
+
+    #[test]
+    fn what_waits_under_a_part_is_counted_on_the_part_alone() {
+        let (world, [lantern]) = world_of(["lantern"]);
+        let atlas = topic(&world, "atlas", &part_of(&[&lantern]));
+        claim(&world, &lantern, "/work");
+        let later = followup(&world, &[&atlas], "later", &dated("2026-10-10"));
+        let fields = head(&world, &later).fields.to_string();
+        fork(&world, &later, &fields);
+        followup(&world, &[&atlas], "untriggered", "");
+        followup(&world, &[&lantern], "own", "");
+
+        let context = at(&world, "/work");
+        assert_eq!(summaries(&context.due), Vec::<&str>::new());
+        assert_eq!(here(&world, "/work"), []);
+        assert_eq!(context.open_count, 1);
+        assert_eq!(of(&context, "lantern").parts[0].open_count, 2);
+        assert!(context.forks.is_empty());
+    }
+
+    #[test]
+    fn a_followup_on_a_claimed_topic_and_its_part_is_due_once() {
+        let (world, [lantern]) = world_of(["lantern"]);
+        let atlas = topic(&world, "atlas", &part_of(&[&lantern]));
+        claim(&world, &lantern, "/work");
+        followup(&world, &[&lantern, &atlas], "both", &dated("2026-10-01"));
+        followup(&world, &[&atlas, &lantern], "waiting on both", "");
+
+        let context = at(&world, "/work");
+        assert_eq!(summaries(&context.due), ["both"]);
+        assert_eq!(summaries(&here(&world, "/work")), ["both"]);
+        assert_eq!(context.open_count, 1);
+    }
+
+    #[test]
+    fn a_followup_touching_a_part_is_not_due_in_the_session_of_its_whole() {
+        let (world, [lantern]) = world_of(["lantern"]);
+        let atlas = topic(&world, "atlas", &part_of(&[&lantern]));
+        claim(&world, &lantern, "/work");
+        claim(&world, &atlas, "/work/atlas");
+        followup(
+            &world,
+            &[&atlas],
+            "touching the part",
+            &format!("touching = \"{atlas}\"\n"),
+        );
+        followup(
+            &world,
+            &[&atlas, &lantern],
+            "touching the whole",
+            &format!("touching = \"{lantern}\"\n"),
+        );
+
+        let whole = at(&world, "/work");
+        assert_eq!(summaries(&whole.due), ["touching the whole"]);
+        assert_eq!(here(&world, "/work"), whole.due);
+        assert_eq!(whole.open_count, 0);
+        assert_eq!(of(&whole, "lantern").parts[0].open_count, 2);
+
+        let part = at(&world, "/work/atlas");
+        assert_eq!(
+            summaries(&part.due),
+            ["touching the part", "touching the whole"]
+        );
+    }
+
+    #[test]
+    fn nothing_is_due_under_an_ended_part_or_what_hangs_from_it() {
+        let (world, [lantern]) = world_of(["lantern"]);
+        let atlas = topic(&world, "atlas", &format!("{}{ENDED}", part_of(&[&lantern])));
+        let phone = topic(&world, "phone", &part_of(&[&atlas]));
+        claim(&world, &lantern, "/work");
+        followup(&world, &[&atlas], "ended", &dated("2026-10-01"));
+        followup(&world, &[&phone], "under ended", &dated("2026-10-01"));
+
+        let context = at(&world, "/work");
+        assert!(context.due.is_empty());
+        assert_eq!(here(&world, "/work"), []);
+        assert_eq!(context.open_count, 0);
+    }
+
+    fn with_due_parts(parts: usize) -> World {
+        let world = World::new();
+        topic(&world, "desk", "");
+        let lantern = topic(&world, "lantern", "");
+        claim(&world, &lantern, "/work");
+        let mut whole = lantern;
+        for number in 0..parts {
+            let part = topic(&world, &format!("atlas-{number}"), &part_of(&[&whole]));
+            followup(&world, &[&part], "due", &dated("2026-10-01"));
+            if number % 2 == 0 {
+                whole = part;
+            }
+        }
+        world
+    }
+
+    fn due_scans_for(parts: usize) -> (usize, usize) {
+        let opened = with_due_parts(parts).counted();
+        assert_eq!(context(&opened.deps(), "/work").unwrap().due.len(), parts);
+        let listed = with_due_parts(parts).counted();
+        assert_eq!(due(&listed.deps(), "/work").unwrap().len(), parts);
+        (opened.store.scans(), listed.store.scans())
+    }
+
+    #[test]
+    fn what_is_due_under_parts_costs_no_scan_more_whatever_their_number() {
+        assert_eq!(due_scans_for(1), (4, 3));
+        assert_eq!(due_scans_for(6), (4, 3));
     }
 }
