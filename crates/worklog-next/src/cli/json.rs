@@ -140,10 +140,17 @@ mod tests {
     }
 
     fn row(id: &DocumentId, kind: &str, label: &str, topics: &[&str]) -> Value {
+        let name = match kind {
+            "topic" => Some(label),
+            "fact" => label.split_once('/').map(|(_, name)| name),
+            "entry" => label.get("2026-10-08-".len()..),
+            _ => None,
+        };
         json!({
             "document": id,
             "kind": kind,
             "label": label,
+            "name": name,
             "summary": "s",
             "topics": topics,
             "forked": false,
@@ -466,7 +473,14 @@ mod tests {
             },
         ]);
         let listed = list::followups(&world.deps(), None, false).unwrap();
-        vec![(listed, expected)]
+
+        world.put("claim", &claim_fields(&world.machine(), &lantern, ""), "\n");
+        let mut due_here = expected.clone();
+        let rows = due_here.as_array_mut().expect("the rows");
+        rows.truncate(2);
+        rows[1]["due"] = json!(true);
+        let here = context::due(&world.deps(), "/srv/lantern").unwrap();
+        vec![(listed, expected), (here, due_here)]
     }
 
     fn claims() -> Vec<(Vec<ClaimRow>, Value)> {
@@ -594,6 +608,51 @@ mod tests {
         vec![(search::log(&world.deps(), 4, None).unwrap(), expected)]
     }
 
+    fn forked(world: &World) -> (Shown, Value) {
+        let phone = topic(world, "phone", "");
+        let root = head(world, &phone).id;
+        let heads = fork(world, &phone, &topic_fields("phone", ""));
+        let of_forked = show::show(&world.deps(), "phone").unwrap();
+        let bodies: Vec<&str> = match &of_forked {
+            Shown::Document(document) => (document.heads.iter())
+                .map(|head| head.text.rsplit("+++\n").next().unwrap_or_default())
+                .collect(),
+            Shown::Version(_) => Vec::new(),
+        };
+        let mut sorted = bodies.clone();
+        sorted.sort_unstable();
+        assert_eq!(sorted, ["left\n", "right\n"]);
+        let sides: Vec<Value> = (heads.iter().zip(&bodies))
+            .map(|(version, body)| {
+                json!({
+                    "document": phone,
+                    "label": "phone",
+                    "version": version,
+                    "written": "2026-09-04T10:00:00+01:00",
+                    "machine": "dededede",
+                    "change": "save",
+                    "parents": [root],
+                    "head": true,
+                    "ended": null,
+                    "text": format!(
+                        "+++\nname = \"phone\"\ncreated = 2026-09-04\nsummary = \"s\"\n+++\n{body}"
+                    ),
+                })
+            })
+            .collect();
+        let expected = json!({
+            "type": "document",
+            "document": phone,
+            "kind": "topic",
+            "label": "phone",
+            "former": [],
+            "forked": true,
+            "heads": sides,
+            "unreadable": [],
+        });
+        (of_forked, expected)
+    }
+
     fn shown() -> Vec<(Shown, Value)> {
         let Damaged {
             world,
@@ -666,7 +725,9 @@ mod tests {
             }],
         });
         let of_unread = show::show(&deps, atlas().short()).unwrap();
+
         vec![
+            forked(&world),
             (of_unknown, unknown),
             (of_version, one),
             (of_ended, ended),
@@ -732,6 +793,7 @@ mod tests {
         let relay = fact(&world, &lantern, "relay", "");
         let dimmer = fact(&world, &lantern, "dimmer", "idea = true\n");
         fact(&world, &phone, "case", "");
+        fact(&world, &phone, "strap", "idea = true\n");
         let due = followup(
             &world,
             &[&lantern],
@@ -742,6 +804,8 @@ mod tests {
         followup(&world, &[&lantern], "s", "");
         let placed = claim_fields(&machine, &lantern, "~/projects/lantern");
         world.put("claim", &placed, "\n");
+        let compass = topic(&world, "compass", "");
+        world.amend(&machine, &topic_fields("desk", &uses(&[&compass])), "\n");
         let loaded = |id: &DocumentId, label: &str, via: Value| {
             json!({
                 "document": id,
@@ -756,18 +820,26 @@ mod tests {
         let filed = |id: &DocumentId, label: &str| row(id, "fact", label, &["lantern"]);
         let expected = json!({
             "machine": "desk",
+            "directory": "~/projects/lantern/case",
             "topics": [
                 {
                     "document": lantern,
                     "label": "lantern",
                     "summary": "s",
-                    "via": {"type": "claim", "directory": "~/projects/lantern"},
+                    "via": {"type": "claim", "directory": "~/projects/lantern", "closest": true},
                     "facts": [filed(&relay, "lantern/relay")],
                     "ideas": [filed(&dimmer, "lantern/dimmer")],
-                    "parts": [{"label": "phone", "fact_count": 1, "open_count": 1}],
+                    "parts": [{
+                        "document": phone,
+                        "label": "phone",
+                        "fact_count": 1,
+                        "idea_count": 1,
+                        "open_count": 1,
+                    }],
                 },
-                loaded(&atlas, "atlas", json!({"type": "edge"})),
-                loaded(&machine, "desk", json!({"type": "machine"})),
+                loaded(&atlas, "atlas", json!({"type": "edge", "from": "lantern"})),
+                loaded(&machine, "desk", json!({"type": "machine", "from": null})),
+                loaded(&compass, "compass", json!({"type": "machine", "from": "desk"})),
             ],
             "due": [{
                 "row": row(&due, "followup", due.short(), &["lantern"]),
@@ -791,7 +863,7 @@ mod tests {
         let nowhere = parsed(&context::context(&world.deps(), "/srv").unwrap());
         assert_eq!(
             nowhere["topics"][0]["via"],
-            json!({"type": "claim", "directory": null})
+            json!({"type": "claim", "directory": null, "closest": true})
         );
     }
 

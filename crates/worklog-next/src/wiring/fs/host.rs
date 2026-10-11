@@ -6,7 +6,7 @@ use crate::domain::ports::{Host, StoreError};
 
 use super::Config;
 
-/// This host as its config file and its environment described it when the command started.
+// This host as its config file and its environment described it when the command started.
 pub struct FsHost {
     config: PathBuf,
     home: Option<String>,
@@ -15,7 +15,6 @@ pub struct FsHost {
 }
 
 impl FsHost {
-    /// A host whose config, read from `config`, is `held`.
     #[must_use]
     pub fn bound(config: PathBuf, home: Option<String>, held: Config) -> FsHost {
         FsHost {
@@ -26,8 +25,7 @@ impl FsHost {
         }
     }
 
-    /// A host with no file at `config`; `store`, from the root, is where binding records the
-    /// store to be.
+    // `store` has to be from the root: a config holding any other path is refused when read.
     #[must_use]
     pub fn unbound(config: PathBuf, home: Option<String>, store: PathBuf) -> FsHost {
         FsHost {

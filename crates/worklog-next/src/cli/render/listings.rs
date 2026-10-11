@@ -53,13 +53,17 @@ fn trigger_state(followup: &FollowupRow) -> String {
     }
 }
 
+pub(super) fn followup_line(text: &mut String, followup: &FollowupRow) {
+    let mut fields = vec![trigger_state(followup)];
+    fields.extend(row_fields(&followup.row, Vec::new()));
+    line(text, &fields);
+}
+
 impl Render for Vec<FollowupRow> {
     fn text(&self) -> String {
         let mut text = String::new();
         for followup in self {
-            let mut fields = vec![trigger_state(followup)];
-            fields.extend(row_fields(&followup.row, Vec::new()));
-            line(&mut text, &fields);
+            followup_line(&mut text, followup);
         }
         text
     }
@@ -99,7 +103,7 @@ impl Render for Vec<ForkRow> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::testing::{row, stamp};
+    use super::super::testing::{followup, look_again, row, stamp};
     use super::*;
     use crate::app::list::ForkHead;
     use crate::domain::id::{DocumentId, VersionId};
@@ -170,24 +174,11 @@ mod tests {
 
     #[test]
     fn a_followup_leads_with_the_state_of_its_trigger() {
-        let followup = |summary: &str, trigger: Option<TriggerShown>, due: bool| FollowupRow {
-            row: row(&lantern(), "7f3a91c0", summary),
-            trigger,
-            due,
-            entry: Some("2026-10-08-wiring".to_owned()),
-            about: None,
-        };
-        let on = |day: &str| {
-            Some(TriggerShown::LookAgain {
-                on: date(day),
-                why: "The part arrives".to_owned(),
-            })
-        };
         let mut done = followup("Solder it", None, false);
         done.row.ended = Some("done".to_owned());
         let listed = vec![
-            followup("Order a fuse", on("2026-10-01"), true),
-            followup("Check the driver", on("2026-11-01"), false),
+            followup("Order a fuse", Some(look_again("2026-10-01")), true),
+            followup("Check the driver", Some(look_again("2026-11-01")), false),
             followup(
                 "Fit the lens",
                 Some(TriggerShown::Touching {

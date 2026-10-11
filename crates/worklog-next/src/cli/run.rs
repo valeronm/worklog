@@ -198,6 +198,10 @@ fn read(
             let directory = directory(environment, dir.as_deref())?;
             output(&context::context(deps, &directory)?, json)
         }
+        ReadCommand::Due { dir } => {
+            let directory = directory(environment, dir.as_deref())?;
+            output(&context::due(deps, &directory)?, json)
+        }
         ReadCommand::Check => output(&check::check(deps)?, json),
     })
 }
@@ -254,8 +258,8 @@ mod tests {
         World, claim_fields, entry, fact, followup, fork, topic, world_with_atlas,
     };
     use crate::cli::args::Cli;
+    use crate::cli::render::{CONTEXT_BYTES, assert_fits};
     use crate::domain::id::DocumentId;
-    use crate::domain::ports::Store as _;
 
     const PROJECT: &str = "/home/desk/projects/lantern";
 
@@ -306,10 +310,15 @@ mod tests {
             assert_eq!(version.len(), 12, "{text}");
         }
 
-        fn claimed(&self, cwd: &str, line: &[&str]) -> String {
+        fn claim(&self, cwd: &str, line: &[&str]) -> DocumentId {
             let stored = self.text_in(cwd, &[line, &["--json"]].concat());
             let stored: serde_json::Value = serde_json::from_str(&stored).expect("one value");
-            stored["document"].as_str().expect("a claim's id")[..8].to_owned()
+            let id = stored["document"].as_str().expect("a claim's id");
+            DocumentId::parse(id).expect("a whole id")
+        }
+
+        fn claimed(&self, cwd: &str, line: &[&str]) -> String {
+            self.claim(cwd, line).short().to_owned()
         }
 
         fn followup(&self, rest: &str) -> String {
@@ -465,14 +474,21 @@ mod tests {
         );
         assert_eq!(fixture.text(&["where", "--machine", "atlas"]), "");
 
-        assert_eq!(fixture.text(&["context"]), "lantern  s\ndesk  s\n");
+        let opened = |first: &str, text: String| {
+            let blocks = format!("{first}: s\n  (no facts)\n\ndesk — this machine: s\n");
+            assert!(text.starts_with(&blocks), "{text}");
+        };
+        opened(
+            "lantern — claimed at ~/projects/lantern",
+            fixture.text(&["context"]),
+        );
         assert_eq!(
             fixture.text_in("/home/desk", &["context", "projects/lantern/case"]),
             fixture.text(&["context"])
         );
-        assert_eq!(
+        opened(
+            "atlas — claimed anywhere",
             fixture.text_in("/home/desk", &["context"]),
-            "atlas  s\ndesk  s\n"
         );
 
         fixture.stored(&["unclaim", "lantern"], "lantern at ~/projects/lantern");
@@ -503,19 +519,90 @@ mod tests {
     }
 
     #[test]
+    fn what_is_due_is_listed_for_the_working_directory_or_the_one_given() {
+        let fixture = Fixture::new();
+        fixture.claimed(PROJECT, &["claim", "lantern"]);
+        assert_eq!(fixture.text(&["due"]), "");
+        assert_eq!(fixture.text(&["due", "--json"]), "[]\n");
+        let id = fixture.followup("look_again = 2026-01-05\nwhy = \"w\"\n");
+        fixture.followup("");
+
+        let line = format!("due 2026-01-05  {id}  Check the driver\n");
+        assert_eq!(fixture.text(&["due"]), line);
+        assert_eq!(fixture.text(&["followups"]).lines().count(), 2);
+        assert_eq!(fixture.text_in("/home/desk", &["due"]), "");
+        assert_eq!(
+            fixture.text_in("/home/desk", &["due", "link/case/.."]),
+            line
+        );
+        let opened = fixture.text(&["context"]);
+        let heading =
+            "due now — `worklog-next show <id>` for one, `worklog-next due`, run here, for all:\n";
+        assert!(
+            opened.starts_with(&format!("{heading}{line}\n")),
+            "{opened}"
+        );
+        assert_eq!(
+            refused(fixture.run_in(None, &["due"])),
+            "no working directory"
+        );
+    }
+
+    #[test]
+    fn a_session_over_more_facts_than_fit_counts_the_machine_s_and_keeps_what_is_due() {
+        let fixture = Fixture::new();
+        let (world, lantern) = (&fixture.world, &fixture.lantern);
+        fixture.claimed(PROJECT, &["claim", "lantern"]);
+        for n in 0..3 {
+            fact(world, lantern, &format!("relay-{n}"), "");
+        }
+        for n in 0..700 {
+            fact(world, &world.machine(), &format!("socket-{n}-is-fused"), "");
+        }
+        let due: Vec<String> = (0..3)
+            .map(|_| fixture.followup("look_again = 2026-01-05\nwhy = \"w\"\n"))
+            .collect();
+
+        let text = fixture.text(&["context"]);
+        assert_fits(&text);
+        assert!(text.starts_with("due now — "), "{text}");
+        assert_eq!(
+            text.lines().nth(1).map(|line| &line[..16]),
+            Some("due 2026-01-05  ")
+        );
+        for id in &due {
+            let line = format!("due 2026-01-05  {id}  Check the driver\n");
+            assert!(text.contains(&line), "{text}");
+        }
+        assert!(
+            text.contains(
+                "lantern — claimed at ~/projects/lantern: s\n  relay-0, relay-1, relay-2\n"
+            ),
+            "{text}"
+        );
+        assert!(
+            text.contains("desk — this machine: s\n  (700 facts)\n"),
+            "{text}"
+        );
+
+        let whole = fixture.text(&["context", "--json"]);
+        assert!(whole.len() > CONTEXT_BYTES, "{}", whole.len());
+        let whole: serde_json::Value = serde_json::from_str(&whole).expect("one value");
+        assert_eq!(
+            whole["topics"][1]["facts"].as_array().map(Vec::len),
+            Some(700)
+        );
+    }
+
+    #[test]
     fn a_claim_is_printed_by_its_label_and_addressed_by_its_short_id() {
         let fixture = Fixture::new();
-        let claim = fixture.claimed(PROJECT, &["claim", "lantern"]);
+        let id = fixture.claim(PROJECT, &["claim", "lantern"]);
+        let claim = id.short().to_owned();
         let label = "lantern at ~/projects/lantern";
         let logged = fixture.text(&["log"]);
         assert!(logged.contains(&format!("  {label}  claim\n")), "{logged}");
 
-        let id = fixture
-            .world
-            .store
-            .documents_under(&claim)
-            .unwrap()
-            .remove(0);
         let fields = claim_fields(
             &fixture.world.machine(),
             &fixture.lantern,
@@ -525,6 +612,12 @@ mod tests {
         let forks = fixture.text(&["forks"]);
         let row = format!("{claim}  {label}  forked\n");
         assert!(forks.starts_with(&row), "{forks}");
+        let opened = fixture.text(&["context"]);
+        let forked = format!(
+            "Forked — `worklog-next forks` lists each with its id, \
+             `worklog-next resolve <id>` opens one: {label}\n\nlantern — "
+        );
+        assert!(opened.starts_with(&forked), "{opened}");
         let shown = fixture.run(&["show", &claim]).unwrap();
         assert_eq!(shown.notes, [format!("{label}: forked: resolve it")]);
         assert_eq!(
@@ -542,9 +635,11 @@ mod tests {
             fixture.text(&["where"]),
             format!("lantern  ~/projects/lantern  {claim}\n")
         );
-        assert_eq!(
-            fixture.text_in("/home/desk", &["context", "link/case/.."]),
-            "lantern  s\ndesk  s\n"
+        let opened = fixture.text_in("/home/desk", &["context", "link/case/.."]);
+        assert!(
+            opened
+                .starts_with("lantern — claimed at ~/projects/lantern: s\n  (no facts)\n\ndesk — "),
+            "{opened}"
         );
         fixture.text_in("/home/desk/projects", &["unclaim", "lantern", "../link"]);
         assert_eq!(fixture.text(&["where"]), "");

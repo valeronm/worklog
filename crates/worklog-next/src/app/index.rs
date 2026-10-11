@@ -4,7 +4,7 @@ use crate::app::Failure;
 use crate::app::heads::{all_ended, edges_of, label_or_short, readable_heads, row_head_of};
 use crate::app::lookup::Lookup;
 use crate::domain::id::DocumentId;
-use crate::domain::schema::graph::{self, Edges};
+use crate::domain::schema::graph::{self, Edges, Reached};
 use crate::domain::schema::{Content, KindOf, Name};
 
 struct Entry {
@@ -97,14 +97,14 @@ impl Topics {
         self.parts.get(id).cloned().unwrap_or_default()
     }
 
-    pub(super) fn reach(&self, from: &[DocumentId]) -> Vec<DocumentId> {
+    pub(super) fn reach_from(&self, from: &[DocumentId]) -> Vec<Reached> {
         let starts: Vec<DocumentId> = from
             .iter()
             .filter(|id| self.unended(id).is_some())
             .cloned()
             .collect();
-        let mut reached = graph::reach(&starts, |id| self.edges(id));
-        reached.retain(|id| self.unended(id).is_some());
+        let mut reached = graph::reach_from(&starts, |id| self.edges(id));
+        reached.retain(|(id, _)| self.unended(id).is_some());
         reached
     }
 }
@@ -114,6 +114,11 @@ mod tests {
     use super::*;
     use crate::app::testing::{ENDED, TOPIC, World, head, part_of, topic, uses, written_at};
     use crate::domain::ports::Store;
+
+    fn reach(topics: &Topics, from: &[DocumentId]) -> Vec<DocumentId> {
+        let reached = topics.reach_from(from);
+        reached.into_iter().map(|(topic, _)| topic).collect()
+    }
 
     fn chain() -> (World, [DocumentId; 4]) {
         let world = World::new();
@@ -178,16 +183,25 @@ mod tests {
         );
         let topics = Topics::load(&world.lookup()).unwrap();
         assert_eq!(
-            topics.reach(std::slice::from_ref(&top)),
+            reach(&topics, std::slice::from_ref(&top)),
             [top.clone(), left.clone(), right.clone(), base.clone()]
         );
         assert_eq!(
-            topics.reach(&[left.clone(), top.clone(), left.clone()]),
+            reach(&topics, &[left.clone(), top.clone(), left.clone()]),
             [left.clone(), top.clone(), base.clone(), right.clone()]
         );
-        assert_eq!(topics.reach(&[]), []);
+        assert_eq!(
+            topics.reach_from(std::slice::from_ref(&top)),
+            [
+                (top.clone(), None),
+                (left.clone(), Some(top.clone())),
+                (right.clone(), Some(top.clone())),
+                (base.clone(), Some(left.clone()))
+            ]
+        );
+        assert_eq!(reach(&topics, &[]), []);
         let unknown = DocumentId::from_bytes([0x42; 16]);
-        assert_eq!(topics.reach(&[unknown]), []);
+        assert_eq!(reach(&topics, &[unknown]), []);
         assert_eq!(topics.uses(&top), [right]);
         assert_eq!(topics.part_of(&top), [left]);
     }
@@ -206,10 +220,10 @@ mod tests {
         );
         let topics = Topics::load(&world.lookup()).unwrap();
         assert_eq!(
-            topics.reach(std::slice::from_ref(&top)),
+            reach(&topics, std::slice::from_ref(&top)),
             std::slice::from_ref(&top)
         );
-        assert_eq!(topics.reach(std::slice::from_ref(&middle)), []);
+        assert_eq!(reach(&topics, std::slice::from_ref(&middle)), []);
     }
 
     #[test]
@@ -227,7 +241,7 @@ mod tests {
         }
         let topics = Topics::load(&world.lookup()).unwrap();
         assert_eq!(
-            topics.reach(std::slice::from_ref(&first)),
+            reach(&topics, std::slice::from_ref(&first)),
             [first.clone(), second.clone()]
         );
         assert_eq!(

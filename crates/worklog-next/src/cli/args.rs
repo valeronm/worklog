@@ -217,6 +217,11 @@ pub enum ReadCommand {
         /// The working directory when not given
         dir: Option<PathBuf>,
     },
+    /// The followups that are due for a session in a directory
+    Due {
+        /// The working directory when not given
+        dir: Option<PathBuf>,
+    },
     /// Every rule the store has to keep; exit 1 when one is broken
     Check,
 }
@@ -350,6 +355,8 @@ mod tests {
             "worklog-next forks",
             "worklog-next context",
             "worklog-next context /atlas/lantern",
+            "worklog-next due",
+            "worklog-next due /atlas/lantern",
             "worklog-next check",
         ] {
             assert!(parsed(line).is_ok(), "{line}");

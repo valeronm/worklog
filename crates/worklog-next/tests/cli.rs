@@ -6,6 +6,15 @@ use assert_cmd::Command;
 use serde_json::Value;
 
 const SUMMARY: (&str, &str) = ("summary = \"\"", "summary = \"Pin four\"");
+const LANTERN_HERE: &str = "lantern — claimed at ~/projects/lantern: A thing\n  (no facts)\n";
+const DESK: &str = "desk — this machine: A machine\n  (no facts)\n";
+const DUE: &str =
+    "due now — `worklog-next show <id>` for one, `worklog-next due`, run here, for all:\n";
+const CLOSING: &str = "Durable facts and ideas, by name where they fit and counted where not —\n\
+     `worklog-next facts <topic>` for a topic's facts,\n\
+     `worklog-next ideas <topic>` for a topic's ideas,\n\
+     `worklog-next show <topic>/<name>` for one,\n\
+     `worklog-next followups <topic>` for open work.\n";
 const NOT_SET_UP: &str = "worklog-next: this host is not set up; run `worklog-next init`\n";
 
 struct Ran {
@@ -30,8 +39,16 @@ impl Host {
     fn set_up(name: &str) -> Host {
         let host = Host::new();
         let store = host.store();
-        host.init(name, &store);
-        host
+        host.created_on(name, &store)
+    }
+
+    fn sharing(&self, name: &str) -> Host {
+        Host::new().created_on(name, &self.store())
+    }
+
+    fn created_on(self, name: &str, store: &Path) -> Host {
+        assert_eq!(self.init(name, store), format!("{name} created\n"));
+        self
     }
 
     fn home(&self) -> PathBuf {
@@ -161,18 +178,50 @@ impl Host {
     }
 
     fn followup(&self, summary: &str) -> String {
-        let stored = self.ok(&[
+        self.followup_with(summary, &[])
+    }
+
+    fn followup_with(&self, summary: &str, rest: &[&str]) -> String {
+        let line = [
             "new",
             "followup",
             "--topics",
             "lantern",
             "--summary",
             summary,
-        ]);
+        ];
+        let stored = self.ok(&[&line[..], rest].concat());
         let (id, version) = halves(&stored);
         assert!(is_hex(id, 8), "{stored}");
         assert!(is_hex(version, 12), "{stored}");
         id.to_owned()
+    }
+
+    fn due(&self, summary: &str, rest: &[&str]) -> String {
+        let dated = ["--look-again", "2000-01-01", "--why", "The fuse blew"];
+        self.followup_with(summary, &[&dated, rest].concat())
+    }
+
+    fn entry(&self, name: &str) -> String {
+        let label = format!("2026-10-09-{name}");
+        self.drafted(
+            &["new", "entry", name, "--date", "2026-10-09"],
+            &[SUMMARY, ("topics = []", "topics = [\"lantern\"]")],
+        );
+        assert_stored(&self.ok(&["save", &label]), &label);
+        label
+    }
+
+    fn version_files(&self) -> Vec<PathBuf> {
+        let mut found = Vec::new();
+        version_files(&self.store(), &mut found);
+        found
+    }
+
+    fn file_of(&self, version: &str) -> PathBuf {
+        (self.version_files().into_iter())
+            .find(|file| file.to_str().unwrap().contains(version))
+            .unwrap_or_else(|| panic!("the file of version {version}"))
     }
 }
 
@@ -191,6 +240,10 @@ fn read_tree(root: &Path, dir: &Path, found: &mut Vec<(PathBuf, Vec<u8>)>) {
             found.push((relative, fs::read(&path).unwrap()));
         }
     }
+}
+
+fn opened(sections: &[&str]) -> String {
+    [sections, &[CLOSING]].concat().join("\n")
 }
 
 fn one_value(printed: &str) -> Option<Value> {
@@ -564,7 +617,7 @@ fn a_claim_with_no_directory_takes_the_working_directory() {
     );
     assert_eq!(
         host.ok_in(&project, &["context"]),
-        "lantern  A thing\ndesk  A machine\n"
+        opened(&[LANTERN_HERE, DESK])
     );
 
     let unclaimed = host.ok_in(
@@ -585,6 +638,77 @@ fn a_claim_with_no_directory_takes_the_working_directory() {
 }
 
 #[test]
+fn a_session_opens_on_what_is_due_then_the_topics_of_its_directory() {
+    let host = Host::stocked();
+    let project = host.home().join("projects/lantern");
+    host.ok_in(&project, &["claim", "lantern"]);
+    host.followup("Check the driver");
+    let due = host.due("Order a fuse", &[]);
+    host.ok(&["new", "topic", "phone"]);
+
+    let text = host.ok_in(&project, &["context"]);
+    assert_eq!(
+        text,
+        opened(&[
+            &format!("{DUE}due 2000-01-01  {due}  Order a fuse\n"),
+            "1 draft left open on this machine — `worklog-next drafts`\n",
+            "1 open followup not due — `worklog-next followups <topic>`\n",
+            "lantern — claimed at ~/projects/lantern: A thing\n\
+             \x20 fuse, relay\n\
+             Ideas — unbuilt, kept with their settled design; opened like a fact:\n\
+             \x20 dimmer\n",
+            DESK,
+        ])
+    );
+    assert_eq!(
+        host.ok(&["show", "lantern/fuse"])
+            .matches("Pin four")
+            .count(),
+        1
+    );
+
+    let whole = host.json_in(&project, &["context"]);
+    assert_eq!(whole["topics"][0]["facts"][0]["label"], "lantern/fuse");
+    assert_eq!(whole["due"][0]["row"]["summary"], "Order a fuse", "{whole}");
+    assert_eq!(whole["draft_count"], 1, "{whole}");
+}
+
+#[test]
+fn what_is_due_in_a_directory_is_listed_as_its_session_opens_on_it() {
+    let host = Host::stocked();
+    let project = host.home().join("projects/lantern");
+    host.ok_in(&project, &["claim", "lantern"]);
+    assert_eq!(host.ok_in(&project, &["due"]), "");
+    assert_eq!(host.json_in(&project, &["due"]), Value::Array(Vec::new()));
+
+    host.followup("Check the driver");
+    let fuse = host.due("Order a fuse", &[]);
+    let lens = host.followup("Fit the lens");
+    host.ok(&["trigger", &lens, "touching", "lantern"]);
+    let listed = format!(
+        "due 2000-01-01  {fuse}  Order a fuse\n\
+         touching lantern  {lens}  Fit the lens\n"
+    );
+    assert_eq!(host.ok_in(&project, &["due"]), listed);
+    assert_eq!(host.ok(&["due", "projects/lantern"]), listed);
+    assert_eq!(host.ok(&["due"]), "");
+    let opened = host.ok_in(&project, &["context"]);
+    assert!(opened.starts_with(&format!("{DUE}{listed}\n")), "{opened}");
+
+    let due = host.json_in(&project, &["due"]);
+    assert_eq!(due.as_array().map(Vec::len), Some(2), "{due}");
+    assert_eq!(due, host.json_in(&project, &["context"])["due"]);
+    assert_refused(&Host::new().run(&["due"]), 1, NOT_SET_UP);
+}
+
+#[test]
+fn a_session_over_an_empty_store_opens_on_the_machine_topic_alone() {
+    let host = Host::set_up("desk");
+    assert_eq!(host.ok(&["context"]), opened(&[DESK]));
+    assert_eq!(host.ok_in(&host.root, &["context"]), opened(&[DESK]));
+}
+
+#[test]
 fn a_directory_is_claimed_and_unclaimed_as_the_file_system_resolves_it() {
     let host = Host::set_up("desk");
     host.topic("lantern");
@@ -599,10 +723,7 @@ fn a_directory_is_claimed_and_unclaimed_as_the_file_system_resolves_it() {
         )
     };
     assert_eq!(host.ok(&["where"]), placed());
-    assert_eq!(
-        host.ok(&["context", "link"]),
-        "lantern  A thing\ndesk  A machine\n"
-    );
+    assert_eq!(host.ok(&["context", "link"]), opened(&[LANTERN_HERE, DESK]));
     host.ok(&["unclaim", "lantern", "link"]);
     assert_eq!(host.ok(&["where"]), "");
 
@@ -623,15 +744,15 @@ fn a_session_in_a_linked_directory_is_opened_by_the_claim_on_the_directory_itsel
     std::os::unix::fs::symlink(&project, host.root.join("link")).unwrap();
     host.ok_in(&project, &["claim", "lantern"]);
 
-    let opened = "lantern  A thing\ndesk  A machine\n";
+    let here = opened(&[LANTERN_HERE, DESK]);
     let link = host.root.join("link");
-    assert_eq!(host.ok(&["context", link.to_str().unwrap()]), opened);
-    assert_eq!(host.ok_in(&link.join("case"), &["context"]), opened);
+    assert_eq!(host.ok(&["context", link.to_str().unwrap()]), here);
+    assert_eq!(host.ok_in(&link.join("case"), &["context"]), here);
     assert_eq!(
         host.ok_in(&host.root, &["context", "link/case/later"]),
-        opened
+        here
     );
-    assert_eq!(host.ok_in(&host.root, &["context"]), "desk  A machine\n");
+    assert_eq!(host.ok_in(&host.root, &["context"]), opened(&[DESK]));
 }
 
 #[test]
@@ -650,7 +771,7 @@ fn a_home_that_is_a_link_still_holds_what_is_under_it_in_the_home_form() {
     assert_eq!(host.ok(&["where"]), placed);
     assert_eq!(
         host.ok(&["context", "projects/lantern"]),
-        "lantern  A thing\ndesk  A machine\n"
+        opened(&[LANTERN_HERE, DESK])
     );
     let home = host.home();
     let through = home.join("projects/lantern");
@@ -970,9 +1091,7 @@ fn a_command_that_reads_the_store_prints_one_json_value() {
 
     let clean = host.json(&["check"]);
     assert_eq!(clean["problems"], Value::Array(Vec::new()), "{clean}");
-    let mut files = Vec::new();
-    version_files(&host.store(), &mut files);
-    fs::write(&files[0], "not a version\n").unwrap();
+    fs::write(&host.version_files()[0], "not a version\n").unwrap();
     let ran = host.run(&["check", "--json"]);
     assert_eq!((ran.stderr.as_str(), ran.code), ("", Some(1)));
     let found = one_value(&ran.stdout).unwrap_or_else(|| panic!("one value: {}", ran.stdout));
@@ -1059,8 +1178,7 @@ fn check_exits_one_on_a_problem_and_zero_without() {
     let host = Host::set_up("desk");
     assert_eq!(host.ok(&["check"]), "0 problems, 0 notices, 0 forks\n");
 
-    let mut files = Vec::new();
-    version_files(&host.store(), &mut files);
+    let files = host.version_files();
     assert_eq!(files.len(), 1);
     fs::write(&files[0], "not a version\n").unwrap();
 
@@ -1253,13 +1371,7 @@ fn a_file_that_does_not_read_is_a_note_on_stderr_beside_the_document() {
     host.ok(&["rename", "lantern", "lamp"]);
     let listed = host.ok(&["history", "lamp"]);
     let first = listed.lines().nth(1).expect("two versions")[..12].to_owned();
-    let mut files = Vec::new();
-    version_files(&host.store(), &mut files);
-    let damaged = files
-        .iter()
-        .find(|file| file.to_str().unwrap().contains(&first))
-        .expect("the first version's file");
-    fs::write(damaged, "not a version\n").unwrap();
+    fs::write(host.file_of(&first), "not a version\n").unwrap();
 
     let shown = host.run(&["show", "lamp"]);
     assert!(shown.stdout.starts_with("+++\n"), "{}", shown.stdout);
@@ -1276,4 +1388,311 @@ fn a_file_that_does_not_read_is_a_note_on_stderr_beside_the_document() {
         host.ok(&["show", "lamp", "--json"]).lines().next(),
         Some("{")
     );
+}
+
+fn taken_since(host: &Host, before: &[PathBuf]) -> Vec<(PathBuf, Vec<u8>)> {
+    (host.version_files().into_iter())
+        .filter(|file| !before.contains(file))
+        .map(|file| {
+            let bytes = fs::read(&file).unwrap();
+            fs::remove_file(&file).unwrap();
+            (file, bytes)
+        })
+        .collect()
+}
+
+fn labels_in(value: &Value, found: &mut Vec<String>) {
+    match value {
+        Value::Array(items) => items.iter().for_each(|item| labels_in(item, found)),
+        Value::Object(fields) => {
+            for (key, held) in fields {
+                match held.as_str() {
+                    Some(label) if key == "label" => found.push(label.to_owned()),
+                    _ => labels_in(held, found),
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn labels(value: &Value) -> Vec<String> {
+    let mut found = Vec::new();
+    labels_in(value, &mut found);
+    found
+}
+
+fn column(listed: &str, at: usize) -> Vec<String> {
+    listed
+        .lines()
+        .filter(|line| !line.starts_with(' '))
+        .map(|line| line.split("  ").nth(at).expect("a label").to_owned())
+        .collect()
+}
+
+#[test]
+fn a_new_host_is_stocked_and_its_session_opens_on_what_is_due_until_that_is_done() {
+    let host = Host::set_up("desk");
+    host.topic("lantern");
+    host.fact("fact", "lantern/relay");
+    let project = host.home().join("projects/lantern");
+
+    assert!(!host.ok_in(&project, &["context"]).contains("relay"));
+    host.ok_in(&project, &["claim", "lantern"]);
+    let stocked = host.ok_in(&project, &["context"]);
+    assert!(stocked.contains("relay"), "{stocked}");
+    assert!(!stocked.contains("due 2000-01-01"), "{stocked}");
+    assert!(!host.ok(&["context"]).contains("relay"));
+
+    let entry = host.entry("wiring");
+    assert_eq!(column(&host.ok(&["entries", "lantern"]), 2), [&*entry]);
+    let fuse = host.due("Order a fuse", &["--entry", &entry]);
+    let line = format!("due 2000-01-01  {fuse}  Order a fuse\n");
+    assert_eq!(host.ok(&["followups", &entry]), line);
+
+    let due = host.ok_in(&project, &["context"]);
+    assert!(due.contains(&line), "{due}");
+    assert!(due.find(&line) < due.find("relay"), "{due}");
+
+    assert_stored(&host.ok(&["done", &fuse, "It arrived"]), &fuse);
+    let cleared = host.ok_in(&project, &["context"]);
+    assert!(!cleared.contains("Order a fuse"), "{cleared}");
+    assert!(!cleared.contains("due 2000-01-01"), "{cleared}");
+    assert!(cleared.contains("relay"), "{cleared}");
+    assert_eq!(host.ok(&["followups"]), "");
+    let ended = host.ok(&["followups", "--ended"]);
+    assert!(ended.contains("Order a fuse"), "{ended}");
+}
+
+#[test]
+fn two_machines_fork_a_document_and_resolving_it_keeps_the_names_of_both_heads() {
+    let desk = Host::set_up("desk");
+    desk.topic("lantern");
+    let phone = desk.sharing("phone");
+    let id = desk.id("lantern");
+    let synced = desk.version_files();
+
+    assert_stored(&desk.ok(&["rename", "lantern", "lamp"]), "lamp");
+    let late = taken_since(&desk, &synced);
+    assert_eq!(late.len(), 1);
+    assert_stored(&phone.ok(&["rename", "lantern", "torch"]), "torch");
+    for (file, bytes) in &late {
+        fs::write(file, bytes).unwrap();
+    }
+
+    let forked = phone.ok(&["forks"]);
+    assert_eq!(desk.ok(&["forks"]), forked);
+    let lines: Vec<&str> = forked.lines().collect();
+    assert_eq!(lines.len(), 3, "{forked}");
+    assert!(lines[0].starts_with(&format!("{id}  ")), "{forked}");
+    assert!(lines[0].ends_with("  A thing  forked"), "{forked}");
+    let mut writers: Vec<&str> = lines[1..]
+        .iter()
+        .map(|head| head.rsplit("  ").next().unwrap())
+        .collect();
+    writers.sort_unstable();
+    assert_eq!(writers, ["desk", "phone"], "{forked}");
+    for host in [&desk, &phone] {
+        assert_eq!(host.ok(&["check"]), "0 problems, 0 notices, 1 fork\n");
+    }
+
+    phone.drafted(&["resolve", &id], &[]);
+    let stored = phone.ok(&["save", &id]);
+    let kept = halves(&stored).0;
+    assert!(["lamp", "torch"].contains(&kept), "{stored}");
+
+    for host in [&desk, &phone] {
+        assert_eq!(host.ok(&["forks"]), "");
+        assert_eq!(host.ok(&["check"]), "0 problems, 0 notices, 0 forks\n");
+        for name in ["lantern", "lamp", "torch"] {
+            assert_eq!(host.id(name), id, "{name}");
+            let shown = host.ok(&["show", name]);
+            assert!(shown.contains(&format!("name = \"{kept}\"")), "{shown}");
+            assert!(!shown.contains("===="), "{shown}");
+        }
+        let mut topics = column(&host.ok(&["topics"]), 1);
+        topics.sort_unstable();
+        let mut expected = ["desk", kept, "phone"];
+        expected.sort_unstable();
+        assert_eq!(topics, expected);
+    }
+}
+
+#[test]
+fn a_renamed_fact_keeps_its_old_name_and_its_topic_ends_once_the_fact_is_filed_elsewhere() {
+    let host = Host::set_up("desk");
+    host.topic("lantern");
+    host.topic("atlas");
+    host.fact("fact", "lantern/relay");
+    let id = host.id("lantern/relay");
+
+    assert_stored(
+        &host.ok(&["rename", "lantern/relay", "relay-pin"]),
+        "lantern/relay-pin",
+    );
+    for name in ["lantern/relay", "lantern/relay-pin"] {
+        assert_eq!(host.id(name), id, "{name}");
+        let shown = host.ok(&["show", name]);
+        assert!(shown.contains("name = \"relay-pin\""), "{shown}");
+    }
+    assert_eq!(
+        column(&host.ok(&["facts", "lantern"]), 2),
+        ["lantern/relay-pin"]
+    );
+
+    let ending = ["end", "lantern", "retired", "Folded into the atlas"];
+    assert_refused(
+        &host.run(&ending),
+        1,
+        "worklog-next: lantern: still has 1 fact\n",
+    );
+    assert_eq!(
+        column(&host.ok(&["topics"]), 1),
+        ["atlas", "desk", "lantern"]
+    );
+
+    assert_stored(
+        &host.ok(&["move", "lantern", "atlas", "lantern/relay"]),
+        "atlas/relay-pin",
+    );
+    assert_eq!(host.id("atlas/relay-pin"), id);
+    assert_eq!(host.ok(&["facts", "lantern"]), "");
+    assert_eq!(
+        column(&host.ok(&["facts", "atlas"]), 2),
+        ["atlas/relay-pin"]
+    );
+
+    assert_stored(&host.ok(&ending), "lantern");
+    assert_eq!(column(&host.ok(&["topics"]), 1), ["atlas", "desk"]);
+    let ended = host.ok(&["topics", "--ended"]);
+    let retired = ended.lines().nth(2).expect("the ended topic");
+    assert!(
+        retired.ends_with("  lantern  A thing  ended retired"),
+        "{ended}"
+    );
+    assert_eq!(column(&host.ok(&["facts"]), 2), ["atlas/relay-pin"]);
+}
+
+#[test]
+fn a_damaged_file_is_named_by_check_and_the_rest_of_the_store_still_reads() {
+    let host = Host::stocked();
+    let topics = host.ok(&["topics"]);
+    let relay = host.ok(&["show", "lantern/relay"]);
+    let facts = host.ok(&["facts"]);
+    assert_eq!(
+        column(&facts, 2),
+        ["lantern/fuse", "lantern/relay"],
+        "{facts}"
+    );
+    let history = host.ok(&["history", "lantern/fuse"]);
+    let version = &history[..12];
+    assert!(is_hex(version, 12), "{history}");
+    assert_eq!(host.ok(&["check"]), "0 problems, 0 notices, 0 forks\n");
+
+    fs::write(host.file_of(version), "not a version\n").unwrap();
+
+    let checked = host.run(&["check"]);
+    assert_eq!((checked.stderr.as_str(), checked.code), ("", Some(1)));
+    let lines: Vec<&str> = checked.stdout.lines().collect();
+    assert_eq!(lines.len(), 2, "{}", checked.stdout);
+    assert!(lines[0].contains(&format!(": {version}: ")), "{}", lines[0]);
+    assert_eq!(lines[1], "1 problem, 0 notices, 0 forks");
+
+    assert_eq!(host.ok(&["topics"]), topics);
+    assert_eq!(host.ok(&["show", "lantern/relay"]), relay);
+    let left = host.ok(&["facts"]);
+    assert_eq!(column(&left, 2), ["lantern/relay"], "{left}");
+    assert_eq!(host.ok(&["facts", "lantern"]), left);
+    assert_eq!(column(&host.ok(&["ideas"]), 2), ["lantern/dimmer"]);
+}
+
+#[test]
+fn json_carries_the_labels_the_text_of_the_same_command_prints() {
+    let text = Host::stocked();
+    let json = Host::stocked();
+    assert_eq!(text.id("lantern/relay"), json.id("lantern/relay"));
+
+    for (args, at, count) in [
+        (&["topics"][..], 1, 3),
+        (&["facts", "lantern"], 2, 2),
+        (&["search", "four"], 1, 3),
+    ] {
+        let printed = column(&text.ok(args), at);
+        assert_eq!(printed.len(), count, "{args:?}");
+        assert_eq!(labels(&json.json(args)), printed, "{args:?}");
+        assert_eq!(labels(&text.json(args)), printed, "{args:?}");
+    }
+
+    for (args, count) in [
+        (&["rename", "lantern/relay", "relay-pin"][..], 1),
+        (
+            &[
+                "move",
+                "lantern",
+                "atlas",
+                "lantern/relay-pin",
+                "lantern/fuse",
+            ],
+            2,
+        ),
+    ] {
+        let stored = text.ok(args);
+        let printed: Vec<&str> = stored
+            .split_inclusive('\n')
+            .map(|line| halves(line).0)
+            .collect();
+        assert_eq!(printed.len(), count, "{args:?}");
+        assert_eq!(labels(&json.json(args)), printed, "{args:?}");
+    }
+    assert_eq!(
+        labels(&json.json(&["facts"])),
+        column(&text.ok(&["facts"]), 2)
+    );
+}
+
+#[test]
+fn each_command_reads_what_the_one_before_it_wrote_on_either_machine() {
+    let desk = Host::set_up("desk");
+    desk.topic("lantern");
+    let phone = desk.sharing("phone");
+
+    desk.fact("fact", "lantern/relay");
+    assert_stored(&phone.ok(&["verify", "lantern/relay"]), "lantern/relay");
+    assert_stored(
+        &desk.ok(&["rename", "lantern/relay", "relay-pin"]),
+        "lantern/relay-pin",
+    );
+    phone.drafted(
+        &["checkout", "lantern/relay-pin"],
+        &[("Pin four", "Pin five")],
+    );
+    assert_stored(&phone.ok(&["save", "lantern/relay"]), "lantern/relay-pin");
+
+    let history = desk.json(&["history", "lantern/relay-pin"]);
+    assert_eq!(phone.json(&["history", "lantern/relay"]), history);
+    let versions = history["versions"].as_array().expect("the versions");
+    assert_eq!(versions.len(), 4, "{history}");
+    let mut written = Vec::new();
+    let mut parents: &[Value] = &[];
+    for _ in versions {
+        let next = versions
+            .iter()
+            .find(|version| version["parents"].as_array().map(Vec::as_slice) == Some(parents))
+            .unwrap_or_else(|| panic!("a version after {parents:?}: {history}"));
+        written.push(next["machine"].as_str().expect("a machine"));
+        parents = std::slice::from_ref(&next["version"]);
+        assert_eq!(next["head"], written.len() == versions.len(), "{history}");
+    }
+    assert_eq!(written, ["desk", "phone", "desk", "phone"], "{history}");
+
+    for host in [&desk, &phone] {
+        assert_eq!(host.ok(&["forks"]), "");
+        assert_eq!(host.ok(&["check"]), "0 problems, 0 notices, 0 forks\n");
+        let facts = host.ok(&["facts"]);
+        assert!(
+            facts.ends_with("  lantern/relay-pin  Pin five\n"),
+            "{facts}"
+        );
+        assert_eq!(facts.lines().count(), 1, "{facts}");
+    }
 }

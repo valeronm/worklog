@@ -136,15 +136,18 @@ impl Document {
         self.versions.first().map(|version| &version.envelope.kind)
     }
 
-    /// Whether a head's fields carry `key` as this text, or as a list
-    /// with this text in it.
+    /// Whether a head's fields carry `key` as one of `values`, or as a list with one of
+    /// them in it.
     #[must_use]
-    pub fn holds(&self, key: &str, value: &str) -> bool {
-        self.heads().iter().any(|head| match head.fields.get(key) {
-            Some(Value::String(text)) => text == value,
-            Some(Value::Array(items)) => items.iter().any(|item| item.as_str() == Some(value)),
-            _ => false,
-        })
+    pub fn holds_any(&self, key: &str, values: &BTreeSet<&str>) -> bool {
+        let asked = |item: &Value| item.as_str().is_some_and(|text| values.contains(text));
+        self.heads
+            .iter()
+            .any(|at| match self.versions[*at].fields.get(key) {
+                Some(Value::Array(items)) => items.iter().any(asked),
+                Some(value) => asked(value),
+                None => false,
+            })
     }
 }
 
@@ -240,7 +243,7 @@ mod tests {
     }
 
     #[test]
-    fn a_document_holds_what_a_head_carries() {
+    fn a_document_is_of_its_versions_kind_and_gives_one_by_its_id() {
         let root = root();
         let renamed = after(
             &[&root],
@@ -248,14 +251,35 @@ mod tests {
             "renamed\n",
         );
         let held = document(&[&root, &renamed]);
-        assert!(held.holds("name", "relay-pin"));
-        assert!(held.holds("topics", "atlas"));
-        assert!(!held.holds("name", "relay"), "only an older version has it");
-        assert!(!held.holds("topics", "phone"));
-        assert!(!held.holds("summary", "relay-pin"));
         assert_eq!(held.kind().map(Kind::as_str), Some("fact"));
         assert_eq!(held.get(&root.id), Some(&root));
         assert_eq!(document(&[]).kind(), None);
+    }
+
+    #[test]
+    fn a_document_holds_any_of_the_values_asked_when_a_head_carries_one() {
+        let root = root();
+        let left = after(
+            &[&root],
+            "name = \"relay-pin\"\ntopics = [\"atlas\"]",
+            "l\n",
+        );
+        let right = after(&[&root], "name = \"coil\"\ntopics = [\"phone\", 4]", "r\n");
+        let forked = document(&[&root, &left, &right]);
+        let any =
+            |key: &str, values: &[&str]| forked.holds_any(key, &values.iter().copied().collect());
+        assert!(any("name", &["coil"]));
+        assert!(any("name", &["desk", "relay-pin"]));
+        assert!(any("topics", &["desk", "phone"]));
+        assert!(any("topics", &["atlas", "phone"]));
+        assert!(
+            !any("name", &["relay", "atlas"]),
+            "only an older version has it"
+        );
+        assert!(!any("topics", &["lantern", "4"]));
+        assert!(!any("summary", &["coil"]));
+        assert!(!any("name", &[]));
+        assert!(!document(&[]).holds_any("name", &BTreeSet::from(["relay"])));
     }
 
     #[test]

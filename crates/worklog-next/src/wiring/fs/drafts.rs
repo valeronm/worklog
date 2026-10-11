@@ -92,7 +92,7 @@ impl Drafts for FsDrafts {
 mod tests {
     use super::*;
     use crate::domain::testing::{LANTERN, drafts_contract, first, lantern};
-    use crate::fs::RandomIds;
+    use crate::wiring::fs::RandomIds;
 
     fn scratch() -> (tempfile::TempDir, FsDrafts) {
         let dir = tempfile::tempdir().unwrap();

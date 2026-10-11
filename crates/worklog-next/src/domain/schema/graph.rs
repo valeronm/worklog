@@ -12,17 +12,24 @@ pub struct Edges {
     pub uses: Vec<DocumentId>,
 }
 
-fn walk(roots: &[DocumentId], next: impl Fn(&DocumentId) -> Vec<DocumentId>) -> Vec<DocumentId> {
-    let mut reached: Vec<DocumentId> = Vec::new();
-    let mut queue: VecDeque<DocumentId> = roots.iter().cloned().collect();
-    while let Some(topic) = queue.pop_front() {
-        if reached.contains(&topic) {
+/// A topic a walk met and the topic it was first met from, none for a root.
+pub type Reached = (DocumentId, Option<DocumentId>);
+
+fn walk(roots: &[DocumentId], next: impl Fn(&DocumentId) -> Vec<DocumentId>) -> Vec<Reached> {
+    let mut reached: Vec<Reached> = Vec::new();
+    let mut queue: VecDeque<Reached> = roots.iter().map(|root| (root.clone(), None)).collect();
+    while let Some((topic, from)) = queue.pop_front() {
+        if reached.iter().any(|(met, _)| *met == topic) {
             continue;
         }
-        queue.extend(next(&topic));
-        reached.push(topic);
+        queue.extend((next(&topic).into_iter()).map(|found| (found, Some(topic.clone()))));
+        reached.push((topic, from));
     }
     reached
+}
+
+fn met(reached: Vec<Reached>) -> Vec<DocumentId> {
+    reached.into_iter().map(|(topic, _)| topic).collect()
 }
 
 /// The roots and every topic they reach through either edge, breadth
@@ -32,6 +39,15 @@ pub fn reach<E: Borrow<Edges>>(
     roots: &[DocumentId],
     edges: impl Fn(&DocumentId) -> Option<E>,
 ) -> Vec<DocumentId> {
+    met(reach_from(roots, edges))
+}
+
+/// What `reach` gives, each topic with the one it was first reached from.
+#[must_use]
+pub fn reach_from<E: Borrow<Edges>>(
+    roots: &[DocumentId],
+    edges: impl Fn(&DocumentId) -> Option<E>,
+) -> Vec<Reached> {
     walk(roots, |topic| {
         edges(topic)
             .map(|edges| {
@@ -59,7 +75,7 @@ pub fn parts(
     topic: &DocumentId,
     parts_of: impl Fn(&DocumentId) -> Vec<DocumentId>,
 ) -> Vec<DocumentId> {
-    let mut reached = walk(std::slice::from_ref(topic), parts_of);
+    let mut reached = met(walk(std::slice::from_ref(topic), parts_of));
     reached.retain(|part| part != topic);
     reached
 }
@@ -108,6 +124,22 @@ mod tests {
         assert_eq!(reach(&[id(1)], edges), [id(1)]);
         assert_eq!(reach(&[id(9)], edges), [id(9)], "a topic nobody holds");
         assert!(reach(&[], edges).is_empty());
+    }
+
+    #[test]
+    fn a_walk_says_which_topic_each_was_first_met_from() {
+        let graph = graph();
+        let edges = |topic: &DocumentId| graph.get(topic).cloned();
+        assert_eq!(
+            reach_from(&[id(3), id(2)], edges),
+            [
+                (id(3), None),
+                (id(2), None),
+                (id(1), Some(id(3))),
+                (id(4), Some(id(3))),
+                (id(5), Some(id(2)))
+            ]
+        );
     }
 
     #[test]

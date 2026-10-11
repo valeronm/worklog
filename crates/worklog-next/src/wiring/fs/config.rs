@@ -12,7 +12,6 @@ use super::{io_error, optional};
 const STORE: &str = "store";
 const MACHINE: &str = "machine";
 
-/// What binding a host records.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Config {
     pub store: PathBuf,
@@ -38,7 +37,6 @@ fn staged(staging: &Path, text: &str) -> std::io::Result<()> {
 }
 
 impl Config {
-    /// `None` for no file; a file that is not a whole config is refused with its path.
     pub fn read(path: &Path) -> Result<Option<Config>, StoreError> {
         let Some(text) = optional(path, fs::read_to_string(path))? else {
             return Ok(None);
@@ -56,7 +54,6 @@ impl Config {
         Ok(Some(Config { store, machine }))
     }
 
-    /// Creates the directory and replaces the file whole.
     pub fn write(&self, path: &Path) -> Result<(), StoreError> {
         let Some(store) = self.store.to_str() else {
             return Err(StoreError::io(
@@ -88,7 +85,7 @@ impl Config {
 mod tests {
     use super::*;
     use crate::domain::testing::{LANTERN, lantern};
-    use crate::fs::{directories, files};
+    use crate::wiring::fs::{directories, files};
 
     fn scratch() -> (tempfile::TempDir, PathBuf) {
         let dir = tempfile::tempdir().unwrap();

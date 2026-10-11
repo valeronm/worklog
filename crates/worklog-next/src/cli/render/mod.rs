@@ -2,6 +2,7 @@
 //! prints, and each line of `drafts`, with one.
 
 mod check;
+mod context;
 mod documents;
 mod listings;
 mod search;
@@ -13,12 +14,16 @@ use std::fmt::Write as _;
 use serde::Serialize;
 
 use super::json::{Pinned, nothing, printed};
-use crate::app::context::Context;
 use crate::app::draft::DraftRow;
 use crate::app::followup::Made;
 use crate::app::setup::Bound;
 use crate::app::{DraftRef, Row, Written};
 use crate::domain::version::Stamp;
+
+#[cfg(test)]
+pub(super) use context::CONTEXT_BYTES;
+#[cfg(test)]
+pub(super) use testing::assert_fits;
 
 /// What one command gives back: `text` for stdout, `notes` for stderr, and its exit code.
 #[derive(Debug, PartialEq, Eq)]
@@ -167,16 +172,6 @@ impl Render for Vec<DraftRow> {
         let mut text = String::new();
         for row in self {
             let _ = writeln!(text, "{} {}", row.label, row.location);
-        }
-        text
-    }
-}
-
-impl Render for Context {
-    fn text(&self) -> String {
-        let mut text = String::new();
-        for topic in &self.topics {
-            line(&mut text, &[&topic.label, &topic.summary]);
         }
         text
     }

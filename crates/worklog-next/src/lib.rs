@@ -2,10 +2,10 @@
 //! made only of ids.
 //!
 //! `domain` holds the model and its rules and touches nothing outside
-//! memory; `fs` implements the ports the domain declares on a directory
-//! tree. `app` holds one use case per command over those ports, `wiring` builds the `fs`
-//! adapters a front end runs them over, and `cli` parses a command line and renders what
-//! its use case returns.
+//! memory. `app` holds one use case per command over the ports the domain declares.
+//! `wiring` builds the adapters a front end runs them over and keeps to itself `fs`, which
+//! implements the ports on a directory tree, and `cli` parses a command line and renders
+//! what its use case returns.
 
 #![allow(
     clippy::missing_errors_doc,
@@ -19,5 +19,4 @@
 pub mod app;
 pub mod cli;
 pub mod domain;
-pub mod fs;
 pub mod wiring;

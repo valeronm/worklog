@@ -6,7 +6,6 @@ use crate::domain::ports::StoreError;
 const OVERRIDE: &str = "WORKLOG_NEXT_HOME";
 const APP: &str = "worklog-next";
 
-/// Where this host keeps what is never synced, and its home directory.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Paths {
     pub config: PathBuf,
@@ -15,10 +14,6 @@ pub struct Paths {
 }
 
 impl Paths {
-    /// The places under `WORKLOG_NEXT_HOME` when `variable` holds it, otherwise under the
-    /// XDG base directories, which default to the home directory. A variable set to nothing
-    /// counts as not set; no `HOME` without `WORKLOG_NEXT_HOME` is refused, and so is a
-    /// `HOME` that is not UTF-8.
     pub fn resolved(variable: impl Fn(&str) -> Option<OsString>) -> Result<Paths, StoreError> {
         let set = |name: &str| {
             variable(name)

@@ -74,7 +74,8 @@ impl Store for MemoryStore {
         if values.is_empty() {
             return Ok(Vec::new());
         }
-        Ok(self.matching(|document| values.iter().any(|value| document.holds(key, value))))
+        let asked: BTreeSet<&str> = values.iter().copied().collect();
+        Ok(self.matching(|document| document.holds_any(key, &asked)))
     }
 
     fn unreadable(&self) -> Result<Vec<Document>, StoreError> {

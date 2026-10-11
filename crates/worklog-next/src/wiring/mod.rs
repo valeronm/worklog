@@ -3,8 +3,10 @@
 use std::ffi::OsString;
 use std::path::PathBuf;
 
+mod fs;
+
 use crate::app::{Deps, Failure, Stored};
-use crate::fs::{Config, FsDrafts, FsHost, FsStore, Paths, RandomIds, SystemClock};
+use fs::{Config, FsDrafts, FsHost, FsStore, Paths, RandomIds, SystemClock};
 
 /// The ports of one command, since the store among them is read once.
 pub struct Adapters {
@@ -31,7 +33,8 @@ impl Adapters {
 /// The adapters over the store this host's config holds, or over `chosen`, the store a host
 /// with no config is about to be bound to; `None` for a host with neither, one that is not
 /// set up. Refuses a configured store that is not a directory unless a store is being chosen,
-/// and a `chosen` one that `FsStore::chosen` refuses.
+/// and a `chosen` one that is a file, or a directory holding something not dot-named and no
+/// store.
 pub fn wire(
     variable: &dyn Fn(&str) -> Option<OsString>,
     chosen: Option<PathBuf>,

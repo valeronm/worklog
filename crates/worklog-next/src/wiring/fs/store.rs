@@ -13,8 +13,8 @@ use super::{directories, files, io_error};
 /// The folder's ignore file names the same prefix.
 const STAGING_PREFIX: &str = ".tmp-";
 
-/// A version's file is never rewritten. One instance is one snapshot: the tree is walked
-/// once and remembered.
+// A version's file is never rewritten. One instance is one snapshot: the tree is walked
+// once and remembered.
 pub struct FsStore {
     root: PathBuf,
     walked: OnceCell<RefCell<Walked>>,
@@ -36,8 +36,8 @@ fn parse(bytes: Vec<u8>, name: &VersionId) -> Result<Version, ReadError> {
 }
 
 impl FsStore {
-    /// A `root` that is not there reads as a store holding nothing, and the first version
-    /// put makes it.
+    // A `root` that is not there reads as a store holding nothing, and the first version
+    // put makes it.
     #[must_use]
     pub fn new(root: PathBuf) -> FsStore {
         FsStore {
@@ -46,7 +46,6 @@ impl FsStore {
         }
     }
 
-    /// Refuses a `root` that is not a directory.
     pub fn open(root: PathBuf) -> Result<FsStore, StoreError> {
         if !root.is_dir() {
             return Err(StoreError::io(
@@ -57,8 +56,6 @@ impl FsStore {
         Ok(FsStore::new(root))
     }
 
-    /// Refuses a `root` that is a file, or a directory holding an entry whose name starts
-    /// with no dot while none of its buckets holds a document's directory.
     pub fn chosen(root: PathBuf) -> Result<FsStore, StoreError> {
         let store = FsStore::new(root);
         let root = &store.root;
@@ -206,7 +203,8 @@ impl Store for FsStore {
         if values.is_empty() {
             return Ok(Vec::new());
         }
-        self.matching(|document| values.iter().any(|value| document.holds(key, value)))
+        let asked: BTreeSet<&str> = values.iter().copied().collect();
+        self.matching(|document| document.holds_any(key, &asked))
     }
 
     fn unreadable(&self) -> Result<Vec<Document>, StoreError> {
@@ -253,7 +251,7 @@ impl Store for FsStore {
 mod tests {
     use super::*;
     use crate::domain::testing::{LANTERN, after, first, lantern, store_contract};
-    use crate::fs::RandomIds;
+    use crate::wiring::fs::RandomIds;
 
     const ATLAS: &str = "7fd0000000000000000000000000000c";
     const RELAY: &str = "name = \"relay\"";

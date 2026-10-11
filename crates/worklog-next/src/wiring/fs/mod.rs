@@ -1,12 +1,12 @@
 //! The ports implemented on a directory tree.
 
-pub mod clock;
-pub mod config;
-pub mod drafts;
-pub mod host;
-pub mod ids;
-pub mod paths;
-pub mod store;
+mod clock;
+mod config;
+mod drafts;
+mod host;
+mod ids;
+mod paths;
+mod store;
 
 pub use clock::SystemClock;
 pub use config::Config;
@@ -20,12 +20,12 @@ use std::path::Path;
 
 use crate::domain::ports::StoreError;
 
-pub(crate) fn io_error(location: &Path, error: &std::io::Error) -> StoreError {
+fn io_error(location: &Path, error: &std::io::Error) -> StoreError {
     StoreError::io(location.display(), error)
 }
 
-/// Every file and directory here is created by its first write.
-pub(crate) fn optional<T>(at: &Path, result: std::io::Result<T>) -> Result<Option<T>, StoreError> {
+// Every file and directory here is created by its first write.
+fn optional<T>(at: &Path, result: std::io::Result<T>) -> Result<Option<T>, StoreError> {
     match result {
         Ok(value) => Ok(Some(value)),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -46,10 +46,10 @@ fn listed(dir: &Path, directories: bool) -> Result<Vec<String>, StoreError> {
     Ok(names)
 }
 
-pub(crate) fn directories(dir: &Path) -> Result<Vec<String>, StoreError> {
+fn directories(dir: &Path) -> Result<Vec<String>, StoreError> {
     listed(dir, true)
 }
 
-pub(crate) fn files(dir: &Path) -> Result<Vec<String>, StoreError> {
+fn files(dir: &Path) -> Result<Vec<String>, StoreError> {
     listed(dir, false)
 }

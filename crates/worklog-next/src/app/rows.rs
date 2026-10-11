@@ -17,6 +17,8 @@ pub struct Row {
     pub document: DocumentId,
     pub kind: KindOf,
     pub label: String,
+    /// The document's own name, which a followup and a claim have none of.
+    pub name: Option<String>,
     /// Empty for a claim.
     pub summary: String,
     /// The labels of `topic` or `topics` in stored order; empty for a topic.
@@ -50,6 +52,7 @@ pub(super) fn row<'d>(topics: &Topics, document: &'d Document) -> Option<Shown<'
     let row = Row {
         kind: record.content.kind(),
         label: label_of(&record.content, topic_name, &id),
+        name: (record.content.naming()).map(|(name, _)| name.to_string()),
         document: id,
         summary,
         topics: shown,
@@ -262,6 +265,19 @@ mod tests {
         assert_eq!(claim_row.document, claim);
         assert_eq!(claim_row.summary, "");
         assert_eq!(claim_row.topics, ["lantern"]);
+
+        let names = [&lantern, &relay, &driver, &followup, &claim].map(|id| shown(id).name);
+        let own = |name: &str| Some(name.to_owned());
+        assert_eq!(
+            names,
+            [
+                own("lantern"),
+                own("relay-pin"),
+                own("lamp-driver"),
+                None,
+                None
+            ]
+        );
     }
 
     #[test]
@@ -578,7 +594,7 @@ mod tests {
         let lookup = Lookup::new(Stored::new(&counting));
         let topics = Topics::load(&lookup).unwrap();
         assert_eq!(topics.covered(&lantern).len(), 2);
-        assert_eq!(topics.reach(std::slice::from_ref(&atlas)).len(), 2);
+        assert_eq!(topics.reach_from(std::slice::from_ref(&atlas)).len(), 2);
         assert_eq!(topics.label(&atlas), "atlas");
         let row = row(&topics, &document).unwrap().row;
         assert_eq!(row.label, "atlas/relay-pin");
