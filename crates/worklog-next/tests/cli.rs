@@ -69,8 +69,15 @@ impl Host {
     }
 
     fn run_in(&self, dir: &Path, args: &[&str]) -> Ran {
-        let output = Command::cargo_bin("worklog-next")
-            .expect("the binary")
+        self.run_as(
+            Command::cargo_bin("worklog-next").expect("the binary"),
+            dir,
+            args,
+        )
+    }
+
+    fn run_as(&self, mut program: Command, dir: &Path, args: &[&str]) -> Ran {
+        let output = program
             .env("WORKLOG_NEXT_HOME", self.root.join("next"))
             .env("HOME", self.home())
             .env_remove("XDG_CONFIG_HOME")
@@ -160,11 +167,11 @@ impl Host {
             host.fact("fact", "lantern/relay");
             host.fact("fact", "lantern/fuse");
             host.fact("idea", "lantern/dimmer");
-            let mut files = Vec::new();
-            read_tree(&host.root, &host.root, &mut files);
             Stocked {
                 store: host.store().to_str().unwrap().to_owned(),
-                files,
+                files: (snapshot(&host).into_iter())
+                    .filter_map(|(path, bytes)| Some((path, bytes?)))
+                    .collect(),
             }
         });
         let host = Host::new();
@@ -232,18 +239,6 @@ impl Host {
 struct Stocked {
     store: String,
     files: Vec<(PathBuf, Vec<u8>)>,
-}
-
-fn read_tree(root: &Path, dir: &Path, found: &mut Vec<(PathBuf, Vec<u8>)>) {
-    for entry in fs::read_dir(dir).unwrap() {
-        let path = entry.unwrap().path();
-        if path.is_dir() {
-            read_tree(root, &path, found);
-        } else {
-            let relative = path.strip_prefix(root).unwrap().to_path_buf();
-            found.push((relative, fs::read(&path).unwrap()));
-        }
-    }
 }
 
 fn opened(sections: &[&str]) -> String {
@@ -357,8 +352,7 @@ fn init_refuses_a_directory_of_other_files_and_writes_nothing() {
     let host = Host::new();
     let project = host.home().join("projects/lantern");
     fs::write(project.join("notes.md"), "a person's own").unwrap();
-    let mut before = Vec::new();
-    read_tree(&host.root, &host.root, &mut before);
+    let before = snapshot(&host);
 
     let line = ["init", "desk", "--store", "projects/lantern"];
     let refused = host.run(&[&line[..], &["--summary", "A machine"]].concat());
@@ -371,9 +365,7 @@ fn init_refuses_a_directory_of_other_files_and_writes_nothing() {
         ),
     );
     assert!(!host.root.join("next").exists());
-    let mut after = Vec::new();
-    read_tree(&host.root, &host.root, &mut after);
-    assert_eq!(after, before);
+    assert_eq!(snapshot(&host), before);
     assert_refused(&host.run(&["topics"]), 1, NOT_SET_UP);
 }
 
@@ -984,6 +976,7 @@ fn a_command_that_opens_lists_or_drops_a_draft_prints_one_json_value() {
     ]);
     assert_eq!(bound["label"], "desk", "{bound}");
     assert_eq!(bound["created"], true, "{bound}");
+    assert_eq!(bound["written"], serde_json::json!([]), "{bound}");
     assert!(is_hex(bound["document"].as_str().unwrap(), 32), "{bound}");
 
     let opened = host.json(&["new", "topic", "lantern"]);
@@ -2103,4 +2096,343 @@ fn serve_is_refused_before_it_listens_on_a_host_or_an_address_it_cannot_serve() 
         assert_eq!((ran.stdout.as_str(), ran.code), ("", Some(2)), "{line:?}");
         assert!(ran.stderr.starts_with("error: "), "{}", ran.stderr);
     }
+}
+
+fn binary() -> PathBuf {
+    fs::canonicalize(
+        Command::cargo_bin("worklog-next")
+            .expect("the binary")
+            .get_program(),
+    )
+    .expect("the binary's own path")
+}
+
+impl Host {
+    fn with_agents(self, homes: &[&str]) -> Host {
+        for home in homes {
+            fs::create_dir_all(self.home().join(home)).unwrap();
+        }
+        self
+    }
+
+    fn skill_of(&self, home: &str) -> PathBuf {
+        self.home().join(home).join("skills/worklog-next/SKILL.md")
+    }
+
+    fn hooks_of(&self, home: &str) -> PathBuf {
+        let file = if home == ".claude" {
+            "settings.json"
+        } else {
+            "hooks.json"
+        };
+        self.home().join(home).join(file)
+    }
+
+    fn hooks_json(&self, home: &str) -> Value {
+        serde_json::from_str(&fs::read_to_string(self.hooks_of(home)).unwrap()).unwrap()
+    }
+
+    fn placed(&self, homes: &[&str]) -> Vec<PathBuf> {
+        (homes.iter())
+            .flat_map(|home| [self.skill_of(home), self.hooks_of(home)])
+            .collect()
+    }
+}
+
+fn hook_command() -> String {
+    format!("\"{}\" context 2>/dev/null || true", binary().display())
+}
+
+fn lines(paths: &[PathBuf]) -> String {
+    let mut text = String::new();
+    for path in paths {
+        text.push_str(&path.display().to_string());
+        text.push('\n');
+    }
+    text
+}
+
+const INIT: [&str; 5] = ["init", "desk", "--store", "kept", "--summary"];
+
+fn init_line(extra: &[&'static str]) -> Vec<&'static str> {
+    [&INIT[..], &["A machine"], extra].concat()
+}
+
+fn tree(root: &Path, dir: &Path, found: &mut Vec<(PathBuf, Option<Vec<u8>>)>) {
+    for entry in fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        let relative = path.strip_prefix(root).unwrap().to_path_buf();
+        if path.is_dir() {
+            found.push((relative, None));
+            tree(root, &path, found);
+        } else {
+            found.push((relative, Some(fs::read(&path).unwrap())));
+        }
+    }
+}
+
+fn snapshot(host: &Host) -> Vec<(PathBuf, Option<Vec<u8>>)> {
+    let mut found = Vec::new();
+    tree(&host.root, &host.root, &mut found);
+    found
+}
+
+#[test]
+fn init_with_agents_installs_for_every_agent_present_and_prints_the_paths() {
+    let host = Host::new().with_agents(&[".claude", ".codex"]);
+    let printed = host.ok(&init_line(&["--agents"]));
+    let paths = host.placed(&[".claude", ".codex"]);
+    assert_eq!(printed, format!("desk created\n{}", lines(&paths)));
+    for home in [".claude", ".codex"] {
+        assert!(
+            fs::read_to_string(host.skill_of(home))
+                .unwrap()
+                .contains("name: worklog-next")
+        );
+        let hooks = host.hooks_json(home);
+        let command = hooks["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+            .as_str()
+            .unwrap();
+        assert_eq!(command, hook_command());
+    }
+}
+
+#[test]
+fn init_json_carries_the_paths_it_wrote_and_none_without_the_flag() {
+    let plain = Host::new().with_agents(&[".claude"]);
+    let bound = plain.json(&init_line(&[]));
+    assert_eq!(bound["written"], serde_json::json!([]), "{bound}");
+    assert!(!plain.skill_of(".claude").exists());
+    assert!(!plain.hooks_of(".claude").exists());
+
+    let host = Host::new().with_agents(&[".claude", ".codex"]);
+    let bound = host.json(&init_line(&["--agents"]));
+    let paths: Vec<String> = (host.placed(&[".claude", ".codex"]).iter())
+        .map(|path| path.display().to_string())
+        .collect();
+    assert_eq!(bound["written"], serde_json::json!(paths), "{bound}");
+    assert_eq!(bound["label"], "desk", "{bound}");
+}
+
+#[test]
+fn init_with_agents_and_no_agent_home_is_refused_before_anything_is_written() {
+    let host = Host::new();
+    let before = snapshot(&host);
+    let ran = host.run(&init_line(&["--agents"]));
+    assert_refused(
+        &ran,
+        1,
+        "worklog-next: no Claude Code or Codex home on this host\n",
+    );
+    assert_eq!(snapshot(&host), before);
+    assert!(!host.root.join("next").exists());
+    assert!(!host.home().join("kept").exists());
+    assert_refused(&host.run(&["topics"]), 1, NOT_SET_UP);
+}
+
+#[test]
+fn agents_install_reaches_the_agents_present_and_notes_a_hook_already_there() {
+    let host = Host::new().with_agents(&[".codex"]);
+    assert_refused(&host.run(&["topics"]), 1, NOT_SET_UP);
+    let first = host.ok(&["agents", "install"]);
+    assert_eq!(
+        first,
+        lines(&[host.skill_of(".codex"), host.hooks_of(".codex")])
+    );
+    assert!(!host.home().join(".claude").exists());
+    let hooks = fs::read(host.hooks_of(".codex")).unwrap();
+
+    let again = host.run(&["agents", "install"]);
+    assert_eq!(again.stdout, lines(&[host.skill_of(".codex")]));
+    assert_eq!(
+        again.stderr,
+        format!(
+            "worklog-next: {}: a SessionStart hook already runs worklog-next context\n",
+            host.hooks_of(".codex").display()
+        )
+    );
+    assert_eq!(again.code, Some(0));
+    assert_eq!(fs::read(host.hooks_of(".codex")).unwrap(), hooks);
+    assert_eq!(host.ok(&["agents", "refresh"]), "");
+}
+
+#[test]
+fn agents_install_with_no_agent_home_is_refused() {
+    let host = Host::new();
+    let ran = host.run(&["agents", "install"]);
+    assert_refused(
+        &ran,
+        1,
+        "worklog-next: no Claude Code or Codex home on this host\n",
+    );
+    assert!(!host.home().join(".claude").exists());
+}
+
+#[test]
+fn agents_refresh_writes_nothing_where_there_is_nothing_to_bring_up() {
+    let host = Host::new();
+    let before = snapshot(&host);
+    let ran = host.run(&["agents", "refresh"]);
+    assert_eq!((ran.stdout.as_str(), ran.stderr.as_str()), ("", ""));
+    assert_eq!(ran.code, Some(0));
+    assert_eq!(snapshot(&host), before);
+    assert!(!host.home().join(".claude").exists());
+    assert!(!host.home().join(".codex").exists());
+
+    let host = Host::new().with_agents(&[".claude", ".codex"]);
+    let before = snapshot(&host);
+    assert_eq!(host.ok(&["agents", "refresh"]), "");
+    assert_eq!(snapshot(&host), before);
+}
+
+#[test]
+fn agents_refresh_rewrites_a_stale_skill_and_a_stale_hook_and_nothing_else() {
+    let host = Host::new().with_agents(&[".claude", ".codex"]);
+    fs::create_dir_all(host.skill_of(".claude").parent().unwrap()).unwrap();
+    fs::write(host.skill_of(".claude"), "old").unwrap();
+    let theirs = serde_json::json!({"hooks": [{"type": "command", "command": "date"}]});
+    let stale = serde_json::json!(
+        {"hooks": [{"type": "command", "command": "\"/gone/worklog-next\" context"}]}
+    );
+    let before = serde_json::json!({"hooks": {"SessionStart": [theirs, stale]}});
+    fs::write(host.hooks_of(".codex"), before.to_string()).unwrap();
+
+    let printed = host.ok(&["agents", "refresh"]);
+    assert_eq!(
+        printed,
+        lines(&[host.skill_of(".claude"), host.hooks_of(".codex")])
+    );
+    assert_ne!(fs::read_to_string(host.skill_of(".claude")).unwrap(), "old");
+    assert!(!host.hooks_of(".claude").exists());
+    assert!(!host.skill_of(".codex").exists());
+    let after = host.hooks_json(".codex");
+    let groups = after["hooks"]["SessionStart"].as_array().unwrap();
+    assert_eq!(groups[0], theirs);
+    assert_eq!(groups[1]["hooks"][0]["command"], hook_command());
+    assert_eq!(host.ok(&["agents", "refresh"]), "");
+}
+
+#[test]
+fn agents_uninstall_takes_back_only_what_install_placed() {
+    let host = Host::new().with_agents(&[".claude", ".codex"]);
+    let other_skill = host.home().join(".claude/skills/other/SKILL.md");
+    fs::create_dir_all(other_skill.parent().unwrap()).unwrap();
+    fs::write(&other_skill, "desk").unwrap();
+    let theirs = serde_json::json!({"hooks": [{"type": "command", "command": "date"}]});
+    let before = serde_json::json!(
+        {"model": "atlas", "hooks": {"SessionStart": [theirs], "Stop": []}}
+    );
+    fs::write(host.hooks_of(".claude"), before.to_string()).unwrap();
+    host.ok(&["agents", "install"]);
+
+    let printed = host.ok(&["agents", "uninstall"]);
+    let skills = |home: &str| host.skill_of(home).parent().unwrap().to_path_buf();
+    assert_eq!(
+        printed,
+        lines(&[
+            skills(".claude"),
+            host.hooks_of(".claude"),
+            skills(".codex"),
+            host.hooks_of(".codex"),
+        ])
+    );
+    assert_eq!(fs::read_to_string(&other_skill).unwrap(), "desk");
+    assert!(!skills(".claude").exists());
+    assert_eq!(host.hooks_json(".claude"), before);
+    assert_eq!(host.ok(&["agents", "uninstall"]), "");
+}
+
+#[test]
+fn agents_install_json_prints_the_written_object() {
+    let host = Host::new().with_agents(&[".claude"]);
+    let printed = host.json(&["agents", "install"]);
+    let paths =
+        [host.skill_of(".claude"), host.hooks_of(".claude")].map(|p| p.display().to_string());
+    assert_eq!(printed, serde_json::json!({"written": paths}));
+    assert_eq!(
+        host.json(&["agents", "uninstall"])["written"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(
+        host.json(&["agents", "uninstall"]),
+        serde_json::json!({"written": []})
+    );
+}
+
+#[test]
+fn init_with_agents_over_a_hooks_file_it_cannot_edit_writes_nothing_at_all() {
+    let host = Host::new().with_agents(&[".claude", ".codex"]);
+    fs::write(host.hooks_of(".codex"), "{ not json").unwrap();
+    let before = snapshot(&host);
+    let ran = host.run(&init_line(&["--agents"]));
+    assert_eq!((ran.stdout.as_str(), ran.code), ("", Some(1)));
+    assert!(
+        ran.stderr.starts_with(&format!(
+            "worklog-next: {}: not readable as JSON",
+            host.hooks_of(".codex").display()
+        )),
+        "{}",
+        ran.stderr
+    );
+    assert_eq!(snapshot(&host), before);
+    assert!(!host.root.join("next").exists());
+    assert!(!host.home().join("kept").exists());
+    assert_refused(&host.run(&["topics"]), 1, NOT_SET_UP);
+}
+
+#[test]
+fn agents_install_writes_nothing_for_the_first_agent_when_the_second_cannot_be_edited() {
+    let host = Host::new().with_agents(&[".claude", ".codex"]);
+    fs::write(host.hooks_of(".codex"), "{\"hooks\": 1}").unwrap();
+    let before = snapshot(&host);
+    let refused = format!(
+        "worklog-next: {}: `hooks` is not an object\n",
+        host.hooks_of(".codex").display()
+    );
+    assert_refused(&host.run(&["agents", "install"]), 1, &refused);
+    assert_eq!(snapshot(&host), before);
+}
+
+#[test]
+fn agents_refresh_and_uninstall_over_a_hooks_file_that_is_not_json_change_nothing() {
+    let host = Host::new().with_agents(&[".claude", ".codex"]);
+    fs::create_dir_all(host.skill_of(".claude").parent().unwrap()).unwrap();
+    fs::write(host.skill_of(".claude"), "old").unwrap();
+    fs::write(host.hooks_of(".codex"), "{ not json").unwrap();
+    let before = snapshot(&host);
+    for action in ["refresh", "uninstall"] {
+        let ran = host.run(&["agents", action]);
+        assert_eq!((ran.stdout.as_str(), ran.code), ("", Some(1)), "{action}");
+        assert!(ran.stderr.contains("not readable as JSON"), "{action}");
+        assert_eq!(snapshot(&host), before, "{action}");
+    }
+}
+
+#[test]
+fn agents_refresh_under_another_file_name_is_refused_only_where_a_hook_is_there_to_rewrite() {
+    let host = Host::new().with_agents(&[".claude", ".codex"]);
+    let renamed = host.root.join("worklog-next-0.3.0");
+    fs::copy(binary(), &renamed).unwrap();
+    let refresh = || host.run_as(Command::new(&renamed), &host.home(), &["agents", "refresh"]);
+    let before = snapshot(&host);
+    let ran = refresh();
+    assert_eq!((ran.stdout.as_str(), ran.stderr.as_str()), ("", ""));
+    assert_eq!(ran.code, Some(0));
+    assert_eq!(snapshot(&host), before);
+
+    host.ok(&["agents", "install"]);
+    let before = snapshot(&host);
+    assert_refused(
+        &refresh(),
+        1,
+        &format!(
+            "worklog-next: {}: the binary's file name must be worklog-next, or its hook is not \
+             found again\n",
+            renamed.display()
+        ),
+    );
+    assert_eq!(snapshot(&host), before);
 }

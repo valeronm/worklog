@@ -1,8 +1,8 @@
 use std::path::Path;
 
-use super::Environment;
 use super::args::{ChangeCommand, Command, DraftCommand, ListCommand, NewWhat, ReadCommand};
 use super::render::{Output, output};
+use super::{Environment, agents};
 use crate::app::followup::{NewFollowup, TriggerArg};
 use crate::app::search::Query;
 use crate::app::{
@@ -41,6 +41,26 @@ fn trigger<'a>(when: &'a str, what: Option<&'a str>) -> Result<Option<TriggerArg
             "a trigger is `<date> <why>`, `touching <topic>` or `none`".to_owned(),
         )),
     }
+}
+
+// Everything that can refuse an agent's install is settled before the host is bound.
+fn initialized(
+    deps: &Deps,
+    environment: &Environment,
+    json: bool,
+    name: &str,
+    summary: Option<&str>,
+    with_agents: bool,
+) -> Result<Output, Failure> {
+    let placing = with_agents
+        .then(|| agents::Placing::on_this_host(environment))
+        .transpose()?;
+    let bound = setup::init(deps, name, summary)?;
+    let done = placing
+        .map(|placing| placing.install())
+        .transpose()?
+        .unwrap_or_default();
+    Ok(done.output(Some(bound), json))
 }
 
 fn opened(deps: &Deps, json: bool, new: &draft::New) -> Result<Output, Failure> {
@@ -239,9 +259,19 @@ pub(super) fn run(
     command: &Command,
 ) -> Result<Output, Failure> {
     match command {
-        Command::Init { name, summary, .. } => {
-            Ok(output(&setup::init(deps, name, summary.as_deref())?, json))
-        }
+        Command::Init {
+            name,
+            summary,
+            agents: with_agents,
+            ..
+        } => initialized(
+            deps,
+            environment,
+            json,
+            name,
+            summary.as_deref(),
+            *with_agents,
+        ),
         Command::Draft(command) => drafted(deps, json, command),
         Command::Change(command) => changed(deps, environment, json, command),
         Command::Read(command) => read(deps, environment, json, command),
@@ -283,6 +313,7 @@ mod tests {
             };
             let environment = Environment {
                 cwd: cwd.map(PathBuf::from),
+                binary: None,
                 variable: &|_| None,
             };
             run(&self.world.deps(), &environment, cli.json, command)

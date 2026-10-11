@@ -1,0 +1,225 @@
+use std::path::Path;
+
+use serde::Serialize;
+
+use super::args::AgentsAction;
+use super::render::{Output, Render, output};
+use super::skill::SKILL;
+use super::{Environment, NAME, hook};
+use crate::app::Failure;
+use crate::app::setup::Bound;
+use crate::domain::id::DocumentId;
+use crate::wiring::{self, Agent};
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub(super) struct Placed {
+    pub written: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub(super) struct Initialized {
+    pub document: DocumentId,
+    pub label: String,
+    pub created: bool,
+    pub written: Vec<String>,
+}
+
+impl Initialized {
+    pub(super) fn new(bound: Bound, written: Vec<String>) -> Initialized {
+        let Bound {
+            document,
+            label,
+            created,
+        } = bound;
+        Initialized {
+            document,
+            label,
+            created,
+            written,
+        }
+    }
+}
+
+fn lines(written: &[String]) -> String {
+    written
+        .iter()
+        .flat_map(|path| [path.as_str(), "\n"])
+        .collect()
+}
+
+impl Render for Placed {
+    fn text(&self) -> String {
+        lines(&self.written)
+    }
+}
+
+impl Render for Initialized {
+    fn text(&self) -> String {
+        let how = if self.created { "created" } else { "bound" };
+        format!("{} {how}\n{}", self.label, lines(&self.written))
+    }
+}
+
+#[derive(Default)]
+pub(super) struct Done {
+    written: Vec<String>,
+    notes: Vec<String>,
+}
+
+impl Done {
+    fn wrote(&mut self, path: &Path) {
+        self.written.push(path.display().to_string());
+    }
+
+    fn hooks(&mut self, agent: &Agent, planned: Option<&str>) -> Result<bool, Failure> {
+        if let Some(text) = planned {
+            agent.write_hooks(text)?;
+            self.wrote(agent.hooks());
+        }
+        Ok(planned.is_some())
+    }
+
+    /// The notes are given under `json` too, since the value printed there carries none.
+    pub(super) fn output(self, bound: Option<Bound>, json: bool) -> Output {
+        let mut made = match bound {
+            Some(bound) => output(&Initialized::new(bound, self.written), json),
+            None => output(
+                &Placed {
+                    written: self.written,
+                },
+                json,
+            ),
+        };
+        made.notes = self.notes;
+        made
+    }
+}
+
+fn present(known: Vec<Agent>) -> Result<Vec<Agent>, Failure> {
+    let names: Vec<&str> = known.iter().map(Agent::name).collect();
+    let present: Vec<Agent> = known.into_iter().filter(Agent::is_present).collect();
+    if present.is_empty() {
+        let (last, first) = names.split_last().expect("agents the tool knows");
+        let joined = if first.is_empty() {
+            (*last).to_owned()
+        } else {
+            format!("{} or {last}", first.join(", "))
+        };
+        return Err(Failure::Refused(format!("no {joined} home on this host")));
+    }
+    Ok(present)
+}
+
+type Planned = Vec<(Agent, Option<String>)>;
+
+// Every agent's hooks file is read and edited in memory before the first write.
+fn planned(
+    agents: Vec<Agent>,
+    hooks: impl Fn(&Agent) -> Result<Option<String>, Failure>,
+) -> Result<Planned, Failure> {
+    agents
+        .into_iter()
+        .map(|agent| hooks(&agent).map(|text| (agent, text)))
+        .collect()
+}
+
+/// An install with every refusal behind it: the binary's path is known and makes a command,
+/// an agent is present, and each hooks file was edited in memory.
+pub(super) struct Placing(Planned);
+
+impl Placing {
+    pub(super) fn on_this_host(environment: &Environment) -> Result<Placing, Failure> {
+        let binary = environment.binary()?;
+        let agents = present(wiring::agents(environment.variable)?)?;
+        planned(agents, |agent| hook::installed(agent, binary)).map(Placing)
+    }
+
+    pub(super) fn install(&self) -> Result<Done, Failure> {
+        let mut done = Done::default();
+        for (agent, hooks) in &self.0 {
+            done.wrote(&agent.write_skill(SKILL)?);
+            if !done.hooks(agent, hooks.as_deref())? {
+                done.notes.push(format!(
+                    "{}: a SessionStart hook already runs {NAME} context",
+                    agent.hooks().display()
+                ));
+            }
+        }
+        Ok(done)
+    }
+}
+
+fn refresh(environment: &Environment) -> Result<Done, Failure> {
+    let agents = wiring::agents(environment.variable)?;
+    let binary = || environment.binary();
+    let mut done = Done::default();
+    for (agent, hooks) in planned(agents, |agent| hook::refreshed(agent, binary))? {
+        if agent.read_skill()?.is_some_and(|held| held != SKILL) {
+            done.wrote(&agent.write_skill(SKILL)?);
+        }
+        done.hooks(&agent, hooks.as_deref())?;
+    }
+    Ok(done)
+}
+
+fn uninstall(environment: &Environment) -> Result<Done, Failure> {
+    let agents = wiring::agents(environment.variable)?;
+    let mut done = Done::default();
+    for (agent, hooks) in planned(agents, hook::uninstalled)? {
+        if let Some(dir) = agent.remove_skill()? {
+            done.wrote(&dir);
+        }
+        done.hooks(&agent, hooks.as_deref())?;
+    }
+    Ok(done)
+}
+
+pub(super) fn run(
+    action: AgentsAction,
+    environment: &Environment,
+    json: bool,
+) -> Result<Output, Failure> {
+    let done = match action {
+        AgentsAction::Install => Placing::on_this_host(environment)?.install()?,
+        AgentsAction::Refresh => refresh(environment)?,
+        AgentsAction::Uninstall => uninstall(environment)?,
+    };
+    Ok(done.output(None, json))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::testing::atlas;
+
+    #[test]
+    fn a_result_is_its_paths_one_to_a_line_and_init_puts_them_after_its_own_line() {
+        let written = vec!["/home/desk/a".to_owned(), "/home/desk/b".to_owned()];
+        assert_eq!(
+            Placed {
+                written: written.clone()
+            }
+            .text(),
+            "/home/desk/a\n/home/desk/b\n"
+        );
+        assert_eq!(
+            Placed {
+                written: Vec::new()
+            }
+            .text(),
+            ""
+        );
+        let mut made = Initialized::new(
+            Bound {
+                document: atlas(),
+                label: "atlas".to_owned(),
+                created: true,
+            },
+            written,
+        );
+        assert_eq!(made.text(), "atlas created\n/home/desk/a\n/home/desk/b\n");
+        made.created = false;
+        made.written.clear();
+        assert_eq!(made.text(), "atlas bound\n");
+    }
+}

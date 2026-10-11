@@ -8,10 +8,7 @@ use crate::domain::id::{DocumentId, VersionId, is_hex};
 use crate::domain::ports::{Store, StoreError};
 use crate::domain::version::{Kind, ReadError, Version};
 
-use super::{directories, files, io_error};
-
-/// The folder's ignore file names the same prefix.
-const STAGING_PREFIX: &str = ".tmp-";
+use super::{STAGING_PREFIX, directories, files, io_error};
 
 // A version's file is never rewritten. One instance is one snapshot: the tree is walked
 // once and remembered.

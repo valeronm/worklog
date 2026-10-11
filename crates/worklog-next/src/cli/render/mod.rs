@@ -16,7 +16,6 @@ use serde::Serialize;
 use super::json::{Pinned, nothing, printed};
 use crate::app::draft::DraftRow;
 use crate::app::followup::Made;
-use crate::app::setup::Bound;
 use crate::app::{DraftRef, Row, Written};
 use crate::render::{change_or_ending, ended, written};
 
@@ -144,13 +143,6 @@ impl Render for Made {
     }
 }
 
-impl Render for Bound {
-    fn text(&self) -> String {
-        let how = if self.created { "created" } else { "bound" };
-        format!("{} {how}\n", self.label)
-    }
-}
-
 impl Render for Vec<DraftRow> {
     fn text(&self) -> String {
         let mut text = String::new();
@@ -245,18 +237,6 @@ mod tests {
         assert_eq!(Vec::<Written>::new().text(), "");
         assert_eq!(Made::Written(one.clone()).text(), one.text());
         assert_eq!(Made::Draft(draft()).text(), draft().text());
-    }
-
-    #[test]
-    fn a_bound_host_says_whether_its_topic_was_made() {
-        let mut made = Bound {
-            document: atlas(),
-            label: "atlas".to_owned(),
-            created: true,
-        };
-        assert_eq!(made.text(), "atlas created\n");
-        made.created = false;
-        assert_eq!(made.text(), "atlas bound\n");
     }
 
     #[test]

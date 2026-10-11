@@ -1,5 +1,3 @@
-use serde::Serialize;
-
 use crate::app::draft::usage;
 use crate::app::lookup::{Lookup, held_by_several};
 use crate::app::save::stepped;
@@ -11,7 +9,7 @@ use crate::domain::version::Fields;
 
 const INIT: &str = "init";
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Bound {
     /// The machine topic the host is bound to.
     pub document: DocumentId,

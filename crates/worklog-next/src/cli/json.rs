@@ -1,4 +1,5 @@
-//! The form `--json` gives a result: the use case's own type, one value and a newline.
+//! The form `--json` gives a result: the use case's own type, or for `agents` and `init` the
+//! command line's own, one value and a newline.
 //!
 //! One convention holds for every value. A key is in snake case. An enum that carries data
 //! is an object whose `type` key holds the variant in snake case, and one that carries none
@@ -37,6 +38,7 @@ pub(super) fn nothing() -> String {
 mod tests {
     use serde_json::{Value, json};
 
+    use super::super::agents::{Initialized, Placed};
     use super::super::render::{Render, output};
     use super::*;
     use crate::app::check::Check;
@@ -45,7 +47,6 @@ mod tests {
     use crate::app::followup::{Made, NewFollowup};
     use crate::app::list::{ClaimRow, EntryRow, FactRow, ForkRow, TopicRow};
     use crate::app::search::{Hit, Logged, Query};
-    use crate::app::setup::Bound;
     use crate::app::show::{Diff, History, Shown};
     use crate::app::testing::{
         ENDED as RETIRED, ENDED_FACT, NOW, World, claim_fields, entry, fact, followup, fork, head,
@@ -127,7 +128,8 @@ mod tests {
         a_listed_draft_holds_its_kind_its_label_and_its_path: Vec<DraftRow> = drafts,
         a_draft_discarded_is_null: () = discarded,
         a_followup_made_is_the_version_stored_or_the_draft_opened: Made = made,
-        a_bound_host_is_its_machine_topic_and_whether_it_was_made: Bound = bound,
+        a_bound_host_is_its_machine_topic_whether_it_was_made_and_what_agents_got: Initialized = bound,
+        the_paths_an_agents_command_wrote_are_listed: Placed = placed,
         a_topic_row_holds_its_row_and_the_labels_of_its_edges: Vec<TopicRow> = topics,
         a_fact_row_holds_its_date_and_an_ended_one_its_reason: Vec<FactRow> = facts,
         an_entry_row_holds_its_date: Vec<EntryRow> = entries,
@@ -410,13 +412,43 @@ mod tests {
         vec![(stored, stored_as), (opened, opened_as)]
     }
 
-    fn bound() -> Vec<(Bound, Value)> {
+    fn bound() -> Vec<(Initialized, Value)> {
         let mut world = World::new();
         world.host.set_machine(None);
         let bound = setup::init(&world.deps(), "desk", Some("A machine")).unwrap();
         let document = world.host.bound().expect("a host that init bound");
-        let expected = json!({"document": document, "label": "desk", "created": true});
-        vec![(bound, expected)]
+        let paths = vec!["/home/desk/.claude/settings.json".to_owned()];
+        let expected = json!({
+            "document": document,
+            "label": "desk",
+            "created": true,
+            "written": paths,
+        });
+        let bare = json!({
+            "document": document,
+            "label": "desk",
+            "created": true,
+            "written": [],
+        });
+        let again = Initialized::new(bound.clone(), Vec::new());
+        vec![(Initialized::new(bound, paths), expected), (again, bare)]
+    }
+
+    fn placed() -> Vec<(Placed, Value)> {
+        let written = vec![
+            "/home/desk/.claude/skills/worklog-next/SKILL.md".to_owned(),
+            "/home/desk/.claude/settings.json".to_owned(),
+        ];
+        let nothing = Placed {
+            written: Vec::new(),
+        };
+        let some = Placed {
+            written: written.clone(),
+        };
+        vec![
+            (some, json!({"written": written})),
+            (nothing, json!({"written": []})),
+        ]
     }
 
     fn topics() -> Vec<(Vec<TopicRow>, Value)> {

@@ -6,6 +6,7 @@ use std::net::SocketAddr;
 use clap::error::ErrorKind;
 use clap::{CommandFactory as _, Parser, Subcommand};
 
+use super::NAME;
 use crate::domain::schema::{KindOf, Reason};
 use crate::web::Server;
 
@@ -20,7 +21,7 @@ fn reasons() -> String {
 
 #[derive(Parser)]
 #[command(
-    name = "worklog-next",
+    name = NAME,
     version,
     about = "A store of work done, durable facts, follow-ups and topics",
     long_about = "Every document is a chain of immutable versions; a write is a new version and \
@@ -67,6 +68,21 @@ pub enum Invoked {
         #[arg(long = "host", value_name = "NAME", value_parser = Server::host_name)]
         hosts: Vec<String>,
     },
+    /// Place or take back the skill and the session hook of the coding agents on this host
+    Agents {
+        #[command(subcommand)]
+        action: AgentsAction,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Subcommand)]
+pub enum AgentsAction {
+    /// Write the skill and add the session hook for every agent on this host
+    Install,
+    /// Bring a skill and a hook already there up to this binary, and write nothing else
+    Refresh,
+    /// Remove the skill and the session hook from every agent
+    Uninstall,
 }
 
 #[derive(Subcommand)]
@@ -81,6 +97,9 @@ pub enum Command {
         /// What the machine is, for a topic that does not exist yet
         #[arg(long)]
         summary: Option<String>,
+        /// Also install the skill and the session hook for every coding agent on this host
+        #[arg(long)]
+        agents: bool,
     },
     #[command(flatten)]
     Draft(DraftCommand),
@@ -479,7 +498,7 @@ mod tests {
     fn serve_listens_on_the_loopback_unless_told_and_takes_each_host_it_is_given() {
         let served = |line: &str| match parsed(line).unwrap().command {
             Invoked::Serve { bind, hosts } => (bind.to_string(), hosts),
-            Invoked::Run(_) => panic!("{line}: expected a serve"),
+            Invoked::Run(_) | Invoked::Agents { .. } => panic!("{line}: expected a serve"),
         };
         assert_eq!(
             served("worklog-next serve"),
@@ -537,5 +556,30 @@ mod tests {
         ] {
             assert!(help.contains(line), "{line}: {help}");
         }
+    }
+
+    #[test]
+    fn agents_takes_an_action_and_init_an_optional_flag() {
+        for (word, action) in [
+            ("install", AgentsAction::Install),
+            ("refresh", AgentsAction::Refresh),
+            ("uninstall", AgentsAction::Uninstall),
+        ] {
+            let Invoked::Agents { action: given } = parsed(&format!("worklog-next agents {word}"))
+                .unwrap()
+                .command
+            else {
+                panic!("{word}: expected agents");
+            };
+            assert_eq!(given, action);
+        }
+        assert!(parsed("worklog-next agents").is_err());
+        assert!(parsed("worklog-next agents remove").is_err());
+        let init = |line: &str| match parsed(line).unwrap().command {
+            Invoked::Run(Command::Init { agents, .. }) => agents,
+            _ => panic!("{line}: expected an init"),
+        };
+        assert!(!init("worklog-next init desk --store kept"));
+        assert!(init("worklog-next init desk --store kept --agents"));
     }
 }

@@ -1,10 +1,13 @@
 //! Argument parsing and rendering. stdout carries data only and refusals and notes go to
 //! stderr; exit 1 is a refusal or a store problem and 2 a usage error.
 
+mod agents;
 mod args;
+mod hook;
 mod json;
 mod render;
 mod run;
+mod skill;
 
 use std::ffi::OsString;
 use std::io::{ErrorKind, Write};
@@ -22,6 +25,7 @@ const NAME: &str = "worklog-next";
 
 struct Environment<'a> {
     cwd: Option<PathBuf>,
+    binary: Option<PathBuf>,
     variable: &'a dyn Fn(&str) -> Option<OsString>,
 }
 
@@ -30,6 +34,12 @@ impl Environment<'_> {
         self.cwd
             .as_deref()
             .ok_or_else(|| Failure::Refused("no working directory".to_owned()))
+    }
+
+    fn binary(&self) -> Result<&Path, Failure> {
+        self.binary
+            .as_deref()
+            .ok_or_else(|| Failure::Refused("the path of this binary is unknown".to_owned()))
     }
 
     fn joined(&self, given: &Path) -> Result<PathBuf, Failure> {
@@ -54,6 +64,7 @@ impl Environment<'_> {
 pub fn main() -> i32 {
     let environment = Environment {
         cwd: std::env::current_dir().ok(),
+        binary: std::env::current_exe().ok(),
         variable: &|name| std::env::var_os(name),
     };
     main_in(
@@ -197,8 +208,15 @@ where
     let command = match &cli.command {
         Invoked::Run(command) => command,
         Invoked::Serve { bind, hosts } => return serve(bind, hosts, environment, out, err),
+        Invoked::Agents { action } => {
+            return finished(agents::run(*action, environment, cli.json), out, err);
+        }
     };
-    let output = match answered(command, cli.json, environment) {
+    finished(answered(command, cli.json, environment), out, err)
+}
+
+fn finished(answer: Result<Output, Failure>, out: &mut dyn Write, err: &mut dyn Write) -> i32 {
+    let output = match answer {
         Ok(output) => output,
         Err(failure) => {
             fail(err, &failure);
@@ -246,6 +264,7 @@ mod tests {
         };
         let environment = Environment {
             cwd: cwd.map(Path::to_path_buf),
+            binary: Some(root.join("worklog-next")),
             variable: &variable,
         };
         let mut err = Vec::new();
@@ -335,6 +354,7 @@ mod tests {
         let at = |cwd: Option<&str>, given: &str| {
             let environment = Environment {
                 cwd: cwd.map(PathBuf::from),
+                binary: None,
                 variable: &|_| None,
             };
             environment.placed(Path::new(given))
@@ -452,5 +472,45 @@ mod tests {
             (err.as_str(), code),
             ("worklog-next: lantern: no draft\n", 1)
         );
+    }
+
+    #[test]
+    fn a_command_that_names_the_binary_in_a_file_is_refused_when_its_path_is_unknown() {
+        let kept = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(kept.path()).unwrap();
+        std::fs::create_dir_all(root.join("home/.claude")).unwrap();
+        let variable = |name: &str| match name {
+            "HOME" => Some(root.join("home").into_os_string()),
+            _ => None,
+        };
+        let environment = Environment {
+            cwd: None,
+            binary: None,
+            variable: &variable,
+        };
+        let ran = |action: &str| {
+            let (mut out, mut err) = (Vec::new(), Vec::new());
+            let args = ["worklog-next", "agents", action];
+            let code = main_in(args, &environment, &mut out, &mut err);
+            assert!(out.is_empty());
+            (String::from_utf8(err).unwrap(), code)
+        };
+        let unknown = (
+            "worklog-next: the path of this binary is unknown\n".to_owned(),
+            1,
+        );
+        assert_eq!(ran("install"), unknown);
+        assert_eq!(ran("refresh"), (String::new(), 0));
+        assert!(!root.join("home/.claude/settings.json").exists());
+
+        let hooks =
+            r#"{"hooks": {"SessionStart": [{"hooks": [{"command": "worklog-next context"}]}]}}"#;
+        std::fs::write(root.join("home/.claude/settings.json"), hooks).unwrap();
+        assert_eq!(ran("refresh"), unknown);
+        std::fs::remove_file(root.join("home/.claude/settings.json")).unwrap();
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let args = ["worklog-next", "agents", "uninstall"];
+        assert_eq!(main_in(args, &environment, &mut out, &mut err), 0);
+        assert!(!root.join("home/.claude/settings.json").exists());
     }
 }

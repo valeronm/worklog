@@ -1,5 +1,4 @@
 use std::fs;
-use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use toml::{Table, Value};
@@ -7,7 +6,7 @@ use toml::{Table, Value};
 use crate::domain::id::DocumentId;
 use crate::domain::ports::StoreError;
 
-use super::{io_error, optional};
+use super::{optional, replace};
 
 const STORE: &str = "store";
 const MACHINE: &str = "machine";
@@ -27,13 +26,6 @@ fn text_of<'t>(table: &'t Table, key: &str, path: &Path) -> Result<&'t str, Stor
         )),
         None => Err(StoreError::io(path.display(), format!("no `{key}`"))),
     }
-}
-
-// A file renamed before its bytes reach the disk can be empty after a crash.
-fn staged(staging: &Path, text: &str) -> std::io::Result<()> {
-    let mut file = fs::File::create(staging)?;
-    file.write_all(text.as_bytes())?;
-    file.sync_all()
 }
 
 impl Config {
@@ -65,19 +57,7 @@ impl Config {
         table.insert(STORE.to_owned(), store.into());
         table.insert(MACHINE.to_owned(), self.machine.as_str().into());
         let text = toml::to_string(&table).map_err(|e| StoreError::io(path.display(), e))?;
-        let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else {
-            return Err(StoreError::io(path.display(), "is not a file's path"));
-        };
-        fs::create_dir_all(dir).map_err(|e| io_error(dir, &e))?;
-        // A rename replaces the file whole only from the same file system.
-        let staging = dir.join(format!(".tmp-{}", name.to_string_lossy()));
-        let replaced = staged(&staging, &text)
-            .map_err(|e| io_error(&staging, &e))
-            .and_then(|()| fs::rename(&staging, path).map_err(|e| io_error(path, &e)));
-        if replaced.is_err() {
-            let _ = fs::remove_file(&staging);
-        }
-        replaced
+        replace(path, &text, |staging| fs::File::create(staging))
     }
 }
 
