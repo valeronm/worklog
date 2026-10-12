@@ -4,7 +4,8 @@ use std::fmt::Write as _;
 
 use askama::Template;
 
-use super::links::{Line, Link, Nav, Place, Text, doc_href, doc_links, encoded};
+use super::links::{Line, Link, Nav, Place, Text, doc_links, encoded};
+use super::versions::document_link;
 use crate::app::check::{Check, Finding};
 use crate::app::list::{EntryRow, FactRow};
 use crate::app::search::{Hit, Query};
@@ -79,13 +80,13 @@ pub struct Scope<'q> {
 }
 
 pub fn shown_link(shown: &Shown) -> Link {
-    let (label, document) = match shown {
-        Shown::Document(document) => (&document.label, &document.document),
-        Shown::Version(compared) => (&compared.label, &compared.document),
-    };
-    Link {
-        text: label.clone(),
-        href: doc_href(document),
+    match shown {
+        Shown::Document(document) => Link::to(
+            &document.document,
+            &document.label,
+            document.ended.as_deref(),
+        ),
+        Shown::Version(compared) => document_link(compared),
     }
 }
 
@@ -119,10 +120,7 @@ impl Listing {
             title: place.title(),
             count: counted(rows.len(), one, several),
             under: scope.under,
-            ended_switch: Link {
-                text: text.to_owned(),
-                href,
-            },
+            ended_switch: Link::plain(text.to_owned(), href),
             rows,
         }
     }
@@ -197,9 +195,11 @@ pub struct Found {
 fn findings(found: &[Finding]) -> Vec<Found> {
     (found.iter())
         .map(|finding| Found {
-            title: Text {
-                text: finding.label.clone(),
-                href: finding.document.as_ref().map(doc_href),
+            title: match &finding.document {
+                Some(document) => {
+                    Text::Link(Link::to(document, &finding.label, finding.ended.as_deref()))
+                }
+                None => Text::plain(&finding.label),
             },
             what: finding.what.clone(),
         })
@@ -224,10 +224,7 @@ impl CheckPage {
             nav: Nav::at(Some(Place::Check)),
             problem_count: summary.problems,
             notice_count: summary.notices,
-            forks: Link {
-                text: summary.forks,
-                href: Place::Forks.route().to_owned(),
-            },
+            forks: Link::plain(summary.forks, Place::Forks.route().to_owned()),
             problems: findings(&check.problems),
             notices: findings(&check.notices),
         }
@@ -244,6 +241,7 @@ mod tests {
         let finding = |document: Option<DocumentId>| Finding {
             document,
             label: "<b>lamp</b>".to_owned(),
+            ended: None,
             what: "holds <i>this</i>".to_owned(),
         };
         let lamp = DocumentId::from_bytes([7; 16]);

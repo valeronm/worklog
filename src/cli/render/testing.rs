@@ -13,6 +13,10 @@ pub(super) fn to(label: &str) -> Reference {
     crate::app::testing::to(&atlas(), label)
 }
 
+pub(super) fn to_ended(label: &str, reason: &str) -> Reference {
+    crate::app::testing::to_ended(&atlas(), label, reason)
+}
+
 pub(super) fn look_again(day: &str) -> TriggerShown {
     TriggerShown::LookAgain {
         on: Date::parse(day).expect("a date"),

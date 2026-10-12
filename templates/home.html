@@ -12,8 +12,8 @@
 </ul>
 {%- when Step::End -%}
 </li>
-{%- when Step::Again with (link) -%}
-<li><a href="{{ link.href }}">{{ link.text }}</a> <span class="muted">shown above</span></li>
+{%- when Step::Again with (again) -%}
+<li>{% call m::link(again) %}{% endcall %} <span class="muted">shown above</span></li>
 {%- when Step::Topic with (t) -%}
 <li>{% call m::topic(t) %}{% endcall %}
 {%- endmatch -%}

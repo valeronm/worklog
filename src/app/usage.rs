@@ -66,14 +66,9 @@ pub fn usage(
                 .map(|(command, run_count)| CommandCount { command, run_count })
                 .collect();
             commands.sort_by(|a, b| (b.run_count, &a.command).cmp(&(a.run_count, &b.command)));
-            let topic = topics.name(&machine).map(ToString::to_string);
-            let label = topic.clone().unwrap_or_else(|| machine.to_string());
             MachineUsage {
-                machine: Reference {
-                    document: machine,
-                    label,
-                },
-                topic,
+                machine: topics.machine(&machine),
+                topic: topics.name(&machine).map(ToString::to_string),
                 commands,
             }
         })
@@ -109,7 +104,9 @@ mod tests {
 
     use super::*;
     use crate::app::amend::rename;
-    use crate::app::testing::{World, counted, fact, refused, to, topic, world_with_atlas};
+    use crate::app::testing::{
+        ENDED, World, counted, fact, refused, to, to_ended, topic, topic_fields, world_with_atlas,
+    };
     use crate::domain::id::DocumentId;
     use crate::domain::ports::{StoreError, Usage};
     use crate::domain::testing::ran;
@@ -158,6 +155,9 @@ mod tests {
         let only = of(Some("phone"), None).unwrap();
         assert_eq!(only.len(), 1);
         assert_eq!(only[0].machine, to(&phone, "phone"));
+        world.amend(&phone, &topic_fields("phone", ENDED), "\n");
+        let only = of(Some("phone"), None).unwrap();
+        assert_eq!(only[0].machine, to_ended(&phone, "phone", "retired"));
         assert_eq!(of(Some("atlas"), None), Ok(Vec::new()));
         assert_eq!(refused(of(Some("torch"), None)), "torch: names no document");
 

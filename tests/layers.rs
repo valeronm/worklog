@@ -794,6 +794,25 @@ fn one_use_case_puts_a_version_in_the_store() {
     assert_eq!(writers, ["save"]);
 }
 
+#[test]
+fn a_reference_is_made_by_the_lookup_and_the_topic_index_alone() {
+    let mut found = Vec::new();
+    sources(&app(), &mut found);
+    let mut makers = Vec::new();
+    for (path, text) in found {
+        let module = module_of(&path);
+        if module == TEST_SUPPORT {
+            continue;
+        }
+        for _ in outside_tests(&text).matches("Reference::to(") {
+            makers.push(module.clone());
+        }
+    }
+    makers.sort();
+    makers.dedup();
+    assert_eq!(makers, ["index", "lookup"]);
+}
+
 const APPENDS: &str = "appends to the log";
 const READS: &str = "reads the log";
 const HANDS_ON: &str = "hands the log on";

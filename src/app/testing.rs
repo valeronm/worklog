@@ -257,7 +257,11 @@ pub fn counted(counts: &[(&str, usize)]) -> Vec<CommandCount> {
 }
 
 pub fn to(document: &DocumentId, label: &str) -> Reference {
-    Reference::to(document, label.to_owned())
+    Reference::to(document, label.to_owned(), None)
+}
+
+pub fn to_ended(document: &DocumentId, label: &str, reason: &str) -> Reference {
+    Reference::to(document, label.to_owned(), Some(reason.to_owned()))
 }
 
 pub fn row(id: &DocumentId, label: &str, summary: &str) -> Row {

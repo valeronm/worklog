@@ -3,13 +3,11 @@
 use askama::Template;
 
 use super::document::Head;
-use super::links::{
-    Line, Link, Nav, Place, Stamped, Text, doc_href, history_href, marks, version_link,
-};
-use crate::app::counted;
+use super::links::{Line, Link, Nav, Place, Stamped, Text, history_href, marks, version_link};
 use crate::app::list::{ForkHead, ForkRow};
 use crate::app::search::Logged;
 use crate::app::show::{Compared, History, Side};
+use crate::app::{Row, counted};
 use crate::render::diff::{Hunk, Mark, UNTERMINATED, hunks};
 use crate::render::{against, change_or_ending, ended, unread_notes};
 
@@ -33,14 +31,23 @@ impl HistoryPage {
             .collect();
         HistoryPage {
             nav: Nav::at(None),
-            document: Link {
-                text: history.label.clone(),
-                href: doc_href(&history.document),
-            },
+            document: Link::to(&history.document, &history.label, history.ended.as_deref()),
             notes: unread_notes(&history.unreadable),
             rows,
         }
     }
+}
+
+fn ended_of(row: Option<&Row>) -> Option<&str> {
+    row.and_then(|row| row.ended.as_deref())
+}
+
+pub(super) fn document_link(compared: &Compared) -> Link {
+    Link::to(
+        &compared.document,
+        &compared.label,
+        compared.document_ended.as_deref(),
+    )
 }
 
 pub struct LogRow {
@@ -63,10 +70,11 @@ impl LogPage {
                 change: Some(change_or_ending(&logged.change, logged.ended.as_deref())),
                 ..Stamped::new(&logged.version, &logged.written, &logged.machine)
             },
-            document: Link {
-                text: logged.label.clone(),
-                href: doc_href(&logged.document),
-            },
+            document: Link::to(
+                &logged.document,
+                &logged.label,
+                ended_of(logged.row.as_ref()),
+            ),
         });
         LogPage {
             nav: Nav::at(Some(Place::Log)),
@@ -90,11 +98,10 @@ impl From<&ForkRow> for Fork {
         };
         Fork {
             line: Line {
-                href: doc_href(&fork.document),
-                label: fork.label.clone(),
+                title: Link::to(&fork.document, &fork.label, ended_of(row)),
                 summary: row.map(|row| row.summary.clone()).unwrap_or_default(),
                 counts: Vec::new(),
-                marks: marks(false, row.and_then(|row| row.ended.as_deref())),
+                marks: marks(false, ended_of(row)),
             },
             heads: fork.heads.iter().map(head).collect(),
         }
@@ -161,9 +168,9 @@ impl Changes {
     fn new(side: &Side, after: &str) -> Changes {
         let against = against(side);
         Changes {
-            against: Text {
-                href: against.held.map(|parent| version_link(parent).href),
-                text: against.words,
+            against: match against.held {
+                Some(parent) => Text::Link(Link::plain(against.words, version_link(parent).href)),
+                None => Text::Plain(against.words),
             },
             lines: diff_lines(hunks(&side.before, after)),
         }
@@ -186,10 +193,7 @@ impl VersionPage {
         let version = &compared.version;
         VersionPage {
             nav: Nav::at(None),
-            document: Link {
-                text: compared.label.clone(),
-                href: doc_href(&compared.document),
-            },
+            document: document_link(compared),
             history: history_href(&compared.document),
             is_head: version.head,
             sides: (compared.sides.iter())
@@ -219,6 +223,7 @@ mod tests {
         let compared = Compared {
             document: DocumentId::from_bytes([3; 16]),
             label: "lantern".to_owned(),
+            document_ended: None,
             version: version(b"joined"),
             sides: vec![
                 side(Some(b"left"), true, "a\nc\n"),
@@ -229,7 +234,13 @@ mod tests {
         };
         let page = VersionPage::new(&compared);
         let named: Vec<(&str, Option<&str>)> = (page.sides.iter())
-            .map(|side| (side.against.text.as_str(), side.against.href.as_deref()))
+            .map(|side| {
+                let against = &side.against;
+                (
+                    against.words(),
+                    against.link().map(|link| link.href.as_str()),
+                )
+            })
             .collect();
         let (left, same) = (VersionId::of(b"left"), VersionId::of(b"same"));
         let not_held = format!("{} (not held)", VersionId::of(b"right").short());

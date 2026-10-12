@@ -53,7 +53,7 @@ fn facts_are_listed_with_their_links_and_marks() {
     has(
         &html,
         &format!(
-            "<a class=\"title\" href=\"/doc/{wick}\">lantern/wick</a> \
+            "<a class=\"title ended\" href=\"/doc/{wick}\" title=\"ended false\">lantern/wick</a> \
              <span class=\"what\">s</span> <span class=\"mark\">ended false</span>"
         ),
     );

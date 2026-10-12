@@ -8,6 +8,7 @@ use crate::app::{Reference, Row};
 use crate::domain::id::{DocumentId, VersionId};
 use crate::domain::version::Stamp;
 use crate::render::{ended, written};
+use crate::web::mark::EndedMark;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Place {
@@ -101,25 +102,52 @@ pub const HISTORY: &str = "/history/";
 pub struct Link {
     pub text: String,
     pub href: String,
+    pub mark: Option<EndedMark>,
 }
 
-pub struct Text {
-    pub text: String,
-    pub href: Option<String>,
+impl Link {
+    pub(super) fn plain(text: String, href: String) -> Link {
+        Link {
+            text,
+            href,
+            mark: None,
+        }
+    }
+
+    pub(super) fn to(document: &DocumentId, label: &str, ended: Option<&str>) -> Link {
+        Link {
+            text: label.to_owned(),
+            href: doc_href(document),
+            mark: EndedMark::of(ended),
+        }
+    }
+}
+
+pub enum Text {
+    Plain(String),
+    Link(Link),
 }
 
 impl Text {
     pub(super) fn plain(text: &str) -> Text {
-        Text {
-            text: text.to_owned(),
-            href: None,
-        }
+        Text::Plain(text.to_owned())
     }
 
     pub(super) fn naming(document: &Reference) -> Text {
-        Text {
-            text: document.label.clone(),
-            href: Some(doc_href(&document.document)),
+        Text::Link(doc_link(document))
+    }
+
+    pub fn link(&self) -> Option<&Link> {
+        match self {
+            Text::Plain(_) => None,
+            Text::Link(link) => Some(link),
+        }
+    }
+
+    pub fn words(&self) -> &str {
+        match self {
+            Text::Plain(words) => words,
+            Text::Link(link) => &link.text,
         }
     }
 }
@@ -167,17 +195,11 @@ pub(super) fn history_href(document: &DocumentId) -> String {
 }
 
 pub(super) fn version_link(version: &VersionId) -> Link {
-    Link {
-        text: version.short().to_owned(),
-        href: format!("{DOC}{version}"),
-    }
+    Link::plain(version.short().to_owned(), format!("{DOC}{version}"))
 }
 
 pub(super) fn doc_link(document: &Reference) -> Link {
-    Link {
-        text: document.label.clone(),
-        href: doc_href(&document.document),
-    }
+    Link::to(&document.document, &document.label, document.ended())
 }
 
 pub(super) fn doc_links(documents: &[Reference]) -> Vec<Link> {
@@ -190,8 +212,7 @@ pub(super) fn marks(forked: bool, ended_for: Option<&str>) -> Vec<String> {
 }
 
 pub struct Line {
-    pub href: String,
-    pub label: String,
+    pub title: Link,
     pub summary: String,
     pub counts: Vec<String>,
     pub marks: Vec<String>,
@@ -200,8 +221,7 @@ pub struct Line {
 impl From<&Row> for Line {
     fn from(row: &Row) -> Line {
         Line {
-            href: doc_href(&row.document),
-            label: row.label.clone(),
+            title: Link::to(&row.document, &row.label, row.ended.as_deref()),
             summary: row.summary.clone(),
             counts: Vec::new(),
             marks: marks(row.forked, row.ended.as_deref()),

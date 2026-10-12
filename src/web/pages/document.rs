@@ -227,7 +227,7 @@ mod tests {
         let values: Vec<Vec<(&str, Option<&str>)>> = (head.fields.iter())
             .map(|field| {
                 (field.values.iter())
-                    .map(|value| (value.text.as_str(), value.href.as_deref()))
+                    .map(|value| (value.words(), value.link().map(|link| link.href.as_str())))
                     .collect()
             })
             .collect();

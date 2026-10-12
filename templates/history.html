@@ -3,7 +3,7 @@
 {% block title %}History of {{ document.text }}{% endblock %}
 {% block content %}
 <h1>History</h1>
-<p class="meta"><span class="kind">of</span><a href="{{ document.href }}">{{ document.text }}</a></p>
+<p class="meta"><span class="kind">of</span>{% call m::link(document) %}{% endcall %}</p>
 {% for note in notes %}<p class="notice">{{ note }}</p>
 {% endfor -%}
 {% if rows.is_empty() %}<p class="muted">No version reads.</p>{% else %}

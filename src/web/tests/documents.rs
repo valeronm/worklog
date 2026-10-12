@@ -1,8 +1,8 @@
-use super::{forked_into, has, lacks, ok, stamp};
+use super::{forked_into, has, lacks, main_of, ok, stamp};
 use crate::app::show;
 use crate::app::show::Shown;
 use crate::app::testing::{
-    ENDED, fact, fact_fields, fork, topic, topic_fields, world, world_with_atlas,
+    DONE, ENDED, fact, fact_fields, fork, topic, topic_fields, world, world_with_atlas,
 };
 use crate::domain::id::{DocumentId, VersionId};
 use crate::domain::version::ReadError;
@@ -147,7 +147,7 @@ fn a_forked_document_is_marked_and_shows_each_head_under_a_heading_naming_it() {
     }
     assert_ne!(shown.heads[0].body, shown.heads[1].body);
     lacks(&html, "<p class=\"stamp\">");
-    lacks(&html, "ended");
+    lacks(main_of(&html), "ended");
 }
 
 #[test]
@@ -326,4 +326,55 @@ fn a_link_stored_as_unresolved_links_to_the_document_its_text_names_now() {
     has(&html, &format!("See <a href=\"/doc/{relay}\">"));
     has(&html, &format!(" and <a href=\"/doc/{atlas}\">"));
     lacks(&html, "class=\"unresolved\"");
+}
+
+#[test]
+fn a_link_to_an_ended_document_is_marked_with_the_reason_and_still_leads_to_it() {
+    let (world, lantern, atlas) = world_with_atlas();
+    let fuse = fact(&world, &lantern, "fuse", DONE);
+    let phone = topic(&world, "phone", ENDED);
+    world.amend_linking(
+        &atlas,
+        &topic_fields("atlas", ""),
+        "See [[lantern/fuse]], [[lantern]], [[phone]] and [[nowhere]].\n",
+        &[
+            ("lantern/fuse", Some(&fuse)),
+            ("lantern", Some(&lantern)),
+            ("phone", None),
+            ("nowhere", None),
+        ],
+    );
+    let html = ok(&world, "/doc/atlas");
+    has(
+        &html,
+        &format!(
+            "<p>See <a class=\"ended\" href=\"/doc/{fuse}\" title=\"ended done\">\
+             lantern/fuse</a>, <a href=\"/doc/{lantern}\">lantern</a>, \
+             <a class=\"ended\" href=\"/doc/{phone}\" title=\"ended retired\">phone</a> and \
+             <span class=\"unresolved\">[[nowhere]]</span>.</p>"
+        ),
+    );
+    has(&html, "a.ended");
+    ok(&world, &format!("/doc/{fuse}"));
+}
+
+#[test]
+fn a_reason_this_worklog_does_not_know_is_escaped_in_the_title_of_a_link() {
+    let (world, lantern, atlas) = world_with_atlas();
+    let sold = "ended = \"sold & <gone> \\\"x\\\"\"\nended_on = 2026-10-09\nnote = \"n\"\n";
+    world.amend(&atlas, &topic_fields("atlas", sold), "\n");
+    world.amend_linking(
+        &lantern,
+        &topic_fields("lantern", ""),
+        "See [[atlas]].\n",
+        &[("atlas", Some(&atlas))],
+    );
+    let html = ok(&world, "/doc/lantern");
+    has(
+        &html,
+        &format!(
+            "<p>See <a class=\"ended\" href=\"/doc/{atlas}\" \
+             title=\"ended sold &amp; &lt;gone&gt; &quot;x&quot;\">atlas</a>.</p>"
+        ),
+    );
 }

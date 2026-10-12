@@ -3,7 +3,7 @@
 {% block title %}{{ head.stamp.version.text }} of {{ document.text }}{% endblock %}
 {% block content %}
 <h1>{{ document.text }}</h1>
-<p class="meta"><span class="kind">version</span>{{ head.stamp.version.text }} of <a href="{{ document.href }}">{{ document.text }}</a> · <a href="{{ history }}">history</a>{% if is_head %} <span class="label">head</span>{% endif %}</p>
+<p class="meta"><span class="kind">version</span>{{ head.stamp.version.text }} of {% call m::link(document) %}{% endcall %} · <a href="{{ history }}">history</a>{% if is_head %} <span class="label">head</span>{% endif %}</p>
 <h2>Changes</h2>
 {% for side in sides -%}
 <p class="parents">against {% call m::text(side.against, "") %}{% endcall %}</p>

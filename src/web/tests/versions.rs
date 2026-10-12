@@ -19,7 +19,7 @@ fn a_history_is_a_row_a_version_newest_first_each_linked() {
         &html,
         &format!(
             "<p class=\"meta\"><span class=\"kind\">of</span>\
-             <a href=\"/doc/{lantern}\">lantern</a></p>"
+             <a class=\"ended\" href=\"/doc/{lantern}\" title=\"ended retired\">lantern</a></p>"
         ),
     );
     let row = |version: &VersionId, head: &str, change: &str| {
@@ -215,7 +215,7 @@ fn a_log_is_a_row_a_version_newest_first_with_its_document_linked_when_it_has_a_
         &ended.id,
         "title=\"2026-10-10T09:00:00+01:00\">2026-10-10T09:00:00+01:00",
         "ended retired",
-        &format!("<a href=\"/doc/{lantern}\">lantern</a>"),
+        &format!("<a class=\"ended\" href=\"/doc/{lantern}\" title=\"ended retired\">lantern</a>"),
     );
     assert_eq!(html.find(&newest), html.find("<tr><td"), "{newest}\n{html}");
     has(
@@ -224,7 +224,9 @@ fn a_log_is_a_row_a_version_newest_first_with_its_document_linked_when_it_has_a_
             &root.id,
             now,
             "new",
-            &format!("<a href=\"/doc/{lantern}\">lantern</a>"),
+            &format!(
+                "<a class=\"ended\" href=\"/doc/{lantern}\" title=\"ended retired\">lantern</a>"
+            ),
         ),
     );
     has(
@@ -351,7 +353,7 @@ fn a_fork_that_is_ended_is_marked_and_one_no_head_of_which_reads_is_linked_as_a_
     has(
         &html,
         &format!(
-            "<li><a class=\"title\" href=\"/doc/{atlas}\">atlas</a> \
+            "<li><a class=\"title ended\" href=\"/doc/{atlas}\" title=\"ended retired\">atlas</a> \
              <span class=\"what\">s</span> <span class=\"mark\">ended retired</span>\
              <span class=\"details\">"
         ),

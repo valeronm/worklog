@@ -186,7 +186,8 @@ or a fenced block is quoted, not made.
 `check` reads the links of each topic, fact and followup that is not
 ended, and gives a notice for one that leads nowhere or to an ended
 document. An entry's links are citations of what was true on its date and
-are not checked.
+are not checked. A page shows every link to a document that has ended
+struck through, in an entry too.
 
 ## What a session reaches
 

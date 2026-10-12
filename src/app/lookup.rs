@@ -3,7 +3,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
 use crate::app::heads::{
-    is_holder, kind_of, label_of, label_or_short, labeling_topic, readable_heads, row_head,
+    ended_for, is_holder, kind_of, label_of, label_or_short, labeling_topic, readable_heads,
+    row_head,
 };
 use crate::app::rows::Reference;
 use crate::app::{Failure, kind_named};
@@ -431,21 +432,32 @@ impl<'a> Lookup<'a> {
     }
 
     pub(super) fn label(&self, id: &DocumentId) -> Result<String, Failure> {
-        let document = self.document(id)?;
-        match row_head(&document) {
-            Some((_, record)) => self.label_of(&record.content, id),
-            None => Ok(id.short().to_owned()),
-        }
+        Ok(self.reference(id)?.label)
     }
 
     pub(super) fn reference(&self, id: &DocumentId) -> Result<Reference, Failure> {
-        Ok(Reference::to(id, self.label(id)?))
+        let document = self.document(id)?;
+        Ok(match row_head(&document) {
+            Some((_, record)) => {
+                let label = self.label_of(&record.content, id)?;
+                Reference::to(id, label, ended_for(&record))
+            }
+            None => Reference::to(id, id.short().to_owned(), None),
+        })
     }
 
-    // A document that is held and is no topic is labeled by its short id, as one not held is.
+    // A document that is held and is no topic is referred to as one not held is.
     pub(super) fn topic_reference(&self, id: &DocumentId) -> Result<Reference, Failure> {
-        let name = self.topic_name(id)?.map(|name| name.to_string());
-        Ok(Reference::to(id, label_or_short(name, id)))
+        let document = self.document(id)?;
+        let topic = row_head(&document).and_then(|(_, record)| {
+            let ended = ended_for(&record);
+            match record.content {
+                Content::Topic(topic) => Some((topic.name.to_string(), ended)),
+                _ => None,
+            }
+        });
+        let (name, ended) = topic.unzip();
+        Ok(Reference::to(id, label_or_short(name, id), ended.flatten()))
     }
 
     pub(super) fn label_of(&self, content: &Content, id: &DocumentId) -> Result<String, Failure> {

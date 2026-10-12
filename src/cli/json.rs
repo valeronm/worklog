@@ -12,8 +12,8 @@
 //!
 //! A document's id is under `document`, as a value's own id and as a reference alike, and a
 //! version's id under `version` where the value is that version. A reference to another
-//! document is an object with `document` and `label`. `ended` is an ending's reason, or
-//! `null`. A count is under a key ending in `_count`, and a plural noun is a list.
+//! document is an object with `document`, `label` and `ended`. `ended` is an ending's reason,
+//! or `null`. A count is under a key ending in `_count`, and a plural noun is a list.
 
 use serde::Serialize;
 
@@ -77,10 +77,11 @@ mod tests {
     fn conventional(value: &Value) -> Result<(), String> {
         match value {
             Value::Object(keyed) => keyed.iter().try_for_each(|(key, inner)| {
-                let reference = keyed.len() == 2
-                    && keyed.contains_key("document")
-                    && keyed.contains_key("label");
-                if reference && !inner.is_string() {
+                let reference = keyed.len() == 3
+                    && ["document", "label", "ended"]
+                        .iter()
+                        .all(|key| keyed.contains_key(*key));
+                if reference && key != "ended" && !inner.is_string() {
                     return Err(format!("the {key} {inner} of a reference"));
                 }
                 if !snake(key) {
@@ -92,7 +93,8 @@ mod tests {
                 if key == "id" {
                     return Err("the key `id`, which says no kind of id".to_owned());
                 }
-                if key == "ended" && !(inner.is_string() || inner.is_null()) {
+                let ending = key == "ended" || key == "document_ended";
+                if ending && !(inner.is_string() || inner.is_null()) {
                     return Err(format!("the ending {inner}"));
                 }
                 conventional(inner)
@@ -158,7 +160,11 @@ mod tests {
     }
 
     fn to(id: &DocumentId, label: &str) -> Value {
-        json!({"document": id, "label": label})
+        json!({"document": id, "label": label, "ended": null})
+    }
+
+    fn to_ended(id: &DocumentId, label: &str, reason: &str) -> Value {
+        json!({"document": id, "label": label, "ended": reason})
     }
 
     fn row(id: &DocumentId, kind: &str, label: &str, topics: &[Value]) -> Value {
@@ -296,20 +302,27 @@ mod tests {
             Err("the ending true".to_owned())
         );
         assert_eq!(
+            conventional(&json!({"document_ended": 4})),
+            Err("the ending 4".to_owned())
+        );
+        assert_eq!(conventional(&json!({"document_ended": null})), Ok(()));
+        assert_eq!(
             conventional(&json!({"type": "look_again", "on": null, "ended": null})),
             Ok(())
         );
         assert_eq!(conventional(&json!({"ended": "retired"})), Ok(()));
         assert_eq!(
-            conventional(&json!({"from": {"document": LANTERN, "label": 4}})),
+            conventional(&json!({"from": {"document": LANTERN, "label": 4, "ended": null}})),
             Err("the label 4 of a reference".to_owned())
         );
         assert_eq!(
-            conventional(&json!({"from": {"document": null, "label": "lantern"}})),
+            conventional(&json!({"from": {"document": null, "label": "lantern", "ended": null}})),
             Err("the document null of a reference".to_owned())
         );
         assert_eq!(
-            conventional(&json!({"from": {"document": LANTERN, "label": "lantern"}})),
+            conventional(
+                &json!({"from": {"document": LANTERN, "label": "lantern", "ended": "retired"}})
+            ),
             Ok(())
         );
         assert_eq!(
@@ -799,6 +812,7 @@ mod tests {
             "type": "version",
             "document": compass,
             "label": "compass",
+            "document_ended": null,
             "version": linking,
             "written": NOW,
             "machine": to(&world.machine(), "desk"),
@@ -812,7 +826,7 @@ mod tests {
             "fields": topic_shown("compass"),
             "body": body,
             "links": [
-                {"text": "lantern", "target": to(lantern, "lantern")},
+                {"text": "lantern", "target": to_ended(lantern, "lantern", "retired")},
                 {"text": "phone", "target": to(&unheld, unheld.short())},
                 {"text": "unknown", "target": null},
             ],
@@ -861,7 +875,7 @@ mod tests {
                     text_field("former_names", "old-driver"),
                     text_field("date", "2026-10-08"),
                     reference_field("machine", &to(&machine, "desk")),
-                    reference_field("topics", &to(lantern, "lantern")),
+                    reference_field("topics", &to_ended(lantern, "lantern", "retired")),
                     text_field("summary", "s"),
                 ],
                 "body": "Wired.\n",
@@ -871,6 +885,29 @@ mod tests {
         });
         let of_referring = show::show(&world.deps(), driver.as_str()).unwrap();
         (of_referring, expected)
+    }
+
+    fn old_version(world: &World, lantern: &DocumentId, root: &VersionId) -> (Shown, Value) {
+        let of_old = show::show(&world.deps(), root.short()).unwrap();
+        let old = json!({
+            "type": "version",
+            "document": lantern,
+            "label": "lantern",
+            "document_ended": "retired",
+            "version": root,
+            "written": NOW,
+            "machine": to(&world.machine(), "desk"),
+            "change": "new",
+            "parents": [],
+            "head": false,
+            "ended": null,
+            "text": "+++\nname = \"lantern\"\ncreated = 2026-09-04\nsummary = \"s\"\n+++\n\n",
+            "fields": topic_shown("lantern"),
+            "body": "\n",
+            "links": [],
+            "sides": [{"against": null, "held": true, "before": ""}],
+        });
+        (of_old, old)
     }
 
     fn shown() -> Vec<(Shown, Value)> {
@@ -897,7 +934,12 @@ mod tests {
         let of_unknown = show::show(&deps, label).unwrap();
 
         let hash = head(&world, &gadget).id;
-        let mut one = json!({"type": "version", "document": gadget, "label": label});
+        let mut one = json!({
+            "type": "version",
+            "document": gadget,
+            "label": label,
+            "document_ended": null,
+        });
         let rest = version(&world, &gadget);
         let fields = rest.as_object().expect("an object").clone();
         one.as_object_mut().expect("an object").extend(fields);
@@ -962,6 +1004,7 @@ mod tests {
         let of_unread = show::show(&deps, atlas().short()).unwrap();
 
         vec![
+            old_version(&world, &lantern, &root),
             forked(&world),
             linking(&world, &lantern),
             referring(&world, &lantern),
@@ -983,6 +1026,7 @@ mod tests {
         let expected = json!({
             "document": gadget,
             "label": label,
+            "ended": null,
             "versions": [{
                 "version": head(&world, &gadget).id,
                 "written": NOW,
@@ -994,7 +1038,35 @@ mod tests {
             }],
             "unreadable": unreadable,
         });
-        vec![(show::history(&world.deps(), label).unwrap(), expected)]
+        let of_gadget = show::history(&world.deps(), label).unwrap();
+        let desk = world.machine();
+        let made = head(&world, &desk).id;
+        let retired = world.amend(&desk, &topic_fields("desk", RETIRED), "\n");
+        let row = |version: &VersionId, change: &str, parents: Value, ended: Value| {
+            json!({
+                "version": version,
+                "written": NOW,
+                "machine": to_ended(&desk, "desk", "retired"),
+                "change": change,
+                "parents": parents,
+                "head": ended.is_string(),
+                "ended": ended,
+            })
+        };
+        let of_ended = json!({
+            "document": desk,
+            "label": "desk",
+            "ended": "retired",
+            "versions": [
+                row(&retired, "save", json!([made]), json!("retired")),
+                row(&made, "new", json!([]), Value::Null),
+            ],
+            "unreadable": [],
+        });
+        vec![
+            (of_gadget, expected),
+            (show::history(&world.deps(), "desk").unwrap(), of_ended),
+        ]
     }
 
     fn diffs() -> Vec<(Diff, Value)> {
@@ -1124,17 +1196,34 @@ mod tests {
     }
 
     fn checks() -> Vec<(Check, Value)> {
-        let Damaged { world, gadget, .. } = damaged();
+        let Damaged {
+            world,
+            gadget,
+            lantern,
+            ..
+        } = damaged();
+        world.amend(&lantern, &topic_fields("lantern", RETIRED), "\n");
+        let lost = VersionId::of(b"lost");
+        world
+            .store
+            .plant_unreadable(&lantern, lost.clone(), ReadError::Corrupt);
+        let of_ended = json!({
+            "document": lantern,
+            "label": "lantern",
+            "ended": "retired",
+            "what": format!("{}: the bytes do not hash to the file's name", lost.short()),
+        });
         let label = gadget.short();
         let finding = |hashed: &[u8], what: &str| {
             let what = format!("{}: {what}", VersionId::of(hashed).short());
-            json!({"document": gadget, "label": label, "what": what})
+            json!({"document": gadget, "label": label, "ended": null, "what": what})
         };
-        let mut problems = [
+        let mut problems = vec![
             finding(b"corrupt", "the bytes do not hash to the file's name"),
             finding(b"malformed", "no envelope"),
         ];
         problems.sort_by_key(|problem| problem["what"].as_str().map(str::to_owned));
+        problems.push(of_ended);
         let expected = json!({
             "problems": problems,
             "notices": [
@@ -1142,6 +1231,7 @@ mod tests {
                 {
                     "document": null,
                     "label": "gadget",
+                    "ended": null,
                     "what": "1 document of a kind this worklog does not know",
                 },
             ],

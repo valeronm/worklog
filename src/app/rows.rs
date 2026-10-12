@@ -12,20 +12,30 @@ use crate::domain::id::DocumentId;
 use crate::domain::schema::{Content, Date, KindOf, Record, Trigger};
 use crate::domain::version::Version;
 
-/// Another document as a result refers to it: the id the referring document stores, and the
-/// label the document referred to has now, or its short id.
+/// Another document as a result refers to it: the id the referring document stores, the
+/// label the document referred to has now, or its short id, and the reason it ended with.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Reference {
     pub document: DocumentId,
     pub label: String,
+    // Private so that no reference is made without saying whether its document has ended.
+    ended: Option<String>,
 }
 
 impl Reference {
-    pub(super) fn to(document: &DocumentId, label: String) -> Reference {
+    pub(super) fn to(document: &DocumentId, label: String, ended: Option<String>) -> Reference {
         Reference {
             document: document.clone(),
             label,
+            ended,
         }
+    }
+
+    /// The reason the document ended with, when every head of it that reads has ended; none
+    /// where the reference is to a topic and the document does not read as one.
+    #[must_use]
+    pub fn ended(&self) -> Option<&str> {
+        self.ended.as_deref()
     }
 }
 
@@ -286,8 +296,8 @@ mod tests {
     use super::*;
     use crate::app::lookup::Stored;
     use crate::app::testing::{
-        Counting, ENDED_FACT, TOPIC, World, entry, fact, fact_fields, followup, head, part_of,
-        referred, to, topic, written_at,
+        Counting, ENDED, ENDED_FACT, REMOVED, TOPIC, World, entry, fact, fact_fields, followup,
+        head, part_of, referred, to, to_ended, topic, topic_fields, world_with_atlas, written_at,
     };
     use crate::domain::ports::Store;
     use crate::domain::testing::first;
@@ -295,6 +305,72 @@ mod tests {
     fn row_of(world: &World, id: &DocumentId) -> Option<Row> {
         let topics = Topics::load(&world.lookup()).unwrap();
         row(&topics, &world.store.document(id).unwrap()).map(|shown| shown.row)
+    }
+
+    #[test]
+    fn a_reference_carries_the_reason_when_every_head_that_reads_has_ended() {
+        let (world, lantern, atlas) = world_with_atlas();
+        let fuse = fact(&world, &lantern, "fuse", ENDED_FACT);
+        let relay = fact(&world, &lantern, "relay-pin", "");
+        let unheld = DocumentId::from_bytes([0x42; 16]);
+        let references = |world: &World, id: &DocumentId| {
+            let lookup = world.lookup();
+            let topics = Topics::load(&lookup).unwrap();
+            let any = lookup.reference(id).unwrap();
+            let as_topic = lookup.topic_reference(id).unwrap();
+            assert_eq!(topics.reference(id), as_topic);
+            (any, as_topic)
+        };
+        let both = |reference: Reference| (reference.clone(), reference);
+        assert_eq!(references(&world, &atlas), both(to(&atlas, "atlas")));
+        assert_eq!(
+            references(&world, &relay),
+            (to(&relay, "lantern/relay-pin"), to(&relay, relay.short()))
+        );
+        assert_eq!(
+            references(&world, &fuse),
+            (
+                to_ended(&fuse, "lantern/fuse", "false"),
+                to(&fuse, fuse.short())
+            )
+        );
+        assert_eq!(
+            references(&world, &unheld),
+            both(to(&unheld, unheld.short()))
+        );
+
+        let root = head(&world, &atlas);
+        let live = written_at(
+            &world,
+            &root,
+            &topic_fields("atlas", ""),
+            "2026-10-09T19:00:00+01:00",
+            "\n",
+            None,
+        );
+        let fields = topic_fields("atlas", REMOVED);
+        written_at(
+            &world,
+            &root,
+            &fields,
+            "2026-10-09T19:30:00+01:00",
+            "\n",
+            None,
+        );
+        assert_eq!(references(&world, &atlas), both(to(&atlas, "atlas")));
+        let fields = topic_fields("atlas", ENDED);
+        written_at(
+            &world,
+            &live,
+            &fields,
+            "2026-10-09T20:00:00+01:00",
+            "\n",
+            None,
+        );
+        assert_eq!(
+            references(&world, &atlas),
+            both(to_ended(&atlas, "atlas", "retired"))
+        );
     }
 
     #[test]

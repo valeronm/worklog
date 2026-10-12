@@ -38,6 +38,7 @@ mod tests {
         let finding = |label: &str, what: &str| Finding {
             document: None,
             label: label.to_owned(),
+            ended: None,
             what: what.to_owned(),
         };
         let clean = Check::default();

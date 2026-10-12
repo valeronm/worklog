@@ -30,6 +30,8 @@ pub struct Finding {
     /// Of the document the finding is about, or the kind's word for a kind this worklog does
     /// not know.
     pub label: String,
+    /// The reason when the document the finding is about is ended.
+    pub ended: Option<String>,
     pub what: String,
 }
 
@@ -75,6 +77,7 @@ pub fn check(deps: &Deps) -> Result<Check, Failure> {
         notices.push(Finding {
             document: None,
             label: unknown.kind.to_string(),
+            ended: None,
             what: format!("{documents} of a kind this worklog does not know"),
         });
     }
@@ -158,8 +161,10 @@ fn links_are_checked(kind: KindOf) -> bool {
 fn labeled(lookup: &Lookup, found: Reported) -> Result<Vec<Finding>, Failure> {
     let mut findings = Vec::new();
     for (id, what) in found {
+        let of = lookup.reference(&id)?;
         findings.push(Finding {
-            label: lookup.label(&id)?,
+            ended: of.ended().map(str::to_owned),
+            label: of.label,
             document: Some(id),
             what,
         });
@@ -261,7 +266,7 @@ mod tests {
     use crate::app::show::{Linked, Shown, show};
     use crate::app::testing::{
         ENDED, ENDED_FACT, World, claim_fields, entry, fact, fact_fields, followup, fork, head,
-        list, refused, to, topic, topic_fields, world, world_with_atlas,
+        list, refused, to, to_ended, topic, topic_fields, world, world_with_atlas,
     };
     use crate::app::{amend, draft, fork as forks};
     use crate::domain::id::{DocumentId, VersionId};
@@ -273,6 +278,7 @@ mod tests {
     fn labeled_only(findings: Vec<Finding>) -> Vec<Finding> {
         let labeled = |found: Finding| Finding {
             document: None,
+            ended: None,
             ..found
         };
         findings.into_iter().map(labeled).collect()
@@ -291,8 +297,26 @@ mod tests {
         Finding {
             document: None,
             label: label.to_owned(),
+            ended: None,
             what: what.to_owned(),
         }
+    }
+
+    #[test]
+    fn a_finding_holds_the_reason_the_document_it_is_about_ended_with() {
+        let (world, lantern, atlas) = world_with_atlas();
+        for topic in [&lantern, &atlas] {
+            let lost = version_id(topic.short());
+            world
+                .store
+                .plant_unreadable(topic, lost, ReadError::Corrupt);
+        }
+        world.amend(&atlas, &topic_fields("atlas", ENDED), "\n");
+        let found = check(&world.deps()).unwrap();
+        let ended: Vec<(&str, Option<&str>)> = (found.problems.iter())
+            .map(|found| (found.label.as_str(), found.ended.as_deref()))
+            .collect();
+        assert_eq!(ended, [("atlas", Some("retired")), ("lantern", None)]);
     }
 
     #[test]
@@ -935,7 +959,10 @@ mod tests {
         let atlas = topic(&world, "atlas", ENDED);
         assert_eq!(
             shown_links(&world, "phone")[0],
-            linked("atlas", Some((&atlas, "atlas")))
+            Linked {
+                text: "atlas".to_owned(),
+                target: Some(to_ended(&atlas, "atlas", "retired")),
+            }
         );
         let found = checked(&world);
         assert_eq!(found.problems, []);

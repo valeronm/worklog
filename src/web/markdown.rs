@@ -5,6 +5,7 @@ use std::fmt;
 
 use pulldown_cmark::{CodeBlockKind, CowStr, Event, LinkType, Options, Parser, Tag, TagEnd, html};
 
+use super::mark::EndedMark;
 use crate::app::show::Linked;
 use crate::domain::id::DocumentId;
 use crate::domain::schema::links::link_at;
@@ -68,12 +69,25 @@ impl<'b> Rendering<'b, '_> {
                 .push(Event::InlineHtml(CowStr::Borrowed("</span>")));
             return;
         };
-        self.out.push(Event::Start(Tag::Link {
+        let mark = EndedMark::of(reference.ended());
+        let title = mark.as_ref().map(|mark| mark.title().to_owned());
+        let start = Event::Start(Tag::Link {
             link_type: LinkType::Inline,
             dest_url: CowStr::from((self.href)(&reference.document)),
-            title: CowStr::Borrowed(""),
+            title: CowStr::from(title.unwrap_or_default()),
             id: CowStr::Borrowed(""),
-        }));
+        });
+        match mark {
+            // The writer escapes an address and a title, and gives a link no class.
+            Some(mark) => {
+                let mut tag = String::new();
+                html::push_html(&mut tag, std::iter::once(start));
+                let classed = format!("<a class=\"{}\" ", mark.class());
+                let tag = tag.replacen("<a ", &classed, 1);
+                self.out.push(Event::InlineHtml(CowStr::from(tag)));
+            }
+            None => self.out.push(start),
+        }
         self.text(&reference.label);
         self.out.push(Event::End(TagEnd::Link));
     }
@@ -183,7 +197,7 @@ mod tests {
     use pulldown_cmark::{Event, Parser};
 
     use super::*;
-    use crate::app::Reference;
+    use crate::app::testing::{to, to_ended};
     use crate::domain::schema::links::tried;
 
     fn atlas() -> DocumentId {
@@ -197,10 +211,14 @@ mod tests {
     fn linked(text: &str, label: Option<&str>) -> Linked {
         Linked {
             text: text.to_owned(),
-            target: label.map(|label| Reference {
-                document: atlas(),
-                label: label.to_owned(),
-            }),
+            target: label.map(|label| to(&atlas(), label)),
+        }
+    }
+
+    fn ended(text: &str, label: &str, reason: &str) -> Linked {
+        Linked {
+            text: text.to_owned(),
+            target: Some(to_ended(&atlas(), label, reason)),
         }
     }
 
@@ -298,6 +316,41 @@ mod tests {
             html("[[atlas &amp; co]]\n"),
             "<p><a href=\"/doc/a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7\">\
              &lt;b&gt;atlas&lt;/b&gt; &amp; co</a></p>\n"
+        );
+    }
+
+    #[test]
+    fn a_link_to_an_ended_document_is_an_anchor_marked_with_the_reason() {
+        let links = [
+            linked("atlas", Some("atlas")),
+            ended("lantern", "lantern", "done"),
+            ended("lantern/relay-pin", "<b>relay</b>", "superseded"),
+            ended("desk", "desk", "a\"b<c>&d"),
+            linked("phone", None),
+        ];
+        let html = |body: &str| to_html(body, &links, doc).to_string();
+        assert_eq!(
+            html("See [[lantern]], [[atlas]] and [[ lantern/relay-pin ]].\n"),
+            format!(
+                "<p>See <a class=\"ended\" href=\"/doc/a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7\" \
+                 title=\"ended done\">lantern</a>, {ATLAS} and \
+                 <a class=\"ended\" href=\"/doc/a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7\" \
+                 title=\"ended superseded\">&lt;b&gt;relay&lt;/b&gt;</a>.</p>\n"
+            )
+        );
+        assert_eq!(
+            html("[[desk]]\n"),
+            "<p><a class=\"ended\" href=\"/doc/a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7\" \
+             title=\"ended a&quot;b&lt;c&gt;&amp;d\">desk</a></p>\n"
+        );
+        assert_eq!(
+            html("[[phone]]\n"),
+            "<p><span class=\"unresolved\">[[phone]]</span></p>\n"
+        );
+        assert_eq!(
+            html("`[[lantern]]` and [x [[lantern]]](https://example.org)\n"),
+            "<p><code>[[lantern]]</code> and \
+             <a href=\"https://example.org\">x [[lantern]]</a></p>\n"
         );
     }
 

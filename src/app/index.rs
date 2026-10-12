@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::app::Failure;
-use crate::app::heads::{all_ended, edges_of, label_or_short, readable_heads, row_head_of};
+use crate::app::heads::{edges_of, ended_for, label_or_short, readable_heads, row_head_of};
 use crate::app::lookup::Lookup;
 use crate::app::rows::Reference;
 use crate::domain::id::DocumentId;
@@ -11,7 +11,7 @@ use crate::domain::schema::{Content, KindOf, Name};
 struct Entry {
     name: Name,
     summary: String,
-    ended: bool,
+    ended: Option<String>,
     edges: Edges,
 }
 
@@ -25,10 +25,10 @@ impl Topics {
         let mut entries = BTreeMap::new();
         for document in lookup.of_kind(KindOf::Topic)? {
             let heads = readable_heads(&document);
-            let Some((_, shown)) = row_head_of(&heads) else {
+            let Some((_, record)) = row_head_of(&heads) else {
                 continue;
             };
-            let Content::Topic(shown) = &shown.content else {
+            let Content::Topic(shown) = &record.content else {
                 continue;
             };
             entries.insert(
@@ -36,7 +36,7 @@ impl Topics {
                 Entry {
                     name: shown.name.clone(),
                     summary: shown.summary.clone(),
-                    ended: all_ended(&heads),
+                    ended: ended_for(record),
                     edges: edges_of(&heads),
                 },
             );
@@ -59,7 +59,19 @@ impl Topics {
     }
 
     pub(super) fn reference(&self, id: &DocumentId) -> Reference {
-        Reference::to(id, self.label(id))
+        Reference::to(id, self.label(id), self.ended(id).map(str::to_owned))
+    }
+
+    // A machine no topic answers for is told from another by its whole id.
+    pub(super) fn machine(&self, id: &DocumentId) -> Reference {
+        let label = self
+            .name(id)
+            .map_or_else(|| id.to_string(), ToString::to_string);
+        Reference::to(id, label, self.ended(id).map(str::to_owned))
+    }
+
+    fn ended(&self, id: &DocumentId) -> Option<&str> {
+        self.entries.get(id)?.ended.as_deref()
     }
 
     pub(super) fn references(&self, ids: &[DocumentId]) -> Vec<Reference> {
@@ -71,11 +83,11 @@ impl Topics {
     }
 
     pub(super) fn is_ended(&self, id: &DocumentId) -> bool {
-        self.entries.get(id).is_some_and(|entry| entry.ended)
+        self.ended(id).is_some()
     }
 
     fn unended(&self, id: &DocumentId) -> Option<&Entry> {
-        self.entries.get(id).filter(|entry| !entry.ended)
+        self.entries.get(id).filter(|entry| entry.ended.is_none())
     }
 
     pub(super) fn edges(&self, id: &DocumentId) -> Option<&Edges> {

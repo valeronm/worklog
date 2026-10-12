@@ -130,7 +130,7 @@ impl Render for Diff {
 
 #[cfg(test)]
 mod tests {
-    use super::super::testing::{WRITTEN, stamp, to};
+    use super::super::testing::{WRITTEN, stamp, to, to_ended};
     use super::*;
     use crate::app::show::{Compared, HistoryRow, Linked, ShownDocument, ShownVersion, Side};
     use crate::domain::document::Unreadable;
@@ -183,16 +183,17 @@ mod tests {
     }
 
     fn alone(version: ShownVersion) -> Shown {
-        Shown::Version(Compared {
+        Shown::Version(Box::new(Compared {
             document: lantern(),
             label: "lantern".to_owned(),
+            document_ended: None,
             version,
             sides: vec![Side {
                 against: None,
                 held: true,
                 before: "before\n".to_owned(),
             }],
-        })
+        }))
     }
 
     fn short(seed: &[u8]) -> String {
@@ -207,7 +208,7 @@ mod tests {
         linking.links = vec![
             Linked {
                 text: "atlas".to_owned(),
-                target: Some(to("atlas")),
+                target: Some(to_ended("atlas", "retired")),
             },
             Linked {
                 text: "phone".to_owned(),
@@ -309,6 +310,7 @@ mod tests {
         let history = History {
             document: lantern(),
             label: "lantern".to_owned(),
+            ended: None,
             versions: held.heads.into_iter().map(row).collect(),
             unreadable: held.unreadable,
         };
@@ -336,6 +338,7 @@ mod tests {
         let history = History {
             document: lantern(),
             label: "lantern".to_owned(),
+            ended: None,
             versions: vec![row(version(b"left", "")), row(first)],
             unreadable: Vec::new(),
         };

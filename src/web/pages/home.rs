@@ -160,7 +160,7 @@ mod tests {
         let words: Vec<String> = (steps.iter())
             .map(|step| match step {
                 Step::Open => "(".to_owned(),
-                Step::Topic(topic) => topic.line.label.clone(),
+                Step::Topic(topic) => topic.line.title.text.clone(),
                 Step::Again(link) => format!("^{} {}", link.text, link.href),
                 Step::End => ";".to_owned(),
                 Step::Close => ")".to_owned(),
@@ -231,7 +231,10 @@ mod tests {
         row.open_count = 2;
         row.uses = vec![to(9, "desk lamp")];
         let topic_line = TopicLine::from(&row);
-        assert_eq!(topic_line.line.href, format!("/doc/{}", row.row.document));
+        assert_eq!(
+            topic_line.line.title.href,
+            format!("/doc/{}", row.row.document)
+        );
         assert_eq!(topic_line.line.counts, ["1 fact", "2 open"]);
         assert_eq!(
             topic_line.uses[0].href,

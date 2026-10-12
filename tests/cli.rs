@@ -1300,6 +1300,62 @@ fn a_link_written_before_its_target_resolves_once_the_target_is_stored() {
 }
 
 #[test]
+fn a_link_to_a_document_that_ended_is_shown_as_ended_in_json_and_on_the_page() {
+    let host = Host::stocked();
+    let draft = host.drafted(
+        &["new", "topic", "phone"],
+        &[("summary = \"\"", "summary = \"A thing\"")],
+    );
+    let mut text = fs::read_to_string(&draft).unwrap();
+    text.push_str("See [[lantern/fuse]] and [[lantern/relay]].\n");
+    fs::write(&draft, text).unwrap();
+    host.ok(&["save", "phone"]);
+
+    let links = |host: &Host| -> Vec<(Value, Value)> {
+        let shown = host.json(&["show", "phone"]);
+        let links = shown["heads"][0]["links"].as_array().expect("links");
+        (links.iter())
+            .map(|link| {
+                let target = &link["target"];
+                (target["label"].clone(), target["ended"].clone())
+            })
+            .collect()
+    };
+    let live = [
+        (Value::from("lantern/fuse"), Value::Null),
+        (Value::from("lantern/relay"), Value::Null),
+    ];
+    assert_eq!(links(&host), live);
+    let before = host.ok(&["show", "phone"]);
+
+    host.ok(&["end", "lantern/fuse", "superseded", "The relay holds it"]);
+    assert_eq!(
+        links(&host),
+        [
+            (Value::from("lantern/fuse"), Value::from("superseded")),
+            live[1].clone(),
+        ]
+    );
+    assert_eq!(host.ok(&["show", "phone"]), before);
+
+    let id = |target: &str| {
+        let shown = host.json(&["show", target]);
+        shown["document"].as_str().expect("a document").to_owned()
+    };
+    let (fuse, relay) = (id("lantern/fuse"), id("lantern/relay"));
+    let mut serving = host.serve(&[]);
+    let page = serving.page("/doc/phone");
+    let body = format!(
+        "<p>See <a class=\"ended\" href=\"/doc/{fuse}\" title=\"ended superseded\">\
+         lantern/fuse</a> and <a href=\"/doc/{relay}\">lantern/relay</a>.</p>"
+    );
+    assert!(page.contains(&body), "{page}");
+    let target = serving.page(&format!("/doc/{fuse}"));
+    assert!(target.contains("<h1>lantern/fuse</h1>"), "{target}");
+    serving.running();
+}
+
+#[test]
 fn the_topics_of_a_topic_are_its_parts_with_what_is_filed_on_each() {
     let host = Host::stocked();
     let part = |name: &str| {
@@ -1331,7 +1387,7 @@ fn the_topics_of_a_topic_are_its_parts_with_what_is_filed_on_each() {
     let lantern = &host.json(&["show", "lantern"])["document"];
     assert_eq!(
         parts[0]["part_of"],
-        serde_json::json!([{"document": lantern, "label": "lantern"}])
+        serde_json::json!([{"document": lantern, "label": "lantern", "ended": null}])
     );
     assert_eq!(
         (
@@ -1572,9 +1628,10 @@ fn labels_in(value: &Value, found: &mut Vec<String>) {
     match value {
         Value::Array(items) => items.iter().for_each(|item| labels_in(item, found)),
         Value::Object(fields) => {
-            let reference = fields.len() == 2
-                && fields.contains_key("document")
-                && fields.contains_key("label");
+            let reference = fields.len() == 3
+                && ["document", "label", "ended"]
+                    .iter()
+                    .all(|key| fields.contains_key(*key));
             if reference {
                 return;
             }
@@ -3144,7 +3201,7 @@ fn every_run_is_logged_under_the_machine_that_ran_it() {
     let counted = counted.expect("one value");
     assert_eq!(
         counted[0]["machine"],
-        serde_json::json!({"document": desk, "label": "desk"})
+        serde_json::json!({"document": desk, "label": "desk", "ended": null})
     );
     assert_eq!(
         counted[0]["commands"][0],
@@ -3313,7 +3370,7 @@ fn a_store_holding_its_usage_log_alone_is_one_a_host_can_be_bound_to() {
     let machines = other.json(&["usage"]);
     assert_eq!(
         machines[0]["machine"],
-        serde_json::json!({"document": unheld, "label": unheld})
+        serde_json::json!({"document": unheld, "label": unheld, "ended": null})
     );
     assert_eq!(
         [&machines[0]["topic"], &machines[1]["topic"]],

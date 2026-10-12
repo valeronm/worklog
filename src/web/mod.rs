@@ -1,6 +1,7 @@
 //! The store as read-only pages: a request is answered from what the read use cases return
 //! for it, and nothing is kept between requests.
 
+mod mark;
 mod markdown;
 mod pages;
 mod query;

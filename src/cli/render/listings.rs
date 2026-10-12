@@ -181,10 +181,7 @@ mod tests {
     #[test]
     fn a_machine_is_headed_by_its_label_and_no_run_at_all_is_a_note() {
         let labeled = |label: &str, topic: Option<&str>| MachineUsage {
-            machine: Reference {
-                document: atlas(),
-                label: label.to_owned(),
-            },
+            machine: to(label),
             topic: topic.map(str::to_owned),
             commands: counted(&[("show", 2)]),
         };

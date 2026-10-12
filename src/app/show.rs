@@ -75,15 +75,17 @@ fn unread(document: &Document) -> Vec<Unread> {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Shown {
     Document(ShownDocument),
-    Version(Compared),
+    Version(Box<Compared>),
 }
 
-/// A version beside what it changed. Its JSON is `document` and `label`, the version's own
-/// keys and `sides` after them.
+/// A version beside what it changed. Its JSON is `document`, `label` and `document_ended`,
+/// the version's own keys and `sides` after them.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Compared {
     pub document: DocumentId,
     pub label: String,
+    /// The reason when the document is ended, as `ShownDocument::ended` is.
+    pub document_ended: Option<String>,
     pub version: ShownVersion,
     /// One for each parent in the order the version lists them, or one against nothing for a
     /// first version; `before` is the parent's text as `version.text` is the version's.
@@ -105,9 +107,10 @@ impl Serialize for Compared {
             body,
             links,
         } = &self.version;
-        let mut keyed = serializer.serialize_struct("Compared", 14)?;
+        let mut keyed = serializer.serialize_struct("Compared", 15)?;
         keyed.serialize_field("document", &self.document)?;
         keyed.serialize_field("label", &self.label)?;
+        keyed.serialize_field("document_ended", &self.document_ended)?;
         keyed.serialize_field("version", version)?;
         keyed.serialize_field("written", written)?;
         keyed.serialize_field("machine", machine)?;
@@ -193,6 +196,8 @@ pub struct Linked {
 pub struct History {
     pub document: DocumentId,
     pub label: String,
+    /// The reason when the document is ended, as `ShownDocument::ended` is.
+    pub ended: Option<String>,
     /// The one with the most behind it first.
     pub versions: Vec<HistoryRow>,
     pub unreadable: Vec<Unread>,
@@ -409,12 +414,14 @@ pub fn show(deps: &Deps, address: &str) -> Result<Shown, Failure> {
             let held_document = lookup.document(&document)?;
             let version = held(&held_document, &version, address)?;
             let head = is_head(&held_document, version);
-            Ok(Shown::Version(Compared {
-                label: lookup.label(&document)?,
+            let of = lookup.reference(&document)?;
+            Ok(Shown::Version(Box::new(Compared {
+                document_ended: of.ended().map(str::to_owned),
+                label: of.label,
                 sides: against_parents(&lookup, &held_document, version)?,
                 version: shown_version(&lookup, version, head)?,
                 document,
-            }))
+            })))
         }
     }
 }
@@ -431,7 +438,7 @@ pub fn history(deps: &Deps, address: &str) -> Result<History, Failure> {
         }
     };
     let document = lookup.document(&id)?;
-    let label = lookup.label(&id)?;
+    let of = lookup.reference(&id)?;
     let versions = document
         .history()
         .into_iter()
@@ -450,7 +457,8 @@ pub fn history(deps: &Deps, address: &str) -> Result<History, Failure> {
     Ok(History {
         unreadable: unread(&document),
         document: id,
-        label,
+        ended: of.ended().map(str::to_owned),
+        label: of.label,
         versions,
     })
 }
@@ -589,8 +597,8 @@ mod tests {
     use super::*;
     use crate::app::draft::checkout;
     use crate::app::testing::{
-        ENDED, TOPIC, World, fact, fact_fields, fork, head, refused, to, topic, topic_fields,
-        world, world_with_atlas, written_at,
+        ENDED, ENDED_FACT, REMOVED, TOPIC, World, fact, fact_fields, fork, head, refused, to,
+        to_ended, topic, topic_fields, world, world_with_atlas, written_at,
     };
     use crate::domain::draft::Draft;
     use crate::domain::id::VersionId;
@@ -684,7 +692,7 @@ mod tests {
 
     fn compared(world: &World, address: &str) -> Compared {
         match show(&world.deps(), address).unwrap() {
-            Shown::Version(compared) => compared,
+            Shown::Version(compared) => *compared,
             Shown::Document(_) => panic!("expected a version"),
         }
     }
@@ -782,10 +790,19 @@ mod tests {
     #[test]
     fn an_ended_document_is_shown() {
         let (world, lantern) = world();
+        let root = head(&world, &lantern).id;
+        assert_eq!(compared(&world, root.short()).document_ended, None);
+        assert_eq!(history(&world.deps(), "lantern").unwrap().ended, None);
+
         world.amend(&lantern, &topic_fields("lantern", ENDED), "\n");
         let shown = shown_document(&world, "lantern");
         assert_eq!(shown.heads[0].ended.as_deref(), Some("retired"));
         assert!(shown.heads[0].text.contains("ended = \"retired\""));
+        let old = compared(&world, root.short());
+        assert_eq!(old.document_ended.as_deref(), Some("retired"));
+        assert_eq!(old.version.ended, None);
+        let history = history(&world.deps(), "lantern").unwrap();
+        assert_eq!(history.ended.as_deref(), Some("retired"));
     }
 
     #[test]
@@ -1040,6 +1057,85 @@ mod tests {
         }
     }
 
+    fn linked_ended(text: &str, document: &DocumentId, label: &str, reason: &str) -> Linked {
+        Linked {
+            text: text.to_owned(),
+            target: Some(to_ended(document, label, reason)),
+        }
+    }
+
+    #[test]
+    fn a_link_carries_the_reason_its_target_ended_with() {
+        let (world, lantern, atlas) = world_with_atlas();
+        let relay = fact(&world, &lantern, "relay-pin", "");
+        let fuse = fact(&world, &lantern, "fuse", ENDED_FACT);
+        let phone = topic(&world, "phone", ENDED);
+        let unheld = DocumentId::from_bytes([0x42; 16]);
+        world.amend_linking(
+            &atlas,
+            &topic_fields("atlas", ""),
+            "\n",
+            &[
+                ("compass", Some(&unheld)),
+                ("lantern/fuse", Some(&fuse)),
+                ("lantern/relay-pin", Some(&relay)),
+                ("phone", None),
+                ("unknown", None),
+            ],
+        );
+        assert_eq!(
+            shown_document(&world, "atlas").heads[0].links,
+            [
+                linked("compass", Some((&unheld, unheld.short()))),
+                linked_ended("lantern/fuse", &fuse, "lantern/fuse", "false"),
+                linked("lantern/relay-pin", Some((&relay, "lantern/relay-pin"))),
+                linked_ended("phone", &phone, "phone", "retired"),
+                linked("unknown", None),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_link_to_a_fork_is_ended_when_check_says_its_target_is() {
+        let (world, lantern, atlas) = world_with_atlas();
+        world.amend_linking(
+            &lantern,
+            &topic_fields("lantern", ""),
+            "\n",
+            &[("atlas", Some(&atlas))],
+        );
+        let noticed = |world: &World| -> Vec<String> {
+            let found = crate::app::check::check(&world.deps()).unwrap();
+            (found.notices.into_iter())
+                .map(|finding| finding.what)
+                .collect()
+        };
+        let link = |world: &World| shown_document(world, "lantern").heads[0].links[0].clone();
+
+        let root = head(&world, &atlas);
+        let live = after(&[&root], &topic_fields("atlas", ""), "live\n");
+        let removed = after(&[&root], &topic_fields("atlas", REMOVED), "gone\n");
+        world.store.put(&live).unwrap();
+        world.store.put(&removed).unwrap();
+        assert_eq!(link(&world), linked("atlas", Some((&atlas, "atlas"))));
+        assert!(noticed(&world).is_empty());
+
+        let stamp = "2026-10-09T20:00:00+01:00";
+        written_at(
+            &world,
+            &live,
+            &topic_fields("atlas", ENDED),
+            stamp,
+            "\n",
+            None,
+        );
+        assert_eq!(
+            link(&world),
+            linked_ended("atlas", &atlas, "atlas", "retired")
+        );
+        assert_eq!(noticed(&world), ["link atlas: atlas is ended"]);
+    }
+
     #[test]
     fn a_version_carries_its_links_by_text_with_the_label_each_document_has_now() {
         let (world, lantern) = world();
@@ -1116,6 +1212,32 @@ mod tests {
         assert_eq!(
             shown_document(&world, "lantern").heads[0].links,
             [linked("phone", Some((&stray, stray.short()))),]
+        );
+    }
+
+    #[test]
+    fn a_link_to_a_document_with_a_head_that_does_not_read_is_ended_by_the_heads_that_do() {
+        let (world, lantern) = world();
+        let atlas = world.put("topic", "name = \"atlas\"\n", "\n");
+        world.amend_linking(
+            &lantern,
+            &topic_fields("lantern", ""),
+            "\n",
+            &[("atlas", Some(&atlas))],
+        );
+        let link = |world: &World| shown_document(world, "lantern").heads[0].links[0].clone();
+        assert_eq!(link(&world), linked("atlas", Some((&atlas, atlas.short()))));
+
+        let unread = head(&world, &atlas);
+        let retired = after(&[&unread], &topic_fields("atlas", ENDED), "\n");
+        world.store.put(&retired).unwrap();
+        world
+            .store
+            .put(&after(&[&unread], "name = \"atlas\"\n", "unread\n"))
+            .unwrap();
+        assert_eq!(
+            link(&world),
+            linked_ended("atlas", &atlas, "atlas", "retired")
         );
     }
 
