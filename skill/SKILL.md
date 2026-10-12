@@ -97,6 +97,11 @@ draft of its document is open.
   An ended document still reads with `show`, is left out of listings
   unless `--ended` is given, and takes no change until `worklog
   reopen <target> <why>` brings it back.
+  Ending a document leaves every live document that links it resting on
+  something that is over. After an `end`, a `done` or a `drop`, run
+  `worklog check`, and for each document it names as linking the ended
+  one, read that document whole and decide what became of it, in the
+  same session.
 - `worklog done <followup> [note]` and `worklog drop <followup>
   <note>` end a followup; a `drop` note says why the work fell away.
   `worklog trigger`, under Open work, sets when one comes up again.
@@ -341,6 +346,16 @@ an ended document, which means the linking document has gone stale; a
 version a newer binary wrote; documents of a kind this binary does not
 know; a claim whose directory is under the home directory and not stored
 that way. An entry's links are citations and are not checked.
+
+A notice that a document links an ended one is a question about the
+linking document, never about the link. Read the document whole, with the
+target and what ended it, and decide one of two things. It is over too:
+end it with the reason that fits, as an idea is `built` once the designs
+it rests on are, or a fact `superseded` or `false`. Or it still holds:
+rewrite what the ending made untrue, and where a sentence only cites the
+target, point it at what the target became, the entry that built it or
+the fact that replaced it. Removing or rewording the link so the notice
+goes away, with the document unread, decides nothing.
 
 A fork is a document with two or more current versions, written on
 different machines before they synced. `worklog forks` lists each
