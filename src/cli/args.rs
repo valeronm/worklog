@@ -95,7 +95,7 @@ pub enum Invoked {
         #[arg(long = "host", value_name = "NAME", value_parser = Server::host_name)]
         hosts: Vec<String>,
     },
-    /// Place or take back the skill and the session hook of the coding agents on this host
+    /// Configure the coding agents on this host to use this tool, or take that back
     Agents {
         #[command(subcommand)]
         action: AgentsAction,
@@ -113,12 +113,12 @@ pub enum Invoked {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Subcommand)]
 pub enum AgentsAction {
-    /// Write the skill and add the session hook for every agent on this host
+    /// Configure every agent on this host to use this tool
     Install,
-    /// Bring a skill, a hook and the fish completions already there up to this binary, and
+    /// Bring what an install placed and the fish completions already there up to this binary, and
     /// write nothing else
     Refresh,
-    /// Remove the skill and the session hook from every agent
+    /// Take back from every agent what an install placed
     Uninstall,
 }
 
@@ -137,7 +137,7 @@ pub enum Command {
         /// What the machine is, for a topic that does not exist yet
         #[arg(long, requires = "name")]
         summary: Option<String>,
-        /// Also install the skill and the session hook for every coding agent on this host
+        /// Also configure every coding agent on this host to use this tool
         #[arg(long, requires = "name")]
         agents: bool,
     },

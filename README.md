@@ -108,6 +108,14 @@ skill describes the commands of the binary it shipped with, and the hook
 and the completions hold the binary's path, which an install to a new
 place leaves stale. The installer and `upgrade` run it.
 
+Codex runs a command in a sandbox that holds everything outside the
+project read-only, the store with it, so a `worklog` it ran would read the
+store, write nothing to it and leave no usage line. For Codex an install
+therefore also writes `rules/worklog.rules`, a rule that runs every
+`worklog` command outside the sandbox without asking. The file is the
+tool's own: a refresh writes it wherever the skill or the hook is, and an
+uninstall removes it.
+
 ## Completions
 
 Completions are answered by the binary, so a shell is offered what the

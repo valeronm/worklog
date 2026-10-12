@@ -225,18 +225,22 @@ pub(super) fn uninstalled(agent: &Agent) -> Result<Option<String>, Failure> {
     planned(agent, |entries| Ok(remove(entries)))
 }
 
-/// Reads the agent's hooks file and writes nothing: its text with one hook, running `binary`,
-/// or `None` where that is what it holds; `binary` is asked for only where a hook is there.
+/// Reads the agent's hooks file and writes nothing: whether it holds a hook, and its text with
+/// one hook, running `binary`, or `None` where that is what it holds; `binary` is asked for
+/// only where a hook is there.
 pub(super) fn refreshed<'p>(
     agent: &Agent,
     binary: impl FnOnce() -> Result<&'p Path, Failure>,
-) -> Result<Option<String>, Failure> {
-    planned(agent, |entries| {
-        if !entries.iter().any(any_runs_context) {
+) -> Result<(bool, Option<String>), Failure> {
+    let mut held = false;
+    let text = planned(agent, |entries| {
+        held = entries.iter().any(any_runs_context);
+        if !held {
             return Ok(false);
         }
         Ok(replace(entries, &agent_command(binary()?, agent)?))
-    })
+    })?;
+    Ok((held, text))
 }
 
 #[cfg(test)]
@@ -588,7 +592,7 @@ mod tests {
         }
 
         fn refresh(agent: &Agent, binary: &Path) -> bool {
-            written(agent, refreshed(agent, || Ok(binary)))
+            written(agent, refreshed(agent, || Ok(binary)).map(|(_, text)| text))
         }
 
         fn uninstall(agent: &Agent) -> bool {
@@ -643,7 +647,7 @@ mod tests {
                 let binary = binary(kept.path());
                 for result in [
                     installed(&agent, &binary),
-                    refreshed(&agent, || Ok(&binary)),
+                    refreshed(&agent, || Ok(&binary)).map(|(_, text)| text),
                     uninstalled(&agent),
                 ] {
                     let Err(Failure::Refused(why)) = result else {
@@ -666,7 +670,7 @@ mod tests {
             let others = ["/opt/bin/other", "/opt/a\"b/worklog"].map(Path::new);
             for other in others {
                 assert!(matches!(installed(&agent, other), Err(Failure::Refused(_))));
-                assert_eq!(refreshed(&agent, || Ok(other)), Ok(None));
+                assert_eq!(refreshed(&agent, || Ok(other)), Ok((false, None)));
             }
             assert!(install(&agent, &binary(kept.path())));
             for other in others {

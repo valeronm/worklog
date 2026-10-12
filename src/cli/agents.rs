@@ -158,6 +158,9 @@ impl Placing {
     fn install_into(&self, done: &mut Done) -> Result<(), Failure> {
         for (agent, hooks) in &self.0 {
             done.wrote(&agent.write_skill(SKILL)?);
+            if let Some(rule) = agent.write_rule()? {
+                done.wrote(&rule);
+            }
             if !done.hooks(agent, hooks.as_deref())? {
                 done.notes.push(format!(
                     "{}: a SessionStart hook already runs {NAME} context",
@@ -210,15 +213,22 @@ fn fish_completions(
 }
 
 pub(super) fn refresh_into(environment: &Environment, done: &mut Done) -> Result<(), Failure> {
+    let refreshed = |agent: Agent| {
+        let (holds_hook, hooks) = hook::refreshed(&agent, || environment.binary())?;
+        Ok((agent, holds_hook, hooks))
+    };
     let agents = wiring::agents(environment.variable)?;
-    let binary = || environment.binary();
-    let agents = planned(agents, |agent| hook::refreshed(agent, binary))?;
+    let agents: Vec<_> = (agents.into_iter().map(refreshed)).collect::<Result<_, Failure>>()?;
     // A binary whose path is unknown or cannot be quoted is refused before the first write.
-    let homes = agents.first().map(|(agent, _)| agent.homes());
+    let homes = agents.first().map(|(agent, ..)| agent.homes());
     let completions = fish_completions(environment, &homes.unwrap_or_default(), done)?;
-    for (agent, hooks) in &agents {
-        if agent.read_skill()?.is_some_and(|held| held != SKILL) {
+    for (agent, holds_hook, hooks) in &agents {
+        let skill = agent.read_skill()?;
+        if skill.as_deref().is_some_and(|held| held != SKILL) {
             done.wrote(&agent.write_skill(SKILL)?);
+        }
+        if let Some(rule) = agent.refresh_rule(skill.is_some() || *holds_hook)? {
+            done.wrote(&rule);
         }
         done.hooks(agent, hooks.as_deref())?;
     }
@@ -234,6 +244,9 @@ fn uninstall_into(environment: &Environment, done: &mut Done) -> Result<(), Fail
     for (agent, hooks) in planned(agents, hook::uninstalled)? {
         if let Some(dir) = agent.remove_skill()? {
             done.wrote(&dir);
+        }
+        if let Some(rule) = agent.remove_rule()? {
+            done.wrote(&rule);
         }
         done.hooks(&agent, hooks.as_deref())?;
     }

@@ -170,10 +170,7 @@ fn placing(environment: &Environment, terminal: &mut Terminal) -> Result<Option<
     if present.is_empty() {
         return Ok(None);
     }
-    let question = format!(
-        "Install the skill and the session hook for {}?",
-        joined(&present)
-    );
+    let question = format!("Configure {} to use {NAME}?", joined(&present));
     if terminal.consent(&question, true)? {
         Placing::on_this_host(environment).map(Some)
     } else {
@@ -540,7 +537,7 @@ mod tests {
         let home = Home::with(&[".codex"]);
         let (world, _) = unbound(None);
         let asked = home.asked(&world, "atlas\nperhaps\nn\ny\n");
-        let one = "Install the skill and the session hook for Codex? [Y/n]: ";
+        let one = "Configure Codex to use worklog? [Y/n]: ";
         let again = format!("{one}{YES_OR_NO}{one}{CONFIRM}");
         assert!(asked.shown.contains(&again), "{}", asked.shown);
         assert_eq!(printed(&asked), "atlas created\n");
@@ -601,7 +598,7 @@ mod tests {
         }
     }
 
-    const BOTH: &str = "Install the skill and the session hook for Claude Code and Codex? [Y/n]: ";
+    const BOTH: &str = "Configure Claude Code and Codex to use worklog? [Y/n]: ";
 
     #[test]
     fn the_agents_present_are_installed_for_unless_the_answer_is_no() {
@@ -619,10 +616,11 @@ mod tests {
         assert_eq!(
             printed(&asked),
             format!(
-                "atlas created\n{}\n{}\n{}\n{}\n",
+                "atlas created\n{}\n{}\n{}\n{}\n{}\n",
                 home.skill(".claude").display(),
                 hooks.display(),
                 home.skill(".codex").display(),
+                home.root.join("home/.codex/rules/worklog.rules").display(),
                 home.root.join("home/.codex/hooks.json").display()
             )
         );
@@ -631,7 +629,7 @@ mod tests {
         let declining = Home::with(&[".codex"]);
         let (world, _) = unbound(None);
         let asked = declining.asked(&world, "atlas\nn\ny\n");
-        let one = "Install the skill and the session hook for Codex? [Y/n]: ";
+        let one = "Configure Codex to use worklog? [Y/n]: ";
         assert!(asked.shown.contains(one), "{}", asked.shown);
         assert_eq!(printed(&asked), "atlas created\n");
         assert!(!declining.skill(".codex").exists());

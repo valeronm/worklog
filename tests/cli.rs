@@ -2242,13 +2242,21 @@ impl Host {
         self.home().join(home).join(file)
     }
 
+    fn rule_of_codex(&self) -> PathBuf {
+        self.home().join(".codex/rules/worklog.rules")
+    }
+
     fn hooks_json(&self, home: &str) -> Value {
         serde_json::from_str(&fs::read_to_string(self.hooks_of(home)).unwrap()).unwrap()
     }
 
     fn placed(&self, homes: &[&str]) -> Vec<PathBuf> {
         (homes.iter())
-            .flat_map(|home| [self.skill_of(home), self.hooks_of(home)])
+            .flat_map(|home| {
+                let rule = (*home == ".codex").then(|| self.rule_of_codex());
+                [Some(self.skill_of(home)), rule, Some(self.hooks_of(home))]
+            })
+            .flatten()
             .collect()
     }
 }
@@ -2349,15 +2357,20 @@ fn agents_install_reaches_the_agents_present_and_notes_a_hook_already_there() {
     let host = Host::new().with_agents(&[".codex"]);
     assert_refused(&host.run(&["topics"]), 1, NOT_SET_UP);
     let first = host.ok(&["agents", "install"]);
-    assert_eq!(
-        first,
-        lines(&[host.skill_of(".codex"), host.hooks_of(".codex")])
+    assert_eq!(first, lines(&host.placed(&[".codex"])));
+    assert!(
+        fs::read_to_string(host.rule_of_codex())
+            .unwrap()
+            .contains("pattern = [\"worklog\"]")
     );
     assert!(!host.home().join(".claude").exists());
     let hooks = fs::read(host.hooks_of(".codex")).unwrap();
 
     let again = host.run(&["agents", "install"]);
-    assert_eq!(again.stdout, lines(&[host.skill_of(".codex")]));
+    assert_eq!(
+        again.stdout,
+        lines(&[host.skill_of(".codex"), host.rule_of_codex()])
+    );
     assert_eq!(
         again.stderr,
         format!(
@@ -2400,7 +2413,7 @@ fn agents_refresh_writes_nothing_where_there_is_nothing_to_bring_up() {
 }
 
 #[test]
-fn agents_refresh_rewrites_a_stale_skill_and_a_stale_hook_and_nothing_else() {
+fn agents_refresh_rewrites_a_stale_skill_rule_and_hook_and_nothing_else() {
     let host = Host::new().with_agents(&[".claude", ".codex"]);
     fs::create_dir_all(host.skill_of(".claude").parent().unwrap()).unwrap();
     fs::write(host.skill_of(".claude"), "old").unwrap();
@@ -2414,9 +2427,19 @@ fn agents_refresh_rewrites_a_stale_skill_and_a_stale_hook_and_nothing_else() {
     let printed = host.ok(&["agents", "refresh"]);
     assert_eq!(
         printed,
-        lines(&[host.skill_of(".claude"), host.hooks_of(".codex")])
+        lines(&[
+            host.skill_of(".claude"),
+            host.rule_of_codex(),
+            host.hooks_of(".codex")
+        ])
     );
     assert_ne!(fs::read_to_string(host.skill_of(".claude")).unwrap(), "old");
+    fs::write(host.rule_of_codex(), "old").unwrap();
+    assert_eq!(
+        host.ok(&["agents", "refresh"]),
+        lines(&[host.rule_of_codex()])
+    );
+    assert_ne!(fs::read_to_string(host.rule_of_codex()).unwrap(), "old");
     assert!(!host.hooks_of(".claude").exists());
     assert!(!host.skill_of(".codex").exists());
     let after = host.hooks_json(".codex");
@@ -2447,9 +2470,11 @@ fn agents_uninstall_takes_back_only_what_install_placed() {
             skills(".claude"),
             host.hooks_of(".claude"),
             skills(".codex"),
+            host.rule_of_codex(),
             host.hooks_of(".codex"),
         ])
     );
+    assert!(!host.rule_of_codex().exists());
     assert_eq!(fs::read_to_string(&other_skill).unwrap(), "desk");
     assert!(!skills(".claude").exists());
     assert_eq!(host.hooks_json(".claude"), before);
@@ -4015,7 +4040,10 @@ fn agents_refresh_writes_its_skill_over_the_one_the_tool_before_the_rebuild_left
     assert_eq!(left, host.skill_of(".codex"));
 
     let printed = host.ok(&["agents", "refresh"]);
-    assert_eq!(printed, lines(&[host.skill_of(".codex")]));
+    assert_eq!(
+        printed,
+        lines(&[host.skill_of(".codex"), host.rule_of_codex()])
+    );
     assert_eq!(
         fs::read_to_string(&left).unwrap(),
         include_str!("../skill/SKILL.md")

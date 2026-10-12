@@ -115,11 +115,19 @@ to the recognition must keep all three. A binary under another file name is
 refused a hook, since it would not find it again. The file is kept as
 data, so key order survives a write and formatting does not.
 
+An agent whose sandbox keeps the store read-only gets a rule that runs
+the tool outside it, a file of the tool's own and so written whole. Codex
+calls its rules experimental and nothing checks the form or the directory
+against it: a change on its side drops the usage lines and the writes of
+its sessions without failing a test.
+
 `init` touches neither the skill nor the hooks file unless given
 `--agents` or told yes to the question it asks on a terminal. A refresh
 writes only where the thing already is, fish's completions directory
 included, which is what lets the installer and `upgrade` run it on every
-host.
+host. The rule is the exception: a refresh writes one that is missing for
+an agent holding the skill or the hook, since a host set up before the
+rule existed is upgraded and not installed again.
 
 A usage line gets its session from the environment variable an agent sets
 for a command it runs. Nothing checks the name the agent table holds

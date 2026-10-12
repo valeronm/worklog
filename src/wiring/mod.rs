@@ -115,6 +115,7 @@ pub const SKILL_DIRECTORY: &str = fs::SKILL_DIRECTORY;
 /// The directory of a store that holds its usage log and no document.
 pub const USAGE_DIRECTORY: &str = fs::USAGE_DIRECTORY;
 
+#[derive(Debug, PartialEq, Eq)]
 struct Known {
     name: &'static str,
     /// Under the user's home.
@@ -122,28 +123,51 @@ struct Known {
     hooks: &'static str,
     /// The variable the agent sets to its session's id for a command it runs.
     session: &'static str,
+    rule: Option<Rule>,
 }
 
-const AGENTS: [Known; 2] = [
+#[derive(Debug, PartialEq, Eq)]
+struct Rule {
+    /// Under the agent's home.
+    file: &'static str,
+    text: &'static str,
+}
+
+// Codex holds everything outside the workspace read-only for a command it runs, unless an
+// `allow` rule matches the command.
+const CODEX_RULE: Rule = Rule {
+    file: "rules/worklog.rules",
+    text: r#"prefix_rule(
+    pattern = ["worklog"],
+    decision = "allow",
+    justification = "worklog writes its store, which is outside the workspace",
+)
+"#,
+};
+
+static AGENTS: [Known; 2] = [
     Known {
         name: "Claude Code",
         home: ".claude",
         hooks: "settings.json",
         session: "CLAUDE_CODE_SESSION_ID",
+        rule: None,
     },
     Known {
         name: "Codex",
         home: ".codex",
         hooks: "hooks.json",
         session: "CODEX_THREAD_ID",
+        rule: Some(CODEX_RULE),
     },
 ];
 
-/// A coding agent on this host: its skill and the file its hooks are read from.
+/// A coding agent on this host and what this tool places in its home.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Agent {
     files: FsAgent,
     homes: Vec<PathBuf>,
+    known: &'static Known,
 }
 
 impl Agent {
@@ -182,6 +206,33 @@ impl Agent {
         Ok(self.files.remove_skill()?)
     }
 
+    /// Writes the rule that lets the agent run this tool outside its sandbox and returns the
+    /// file, or `None` for an agent that takes no rule.
+    pub fn write_rule(&self) -> Result<Option<PathBuf>, Failure> {
+        let Some(rule) = &self.known.rule else {
+            return Ok(None);
+        };
+        Ok(self.files.write_rule(rule.text)?)
+    }
+
+    /// Writes the rule where the one there is not the one this binary writes, and with
+    /// `missing_too` where none is there, and returns the file then.
+    pub fn refresh_rule(&self, missing_too: bool) -> Result<Option<PathBuf>, Failure> {
+        let Some(rule) = &self.known.rule else {
+            return Ok(None);
+        };
+        match self.files.read_rule()? {
+            Some(held) if held == rule.text => Ok(None),
+            None if !missing_too => Ok(None),
+            _ => self.write_rule(),
+        }
+    }
+
+    /// Removes the rule's file and returns it, or `None` when there was none.
+    pub fn remove_rule(&self) -> Result<Option<PathBuf>, Failure> {
+        Ok(self.files.remove_rule()?)
+    }
+
     pub fn read_hooks(&self) -> Result<Option<String>, Failure> {
         Ok(self.files.read_hooks()?)
     }
@@ -198,9 +249,15 @@ pub fn agents(variable: &dyn Fn(&str) -> Option<OsString>) -> Result<Vec<Agent>,
     let Some(home) = homes.first() else {
         return Err(Failure::at("$HOME", "not set"));
     };
-    let agent = |known: &Known| Agent {
-        files: FsAgent::new(known.name, home.join(known.home), known.hooks),
+    let agent = |known: &'static Known| Agent {
+        files: FsAgent::new(
+            known.name,
+            home.join(known.home),
+            known.hooks,
+            known.rule.as_ref().map(|rule| rule.file),
+        ),
         homes: homes.clone(),
+        known,
     };
     Ok(AGENTS.iter().map(agent).collect())
 }
@@ -474,6 +531,15 @@ mod tests {
             codex.remove_skill().unwrap(),
             Some(root.join(".codex/skills/worklog"))
         );
+        let rule = root.join(".codex/rules/worklog.rules");
+        assert_eq!(codex.refresh_rule(false).unwrap(), None);
+        assert_eq!(codex.refresh_rule(true).unwrap(), Some(rule.clone()));
+        assert_eq!(codex.refresh_rule(true).unwrap(), None);
+        std::fs::write(&rule, "lantern").unwrap();
+        assert_eq!(codex.refresh_rule(false).unwrap(), Some(rule.clone()));
+        assert_ne!(std::fs::read_to_string(&rule).unwrap(), "lantern");
+        assert_eq!(codex.write_rule().unwrap(), Some(rule.clone()));
+        assert_eq!(codex.remove_rule().unwrap(), Some(rule));
         assert!(!root.join(".claude").exists());
         assert_eq!(codex.homes(), [root.as_path()]);
     }
