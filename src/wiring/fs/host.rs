@@ -101,6 +101,11 @@ impl Host for FsHost {
     fn session(&self) -> Option<Session> {
         self.session.clone()
     }
+
+    fn name(&self) -> Option<String> {
+        let named = rustix::system::uname();
+        named.nodename().to_str().ok().map(str::to_owned)
+    }
 }
 
 #[cfg(test)]
@@ -121,6 +126,15 @@ mod tests {
         assert_eq!(host.machine(), Ok(None));
         assert_eq!(host.home(), Ok(None));
         assert_eq!(host.session(), None);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_host_is_named_as_its_operating_system_names_it() {
+        let (_dir, config) = scratch();
+        let host = FsHost::unbound(config, None, PathBuf::from("/home/desk/store"), None);
+        let kernel = std::fs::read_to_string("/proc/sys/kernel/hostname").unwrap();
+        assert_eq!(host.name().as_deref(), Some(kernel.trim_end_matches('\n')));
     }
 
     #[test]

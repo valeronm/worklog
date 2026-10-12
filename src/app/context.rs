@@ -7,6 +7,7 @@ use serde::Serialize;
 use crate::app::heads::is_forked;
 use crate::app::index::Topics;
 use crate::app::lookup::Lookup;
+use crate::app::machines::PLACEHOLDER;
 use crate::app::rows::{
     Filed, Filings, FollowupRow, Reference, Row, by_label, filed, filed_by_topic, followup_rows,
     is_idea, row, shown,
@@ -34,6 +35,8 @@ pub struct Context {
     /// and ideas, and the followups in `due` or counted in `open_count`, by label.
     pub forks: Vec<Row>,
     pub draft_count: usize,
+    /// The machine topic's summary is `machines::PLACEHOLDER`.
+    pub machine_needs_summary: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -228,6 +231,7 @@ pub fn context(deps: &Deps, directory: &str) -> Result<Context, Failure> {
         due,
         forks,
         draft_count: deps.drafts.list()?.len(),
+        machine_needs_summary: topics.summary(machine) == Some(PLACEHOLDER),
     })
 }
 
@@ -356,10 +360,11 @@ impl Claimed {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::machines::PLACEHOLDER;
     use crate::app::rows::TriggerShown;
     use crate::app::testing::{
         ENDED, ENDED_FACT, World, claim_fields, fact, followup, fork, head, labels, part_of,
-        refused, to, topic, topic_fields, uses, world_of,
+        refused, to, topic, topic_fields, uses, world, world_of,
     };
     use crate::domain::draft::Draft;
     use crate::domain::ports::{Drafts, Store};
@@ -960,6 +965,17 @@ mod tests {
             world.drafts.write(&draft).unwrap();
         }
         assert_eq!(at(&world, "/work").draft_count, 2);
+    }
+
+    #[test]
+    fn a_machine_topic_whose_summary_is_the_placeholder_needs_one_written() {
+        let (world, _) = world();
+        assert!(!at(&world, "/work").machine_needs_summary);
+        let kept = topic_fields("desk", "").replace("\"s\"", &format!("{PLACEHOLDER:?}"));
+        world.amend(&world.machine(), &kept, "\n");
+        assert!(at(&world, "/work").machine_needs_summary);
+        world.amend(&world.machine(), &topic_fields("desk", ""), "\n");
+        assert!(!at(&world, "/work").machine_needs_summary);
     }
 
     #[test]

@@ -121,6 +121,16 @@ fn present(known: Vec<Agent>) -> Result<Vec<Agent>, Failure> {
     Ok(present)
 }
 
+/// The agents present on this host, by name; none on a host with no home directory.
+pub(super) fn present_names(environment: &Environment) -> Result<Vec<&'static str>, Failure> {
+    if wiring::homes(environment.variable)?.is_empty() {
+        return Ok(Vec::new());
+    }
+    let known = wiring::agents(environment.variable)?;
+    let present = known.iter().filter(|agent| agent.is_present());
+    Ok(present.map(Agent::name).collect())
+}
+
 type Planned = Vec<(Agent, Option<String>)>;
 
 // Every agent's hooks file is read and edited in memory before the first write.
@@ -163,6 +173,20 @@ impl Placing {
         self.install_into(&mut done)?;
         Ok(done)
     }
+}
+
+// Everything that can refuse an agent's install is settled before the host is bound.
+pub(super) fn initialized(
+    placing: Option<Placing>,
+    json: bool,
+    bind: impl FnOnce() -> Result<Bound, Failure>,
+) -> Result<Output, Failure> {
+    let bound = bind()?;
+    let done = placing
+        .map(|placing| placing.install())
+        .transpose()?
+        .unwrap_or_default();
+    Ok(done.output(Some(bound), json))
 }
 
 fn fish_completions(

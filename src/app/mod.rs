@@ -22,6 +22,7 @@ mod index;
 pub mod list;
 mod live;
 mod lookup;
+pub mod machines;
 pub mod offer;
 pub mod record;
 mod rows;

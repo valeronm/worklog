@@ -1,5 +1,6 @@
 use crate::app::draft::usage;
-use crate::app::lookup::{Lookup, held_by_several};
+use crate::app::lookup::Lookup;
+use crate::app::machines::{PLACEHOLDER, topic_named};
 use crate::app::save::stepped;
 use crate::app::{Deps, Failure, kind_named, text};
 use crate::domain::id::DocumentId;
@@ -43,30 +44,31 @@ impl Host for Becoming<'_> {
     fn session(&self) -> Option<Session> {
         self.host.session()
     }
+
+    fn name(&self) -> Option<String> {
+        self.host.name()
+    }
+}
+
+/// Refuses a host that has a machine topic.
+pub fn refuse_bound(deps: &Deps) -> Result<(), Failure> {
+    match deps.host.machine()? {
+        Some(machine) => Err(Failure::Refused(format!(
+            "this host is already set up as {}",
+            Lookup::new(deps.store).label(&machine)?
+        ))),
+        None => Ok(()),
+    }
 }
 
 /// Binds the host to the topic that is not ended and named `name`, making it with `summary`
 /// when there is none. Refuses a host already bound and a name several such topics hold; a
 /// malformed name, or a topic to make without a summary, is a usage failure.
 pub fn init(deps: &Deps, name: &str, summary: Option<&str>) -> Result<Bound, Failure> {
+    refuse_bound(deps)?;
     let lookup = Lookup::new(deps.store);
-    if let Some(machine) = deps.host.machine()? {
-        return Err(Failure::Refused(format!(
-            "this host is already set up as {}",
-            lookup.label(&machine)?
-        )));
-    }
     let name = Name::parse(name).map_err(usage)?;
-    let holders = lookup.holders(KindOf::Topic, "name", &[name.as_str()], false)?;
-    let held = match holders.as_slice() {
-        [] => None,
-        [only] => Some(only.id().clone()),
-        several => {
-            let ids = several.iter().map(|holder| holder.id());
-            return Err(held_by_several(name.as_str(), ids));
-        }
-    };
-    if let Some(machine) = held {
+    if let Some(machine) = topic_named(&lookup, &name)? {
         let label = lookup.label(&machine)?;
         deps.host.bind(&machine)?;
         return Ok(Bound {
@@ -101,6 +103,11 @@ pub fn init(deps: &Deps, name: &str, summary: Option<&str>) -> Result<Bound, Fai
         label: name.to_string(),
         created: true,
     })
+}
+
+/// As `init`, for a caller with no summary to give: a topic it makes carries `PLACEHOLDER`.
+pub fn init_awaiting_summary(deps: &Deps, name: &str) -> Result<Bound, Failure> {
+    init(deps, name, Some(PLACEHOLDER))
 }
 
 #[cfg(test)]
@@ -149,6 +156,38 @@ mod tests {
         assert_eq!(stored.envelope.written, world.clock.0);
         assert_eq!(stored.body, "\n");
         assert_eq!(world.host.machine(), Ok(Some(bound.document)));
+    }
+
+    #[test]
+    fn a_topic_made_without_a_summary_carries_the_placeholder() {
+        let world = bare();
+        let bound = init_awaiting_summary(&world.deps(), "desk").unwrap();
+        assert!(bound.created);
+        assert_eq!(bound.label, "desk");
+        let stored = head(&world, &bound.document);
+        assert_eq!(
+            toml::to_string(&stored.fields).unwrap(),
+            format!("name = \"desk\"\ncreated = 2026-10-09\nsummary = \"{PLACEHOLDER}\"\n")
+        );
+        assert_eq!(world.host.machine(), Ok(Some(bound.document)));
+    }
+
+    #[test]
+    fn a_topic_that_holds_the_name_is_bound_to_and_keeps_its_summary() {
+        let (mut world, lantern) = world();
+        world.host.set_machine(None);
+        let bound = init_awaiting_summary(&world.deps(), "lantern").unwrap();
+        assert_eq!((bound.document.clone(), bound.created), (lantern, false));
+        let stored = toml::to_string(&head(&world, &bound.document).fields).unwrap();
+        assert!(stored.contains("summary = \"s\""), "{stored}");
+    }
+
+    #[test]
+    fn a_host_that_is_bound_is_refused_before_anything_is_asked_of_it() {
+        let (world, _) = world();
+        let text = refused(refuse_bound(&world.deps()));
+        assert_eq!(text, "this host is already set up as desk");
+        assert_eq!(refuse_bound(&bare().deps()), Ok(()));
     }
 
     #[test]

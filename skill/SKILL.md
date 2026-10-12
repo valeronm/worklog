@@ -250,12 +250,13 @@ lists the topics directly part of one.
 
 ## Machines and claims
 
-A host is set up once, by the user: `worklog init <name> --store
-<dir>` binds it to the machine topic of that name, and with `--summary
-<text>` makes that topic when the store has none. Until then every command
+A host is set up once, by the user: `worklog init` asks for the store
+and the machine topic, and the user answers. Until then every command
 that uses the store is refused, and `context` prints only a note saying so
 and exits 0. The machine topic loads in every session on that host; facts
-about the machine go under it.
+about the machine go under it. When `context` reports that the machine
+topic has no summary, write one from what the machine is (`worklog
+checkout <name>`, edit the draft, `worklog save <name>`).
 
 A claim places a topic in a directory of this machine: `worklog claim
 <topic>` from inside the checkout, or `worklog claim <topic> <dir>`.

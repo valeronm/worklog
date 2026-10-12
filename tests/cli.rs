@@ -371,6 +371,30 @@ fn init_makes_the_machine_topic_and_a_second_init_is_refused() {
 }
 
 #[test]
+fn init_alone_with_no_terminal_is_a_usage_error_naming_the_form_with_arguments() {
+    let host = Host::new();
+    let before = snapshot(&host);
+    let alone = host.run(&["init"]);
+    assert_refused(
+        &alone,
+        2,
+        "worklog: `init` alone asks its questions on a terminal. A host is set up by its user, \
+         who gives the directory of the store; without a terminal that is `worklog init <NAME> \
+         --store <DIR>`\n",
+    );
+    assert!(!host.root.join("next").exists());
+    assert_eq!(snapshot(&host), before);
+    assert_refused(&host.run(&["topics"]), 1, NOT_SET_UP);
+
+    for half in [&["init", "desk"][..], &["init", "--store", "kept"]] {
+        let ran = host.run(half);
+        assert_eq!((ran.stdout.as_str(), ran.code), ("", Some(2)), "{half:?}");
+        assert!(ran.stderr.starts_with("error: "), "{}", ran.stderr);
+    }
+    assert!(!host.home().join("kept").exists());
+}
+
+#[test]
 fn init_refuses_a_directory_of_other_files_and_writes_nothing() {
     let host = Host::new();
     let project = host.home().join("projects/lantern");

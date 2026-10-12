@@ -117,9 +117,10 @@ refused a hook, since it would not find it again. The file is kept as
 data, so key order survives a write and formatting does not.
 
 `init` touches neither the skill nor the hooks file unless given
-`--agents`. A refresh writes only where the thing already is, fish's
-completions directory included, which is what lets the installer and
-`upgrade` run it on every host.
+`--agents` or told yes to the question it asks on a terminal. A refresh
+writes only where the thing already is, fish's completions directory
+included, which is what lets the installer and `upgrade` run it on every
+host.
 
 A usage line gets its session from the environment variable an agent sets
 for a command it runs. Nothing checks the name the agent table holds

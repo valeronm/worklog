@@ -128,4 +128,7 @@ pub trait Host {
     fn resolve(&self, absolute: &str) -> Result<String, StoreError>;
     /// The agent session this process runs in; `None` at a terminal.
     fn session(&self) -> Option<Session>;
+    /// The name the operating system has for this host, as it gives it; `None` for one that
+    /// does not read as text.
+    fn name(&self) -> Option<String>;
 }

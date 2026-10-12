@@ -48,17 +48,26 @@ only reports the two versions.
 ## Set up a host
 
 A host is bound once to its machine topic and to the directory of the
-store. `init` takes both, with no default for either:
+store. `init` on a terminal asks for both:
+
+```
+worklog init
+```
+
+Where the store holds the topic named, `init` binds the host to it; where
+it holds none, `init` makes the topic, and `context` reports that it needs
+a summary until one is written. A second host joins a store another
+machine made with its own machine topic. A directory holding no document
+is started as a store only on a yes, since a shared store may not have
+synced yet; a directory of other files is not taken.
+
+Without a terminal, `init` takes both as arguments, with no default for
+either. `--summary` makes the topic where the store holds none, and
+starts a missing or empty directory without asking:
 
 ```
 worklog init desk --store ~/sync/worklog --summary "The desk machine"
 ```
-
-Where the store holds a topic named `desk`, `init` binds the host to it;
-where it holds none, `--summary` makes the topic. A second host joins a
-store another machine made by the same command with its own machine
-topic. The store directory may be missing, empty, or a store already; a
-directory of other files is refused.
 
 Until a host is set up, every command that uses the store is refused, and
 `context` prints a note and exits 0 so a session still opens.
@@ -86,10 +95,11 @@ store as it then stands, so a machine holding a synced copy can serve it.
 
 The binary carries the skill that teaches a coding agent the store and its
 commands, and a SessionStart hook that opens every session with `worklog
-context`. `worklog agents install`, or `init --agents`, places both for
-each agent it knows whose home directory exists: the skill under the
-agent's skills, and one hook merged into the agent's hooks file, the rest
-of which is kept. Without the flag `init` writes neither.
+context`. `worklog agents install` places both for each agent it knows
+whose home directory exists: the skill under the agent's skills, and one
+hook merged into the agent's hooks file, the rest of which is kept. `init`
+offers it, and given arguments does it with `--agents` and otherwise
+writes neither.
 
 `worklog agents uninstall` takes both away and leaves whatever else the
 files hold. `worklog agents refresh` brings a skill, a hook and the fish

@@ -1354,6 +1354,7 @@ dependencies = [
  "getrandom 0.4.3",
  "pulldown-cmark",
  "regex",
+ "rustix",
  "serde",
  "serde_json",
  "sha2",

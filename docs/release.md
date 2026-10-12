@@ -66,7 +66,10 @@ reads neither of them. A store and its hosts cross over in this order.
    a 0.4 binary is still configured for it. Run `worklog check` on the
    result with the 0.5 binary built from the same source. `check` answers
    only on a bound host, so bind a temporary one: set `WORKLOG_HOME` to an
-   empty directory and run `init` as in step 5 under it.
+   empty directory and run `worklog init <machine topic> --store <new
+   directory>` under it. That form writes no agent's skill or hook; the
+   prompts of step 5 offer to, and an agent's files are under the home
+   directory, which `WORKLOG_HOME` does not move.
 3. Share the new directory between the machines by the file sync.
 4. Upgrade each machine: `worklog upgrade` from 0.3.0 on, the installer
    otherwise. Either runs the new binary's `agents refresh`, which takes
@@ -76,10 +79,15 @@ reads neither of them. A store and its hosts cross over in this order.
    is not set up until `init`, and `context` prints that as a note and
    exits 0, so sessions still open.
 5. On each machine, once the sync has delivered the converted store, bind
-   the host with `worklog init <machine topic> --store <dir>` and no
-   `--summary`. Before the store has arrived `init` accepts the missing or
-   empty directory, and `--summary` then makes a new topic of that name,
-   a second one once the sync delivers the converted store; without it a
-   name the store does not hold is refused. `init` also refuses the old
-   store's directory, since it holds files and no store of this format,
-   and leaves the earlier config, another file, as it is.
+   the host with `worklog init` and answer it with the store directory
+   and the machine topic the conversion made for that machine. Before the
+   store has arrived, `init` asks whether to start a new store in a
+   missing or empty directory and answers no by default; a yes there makes
+   a new machine topic of the name given, a second one once the sync
+   delivers the converted store. The form with arguments, `worklog init
+   <machine topic> --store <dir>`, starts such a directory without
+   asking, so it takes no `--summary` before the sync: with one, a name
+   the store does not hold makes a new topic, and without it is refused.
+   `init` also refuses the old store's directory, since it holds files and
+   no store of this format, and leaves the earlier config, another file,
+   as it is.

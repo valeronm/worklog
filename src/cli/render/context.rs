@@ -170,6 +170,7 @@ fn forks(rows: &[Row]) -> String {
 
 struct Page {
     due: Vec<String>,
+    summary: Option<String>,
     forks: Option<String>,
     counts: Vec<String>,
     topics: Vec<[String; FORMS]>,
@@ -213,6 +214,13 @@ impl Page {
         }
         Page {
             due,
+            summary: context.machine_needs_summary.then(|| {
+                format!(
+                    "{label} has no summary — `worklog checkout {label}` opens it to write \
+                     what the machine is\n",
+                    label = context.machine.label
+                )
+            }),
             forks: (!context.forks.is_empty()).then(|| forks(&context.forks)),
             counts,
             topics: context.topics.iter().map(forms).collect(),
@@ -237,7 +245,7 @@ impl Page {
                 text.push_str(&more_due(given.due_counted));
             }
         }
-        for section in self.forks.iter().chain(&self.counts) {
+        for section in (self.summary.iter()).chain(&self.forks).chain(&self.counts) {
             open(text, section);
         }
         let mut left_out = 0;
@@ -283,7 +291,8 @@ impl Render for Context {
             }
             page.fill(&given, &mut text);
         }
-        // The last step leaves fixed lines, counts and a bounded line of fork labels.
+        // The last step leaves lines of bounded length: the fixed ones, the counts, the fork
+        // labels and the machine topic's missing summary.
         text
     }
 }
@@ -378,6 +387,7 @@ mod tests {
             open_count: 0,
             forks: Vec::new(),
             draft_count: 0,
+            machine_needs_summary: false,
         }
     }
 
@@ -690,6 +700,26 @@ mod tests {
         assert!(grown > CONTEXT_BYTES, "{shown}");
     }
 
+    const NEEDS_SUMMARY: &str =
+        "desk has no summary — `worklog checkout desk` opens it to write what the machine is\n";
+
+    #[test]
+    fn a_machine_topic_without_a_summary_is_named_after_what_is_due_and_before_the_forks() {
+        let mut opened = context(
+            vec![loaded("desk", machine(), Vec::new(), Vec::new())],
+            vec![due(1)],
+        );
+        assert!(!opened.text().contains("no summary"));
+        opened.machine_needs_summary = true;
+        opened.forks = forked(1);
+        opened.draft_count = 2;
+        let text = opened.text();
+        let (before, rest) = text.split_once(NEEDS_SUMMARY).unwrap();
+        assert!(before.starts_with(DUE), "{before}");
+        assert_eq!(before.lines().count(), 3, "{before}");
+        assert!(rest.starts_with("\nForked — "), "{rest}");
+    }
+
     #[test]
     fn fork_labels_are_named_while_their_line_is_short_whatever_else_gives_way() {
         let mut opened = context(vec![filled("lantern", here(), 3, 1)], vec![due(1)]);
@@ -792,6 +822,7 @@ mod tests {
     fn one_due_line_that_does_not_fit_is_counted_as_one() {
         let page = Page {
             due: vec!["due 2026-01-01  7f3a91c0  Order a fuse\n".to_owned(); 2],
+            summary: None,
             forks: None,
             counts: Vec::new(),
             topics: Vec::new(),
@@ -853,10 +884,12 @@ mod tests {
             opened.forks = forked(fork_count);
             opened.open_count = usize::MAX;
             opened.draft_count = usize::MAX;
+            opened.machine_needs_summary = true;
             let text = opened.text();
             let case = format!("{due_count} due, {fork_count} forks, {topic_count} topics");
             assert_case_fits(&case, &text);
             assert!(text.ends_with(CLOSING), "{case}");
+            assert!(text.contains(NEEDS_SUMMARY), "{case}");
 
             let named = text.matches("due 2026-01-01  7f3a91c0  ").count();
             let more = number_before(&text, " more due — ").unwrap_or(0);

@@ -43,7 +43,6 @@ fn trigger<'a>(when: &'a str, what: Option<&'a str>) -> Result<Option<TriggerArg
     }
 }
 
-// Everything that can refuse an agent's install is settled before the host is bound.
 fn initialized(
     deps: &Deps,
     environment: &Environment,
@@ -55,12 +54,7 @@ fn initialized(
     let placing = with_agents
         .then(|| agents::Placing::on_this_host(environment))
         .transpose()?;
-    let bound = setup::init(deps, name, summary)?;
-    let done = placing
-        .map(|placing| placing.install())
-        .transpose()?
-        .unwrap_or_default();
-    Ok(done.output(Some(bound), json))
+    agents::initialized(placing, json, || setup::init(deps, name, summary))
 }
 
 fn opened(deps: &Deps, json: bool, new: &draft::New) -> Result<Output, Failure> {
@@ -264,7 +258,7 @@ pub(super) fn run(
 ) -> Result<Output, Failure> {
     match command {
         Command::Init {
-            name,
+            name: Some(name),
             summary,
             agents: with_agents,
             ..
@@ -276,6 +270,9 @@ pub(super) fn run(
             summary.as_deref(),
             *with_agents,
         ),
+        Command::Init { name: None, .. } => {
+            unreachable!("an `init` given no name is asked for one before a command is run")
+        }
         Command::Draft(command) => drafted(deps, json, command),
         Command::Change(command) => changed(deps, environment, json, command),
         Command::Read(command) => read(deps, environment, json, command),

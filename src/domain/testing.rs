@@ -417,6 +417,7 @@ pub struct FixedHost {
     binds: bool,
     links: Vec<(String, String)>,
     session: Option<Session>,
+    name: Option<String>,
 }
 
 const FIXED_HOST: &str = "memory:host";
@@ -430,6 +431,7 @@ impl FixedHost {
             binds: true,
             links: Vec::new(),
             session: None,
+            name: None,
         }
     }
 
@@ -452,6 +454,10 @@ impl FixedHost {
 
     pub fn set_session(&mut self, session: Option<Session>) {
         self.session = session;
+    }
+
+    pub fn set_name(&mut self, name: Option<String>) {
+        self.name = name;
     }
 
     /// Makes `link`, and every path under it, resolve to `target` and the same path under it.
@@ -490,6 +496,10 @@ impl Host for FixedHost {
 
     fn session(&self) -> Option<Session> {
         self.session.clone()
+    }
+
+    fn name(&self) -> Option<String> {
+        self.name.clone()
     }
 }
 
@@ -810,7 +820,10 @@ mod tests {
         let clock = FixedClock::at("2026-10-09T18:22:41.118204+01:00");
         assert_eq!(clock.now(), clock.now());
         assert_eq!(clock.now().day(), "2026-10-09");
-        let host = FixedHost::new(Some(atlas()), Some("/home/desk".to_owned()));
+        let mut host = FixedHost::new(Some(atlas()), Some("/home/desk".to_owned()));
+        assert_eq!(host.name(), None);
+        host.set_name(Some("Desk.local".to_owned()));
+        assert_eq!(host.name(), Some("Desk.local".to_owned()));
         assert_eq!(host.machine(), Ok(Some(atlas())));
         assert_eq!(host.home(), Ok(Some("/home/desk".to_owned())));
         assert_eq!(FixedHost::new(None, None).machine(), Ok(None));

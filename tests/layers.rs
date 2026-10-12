@@ -343,9 +343,20 @@ fn a_command_line_file_that_names_the_store_is_found() {
 
 const TEST_MODULE: &str = "#[cfg(test)]\nmod tests";
 
+const TERMINAL: [&str; 4] = ["stdin", "Stdin", "is_terminal", "IsTerminal"];
+
 fn process_read(text: &str) -> Vec<String> {
     let text = text.split(TEST_MODULE).next().unwrap_or_default();
-    modules_named(text, "std", &["env"])
+    let mut read = modules_named(text, "std", &["env"]);
+    let code = uncommented(text);
+    let mut terminal: Vec<&str> = tokens(&code)
+        .into_iter()
+        .filter(|token| TERMINAL.contains(token))
+        .collect();
+    terminal.sort_unstable();
+    terminal.dedup();
+    read.extend(terminal.iter().map(|name| format!("names `{name}`")));
+    read
 }
 
 #[test]
@@ -365,10 +376,13 @@ fn the_command_line_reads_its_process_where_it_starts_and_where_a_shell_asks() {
         readers,
         [
             "complete.rs: names `std::env` as `std::env::var_os`",
+            "mod.rs: names `IsTerminal`",
+            "mod.rs: names `is_terminal`",
             "mod.rs: names `std::env` as `std::env::args_os`",
             "mod.rs: names `std::env` as `std::env::current_dir`",
             "mod.rs: names `std::env` as `std::env::current_exe`",
             "mod.rs: names `std::env` as `std::env::var_os`",
+            "mod.rs: names `stdin`",
         ]
     );
 }
@@ -399,6 +413,15 @@ fn a_command_line_file_that_reads_the_process_is_found() {
         (
             "let words: Vec<_> = std :: env :: args().collect();",
             "names `std::env` as `std::env::args`",
+        ),
+        (
+            "let mut line = String::new();\nstd::io::stdin().read_line(&mut line);",
+            "names `stdin`",
+        ),
+        ("use std::io::IsTerminal as _;", "names `IsTerminal`"),
+        (
+            "let asked = std::io::stderr().is_terminal();",
+            "names `is_terminal`",
         ),
     ] {
         let named = process_read(broken);

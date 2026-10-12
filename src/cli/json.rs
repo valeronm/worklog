@@ -46,6 +46,7 @@ mod tests {
     use crate::app::draft::DraftRow;
     use crate::app::followup::{Made, NewFollowup};
     use crate::app::list::{ClaimRow, EntryRow, FactRow, ForkRow, TopicRow};
+    use crate::app::machines::PLACEHOLDER;
     use crate::app::search::{Hit, Logged, Query};
     use crate::app::show::{Diff, History, Shown};
     use crate::app::testing::{
@@ -1096,9 +1097,19 @@ mod tests {
             "open_count": 1,
             "forks": [],
             "draft_count": 0,
+            "machine_needs_summary": false,
         });
         let here = context::context(&world.deps(), "/home/desk/projects/lantern/case").unwrap();
         vec![(here, expected)]
+    }
+
+    #[test]
+    fn a_context_says_when_the_machine_topic_still_has_the_placeholder_summary() {
+        let (world, _) = world();
+        let held = topic_fields("desk", "").replace("\"s\"", &format!("{PLACEHOLDER:?}"));
+        world.amend(&world.machine(), &held, "\n");
+        let text = parsed(&context::context(&world.deps(), "/srv").unwrap());
+        assert_eq!(text["machine_needs_summary"], json!(true));
     }
 
     #[test]

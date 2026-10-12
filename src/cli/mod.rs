@@ -7,18 +7,20 @@ mod complete;
 mod hook;
 mod json;
 mod log;
+mod prompt;
 mod render;
 mod run;
 mod skill;
 mod upgrade;
 
+use std::cell::RefCell;
 use std::ffi::OsString;
-use std::io::{ErrorKind, Write};
+use std::io::{BufRead, ErrorKind, IsTerminal as _, Write};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
-use crate::app::Failure;
 use crate::app::record::Outcome;
+use crate::app::{Failure, setup};
 use crate::domain::ports::{Binary, Releases, StoreError};
 use crate::domain::release::{self, ReleaseVersion};
 use crate::domain::schema::Directory;
@@ -35,6 +37,8 @@ struct Environment<'a> {
     version: ReleaseVersion,
     releases: &'a dyn Fn() -> Box<dyn Releases>,
     binary_at: &'a dyn Fn(&Path) -> Box<dyn Binary>,
+    /// `None` unless both the input and stderr are a terminal.
+    terminal: Option<&'a RefCell<dyn BufRead + 'a>>,
 }
 
 impl Environment<'_> {
@@ -71,6 +75,9 @@ impl Environment<'_> {
 #[must_use]
 pub fn main() -> i32 {
     let variable = |name: &str| std::env::var_os(name);
+    let stdin = std::io::stdin();
+    let typed = RefCell::new(stdin.lock());
+    let answers: &RefCell<dyn BufRead> = &typed;
     let environment = Environment {
         cwd: std::env::current_dir().ok(),
         binary: std::env::current_exe().ok(),
@@ -78,6 +85,7 @@ pub fn main() -> i32 {
         version: release::current(),
         releases: &|| wiring::releases(&variable),
         binary_at: &|path| wiring::binary(path, NAME),
+        terminal: (stdin.is_terminal() && std::io::stderr().is_terminal()).then_some(answers),
     };
     let args: Vec<OsString> = std::env::args_os().collect();
     let cwd = environment.cwd.as_deref();
@@ -104,7 +112,9 @@ fn adapters_for(
     environment: &Environment,
 ) -> Result<Option<wiring::Adapters>, Failure> {
     let chosen = match command {
-        Command::Init { store, .. } => Some(environment.placed(store)?),
+        Command::Init {
+            store: Some(store), ..
+        } => Some(environment.placed(store)?),
         _ => None,
     };
     wiring::wire(environment.variable, chosen)
@@ -121,6 +131,21 @@ fn unbound(command: &Command, json: bool) -> Result<Output, Failure> {
     }
 }
 
+// The store of an `init` given no argument is known only once its question is answered.
+fn asked(json: bool, environment: &Environment, err: &mut dyn Write) -> Result<Output, Failure> {
+    let answers = environment.terminal.ok_or_else(prompt::no_terminal)?;
+    if let Some(bound) = wiring::wire(environment.variable, None)? {
+        setup::refuse_bound(&bound.deps())?;
+    }
+    let mut answers = answers.borrow_mut();
+    let mut terminal = prompt::Terminal::new(&mut *answers, err);
+    let (store, adapters) = prompt::store(&mut terminal, environment, |store| {
+        wiring::wire(environment.variable, Some(store.to_path_buf()))?
+            .ok_or_else(Failure::not_set_up)
+    })?;
+    prompt::init(&adapters.deps(), environment, json, &store, &mut terminal)
+}
+
 // A log that stalls must not hold back the run's output.
 fn ran(
     command: &Command,
@@ -130,6 +155,10 @@ fn ran(
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> i32 {
+    if let Command::Init { name: None, .. } = command {
+        let answer = asked(json, environment, err);
+        return finished(answer, out, err);
+    }
     let adapters = match adapters_for(command, environment) {
         Ok(Some(adapters)) => adapters,
         Ok(None) => return finished(unbound(command, json), out, err),
@@ -318,6 +347,7 @@ mod tests {
     use std::io;
 
     use super::*;
+    use crate::app::machines;
     use crate::domain::testing::{MemoryBinary, MemoryReleases, version};
 
     const UNPUBLISHED: fn() -> Box<dyn Releases> = || Box::new(MemoryReleases::default());
@@ -338,6 +368,7 @@ mod tests {
             version: release::current(),
             releases: &UNPUBLISHED,
             binary_at: &IN_MEMORY,
+            terminal: None,
         }
     }
 
@@ -351,6 +382,7 @@ mod tests {
         pub(super) version: ReleaseVersion,
         pub(super) releases: &'a dyn Fn() -> Box<dyn Releases>,
         pub(super) binary_at: &'a dyn Fn(&Path) -> Box<dyn Binary>,
+        pub(super) typed: Option<String>,
     }
 
     impl<'a> Process<'a> {
@@ -365,6 +397,7 @@ mod tests {
                 version: release::current(),
                 releases: &UNPUBLISHED,
                 binary_at: &IN_MEMORY,
+                typed: None,
             }
         }
 
@@ -394,6 +427,11 @@ mod tests {
             out: &mut dyn Write,
             err: &mut dyn Write,
         ) -> i32 {
+            let typed = self
+                .typed
+                .as_deref()
+                .map(|typed| RefCell::new(typed.as_bytes()));
+            let answers = typed.as_ref().map(|typed| typed as &RefCell<dyn BufRead>);
             let environment = Environment {
                 cwd: self.cwd.clone(),
                 binary: self.binary.clone(),
@@ -401,6 +439,7 @@ mod tests {
                 version: self.version,
                 releases: self.releases,
                 binary_at: self.binary_at,
+                terminal: answers,
             };
             let mut args = vec![self.invoked.clone()];
             args.extend(line.iter().map(OsString::from));
@@ -835,6 +874,177 @@ mod tests {
         assert_eq!(ran.code, 2);
         assert!(!root.join("home/kept").exists());
         assert!(!root.join("next").exists());
+    }
+
+    fn typing<'a>(root: &Path, answers: &str) -> Process<'a> {
+        Process {
+            typed: Some(answers.to_owned()),
+            ..Process::under(root)
+        }
+    }
+
+    fn scratch() -> (tempfile::TempDir, PathBuf) {
+        let kept = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(kept.path()).unwrap();
+        (kept, root)
+    }
+
+    #[test]
+    fn init_alone_with_no_terminal_is_a_usage_error_that_asks_nothing() {
+        let (_kept, root) = scratch();
+        let ran = run(&root, &["init"]);
+        assert_eq!((ran.out.as_str(), ran.code), ("", 2));
+        assert_eq!(
+            ran.err,
+            format!(
+                "{NAME}: `init` alone asks its questions on a terminal. A host is set up by its \
+                 user, who gives the directory of the store; without a terminal that is \
+                 `{NAME} init <NAME> --store <DIR>`\n"
+            )
+        );
+        assert!(!root.join("next").exists());
+        assert!(!root.join("home").exists());
+    }
+
+    #[test]
+    fn init_alone_binds_the_host_over_the_store_it_is_told_of() {
+        let (_kept, root) = scratch();
+        let store = root.join("home/kept");
+        let made = typing(&root, "kept\ny\ndesk\n\n").run(&["init"]);
+        assert_eq!((made.out.as_str(), made.code), ("desk created\n", 0));
+        let default = root.join("home/worklog");
+        let first = format!("Directory of the store [{}]: ", default.display());
+        assert!(made.err.starts_with(&first), "{}", made.err);
+        let last = format!(
+            "The store: {}\nThe machine: desk, a new topic\nSet this host up? [Y/n]: ",
+            store.display()
+        );
+        assert!(made.err.ends_with(&last), "{}", made.err);
+        let listed = run(&root, &["topics"]);
+        let row = format!("  desk  {}\n", machines::PLACEHOLDER);
+        assert!(listed.out.ends_with(&row), "{}", listed.out);
+
+        let (_other, phone) = scratch();
+        let answers = format!("{}\ndesk\n\n", store.display());
+        let bound = typing(&phone, &answers).run(&["init", "--json"]);
+        assert_eq!(bound.code, 0, "{}", bound.err);
+        let value: serde_json::Value = serde_json::from_str(&bound.out).expect("one value");
+        assert_eq!(
+            (&value["label"], &value["created"]),
+            (&"desk".into(), &false.into())
+        );
+        assert_eq!(run(&phone, &["topics"]).out, listed.out);
+    }
+
+    #[test]
+    fn init_alone_that_is_declined_leaves_no_store_and_no_config() {
+        for (answers, why) in [
+            ("kept\n\n", "no store was started"),
+            ("kept\nn\n", "no store was started"),
+            ("kept\ny\ndesk\nn\n", "nothing was written"),
+            ("kept\ny\n", "nothing was written"),
+            ("", "nothing was written"),
+        ] {
+            let (_kept, root) = scratch();
+            let ran = typing(&root, answers).run(&["init"]);
+            assert_eq!((ran.out.as_str(), ran.code), ("", 1), "{answers:?}");
+            assert!(ran.err.contains(&format!("{NAME}: ")), "{}", ran.err);
+            assert!(ran.err.ends_with(&format!("{why}\n")), "{}", ran.err);
+            assert!(!root.join("next").exists(), "{answers:?}");
+            assert!(!root.join("home").exists(), "{answers:?}");
+        }
+    }
+
+    #[test]
+    fn init_alone_asks_before_it_starts_a_store_in_a_directory_holding_no_document() {
+        for held in [&[][..], &[".stfolder"], &[".stfolder", "usage"]] {
+            let (_kept, root) = scratch();
+            let store = root.join("home/kept");
+            std::fs::create_dir_all(&store).unwrap();
+            for dir in held {
+                std::fs::create_dir(store.join(dir)).unwrap();
+            }
+            let asking = format!(
+                "{} holds no documents. A store shared between machines may not have synced \
+                 to this one yet.\nStart a new store there? [y/N]: ",
+                store.display()
+            );
+            let declined = typing(&root, "kept\n\n").run(&["init"]);
+            assert_eq!((declined.out.as_str(), declined.code), ("", 1));
+            assert!(declined.err.contains(&asking), "{}", declined.err);
+            assert!(!root.join("next").exists(), "{held:?}");
+            assert_eq!(std::fs::read_dir(&store).unwrap().count(), held.len());
+
+            let made = typing(&root, "kept\ny\ndesk\n\n").run(&["init"]);
+            assert_eq!((made.out.as_str(), made.code), ("desk created\n", 0));
+        }
+    }
+
+    #[test]
+    fn init_alone_reads_a_tilde_as_the_home_directory_and_refuses_what_an_argument_is_refused() {
+        let (_kept, root) = scratch();
+        let made = typing(&root, "~/sync/kept\ny\ndesk\n\n").run(&["init"]);
+        assert_eq!((made.out.as_str(), made.code), ("desk created\n", 0));
+        assert!(root.join("home/sync/kept").is_dir());
+
+        let (_other, root) = scratch();
+        let project = root.join("home/projects");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(project.join("notes.md"), "a person's own").unwrap();
+        std::fs::write(root.join("home/file"), "").unwrap();
+        let asked_again = typing(&root, "projects\nfile\nkept\ny\ndesk\n\n").run(&["init"]);
+        assert_eq!(
+            (asked_again.out.as_str(), asked_again.code),
+            ("desk created\n", 0)
+        );
+        let said = format!(
+            "{}: is not empty and holds no store\nDirectory of the store [",
+            project.display()
+        );
+        assert!(asked_again.err.contains(&said), "{}", asked_again.err);
+        let file = format!("]: {}: ", root.join("home/file").display());
+        assert!(asked_again.err.contains(&file), "{}", asked_again.err);
+        assert!(root.join("home/kept").is_dir());
+        assert_eq!(std::fs::read_dir(&project).unwrap().count(), 1);
+
+        let (_third, root) = scratch();
+        let project = root.join("home/projects");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(project.join("notes.md"), "a person's own").unwrap();
+        let ended = typing(&root, "projects\n").run(&["init"]);
+        assert_eq!((ended.out.as_str(), ended.code), ("", 1));
+        assert!(!root.join("next").exists());
+    }
+
+    #[test]
+    fn init_alone_on_a_host_that_is_set_up_is_refused_before_it_asks() {
+        let (_kept, root) = scratch();
+        init(&root);
+        let again = typing(&root, "elsewhere\ny\natlas\n\n").run(&["init"]);
+        assert_eq!((again.out.as_str(), again.code), ("", 1));
+        assert_eq!(
+            again.err,
+            format!("{NAME}: this host is already set up as desk\n")
+        );
+        assert!(!root.join("home/elsewhere").exists());
+    }
+
+    #[test]
+    fn init_alone_installs_for_the_agents_of_the_host_when_told_to() {
+        let (_kept, root) = scratch();
+        let home = root.join("home");
+        std::fs::create_dir_all(home.join(".claude")).unwrap();
+        let made = typing(&root, "kept\ny\ndesk\ny\n\n").run(&["init"]);
+        let skill = home.join(".claude/skills").join(NAME).join("SKILL.md");
+        let hooks = home.join(".claude/settings.json");
+        assert_eq!(
+            (made.out, made.code),
+            (
+                format!("desk created\n{}\n{}\n", skill.display(), hooks.display()),
+                0
+            )
+        );
+        assert!(skill.is_file() && hooks.is_file());
     }
 
     #[test]

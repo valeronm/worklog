@@ -125,17 +125,20 @@ pub enum AgentsAction {
 #[derive(Subcommand)]
 pub enum Command {
     /// Bind this host to its machine topic and record where the store is; done once per host
+    ///
+    /// With no argument it asks for both on a terminal.
     Init {
         /// The machine topic: an existing topic to bind to, or the name of a new one
-        name: String,
+        #[arg(requires = "store")]
+        name: Option<String>,
         /// The store directory
-        #[arg(long, value_hint = ValueHint::DirPath)]
-        store: PathBuf,
+        #[arg(long, value_hint = ValueHint::DirPath, requires = "name")]
+        store: Option<PathBuf>,
         /// What the machine is, for a topic that does not exist yet
-        #[arg(long)]
+        #[arg(long, requires = "name")]
         summary: Option<String>,
         /// Also install the skill and the session hook for every coding agent on this host
-        #[arg(long)]
+        #[arg(long, requires = "name")]
         agents: bool,
     },
     #[command(flatten)]
@@ -449,6 +452,8 @@ mod tests {
     #[test]
     fn every_command_of_the_list_parses() {
         for line in [
+            "worklog init",
+            "worklog init --json",
             "worklog init desk --store /atlas/store",
             "worklog init desk --store store --summary desk",
             "worklog new topic lantern",
@@ -566,6 +571,9 @@ mod tests {
     fn a_command_line_missing_a_part_is_refused() {
         for line in [
             "worklog init desk",
+            "worklog init --store kept",
+            "worklog init --summary desk",
+            "worklog init --agents",
             "worklog new followup",
             "worklog new followup --topics lantern --look-again 2026-11-01",
             "worklog new followup --topics lantern --why w",
@@ -748,6 +756,19 @@ mod tests {
         };
         assert!(!init("worklog init desk --store kept"));
         assert!(init("worklog init desk --store kept --agents"));
+    }
+
+    #[test]
+    fn init_takes_its_name_with_its_store_or_neither() {
+        let init = |line: &str| match parsed(line).unwrap().command {
+            Invoked::Run(Command::Init { name, store, .. }) => (name, store),
+            _ => panic!("{line}: expected an init"),
+        };
+        assert_eq!(init("worklog init"), (None, None));
+        assert_eq!(
+            init("worklog init desk --store kept"),
+            (Some("desk".to_owned()), Some(PathBuf::from("kept")))
+        );
     }
 
     #[test]
