@@ -1117,7 +1117,7 @@ fn a_command_that_changes_a_document_prints_its_stored_version_as_json() {
 #[test]
 fn a_command_that_reads_the_store_prints_one_json_value() {
     let host = Host::stocked();
-    host.followup("Check the driver");
+    let followup = host.followup("Check the driver");
     let project = host.home().join("projects/lantern");
     host.ok_in(&project, &["claim", "lantern"]);
 
@@ -1160,7 +1160,8 @@ fn a_command_that_reads_the_store_prints_one_json_value() {
 
     let clean = host.json(&["check"]);
     assert_eq!(clean["problems"], Value::Array(Vec::new()), "{clean}");
-    fs::write(&host.version_files()[0], "not a version\n").unwrap();
+    let stored = host.ok(&["history", &followup]);
+    fs::write(host.file_of(&stored[..12]), "not a version\n").unwrap();
     let ran = host.run(&["check", "--json"]);
     assert_eq!((ran.stderr.as_str(), ran.code), ("", Some(1)));
     let found = one_value(&ran.stdout).unwrap_or_else(|| panic!("one value: {}", ran.stdout));
