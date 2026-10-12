@@ -1,21 +1,17 @@
 {% extends "base.html" %}
 {% import "macros.html" as m %}
-{% block title %}History of {{ slug.text }}{% endblock %}
-{% block nav %}{{ nav }}{% endblock %}
+{% block title %}History of {{ document.text }}{% endblock %}
 {% block content %}
-{% call m::crumbs(crumbs) %}{% endcall %}
 <h1>History</h1>
-{% call m::meta("of", slug_plain, history) %}{% endcall %}
-{% call m::notice(foreign) %}{% endcall %}
-{% call m::notice(lost_rename) %}{% endcall %}
-{% call m::notice(waiting) %}{% endcall %}
+<p class="meta"><span class="kind">of</span><a href="{{ document.href }}">{{ document.text }}</a></p>
+{% for note in notes %}<p class="notice">{{ note }}</p>
+{% endfor -%}
+{% if rows.is_empty() %}<p class="muted">No version reads.</p>{% else %}
 <table>
-<tr><th>Version</th><th>Written</th><th>Machine</th><th>Operation</th><th>Parents</th></tr>
-{% for v in versions %}
-<tr>
-  {% call m::stamp(v.line) %}{% endcall %}
-  <td>{% if v.parents.is_empty() %}<span class="muted">none</span>{% else %}{% call m::links(v.parents) %}{% endcall %}{% endif %}{% if let Some(from) = v.moved_from %} <span class="muted">as {% call m::link(from) %}{% endcall %}</span>{% endif %}</td>
-</tr>
-{% endfor %}
+<tr><th>Version</th><th>Written</th><th>Machine</th><th>Change</th></tr>
+{% for row in rows -%}
+<tr>{% call m::version_row(row) %}{% endcall %}</tr>
+{% endfor -%}
 </table>
+{% endif %}
 {% endblock %}

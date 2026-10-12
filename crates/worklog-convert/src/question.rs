@@ -1,7 +1,7 @@
 //! Everything that stops a conversion, and for what a decision file answers, the keys the
 //! answer goes under.
 
-use worklog_next::domain::schema::{KindOf, Reason};
+use worklog::domain::schema::{KindOf, Reason};
 
 use crate::key::{
     ConversionKey, DocumentField, DocumentKey, Folded, Key, Placement, TopicKey, segment,
@@ -410,8 +410,8 @@ fn include_offers(
         )
     } else if unread {
         format!(
-            "write {item} here, or in uses, or in drop: worklog does not act on this item, \
-             which it leaves out of the list as it renames it"
+            "write {item} here, or in uses, or in drop: `worklog` 0.4 does not act on this \
+             item, which it leaves out of the list as it renames it"
         )
     } else {
         format!("write {item} here, or in uses, or in drop")

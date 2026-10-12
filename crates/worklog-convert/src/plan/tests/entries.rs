@@ -1,4 +1,4 @@
-use worklog_next::domain::schema::Entry;
+use worklog::domain::schema::Entry;
 
 use super::*;
 
@@ -518,7 +518,7 @@ fn what_stands_before_an_entry_is_asked_as_for_any_document() {
 fn a_field_the_store_requires_and_a_version_lacks_blocks() {
     let old = with_topics();
     let first = old.entry(LAMP_DRIVER, "Drove the lamp", &[], desk(DAY_1));
-    let mut fields = worklog::domain::frontmatter::Fields::default();
+    let mut fields = worklog_old::domain::frontmatter::Fields::default();
     fields.set("summary", scalar("Drove the lamp"));
     let bare = composed(
         LAMP_DRIVER,

@@ -1,9 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use worklog_next::domain::id::DocumentId;
-use worklog_next::domain::schema::address::displayed;
-use worklog_next::domain::schema::{Content, Followup, Trigger};
-use worklog_next::domain::version::Links;
+use worklog::domain::id::DocumentId;
+use worklog::domain::schema::address::displayed;
+use worklog::domain::schema::{Content, Followup, Trigger};
+use worklog::domain::version::Links;
 
 use super::resolve::Unsettled;
 use super::{Document, Frame, Origin, Source, Version};

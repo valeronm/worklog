@@ -1,4 +1,4 @@
-//! Converts a store of the `worklog` crate to the store `worklog-next` keeps.
+//! Converts a store of the `worklog-old` crate to the store `worklog` keeps.
 //!
 //! Outside the tests, `old` alone reaches the crate that wrote the store being converted.
 

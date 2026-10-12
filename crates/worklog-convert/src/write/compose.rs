@@ -1,9 +1,9 @@
 use std::collections::BTreeSet;
 use std::fmt;
 
-use worklog_next::domain::id::DocumentId;
-use worklog_next::domain::schema::KindOf;
-use worklog_next::domain::version::{Envelope, Kind, Version};
+use worklog::domain::id::DocumentId;
+use worklog::domain::schema::KindOf;
+use worklog::domain::version::{Envelope, Kind, Version};
 
 use crate::plan::{Complete, Whole, Written, head};
 

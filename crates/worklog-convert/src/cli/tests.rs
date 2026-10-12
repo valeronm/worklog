@@ -4,8 +4,8 @@ use std::io::{self, ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use worklog_next::app::check::{Finding, check};
-use worklog_next::wiring::wire;
+use worklog::app::check::{Finding, check};
+use worklog::wiring::wire;
 
 use super::{Shown, converted, finish, main_in};
 use crate::decisions::Decisions;
@@ -149,7 +149,7 @@ fn summary(target: &Path) -> String {
     let target = target.display();
     format!(
         "{COUNTS}{WROTE}{notices}written to {target}\n\
-         to bind a host to it: worklog-next init <its machine topic> --store {target}\n"
+         to bind a host to it: worklog init <its machine topic> --store {target}\n"
     )
 }
 
@@ -1103,7 +1103,7 @@ fn a_store_with_a_document_to_mend_is_reported_and_never_written() {
     assert!(
         dry.out.contains(&format!(
             "\n## Blocked\n\n### Forked\n\n\
-             Close each fork with `worklog resolve` and `worklog save`.\n\n\
+             Close each fork with `worklog resolve` and `worklog save`, run with a `worklog` 0.4 binary.\n\n\
              | document | heads |\n| --- | --- |\n| fact/atlas/legend | {} |\n",
             heads.join(", ")
         )),
@@ -1209,14 +1209,14 @@ fn the_summary_lists_what_the_conversion_wrote_and_what_the_new_check_notes() {
         format!(
             "{COUNTS}{WROTE}notice: atlas: is placed nowhere\nnotice: phone: is old\n\
              written to /atlas/new\n\
-             to bind a host to it: worklog-next init <its machine topic> --store /atlas/new\n"
+             to bind a host to it: worklog init <its machine topic> --store /atlas/new\n"
         ),
     );
     assert_eq!(
         super::summary(ready.counts(), "", &[], target),
         format!(
             "{COUNTS}written to /atlas/new\n\
-             to bind a host to it: worklog-next init <its machine topic> --store /atlas/new\n"
+             to bind a host to it: worklog init <its machine topic> --store /atlas/new\n"
         ),
     );
 }

@@ -1,25 +1,74 @@
+//! One immutable file: the envelope a write stamps, the fields and links of
+//! the document as they stood, and the body.
+
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
-use super::frontmatter::{self, FieldError, Fields, ParseError, Value};
-use super::machine::MachineName;
-use super::slug::{Kind, Slug};
+use serde::{Serialize, Serializer};
+use toml::value::Datetime;
+use toml::{Table, Value};
 
-/// The BLAKE3 hash of a version's bytes, which is also its file name.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct VersionId(String);
+use super::fence;
+use super::id::{DocumentId, VersionId};
 
-impl VersionId {
-    #[must_use]
-    pub fn of(text: &str) -> VersionId {
-        VersionId(blake3::hash(text.as_bytes()).to_hex().to_string())
+/// The newest file layout this reader knows.
+pub const FORMAT: u32 = 1;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum VersionError {
+    NotAKind(String),
+    NotAStamp(String),
+    /// The parts render to a file that parses to other parts.
+    DoesNotReadBack,
+}
+
+impl fmt::Display for VersionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            VersionError::NotAKind(text) => write!(f, "`{text}` is not a kind"),
+            VersionError::NotAStamp(text) => {
+                write!(f, "`{text}` is not a date and time with an offset")
+            }
+            VersionError::DoesNotReadBack => f.write_str("does not read back as written"),
+        }
     }
+}
 
-    pub fn parse(text: &str) -> Result<VersionId, VersionError> {
-        let ok = text.len() == 64 && text.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
-        if ok {
-            Ok(VersionId(text.to_owned()))
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ReadError {
+    /// The bytes do not hash to the name they were found under.
+    Corrupt,
+    /// Written by a release that knows a later layout.
+    Newer {
+        format: u32,
+    },
+    Malformed(String),
+}
+
+impl fmt::Display for ReadError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ReadError::Corrupt => f.write_str("the bytes do not hash to the file's name"),
+            ReadError::Newer { format } => write!(f, "written in format {format}, a newer one"),
+            ReadError::Malformed(why) => f.write_str(why),
+        }
+    }
+}
+
+fn malformed(why: impl fmt::Display) -> ReadError {
+    ReadError::Malformed(why.to_string())
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
+#[serde(transparent)]
+pub struct Kind(String);
+
+impl Kind {
+    pub fn parse(text: &str) -> Result<Kind, VersionError> {
+        if !text.is_empty() && text.bytes().all(|b| b.is_ascii_lowercase()) {
+            Ok(Kind(text.to_owned()))
         } else {
-            Err(VersionError::BadId(text.to_owned()))
+            Err(VersionError::NotAKind(text.to_owned()))
         }
     }
 
@@ -27,555 +76,335 @@ impl VersionId {
     pub fn as_str(&self) -> &str {
         &self.0
     }
-
-    /// Whether `text` could be the start of an id: lowercase hex, and long
-    /// enough not to match by accident.
-    #[must_use]
-    pub fn is_prefix(text: &str) -> bool {
-        (6..=64).contains(&text.len())
-            && text.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
-    }
-
-    /// Enough of the hash to tell versions of one document apart on a line.
-    #[must_use]
-    pub fn short(&self) -> &str {
-        &self.0[..12]
-    }
 }
 
-impl fmt::Display for VersionId {
+impl fmt::Display for Kind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.0)
     }
 }
 
-/// The two operation names the chain itself reads.
-pub const TOMBSTONE: &str = "tombstone";
-pub const RENAME: &str = "rename";
-
+/// When a version was written, with the offset of the host that wrote it.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct VersionBlock {
-    pub parents: Vec<VersionId>,
-    pub written: String,
-    pub machine: MachineName,
-    /// The command that wrote the version, as the file names it.
-    pub operation: String,
-    /// The new slug, on the tombstone a rename leaves behind.
-    pub superseded_by: Option<Slug>,
-    /// The old slug, on the first version a rename writes at the new one.
-    pub renamed_from: Option<Slug>,
-    /// The block's entries as read, kept when one is outside this
-    /// worklog's grammar so the bytes re-emit as written; nothing writes a
-    /// block that has them.
-    pub raw: Option<Vec<(String, Value)>>,
-}
+pub struct Stamp(Datetime);
 
-/// What a tombstone says: where the document went, or why it ended.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Tombstone<'a> {
-    RenamedTo(&'a Slug),
-    Removed { note: Option<&'a str> },
-}
-
-/// The body with the note as its last line, the form `Version::note`
-/// reads back.
-#[must_use]
-pub fn with_note(mut body: String, note: Option<&str>) -> String {
-    if let Some(note) = note {
-        if !body.is_empty() && !body.ends_with('\n') {
-            body.push('\n');
-        }
-        body.push_str(note.trim());
-        body.push('\n');
+impl Stamp {
+    /// Takes RFC 3339 with an offset.
+    pub fn parse(text: &str) -> Result<Stamp, VersionError> {
+        text.parse()
+            .ok()
+            .and_then(Stamp::of)
+            .ok_or_else(|| VersionError::NotAStamp(text.to_owned()))
     }
-    body
+
+    /// The date part, `YYYY-MM-DD`.
+    #[must_use]
+    pub fn day(&self) -> String {
+        self.to_string().chars().take(10).collect()
+    }
+
+    fn of(datetime: Datetime) -> Option<Stamp> {
+        (datetime.date.is_some() && datetime.time.is_some() && datetime.offset.is_some())
+            .then_some(Stamp(datetime))
+    }
 }
 
-/// A body that is the note alone, or nothing for a blank one, so what
-/// `Version::note` reads back is what was said.
-#[must_use]
-pub fn note_body(note: &str) -> Option<String> {
-    let note = note.trim();
-    (!note.is_empty()).then(|| format!("{note}\n"))
+impl Stamp {
+    /// Nanoseconds since the epoch, whatever offset the stamp is written in.
+    #[must_use]
+    pub fn instant(&self) -> i128 {
+        let datetime = &self.0;
+        let (Some(date), Some(time), Some(offset)) =
+            (datetime.date, datetime.time, datetime.offset)
+        else {
+            return 0;
+        };
+        let offset = match offset {
+            toml::value::Offset::Z => 0,
+            toml::value::Offset::Custom { minutes } => i64::from(minutes),
+        };
+        let (year, month, day) = (
+            i64::from(date.year) - i64::from(date.month <= 2),
+            i64::from(date.month),
+            i64::from(date.day),
+        );
+        let era = year.div_euclid(400);
+        let year_of_era = year - era * 400;
+        let day_of_year = (153 * (month + if month > 2 { -3 } else { 9 }) + 2) / 5 + day - 1;
+        let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+        let days = era * 146_097 + day_of_era - 719_468;
+        let seconds = days * 86_400
+            + i64::from(time.hour) * 3_600
+            + i64::from(time.minute) * 60
+            + i64::from(time.second.unwrap_or(0))
+            - offset * 60;
+        i128::from(seconds) * 1_000_000_000 + i128::from(time.nanosecond.unwrap_or(0))
+    }
 }
 
-/// One immutable file of the store.
+impl Ord for Stamp {
+    fn cmp(&self, other: &Stamp) -> std::cmp::Ordering {
+        self.instant()
+            .cmp(&other.instant())
+            .then_with(|| self.to_string().cmp(&other.to_string()))
+    }
+}
+
+impl PartialOrd for Stamp {
+    fn partial_cmp(&self, other: &Stamp) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl fmt::Display for Stamp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl Serialize for Stamp {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
+    }
+}
+
+pub type Fields = Table;
+
+/// What each `[[name]]` in the body resolved to when the version was
+/// saved; `None` for a name no document held.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Links(pub BTreeMap<String, Option<DocumentId>>);
+
+/// What a write stamps on a version, apart from the document's content.
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Envelope {
+    pub document: DocumentId,
+    pub kind: Kind,
+    pub parents: Vec<VersionId>,
+    /// Every version behind this one, the parents included.
+    pub ancestors: Vec<VersionId>,
+    pub written: Stamp,
+    /// The topic of the machine that wrote it.
+    pub machine: DocumentId,
+    /// The command that wrote it, as free text.
+    pub change: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct Version {
     pub id: VersionId,
-    pub slug: Slug,
-    pub block: VersionBlock,
-    /// The kind's own fields, without `slug`, `kind` and `version`.
+    pub envelope: Envelope,
     pub fields: Fields,
+    pub links: Links,
     pub body: String,
+    text: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum VersionError {
-    Frontmatter(ParseError),
-    Field(FieldError),
-    BadId(String),
-    /// The bytes are not what the writer would emit for their content, so
-    /// their hash would not survive a rewrite.
-    NotCanonical,
-    /// The file's name is not the hash of its bytes.
-    IdMismatch {
-        named: String,
-        actual: String,
-    },
+fn ids(ids: &[VersionId]) -> Value {
+    Value::Array(ids.iter().map(|id| id.as_str().into()).collect())
 }
 
-impl fmt::Display for VersionError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            VersionError::Frontmatter(e) => e.fmt(f),
-            VersionError::Field(e) => e.fmt(f),
-            VersionError::BadId(id) => write!(f, "`{id}` is not a version id"),
-            VersionError::NotCanonical => f.write_str("the bytes are not in the writer's shape"),
-            VersionError::IdMismatch { named, actual } => {
-                write!(f, "file named {named} hashes to {actual}")
-            }
-        }
+fn render(envelope: &Envelope, fields: &Fields, links: &Links, body: &str) -> Option<String> {
+    let mut header = Table::new();
+    header.insert("format".into(), i64::from(FORMAT).into());
+    header.insert("document".into(), envelope.document.as_str().into());
+    header.insert("kind".into(), envelope.kind.as_str().into());
+    header.insert("parents".into(), ids(&envelope.parents));
+    header.insert("ancestors".into(), ids(&envelope.ancestors));
+    header.insert("written".into(), Value::Datetime(envelope.written.0));
+    header.insert("machine".into(), envelope.machine.as_str().into());
+    header.insert("change".into(), envelope.change.as_str().into());
+    header.insert("fields".into(), Value::Table(fields.clone()));
+    if !links.0.is_empty() {
+        let links = links
+            .0
+            .iter()
+            .map(|(name, id)| {
+                (
+                    name.clone(),
+                    id.as_ref().map_or("", DocumentId::as_str).into(),
+                )
+            })
+            .collect();
+        header.insert("links".into(), Value::Table(links));
+    }
+    fence::join(&toml::to_string(&header).ok()?, body).ok()
+}
+
+fn take(header: &mut Table, key: &str) -> Result<Value, ReadError> {
+    header
+        .remove(key)
+        .ok_or_else(|| malformed(format!("no `{key}`")))
+}
+
+pub(super) fn text_of(header: &mut Table, key: &str) -> Result<String, ReadError> {
+    match take(header, key)? {
+        Value::String(text) => Ok(text),
+        _ => Err(malformed(format!("`{key}` is not text"))),
     }
 }
 
-impl From<ParseError> for VersionError {
-    fn from(e: ParseError) -> Self {
-        VersionError::Frontmatter(e)
-    }
+fn document_of(header: &mut Table, key: &str) -> Result<DocumentId, ReadError> {
+    DocumentId::parse(&text_of(header, key)?).map_err(malformed)
 }
 
-impl From<FieldError> for VersionError {
-    fn from(e: FieldError) -> Self {
-        VersionError::Field(e)
-    }
-}
-
-fn invalid(key: &str, reason: impl fmt::Display) -> VersionError {
-    VersionError::Field(FieldError::invalid(key, reason))
-}
-
-/// The fields of a file as written: the document header, the kind's own
-/// fields, and the `version` block last. Versions and drafts share this
-/// shape, so a draft's bytes are a version's minus what `save` stamps.
-#[must_use]
-pub fn envelope(slug: &Slug, fields: &Fields, version: Value) -> Fields {
-    let mut all = Fields::default();
-    all.push_scalar("slug", slug.path());
-    all.push_scalar("kind", slug.kind().dir());
-    for (key, value) in fields.iter() {
-        all.push(key, value.clone());
-    }
-    all.push("version", version);
-    all
-}
-
-/// The inverse of `envelope`: the slug, the `version` value and the kind's
-/// own fields.
-pub fn open_envelope(mut fields: Fields) -> Result<(Slug, Value, Fields), VersionError> {
-    let slug = fields.required("slug")?;
-    let kind = fields.required("kind")?;
-    let kind =
-        Kind::from_dir(kind).ok_or_else(|| invalid("kind", format!("`{kind}` is no kind")))?;
-    let slug = Slug::of_kind(kind, slug).map_err(|e| invalid("slug", e))?;
-    let version = fields
-        .remove("version")
-        .ok_or(FieldError::Missing("version"))?;
-    fields.remove("slug");
-    fields.remove("kind");
-    Ok((slug, version, fields))
-}
-
-/// The `parents` list of a version block.
-pub fn parse_parents(block: &Fields) -> Result<Vec<VersionId>, VersionError> {
-    block
-        .list("parents")
-        .ok_or(FieldError::Missing("version.parents"))?
+pub(super) fn versions_of(header: &mut Table, key: &str) -> Result<Vec<VersionId>, ReadError> {
+    let Value::Array(items) = take(header, key)? else {
+        return Err(malformed(format!("`{key}` is not a list")));
+    };
+    items
         .iter()
-        .map(|p| VersionId::parse(p))
+        .map(|item| {
+            item.as_str()
+                .ok_or_else(|| malformed(format!("`{key}` holds what is not text")))
+                .and_then(|text| VersionId::parse(text).map_err(malformed))
+        })
         .collect()
 }
 
-impl VersionBlock {
-    /// Every key `to_value` emits; a block with any other is kept raw.
-    const KNOWN: [&'static str; 6] = [
-        "parents",
-        "written",
-        "machine",
-        "operation",
-        "superseded_by",
-        "renamed_from",
-    ];
+fn table_of(header: &mut Table, key: &str) -> Result<Table, ReadError> {
+    match header.remove(key) {
+        None => Ok(Table::new()),
+        Some(Value::Table(table)) => Ok(table),
+        Some(_) => Err(malformed(format!("`{key}` is not a table"))),
+    }
+}
 
-    fn to_value(&self) -> Value {
-        if let Some(raw) = &self.raw {
-            return Value::Map(raw.clone());
+fn links_of(header: &mut Table) -> Result<Links, ReadError> {
+    table_of(header, "links")?
+        .into_iter()
+        .map(|(name, id)| match id.as_str() {
+            Some("") => Ok((name, None)),
+            Some(id) => Ok((name, Some(DocumentId::parse(id).map_err(malformed)?))),
+            None => Err(malformed(format!("the link `{name}` is not text"))),
+        })
+        .collect::<Result<_, _>>()
+        .map(Links)
+}
+
+impl Envelope {
+    #[must_use]
+    pub fn first(
+        document: DocumentId,
+        kind: Kind,
+        written: Stamp,
+        machine: DocumentId,
+        change: &str,
+    ) -> Envelope {
+        Envelope {
+            document,
+            kind,
+            parents: Vec::new(),
+            ancestors: Vec::new(),
+            written,
+            machine,
+            change: change.to_owned(),
         }
-        let mut entries = vec![
-            (
-                "parents".to_owned(),
-                Value::List(self.parents.iter().map(|p| p.0.clone()).collect()),
-            ),
-            ("written".to_owned(), Value::Scalar(self.written.clone())),
-            (
-                "machine".to_owned(),
-                Value::Scalar(self.machine.as_str().to_owned()),
-            ),
-            (
-                "operation".to_owned(),
-                Value::Scalar(self.operation.clone()),
-            ),
-        ];
-        if let Some(slug) = &self.superseded_by {
-            entries.push(("superseded_by".to_owned(), Value::Scalar(slug.to_string())));
-        }
-        if let Some(slug) = &self.renamed_from {
-            entries.push(("renamed_from".to_owned(), Value::Scalar(slug.to_string())));
-        }
-        Value::Map(entries)
     }
 
-    fn from_entries(entries: &[(String, Value)]) -> Result<VersionBlock, VersionError> {
-        let sub: Fields = entries.iter().cloned().collect();
-        let parents = parse_parents(&sub)?;
-        let written = sub
-            .required("written")
-            .map_err(|_| FieldError::Missing("version.written"))?;
-        let machine = MachineName::parse(
-            sub.required("machine")
-                .map_err(|_| FieldError::Missing("version.machine"))?,
-        )
-        .map_err(|e| invalid("version.machine", e))?;
-        let operation = sub
-            .required("operation")
-            .map_err(|_| FieldError::Missing("version.operation"))?;
-        let superseded_by = sub
-            .optional("superseded_by")
-            .map(Slug::parse)
-            .transpose()
-            .map_err(|e| invalid("version.superseded_by", e))?;
-        let renamed_from = sub
-            .optional("renamed_from")
-            .map(Slug::parse)
-            .transpose()
-            .map_err(|e| invalid("version.renamed_from", e))?;
-        Ok(VersionBlock {
-            parents,
-            written: written.to_owned(),
+    /// The envelope of a version written on top of `heads`, or `None`
+    /// when there are none to follow.
+    #[must_use]
+    pub fn following(
+        heads: &[&Version],
+        written: Stamp,
+        machine: DocumentId,
+        change: &str,
+    ) -> Option<Envelope> {
+        let first = heads.first()?;
+        let parents: BTreeSet<&VersionId> = heads.iter().map(|head| &head.id).collect();
+        let ancestors: BTreeSet<&VersionId> = heads
+            .iter()
+            .flat_map(|head| &head.envelope.ancestors)
+            .chain(parents.iter().copied())
+            .collect();
+        Some(Envelope {
+            document: first.envelope.document.clone(),
+            kind: first.envelope.kind.clone(),
+            parents: parents.into_iter().cloned().collect(),
+            ancestors: ancestors.into_iter().cloned().collect(),
+            written,
             machine,
-            operation: operation.to_owned(),
-            superseded_by,
-            renamed_from,
-            raw: entries
-                .iter()
-                .any(|(key, _)| !Self::KNOWN.contains(&key.as_str()))
-                .then(|| entries.to_vec()),
+            change: change.to_owned(),
         })
     }
 }
 
 impl Version {
-    /// Builds the version from its parts; the id is the hash of the bytes
-    /// `to_text` will produce.
-    #[must_use]
-    pub fn compose(slug: Slug, block: VersionBlock, fields: Fields, body: String) -> Version {
-        let text = Version::render(&slug, &block, &fields, &body);
-        Version {
-            id: VersionId::of(&text),
-            slug,
-            block,
+    /// Builds the version from its parts, refusing parts whose file would
+    /// parse to anything else.
+    pub fn compose(
+        envelope: Envelope,
+        fields: Fields,
+        links: Links,
+        body: String,
+    ) -> Result<Version, VersionError> {
+        let text =
+            render(&envelope, &fields, &links, &body).ok_or(VersionError::DoesNotReadBack)?;
+        let version = Version {
+            id: VersionId::of(text.as_bytes()),
+            envelope,
             fields,
+            links,
             body,
+            text,
+        };
+        if Version::read(&version.id, &version.text).as_ref() == Ok(&version) {
+            Ok(version)
+        } else {
+            Err(VersionError::DoesNotReadBack)
         }
     }
 
-    fn render(slug: &Slug, block: &VersionBlock, fields: &Fields, body: &str) -> String {
-        frontmatter::emit(&envelope(slug, fields, block.to_value()), body)
-    }
-
+    /// The bytes the version was composed as or read from.
     #[must_use]
-    pub fn to_text(&self) -> String {
-        Version::render(&self.slug, &self.block, &self.fields, &self.body)
+    pub fn text(&self) -> &str {
+        &self.text
     }
 
-    /// The kind's fields and the body, as `show` prints them.
-    #[must_use]
-    pub fn content_text(&self) -> String {
-        frontmatter::emit(&self.fields, &self.body)
-    }
-
-    /// Reads a version from its bytes, refusing any that would not hash to
-    /// their own name when written again.
-    pub fn from_text(text: &str) -> Result<Version, VersionError> {
-        let split = frontmatter::parse(text)?;
-        let (slug, block, fields) = open_envelope(split.fields)?;
-        let block = match block {
-            Value::Map(entries) => VersionBlock::from_entries(&entries)?,
-            _ => return Err(FieldError::Missing("version").into()),
+    /// Refuses bytes that do not hash to `name`.
+    pub fn read(name: &VersionId, text: &str) -> Result<Version, ReadError> {
+        if VersionId::of(text.as_bytes()) != *name {
+            return Err(ReadError::Corrupt);
+        }
+        let (header, body) = fence::split(text).map_err(malformed)?;
+        let mut header: Table = header
+            .parse()
+            .map_err(|e| malformed(format!("the header is not TOML: {e}")))?;
+        let format = match take(&mut header, "format")? {
+            Value::Integer(format) => u32::try_from(format).ok().filter(|f| *f > 0),
+            _ => None,
+        }
+        .ok_or_else(|| malformed("`format` is not a format number"))?;
+        if format > FORMAT {
+            return Err(ReadError::Newer { format });
+        }
+        let envelope = Envelope {
+            document: document_of(&mut header, "document")?,
+            kind: Kind::parse(&text_of(&mut header, "kind")?).map_err(malformed)?,
+            parents: versions_of(&mut header, "parents")?,
+            ancestors: versions_of(&mut header, "ancestors")?,
+            written: match take(&mut header, "written")? {
+                Value::Datetime(written) => Stamp::of(written),
+                _ => None,
+            }
+            .ok_or_else(|| malformed("`written` is not a date and time with an offset"))?,
+            machine: document_of(&mut header, "machine")?,
+            change: text_of(&mut header, "change")?,
         };
-        if Version::render(&slug, &block, &fields, &split.body) != text {
-            return Err(VersionError::NotCanonical);
+        let fields = table_of(&mut header, "fields")?;
+        let links = links_of(&mut header)?;
+        if let Some(key) = header.keys().next() {
+            return Err(malformed(format!("`{key}` is no key of format {format}")));
         }
         Ok(Version {
-            id: VersionId::of(text),
-            slug,
-            block,
+            id: name.clone(),
+            envelope,
             fields,
-            body: split.body,
+            links,
+            body: body.to_owned(),
+            text: text.to_owned(),
         })
-    }
-
-    /// `from_text` plus the check that the file's name is the hash.
-    pub fn from_named_text(name: &str, text: &str) -> Result<Version, VersionError> {
-        let version = Version::from_text(text)?;
-        if version.id.as_str() != name {
-            return Err(VersionError::IdMismatch {
-                named: name.to_owned(),
-                actual: version.id.0,
-            });
-        }
-        Ok(version)
-    }
-
-    /// A head carrying `TOMBSTONE`, or `RENAME` with a successor, ended
-    /// the document; an operation from a newer grammar reads as live even
-    /// if it ended the document there.
-    #[must_use]
-    pub fn is_tombstone(&self) -> bool {
-        self.block.operation == TOMBSTONE
-            || (self.block.operation == RENAME && self.block.superseded_by.is_some())
-    }
-
-    /// The key in the version block this worklog does not know, when a
-    /// newer one wrote it; the version reads but cannot be amended.
-    #[must_use]
-    pub fn foreign_key(&self) -> Option<&str> {
-        self.block
-            .raw
-            .as_ref()?
-            .iter()
-            .map(|(key, _)| key.as_str())
-            .find(|key| !VersionBlock::KNOWN.contains(key))
-    }
-
-    /// The body as a note: what a tombstone says about why, or nothing.
-    #[must_use]
-    pub fn note(&self) -> Option<&str> {
-        Some(self.body.trim()).filter(|n| !n.is_empty())
-    }
-
-    /// The slugs a rename moved the document between, for either version
-    /// it wrote: the tombstone names its successor, the moved version its
-    /// predecessor.
-    #[must_use]
-    pub fn rename_sides(&self) -> Option<(&Slug, &Slug)> {
-        if self.block.operation != RENAME {
-            return None;
-        }
-        if let Some(to) = &self.block.superseded_by {
-            return Some((&self.slug, to));
-        }
-        let from = self.block.renamed_from.as_ref()?;
-        Some((from, &self.slug))
-    }
-
-    /// The document the version's parents sit in: its own or, for the
-    /// version a rename moved, the old slug's.
-    #[must_use]
-    pub fn parents_slug(&self) -> &Slug {
-        self.block.renamed_from.as_ref().unwrap_or(&self.slug)
-    }
-
-    /// The first version a rename writes under the new slug, from the
-    /// tombstone it left and the version before that one; `None` when
-    /// `stone` is no rename's tombstone. Every part comes from the two, so
-    /// composing it again yields the same id.
-    #[must_use]
-    pub fn moved_by(stone: &Version, before: &Version) -> Option<Version> {
-        if stone.block.operation != RENAME {
-            return None;
-        }
-        let to = stone.block.superseded_by.clone()?;
-        let block = VersionBlock {
-            parents: vec![stone.id.clone()],
-            written: stone.block.written.clone(),
-            machine: stone.block.machine.clone(),
-            operation: RENAME.to_owned(),
-            superseded_by: None,
-            renamed_from: Some(stone.slug.clone()),
-            raw: None,
-        };
-        Some(Version::compose(
-            to,
-            block,
-            stone.fields.clone(),
-            before.body.clone(),
-        ))
-    }
-}
-
-/// Every version of one slug.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Document {
-    versions: Vec<Version>,
-}
-
-/// What a document is right now.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum State<'a> {
-    /// No version exists.
-    Absent,
-    Live(&'a Version),
-    Tombstoned(&'a Version),
-    /// Two or more heads, sorted by id.
-    Forked(Vec<&'a Version>),
-    /// Two or more heads, sorted by id, one of which may be an ancestor of a
-    /// version the document does not hold.
-    Waiting(Vec<&'a Version>),
-}
-
-impl Document {
-    #[must_use]
-    pub fn new(versions: Vec<Version>) -> Document {
-        Document { versions }
-    }
-
-    /// True for a slug the store never held.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.versions.is_empty()
-    }
-
-    /// The version out of the document rather than a copy of it.
-    #[must_use]
-    pub fn take(mut self, id: &VersionId) -> Option<Version> {
-        let at = self.versions.iter().position(|v| &v.id == id)?;
-        Some(self.versions.swap_remove(at))
-    }
-
-    #[must_use]
-    pub fn get(&self, id: &VersionId) -> Option<&Version> {
-        self.versions.iter().find(|v| &v.id == id)
-    }
-
-    /// A version a rename moved names a parent under the old slug, which
-    /// is not missing here.
-    fn own(&self) -> impl Iterator<Item = &Version> {
-        self.versions.iter().filter(|v| v.parents_slug() == &v.slug)
-    }
-
-    /// A head that descends from no version naming a missing parent may
-    /// be an ancestor of that parent.
-    fn a_head_may_precede_a_missing_parent(&self, heads: &[&Version]) -> bool {
-        let named = self.own().flat_map(|v| &v.block.parents);
-        let mut missing = named.filter(|id| self.get(id).is_none());
-        missing.any(|id| !heads.iter().all(|head| self.follows(head, id)))
-    }
-
-    fn follows(&self, version: &Version, parent: &VersionId) -> bool {
-        let mut children = self.own().filter(|v| v.block.parents.contains(parent));
-        children.any(|child| self.descends(version, child))
-    }
-
-    fn descends(&self, version: &Version, from: &Version) -> bool {
-        let mut parents = version.block.parents.iter().filter_map(|id| self.get(id));
-        version.id == from.id || parents.any(|parent| self.descends(parent, from))
-    }
-
-    /// Whether the version names a parent that no version here carries.
-    #[must_use]
-    pub fn lacks_a_parent_of(&self, version: &Version) -> bool {
-        let mut parents = version.block.parents.iter();
-        parents.any(|id| self.get(id).is_none())
-    }
-
-    /// The ids in `history` order, newest first, owned so the document can go.
-    #[must_use]
-    pub fn history_ids(&self) -> Vec<VersionId> {
-        self.history().into_iter().map(|v| v.id.clone()).collect()
-    }
-
-    /// Versions no sibling names as a parent, sorted by id.
-    #[must_use]
-    pub fn heads(&self) -> Vec<&Version> {
-        let mut heads: Vec<&Version> = self
-            .versions
-            .iter()
-            .filter(|v| {
-                !self
-                    .versions
-                    .iter()
-                    .any(|other| other.block.parents.contains(&v.id))
-            })
-            .collect();
-        heads.sort_by(|a, b| a.id.cmp(&b.id));
-        heads
-    }
-
-    #[must_use]
-    pub fn state(&self) -> State<'_> {
-        let heads = self.heads();
-        match heads.as_slice() {
-            [] => State::Absent,
-            [head] if head.is_tombstone() => State::Tombstoned(head),
-            [head] => State::Live(head),
-            _ if self.a_head_may_precede_a_missing_parent(&heads) => State::Waiting(heads),
-            _ => State::Forked(heads),
-        }
-    }
-
-    /// The slug a rename moved the document to.
-    #[must_use]
-    pub fn renamed_to(&self) -> Option<&Slug> {
-        match self.tombstone() {
-            Some(Tombstone::RenamedTo(to)) => Some(to),
-            _ => None,
-        }
-    }
-
-    /// What the tombstone at the head says, when the head is one.
-    #[must_use]
-    pub fn tombstone(&self) -> Option<Tombstone<'_>> {
-        let State::Tombstoned(v) = self.state() else {
-            return None;
-        };
-        Some(match &v.block.superseded_by {
-            Some(to) => Tombstone::RenamedTo(to),
-            None => Tombstone::Removed { note: v.note() },
-        })
-    }
-
-    /// The single live head.
-    #[must_use]
-    pub fn current(&self) -> Option<&Version> {
-        match self.state() {
-            State::Live(v) => Some(v),
-            _ => None,
-        }
-    }
-
-    /// Newest first: a version comes after every version naming it as a
-    /// parent. Versions on a fork share no order, so the id decides there.
-    #[must_use]
-    pub fn history(&self) -> Vec<&Version> {
-        let mut remaining: Vec<&Version> = self.versions.iter().collect();
-        let mut ordered: Vec<&Version> = Vec::new();
-        // Hash-linked parents cannot form a cycle, so a childless version
-        // always exists while any remain.
-        while let Some(next) = remaining
-            .iter()
-            .enumerate()
-            .filter(|(_, v)| {
-                !remaining
-                    .iter()
-                    .any(|child| child.block.parents.contains(&v.id))
-            })
-            .max_by(|(_, a), (_, b)| a.id.cmp(&b.id))
-            .map(|(i, _)| i)
-        {
-            ordered.push(remaining.remove(next));
-        }
-        ordered
     }
 }
 
@@ -583,188 +412,236 @@ impl Document {
 mod tests {
     use super::*;
 
-    fn block(parents: &[&VersionId], op: &str) -> VersionBlock {
-        VersionBlock {
-            parents: parents.iter().map(|p| (*p).clone()).collect(),
-            written: "2026-09-04T10:00:00+01:00".into(),
-            machine: MachineName::parse("m1").unwrap(),
-            operation: op.to_owned(),
-            superseded_by: None,
-            renamed_from: None,
-            raw: None,
+    #[test]
+    fn stamps_order_by_the_moment_whatever_the_offset() {
+        let stamp = |text| Stamp::parse(text).unwrap();
+        let later = stamp("2026-10-09T11:30:00+02:00");
+        let earlier = stamp("2026-10-09T09:00:00+00:00");
+        assert!(earlier < later);
+        assert!(stamp("2026-10-09T08:30:00+00:00") < stamp("2026-10-09T08:30:00.5+00:00"));
+        assert!(stamp("2026-02-28T23:00:00Z") < stamp("2026-03-01T00:00:00Z"));
+        assert!(stamp("2025-12-31T23:59:59Z") < stamp("2026-01-01T00:00:00Z"));
+        let (zulu, shifted) = (
+            stamp("2026-10-09T10:00:00Z"),
+            stamp("2026-10-09T11:00:00+01:00"),
+        );
+        assert_eq!(zulu.instant(), shifted.instant());
+        assert_ne!(zulu, shifted);
+        assert_eq!(zulu.cmp(&zulu), std::cmp::Ordering::Equal);
+    }
+
+    const LANTERN: &str = "7f3a91c05be2446d8a10c3f29b7e6d54";
+    const DESK: &str = "03be552100000000000000000000000a";
+    const BOOT_STRAPS: &str = "2be0417f00000000000000000000000b";
+
+    fn envelope() -> Envelope {
+        Envelope {
+            document: DocumentId::parse(LANTERN).unwrap(),
+            kind: Kind::parse("fact").unwrap(),
+            parents: vec![VersionId::of(b"parent")],
+            ancestors: vec![VersionId::of(b"parent"), VersionId::of(b"root")],
+            written: Stamp::parse("2026-10-09T18:22:41.118204+01:00").unwrap(),
+            machine: DocumentId::parse(DESK).unwrap(),
+            change: "save".to_owned(),
         }
     }
 
-    fn topic(name: &str, body: &str, parents: &[&VersionId], op: &str) -> Version {
-        let mut fields = Fields::default();
-        fields.push_scalar("summary", "a topic");
-        Version::compose(
-            Slug::parse(name).unwrap(),
-            block(parents, op),
-            fields,
-            body.to_owned(),
-        )
-    }
-
-    #[test]
-    fn text_round_trips_and_names_itself() {
-        let v = topic("lantern", "\nbody\n", &[], "new");
-        let text = v.to_text();
-        assert!(text.starts_with(
-            "---\nslug: lantern\nkind: topic\nsummary: a topic\nversion:\n  parents: []\n"
-        ));
-        assert_eq!(Version::from_named_text(v.id.as_str(), &text).unwrap(), v);
-    }
-
-    #[test]
-    fn unknown_grammar_reads_and_re_emits_as_written() {
-        let v = topic("lantern", "\nbody\n", &[], "new");
-        let text = v
-            .to_text()
-            .replace("  operation: new\n", "  hue: 3\n  operation: pin\n");
-        let read = Version::from_text(&text).unwrap();
-        assert_eq!(read.to_text(), text);
-        assert_eq!(read.block.operation, "pin");
-        assert_eq!(read.foreign_key(), Some("hue"));
-        assert!(v.foreign_key().is_none());
-        let renamed_op =
-            Version::from_text(&v.to_text().replace("operation: new", "operation: pin")).unwrap();
-        assert!(renamed_op.block.raw.is_none());
-        assert_eq!(renamed_op.block.operation, "pin");
-        assert!(!renamed_op.is_tombstone());
-    }
-
-    #[test]
-    fn a_successor_ends_the_document_only_on_a_rename() {
-        let moved_to = |op: &str| {
-            let mut moved = block(&[], op);
-            moved.superseded_by = Some(Slug::parse("lamp").unwrap());
-            let mut fields = Fields::default();
-            fields.push_scalar("summary", "a topic");
-            Version::compose(Slug::parse("t").unwrap(), moved, fields, String::new())
-        };
-        let stone = moved_to(RENAME);
-        assert!(stone.is_tombstone());
-        assert!(stone.rename_sides().is_some());
-        let pinned = moved_to("pin");
-        assert!(!pinned.is_tombstone());
-        assert!(pinned.rename_sides().is_none());
-    }
-
-    #[test]
-    fn a_moved_version_is_made_of_its_tombstone_and_the_version_before() {
-        let before = topic("t", "\nbody\n", &[], "new");
-        let mut leaving = block(&[&before.id], RENAME);
-        leaving.superseded_by = Some(Slug::parse("lamp").unwrap());
-        let stone = Version::compose(
-            before.slug.clone(),
-            leaving,
-            before.fields.clone(),
-            String::new(),
+    fn fields() -> Fields {
+        let mut fields = Fields::new();
+        fields.insert("name".into(), "relay-pin-is-fixed".into());
+        fields.insert(
+            "summary".into(),
+            "The relay's pin is fixed, since the \"boot strap\" pins can't be driven".into(),
         );
-        let moved = Version::moved_by(&stone, &before).unwrap();
-        assert_eq!(moved.rename_sides(), stone.rename_sides());
-        assert_eq!(moved.block.parents, std::slice::from_ref(&stone.id));
-        assert_eq!(moved.block.written, stone.block.written);
-        assert_eq!(moved.body, before.body);
-        assert_eq!(Version::moved_by(&stone, &before).unwrap().id, moved.id);
-        assert!(Version::moved_by(&before, &before).is_none());
+        fields.insert("idea".into(), false.into());
+        fields
+    }
+
+    fn links() -> Links {
+        Links(BTreeMap::from([
+            (
+                "lantern/boot-straps".to_owned(),
+                Some(DocumentId::parse(BOOT_STRAPS).unwrap()),
+            ),
+            ("lantern/unwritten".to_owned(), None),
+        ]))
+    }
+
+    fn version(body: &str) -> Version {
+        Version::compose(envelope(), fields(), links(), body.to_owned()).unwrap()
     }
 
     #[test]
-    fn non_canonical_bytes_are_refused() {
-        let v = topic("lantern", "\nbody\n", &[], "new");
-        let text = v.to_text().replace("summary: a topic", "summary:  a topic");
-        assert_eq!(Version::from_text(&text), Err(VersionError::NotCanonical));
+    fn a_composed_version_reads_back_as_it_was_composed() {
+        let version = version("The relay is wired to GPIO 5.\n");
+        assert_eq!(version.id, VersionId::of(version.text().as_bytes()));
+        assert_eq!(Version::read(&version.id, version.text()), Ok(version));
     }
 
     #[test]
-    fn heads_and_forks() {
-        let a = topic("t", "\n1\n", &[], "new");
-        let b = topic("t", "\n2\n", &[&a.id], "save");
-        let c = topic("t", "\n3\n", &[&a.id], "save");
-        let linear = Document::new(vec![a.clone(), b.clone()]);
-        assert_eq!(linear.state(), State::Live(&b));
-        let forked = Document::new(vec![a.clone(), b.clone(), c.clone()]);
-        assert!(matches!(forked.state(), State::Forked(heads) if heads.len() == 2));
-        let resolved = topic("t", "\n4\n", &[&b.id, &c.id], "resolve");
-        let doc = Document::new(vec![a.clone(), b, c, resolved.clone()]);
-        assert_eq!(doc.state(), State::Live(&resolved));
-        assert_eq!(doc.history().len(), 4);
-        assert_eq!(doc.history()[0], &resolved);
-        assert_eq!(doc.history()[3], &a);
-    }
-
-    #[test]
-    fn a_document_lacks_a_parent_none_of_its_versions_carries() {
-        let a = topic("t", "\n1\n", &[], "new");
-        let b = topic("t", "\n2\n", &[&a.id], "save");
-        let c = topic("t", "\n3\n", &[&a.id], "save");
-        let resolved = topic("t", "\n4\n", &[&b.id, &c.id], "resolve");
-        let partial = Document::new(vec![a.clone(), b.clone(), resolved.clone()]);
-        assert!(!partial.lacks_a_parent_of(&a));
-        assert!(!partial.lacks_a_parent_of(&b));
-        assert!(partial.lacks_a_parent_of(&resolved));
-    }
-
-    #[test]
-    fn a_head_that_may_precede_a_missing_version_waits() {
-        let first = topic("t", "\n1\n", &[], "new");
-        let second = topic("t", "\n2\n", &[&first.id], "save");
-        let third = topic("t", "\n3\n", &[&second.id], "save");
-        let gapped = Document::new(vec![first.clone(), third.clone()]);
-        assert!(matches!(gapped.state(), State::Waiting(heads) if heads.len() == 2));
-        let aside = topic("t", "\n4\n", &[&first.id], "save");
-        let branched = Document::new(vec![first.clone(), aside, third.clone()]);
-        assert!(matches!(branched.state(), State::Waiting(heads) if heads.len() == 2));
-        let rootless = Document::new(vec![second.clone(), third.clone()]);
-        assert_eq!(rootless.state(), State::Live(&third));
-        let whole = Document::new(vec![first, second, third.clone()]);
-        assert_eq!(whole.state(), State::Live(&third));
-    }
-
-    #[test]
-    fn heads_that_all_follow_the_missing_version_are_a_fork() {
-        let first = topic("t", "\n1\n", &[], "new");
-        let second = topic("t", "\n2\n", &[&first.id], "save");
-        let left = topic("t", "\n3\n", &[&second.id], "save");
-        let right = topic("t", "\n4\n", &[&second.id], "save");
-        let under_one = Document::new(vec![second, left.clone(), right.clone()]);
-        assert!(matches!(under_one.state(), State::Forked(heads) if heads.len() == 2));
-        let siblings = Document::new(vec![left, right]);
-        assert!(matches!(siblings.state(), State::Forked(heads) if heads.len() == 2));
-    }
-
-    #[test]
-    fn two_renames_onto_one_slug_fork_without_waiting_on_the_old_ones() {
-        let moved_from = |old: &str| {
-            let tombstone = VersionId::of(&format!("the tombstone under {old}"));
-            let mut block = block(&[&tombstone], "rename");
-            block.renamed_from = Some(Slug::parse(old).unwrap());
-            let mut fields = Fields::default();
-            fields.push_scalar("summary", "a topic");
-            Version::compose(
-                Slug::parse("t").unwrap(),
-                block,
-                fields,
-                format!("\n{old}\n"),
-            )
+    fn the_header_keeps_the_envelope_first_and_in_one_order() {
+        let version = version("body\n");
+        let text = version.text();
+        assert!(text.starts_with("+++\nformat = 1\n"), "{text}");
+        let at = |needle: &str| {
+            text.find(needle)
+                .unwrap_or_else(|| panic!("{needle}: {text}"))
         };
-        let document = Document::new(vec![moved_from("lamp"), moved_from("torch")]);
-        assert!(matches!(document.state(), State::Forked(heads) if heads.len() == 2));
+        let order = [
+            "format = ",
+            "document = ",
+            "kind = ",
+            "parents = ",
+            "ancestors = ",
+            "written = 2026-10-09T18:22:41.118204+01:00",
+            "machine = ",
+            "change = ",
+            "[fields]",
+            "[links]",
+            "\n+++\nbody\n",
+        ];
+        assert!(order.map(at).is_sorted(), "{text}");
+        assert!(!text.contains(version.id.as_str()), "{text}");
     }
 
     #[test]
-    fn a_tombstone_is_a_head_with_no_body() {
-        let a = topic("t", "\n1\n", &[], "new");
-        let t = topic("t", "", &[&a.id], TOMBSTONE);
-        let doc = Document::new(vec![a, t.clone()]);
-        assert_eq!(doc.state(), State::Tombstoned(&t));
-        assert_eq!(doc.current(), None);
+    fn a_file_written_by_hand_reads_to_its_parts() {
+        let text = format!(
+            "+++\n\
+             format = 1\n\
+             document = \"{LANTERN}\"\n\
+             kind = \"fact\"\n\
+             parents = []\n\
+             ancestors = []\n\
+             written = 2026-09-04T10:00:00+01:00\n\
+             machine = \"{DESK}\"\n\
+             change = \"new\"\n\
+             \n\
+             [fields]\n\
+             name = \"relay-pin-is-fixed\"\n\
+             idea = false\n\
+             \n\
+             [links]\n\
+             \"lantern/boot-straps\" = \"{BOOT_STRAPS}\"\n\
+             \"lantern/unwritten\" = \"\"\n\
+             +++\n\
+             \n\
+             The relay is wired to GPIO 5.\n"
+        );
+        let version = Version::read(&VersionId::of(text.as_bytes()), &text).unwrap();
+        assert_eq!(version.envelope.document.as_str(), LANTERN);
+        assert_eq!(version.envelope.kind.as_str(), "fact");
+        assert!(version.envelope.parents.is_empty());
+        assert_eq!(version.envelope.change, "new");
+        assert_eq!(
+            version.fields.get("name").and_then(|v| v.as_str()),
+            Some("relay-pin-is-fixed")
+        );
+        assert_eq!(version.links, links());
+        assert_eq!(version.body, "\nThe relay is wired to GPIO 5.\n");
+        assert_eq!(version.text(), text);
     }
 
     #[test]
-    fn absent() {
-        assert_eq!(Document::default().state(), State::Absent);
+    fn a_version_with_no_links_carries_no_links_table() {
+        let version =
+            Version::compose(envelope(), fields(), Links::default(), String::new()).unwrap();
+        assert!(!version.text().contains("[links]"), "{}", version.text());
+        assert_eq!(Version::read(&version.id, version.text()), Ok(version));
+    }
+
+    #[test]
+    fn bytes_that_do_not_hash_to_the_name_are_corrupt() {
+        let version = version("The relay is wired to GPIO 5.\n");
+        let damaged = version.text().replace("GPIO 5", "GPIO 6");
+        assert_eq!(
+            Version::read(&version.id, &damaged),
+            Err(ReadError::Corrupt)
+        );
+    }
+
+    #[test]
+    fn a_higher_format_is_newer_and_not_damage() {
+        let text = version("body\n")
+            .text()
+            .replace("format = 1\n", "format = 2\n");
+        assert_eq!(
+            Version::read(&VersionId::of(text.as_bytes()), &text),
+            Err(ReadError::Newer { format: 2 })
+        );
+    }
+
+    #[test]
+    fn what_is_no_version_is_malformed_with_the_reason() {
+        for (text, reason) in [
+            ("body only\n".to_owned(), "no opening fence"),
+            ("+++\nformat = 1\n".to_owned(), "no closing fence"),
+            ("+++\nformat = \n+++\n".to_owned(), "TOML"),
+            (
+                version("body\n").text().replace("kind = \"fact\"\n", ""),
+                "kind",
+            ),
+            (
+                version("body\n")
+                    .text()
+                    .replace("change = \"save\"\n", "change = \"save\"\nsurprise = 1\n"),
+                "surprise",
+            ),
+        ] {
+            match Version::read(&VersionId::of(text.as_bytes()), &text) {
+                Err(ReadError::Malformed(why)) => assert!(why.contains(reason), "{why}"),
+                other => panic!("{reason}: {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn a_fence_line_in_the_body_stays_in_the_body() {
+        let version = version("before\n+++\nafter\n");
+        assert_eq!(
+            Version::read(&version.id, version.text()).unwrap().body,
+            "before\n+++\nafter\n"
+        );
+    }
+
+    #[test]
+    fn a_field_holding_a_fence_line_is_refused() {
+        let mut fields = fields();
+        fields.insert("note".into(), "before\n+++\nafter".into());
+        assert_eq!(
+            Version::compose(envelope(), fields, links(), String::new()),
+            Err(VersionError::DoesNotReadBack)
+        );
+    }
+
+    #[test]
+    fn a_field_of_several_lines_reads_back() {
+        let mut fields = fields();
+        fields.insert("note".into(), "before\nafter".into());
+        let version = Version::compose(envelope(), fields, links(), String::new()).unwrap();
+        assert_eq!(Version::read(&version.id, version.text()), Ok(version));
+    }
+
+    #[test]
+    fn a_kind_is_a_lowercase_word_and_a_stamp_carries_its_offset() {
+        assert!(Kind::parse("fact").is_ok());
+        for bad in ["", "Fact", "fact 2", "fo/o"] {
+            assert!(Kind::parse(bad).is_err(), "{bad}");
+        }
+        for bad in ["2026-10-09", "2026-10-09T18:22:41", "yesterday"] {
+            assert!(Stamp::parse(bad).is_err(), "{bad}");
+        }
+        assert_eq!(
+            Stamp::parse("2026-10-09T18:22:41.118204+01:00")
+                .unwrap()
+                .to_string(),
+            "2026-10-09T18:22:41.118204+01:00"
+        );
+    }
+
+    #[test]
+    fn a_stamp_reports_its_day() {
+        let stamp = Stamp::parse("2026-10-09T18:22:41.118204+01:00").unwrap();
+        assert_eq!(stamp.day(), "2026-10-09");
     }
 }

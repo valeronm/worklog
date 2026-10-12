@@ -1,9 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-use worklog_next::domain::id::{DocumentId, VersionId};
-use worklog_next::domain::schema::{KindOf, Record};
-use worklog_next::domain::version::Version;
+use worklog::domain::id::{DocumentId, VersionId};
+use worklog::domain::schema::{KindOf, Record};
+use worklog::domain::version::Version;
 
 use super::Fault;
 use super::compose::{Composed, file_of};

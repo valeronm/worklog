@@ -1123,7 +1123,7 @@ fn a_key_that_is_no_bare_key_is_a_basic_string_in_its_path() {
 
 #[test]
 fn the_time_of_a_conversion_is_handed_on_as_rfc_3339() {
-    use worklog_next::domain::version::Stamp;
+    use worklog::domain::version::Stamp;
 
     for (typed, handed) in [
         ("2026-10-20T09:30:00+01:00", "2026-10-20T09:30:00+01:00"),

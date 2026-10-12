@@ -1,334 +1,263 @@
 # The store format
 
-What a store holds on disk, byte for byte: the grammar every file uses,
-the shape of a version, how a document's state follows from its files,
-and what each operation writes. `documents.md` covers the four kinds and
+What a store holds on disk: the tree, the shape of a version file, how a
+document's state follows from its files, what a reader refuses, and the
+files a host keeps beside the store. `documents.md` covers the kinds and
 their fields.
 
-A store is shared between machines by a file sync, so the shape of a
-file is a contract. Nothing in it is edited in place, merged, or
-repaired.
+A store is shared between machines by a file sync, so the shape of a file
+is a contract. Nothing in it is edited in place, merged or repaired.
 
 ## Layout
 
 ```
 <store>/
-  entry/<YYYY-MM>/<YYYY-MM-DD>-<name>/<id>.md
-  fact/<topic>/<name>/<id>.md
-  followup/<YYYY-MM-DD>-<name>/<id>.md
-  topic/<name>/<id>.md
+  <bucket>/<document id>/<version id>.md
   usage/<machine>-<YYYY-MM>.jsonl
-  .stignore                                   in a Syncthing folder only
+  .stignore                               in a Syncthing folder only
 ```
 
-The four kind directories hold documents; a document is a directory
-named by its slug, and every file in it is one version, named by the
-version's id with `.md`. The reader takes a file as a version only when
-its name parses as an id, and skips a directory whose name opens with a
-dot. A version file that does not read, or whose `slug` field does not
-name the directory it sits in, fails the whole document rather than
-being skipped, so a damaged file never leaves a stale head in its place.
+A document is a directory named by its id, under a bucket named by the
+id's first two characters. Every version of the document is one file in
+that directory, named by the version's id with `.md`.
 
-A version is written under a `.tmp-` name and renamed into place, so a
-sync never ships a partial file. Writing a version whose file already
-exists does nothing. In a Syncthing folder, recognised by its
-`.stfolder` marker, `.stignore` covers the `.tmp-` prefix and
-`.DS_Store`; an existing one is left alone.
+A reader takes a directory as a bucket when its name is two lowercase hex
+characters, a directory in it as a document when its name is a document id
+that starts with the bucket's name, and a file in that as a version when
+its name is a version id followed by `.md`. Everything else in the tree is
+passed over, so a sync tool may keep files of its own beside the documents.
 
-## The frontmatter grammar
+A version is written under the name `.tmp-<version id>` in its document's
+directory and renamed into place, so a sync does not carry a partial file.
+A version whose file is already there is not written again. In a Syncthing
+folder, recognized by its `.stfolder` marker, a store with no `.stignore`
+is given one when a version is written, covering `.DS_Store` and the
+`.tmp-` prefix; one already there is left alone.
 
-Every version, every draft and the config file use one grammar. It looks
-like a subset of YAML and is not YAML: there is exactly one way to write
-any content.
+## Ids
 
-```
----
-key: scalar
-key: [item, item]
-key:
-  sub: scalar
-  sub: [item]
----
-body
-```
+A document id is 32 lowercase hex characters. It is given when the
+document is created, from 16 random bytes for one this binary makes, and
+never changes.
 
-- A file is UTF-8 with LF line endings and no byte order mark. The
-  opening fence is the first line.
-- A key matches `[A-Za-z_][A-Za-z0-9_-]*`, ASCII only, and appears once.
-- A scalar is the rest of the line after `: `, trimmed. It holds no
-  newline and no leading or trailing space. An empty scalar is written
-  `key:` with nothing after the colon.
-- A list is `[a, b]`. Items are trimmed, never empty, and hold no comma;
-  `[]` is the empty list, and a list never spans lines.
-- A map is a key with nothing after the colon followed by lines indented
-  by exactly two spaces, each a scalar or a list. Nesting stops there.
-- Fields keep the order they were written in. Order is part of the bytes.
-- The body is everything after the closing fence, copied byte for byte.
-
-There is no escaping. A scalar that opens with `[` and closes with `]`
-reads as a list, so a draft holding one where its kind wants text is
-refused, and a comma inside a list item makes two items of it. A command
-refuses a value that would not read back as it was given. A reader skips
-a blank line anywhere in the fields and a `#` line at the top level;
-that tolerance is for the files a person edits, and a version with
-either is refused.
+A version id is `b3-` followed by the BLAKE3 hash of the file's bytes as 64
+lowercase hex characters. A reader refuses a file whose bytes do not hash
+to its name.
 
 ## A version
 
-A version is one immutable file: the document header, the kind's own
-fields, and a `version` block last.
+A version is one immutable UTF-8 file: a TOML header between two lines
+that hold only `+++`, then the body. Lines end in LF, and the file opens
+with the fence, no byte order mark before it.
 
 ```
----
-slug: lantern/relay-pin-is-fixed
-kind: fact
-tags: [lantern]
-verified: 2026-09-04
-summary: The relay pin is fixed on the board
-version:
-  parents: [e759ec9a…]
-  written: 2026-09-04T10:15:07.412093+01:00
-  machine: desk
-  operation: save
----
-**Why:** …
++++
+format = 1
+document = "7f3a91c05be2446d8a10c3f29b7e6d54"
+kind = "fact"
+parents = ["b3-5c1e…"]
+ancestors = ["b3-5c1e…", "b3-e759…"]
+written = 2026-09-04T10:15:07.412093+01:00
+machine = "03be552100000000000000000000000a"
+change = "save"
+
+[fields]
+name = "relay-pin-is-fixed"
+topic = "2be0417f00000000000000000000000b"
+created = 2026-09-01
+confirmed = 2026-09-04
+summary = "The relay pin is fixed on the board"
+
+[links]
+"lantern/boot-straps" = "41c2d09a00000000000000000000000c"
+"lantern/unwritten" = ""
++++
+The relay is wired to GPIO 5.
 ```
 
-`slug` and `kind` name the document; `kind` is the kind directory and the
-slug's shape has to agree with it. The kind's own fields follow, in the
-order and with the presence rules the kind's table in `documents.md`
-gives. The block's keys, in this order:
+The opening fence is the file's first line, and the header ends at the
+first later line that is only `+++`. The body is every byte after that
+line. A writer refuses a header in which a value holds such a line.
 
-| key | presence | meaning |
+The header's keys:
+
+| key | value | meaning |
 | --- | --- | --- |
-| `parents` | always | the ids this version follows: none for a first version, one for a change, every head of a fork for a `resolve` |
-| `written` | always | RFC 3339 with microseconds and the writing machine's own offset |
-| `machine` | always | the configured name of the writing machine, never a hostname: ASCII letters, digits, `.`, `_` and `-` |
-| `operation` | always | which command wrote it |
-| `superseded_by` | if set | the new slug, on the tombstone a rename leaves |
-| `renamed_from` | if set | the old slug, on the first version a rename writes at the new slug |
+| `format` | an integer above zero | the layout the file is written in; `1` |
+| `document` | a document id | the document this is a version of |
+| `kind` | lowercase ASCII letters | the document's kind |
+| `parents` | a list of version ids | the versions this one follows: none for a first version, one for a change, every head for a version that closes a fork |
+| `ancestors` | a list of version ids | every version behind this one, the parents included |
+| `written` | a TOML offset date-time, unquoted | when it was written, by the clock and at the offset of the writing host |
+| `machine` | a document id | the machine topic of the host that wrote it |
+| `change` | text | the command that wrote it |
+| `fields` | a table | the document's own fields, which `documents.md` lists by kind |
+| `links` | a table | each `[[target]]` of the body and the summary, with the id of the document it resolved to when the version was saved, or `""` for one that resolved to none |
 
-Machines stamp their own clocks, so the instant `written` names, not
-the string, is what orders versions across machines.
+A writer emits the keys in this order, with `parents` and `ancestors`
+sorted and no `links` table for a version with no link. This binary's
+clock gives `written` to the microsecond, and a reader takes any
+precision. A reader takes the keys in any order and reads a missing
+`fields` or `links` as an empty table.
 
-### The id
+A reader refuses a file that is not UTF-8, has no opening or closing
+fence, whose header is not TOML, that lacks one of the keys from `format`
+to `change` or holds one with a value of another type, whose `fields` or
+`links` is not a table, that holds a link whose value is neither `""` nor
+a document id, or that holds a key this table does not list. A file whose
+`format` is greater than the reader's own is set apart as written by a
+newer binary, and its other keys are not interpreted. A writer refuses to
+make a version that would not read back as the parts it was made from.
 
-A version's id is the BLAKE3 hash of the file's bytes: 64 characters of
-lowercase hex. The file is named by it, and a reader refuses a file
-whose bytes do not hash to its name. The reader also refuses a file that
-parses but is not byte for byte what the writer would emit for its
-content.
+Hosts stamp their own clocks, so versions are ordered across machines by
+the instant `written` gives and not by its text.
 
 ## A document's state
 
-A document is every version under its slug. Its state is derived from
-the files each time it is read; nothing stores it.
+A document is every version file in its directory. Its state is derived
+from the files each time it is read; nothing stores it. Every version of a
+document carries the same `kind`. A reader does not check it and takes the
+kind of the version with the lowest id.
 
-1. The heads are the versions no other version in the document names as
-   a parent.
-2. One head that is a tombstone, either `operation: tombstone` or
-   `operation: rename` with `superseded_by`, means the document is
-   tombstoned.
-3. One other head means the document is live, and that head is its
-   current version.
-4. Two or more heads, and a parent some version names that the document
-   does not hold: the document is waiting unless every head descends
-   from a version naming that parent. A head that does not may be an
-   ancestor of the missing version, which the files cannot tell from a
-   fork.
-5. Two or more heads otherwise mean a fork. The heads are ordered by id.
-   A fork with a tombstone among its heads is still a fork.
-6. No version at all: the document does not exist.
+1. A file that does not read as a version, or whose `document` is not the
+   directory it sits in, is kept apart as unreadable and takes no part in
+   the rest.
+2. The heads are the versions that no version in the document lists among
+   its `ancestors`.
+3. No version: the document does not exist.
+4. One head: the document is live, and that head is its current version.
+5. Two or more heads: the document is forked, the heads in the order of
+   their ids.
 
-A slug is never reused: outside a fork, nothing is written after a
-tombstone, so it stays a head. The one exception is a removed document
-tombstoned again to replace its note, whose new tombstone follows the
-old. A renamed document may not be, since its tombstone points
-elsewhere.
+Since a version lists everything behind it, a version that arrives before
+its parents is a head on its own account, and the parents that arrive
+later are not.
 
-Forks are reported, never merged. Every read shows every head, `check`
-counts them, and only `resolve` writes a version naming them all, a
-tombstone among them included.
+A fork arises when two machines write from the same parent before they
+sync. It is reported, not merged: a read shows every head, and the
+only write a forked document takes is a version whose `parents` are all of
+its heads. A document holding an unreadable file takes no write at all,
+and `show` and `history` note the file beside what they print.
 
-A waiting document shows every head too, with a note, and takes no
-write, `resolve` included, since a version written now would name as a
-parent what the missing version may already follow. It settles when the
-version arrives, as live or as a fork.
+A document's history is its versions with the one that has the most
+ancestors first, the id deciding between two that have as many.
 
-`history` orders a document newest first, each version after every
-version naming it as a parent. Versions on a fork share no order, so the
-id decides between them.
-
-A version can arrive before a parent it names, since a sync carries
-files in no order. Such a version still reads; `diff` compares it with
-the parents that are there and notes the one that is not, and `check`
-gives the document a notice, since only a parent that never arrives is
-a fault.
-
-## Operations
-
-Each operation names the command that writes the version, so `history`
-and a fork report can say what happened.
-
-| operation | parents | what changes |
-| --- | --- | --- |
-| `new` | none | a first version, with the fields and body of a draft or of `new followup` |
-| `save` | the one head | the fields and body of a draft |
-| `resolve` | every head | the fields and body of a draft, closing a fork |
-| `done`, `drop` | the head | `state` on a followup; a note, if given, is appended to the body |
-| `recheck` | the head | `recheck` on a fact or followup |
-| `verify` | the head | `verified` on a fact |
-| `tombstone` | the head | nothing in the fields; the body is the note alone |
-| `rename` | see below | two versions |
-| `claim`, `unclaim` | the head | `claims` on a machine topic |
-| `migrate` | none | a first version an importer wrote |
-
-No command writes `migrate`; the operation is reserved for an importer.
-
-A `save` whose draft names a parent that is no longer the head is
-refused, so a fork can arise only between two machines that wrote from
-the same parent before syncing.
-
-A note is what a tombstone says about why, or what closed a followup.
-`done` and `drop` append it as the body's last line; a tombstone's body
-is the note alone, trimmed and never blank, and is what a read of the
-removed document shows. A note is where the link to what ended or
-dissolved the document goes.
-
-### Rename
-
-A rename writes two versions. Under the old slug, a tombstone with
-`operation: rename` and `superseded_by` naming the new slug, parented on
-the old head, with an empty body. Under the new slug, a first version
-with the same fields and body, `operation: rename`, `renamed_from`
-naming the old slug, and the tombstone as its parent. That parent link
-is the one place a chain crosses documents. The first version carries
-the tombstone's `written` and `machine`, so it is a function of the
-tombstone and the version before it.
-
-A read of the old slug follows `superseded_by` to wherever the document
-is now; a write to it is refused and names the new slug.
-
-The two versions are separate writes and the tombstone lands first, so a
-tombstone can name a slug with no versions. `show` then refuses the old
-slug and says so, `history` ends at the tombstone, and `check` reports
-it as a problem. The same `rename` run again writes the missing version,
-with the id the first run would have given it, so one that arrives late
-from another machine is the same file. A rename written before both
-versions shared a stamp completes under a different id, and a late
-arrival then forks the new slug.
+Whether a document is ended is a matter of its fields, not of the file
+format: `documents.md` has the ending.
 
 ## What a newer binary wrote
 
-The grammar grows only by adding: a key in the block, an operation, a
-field on a kind. A binary meeting one it does not know still reads the
-version, keeping the block as written so the bytes still hash; `show`,
-`history` and `check` note it, and a write that would follow it is
-refused, so the machine that cannot read the grammar never writes over
-it. Only `tombstone` and `rename` are interpreted; every other operation
-is carried as a name, and an unknown one reads as a live head, since the
-reader cannot tell whether it ended the document.
+A reader that meets a `format` above its own reports the file as written
+by a newer binary: `check` lists it as a notice, where any other file that
+does not read is a problem, and the document takes no write on that host.
 
-Anything else, a new envelope key, a new kind, a new slug shape, needs
-every machine sharing the store upgraded before the first write.
-`release.md` has the step.
+A kind the reader does not know is kept: the documents read as versions,
+`check` gives one notice per kind, with the count of its documents, and
+nothing interprets their fields. A `change` is free text, and the reason
+a document ended for is carried as a word, so a reader passes a value it
+has not seen.
 
-## Links
-
-`[[slug]]` anywhere in a body or a summary is a link to that document, and
-resolves to its current version. The target is a bare slug, whose shape
-says the kind. A `[[…]]` inside an inline code span is quoted, not made.
-
-`check` reads every link in every live document and in every removed
-document's note; a forked document is reported as a fork and its heads
-are not read. A problem is a rule the store has to keep; a notice is a
-judgement call for a person.
-
-| link | from | `check` says |
-| --- | --- | --- |
-| naming no document shape, or no document | anything | a problem |
-| to a removed document | an entry, or a followup that is done or dropped | nothing |
-| to a removed document | anything else | a notice |
-| to a removed document with no note | anything | a notice on the removed document |
-
-An entry cites what was true on its date, and a closed followup what was
-true when it closed; anything else rests on what it links, and has gone
-stale when that is removed.
+A header key outside the table above, and a field its kind does not have,
+are not tolerated: the first makes the file unreadable and the second the
+head, and `check` reports either as a problem. `release.md` has what that
+asks of the machines sharing a store.
 
 ## Usage
 
-`usage` is not a document, because a count is not immutable. A machine
-appends a line to its own file for the month on every command run
-against a store, and reads every machine's files, so a sync carries
-them without a conflict to report. Only the binary PATH finds under the
-name it was run by appends, since the log counts use and a build under
-test is not use.
+The usage log is not a document, because a count is not immutable. A host
+appends one line per command run to its own file for the month,
+`usage/<machine>-<YYYY-MM>.jsonl`, where `<machine>` is the id of its
+machine topic and the month is that of the line's `written`. A reader
+takes every file of that name shape under `usage/`, so a sync carries the
+log with no two machines writing one file.
 
-A line is one JSON object ending in a newline:
+A line is one JSON object ending in a newline, with every key present and
+`null` under one the run has nothing for:
 
 ```
-{"written":"2026-09-04T10:00:00.123456+01:00","machine":"desk","version":"1.2.3","agent":"Codex","session":"s-1","command":"search","exit":0,"hits":2,"directory":"~/projects/lantern","arguments":["lantern"]}
+{"written":"2026-09-04T10:00:00.123456+01:00","machine":"03be552100000000000000000000000a","version":"1.2.3","agent":"Codex","session":"s-1","command":"search","exit":0,"refusal":null,"hits":2,"directory":"~/projects/lantern","arguments":["lantern"]}
 ```
 
-`version` is the release of the binary that ran. `agent` and `session`
-are the coding agent the command ran under and the id of its session,
-and both are left out at a terminal; a line with one of them alone reads
-as having neither. `refusal` is the message of a run that
-failed, the first line of it for a command line the parser refused, and
-`hits` how many documents a `search` matched; each is left
-out of a line it does not apply to. `directory` spells home as `~`. A
-reader passes over a key it does not know, so a field is added without a
-new file name. A line a sync delivers half-written reads as nothing.
+| key | meaning |
+| --- | --- |
+| `written` | when the command ran, as a version's `written` is given |
+| `machine` | the id of the machine topic of the host that ran it |
+| `version` | the release of the binary that ran |
+| `agent`, `session` | the coding agent the command ran under and the id of its session; a line with one of them alone reads as having neither |
+| `command` | the command's path, `new entry` for a command with a subcommand, and empty where the words reach no command |
+| `exit` | the exit code |
+| `refusal` | the message of a run that failed; for a command line the parser refused, its first line |
+| `hits` | how many documents a `search` matched |
+| `directory` | the working directory, with the home directory as `~` |
+| `arguments` | the words typed, without those of the command's path |
 
-A command line the parser refuses is logged with exit code 2 under the
-command its words got as far as naming, which is the empty string when
-they named none; `usage` leaves the empty one out of its counts. A setup
-command is never logged.
+A reader passes over a key it does not know and over a line that does not
+read, which is what a sync delivers of a line it cut short.
 
-A binary from before the JSON files wrote `usage/<machine>-<YYYY-MM>.tsv`
-and reads nothing else. Those files are still read and never written: a
-line is tab-separated fields, the `written` stamp, the machine, the
-command path, the exit code, the working directory, then one field per
-argument, and inside a field a backslash, a tab, a newline and a
-carriage return are written `\\`, `\t`, `\n` and `\r`.
+A line is appended only by a binary that `PATH` finds under the name it
+was run by, since the log counts use and a build under test is not use. It
+is appended for a command that reads or writes the store and for `serve`;
+binding a host, the commands for the agents, the completions and
+`upgrade` write none, and neither does a shell asking for completions. A
+command line the parser refuses is logged with its exit code under the
+last command its words reach. No line is written into a
+directory that holds nothing of the host's machine topic, so a store that
+has not synced or mounted is not started a second time under its path.
+
+## The host's config
+
+`init` writes the config once per host, as TOML:
+
+```
+store = "/home/desk/sync/worklog"
+machine = "03be552100000000000000000000000a"
+```
+
+`store` is the store's directory as an absolute path, and `machine` the id
+of the host's machine topic, which every version and usage line written on
+the host carries. A file without both keys, with a `store` that is not
+absolute or a `machine` that is not a document id, is refused. A host with
+no config file is not set up. A config whose `store` is not a directory is
+refused by every command that uses the store, so a store that is gone is
+not read as an empty one.
+
+The file is `$XDG_CONFIG_HOME/worklog/config.toml`, or under `~/.config`
+where that variable is not set. `WORKLOG_HOME=<dir>` moves it to
+`<dir>/config.toml` and the drafts to `<dir>/drafts`.
 
 ## Drafts
 
-Prose reaches the store through a draft, an editable file outside it,
-under the host's own state directory and never synced.
+Prose reaches the store through a draft, an editable file outside it. A
+host's drafts are its own and are not synced. They sit in one directory,
+`$XDG_STATE_HOME/worklog/drafts`, or under `~/.local/state` where that
+variable is not set:
 
 ```
 <drafts>/
-  entry/<YYYY-MM>/<YYYY-MM-DD>-<name>.md
-  entry/<YYYY-MM>/<YYYY-MM-DD>-<name>.parents
-  fact/<topic>/<name>.md
-  fact/<topic>/<name>.parents
-  …
+  <document id>.md
+  <document id>.origin.toml
 ```
 
-A draft is the document's own fields and body, the same text `show`
-prints, with no header and no block, so nothing in it belongs to the
-tool. The ids it was checked out from sit in the `.parents` file beside
-it, one per line, and empty for a document that does not exist yet.
-That file is what `save` relies on and an editor never opens: its
-contents decide whether the version written is a `new`, a `save` or a
-`resolve`, and whether the draft is stale.
+The `.md` file is what a person or an agent edits: the document's fields
+as TOML between two `+++` lines, then the body. It carries neither the
+header's other keys nor the fields only the tool writes, and it shows a
+field that holds another document as that document's address where it has
+one. `documents.md` has which fields those are.
 
-The sidecar is written before the draft, so a draft on disk always has
-its parents beside it; a draft found without one is refused, naming the
-missing file. `save` and `discard` remove both files. A `.parents` file
-left on its own is not a draft and is ignored.
-
-## The config
-
-`init` writes the config once per host, under the platform's config
-directory as `worklog/config`, in the grammar above without fences, so
-the tree has one syntax:
+The `.origin.toml` file is what the draft started from:
 
 ```
-machine: desk
-store: /home/u/worklog
+kind = "fact"
+parents = ["b3-5c1e…"]
 ```
 
-`machine` is what every version written on the host is stamped with, and
-what names its usage file.
+`parents` is empty for a document that does not exist yet, one head for a
+document opened as it stands, and every head for a fork being resolved. A
+`save` compares it with the document's heads: a draft with no parent makes
+a first version of a document that has none, a draft whose parents are the
+heads makes the next version, and any other draft is refused as stale.
+
+The origin is written before the text. A text without its origin is
+refused, an origin without a text is no draft, and a file in the directory
+whose name is not a document id with `.md` is passed over. Storing or
+discarding a draft removes both files.

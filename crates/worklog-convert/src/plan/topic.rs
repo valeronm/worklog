@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
-use worklog_next::domain::id::DocumentId;
-use worklog_next::domain::schema::{Content, Record, Topic};
+use worklog::domain::id::DocumentId;
+use worklog::domain::schema::{Content, Record, Topic};
 
 use super::Frame;
 use super::chain::Settled;

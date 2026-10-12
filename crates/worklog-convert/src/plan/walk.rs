@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use worklog_next::domain::id::DocumentId;
-use worklog_next::domain::schema::{Date, Ending, KindOf, Reason, Record};
-use worklog_next::domain::version::Links;
+use worklog::domain::id::DocumentId;
+use worklog::domain::schema::{Date, Ending, KindOf, Reason, Record};
+use worklog::domain::version::Links;
 
 use super::chain::{Settled, key_of};
 use super::followup::reason_of;
@@ -130,13 +130,13 @@ impl Follows for Step<'_> {
     }
 }
 
-impl Follows for worklog_next::domain::version::Version {
+impl Follows for worklog::domain::version::Version {
     fn key(&self) -> &str {
         self.id.as_str()
     }
 
     fn parents(&self) -> impl Iterator<Item = &str> {
-        (self.envelope.parents.iter()).map(worklog_next::domain::id::VersionId::as_str)
+        (self.envelope.parents.iter()).map(worklog::domain::id::VersionId::as_str)
     }
 }
 

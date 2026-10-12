@@ -1,4 +1,4 @@
-use worklog_next::domain::id::DocumentId;
+use worklog::domain::id::DocumentId;
 
 use crate::old::Kind;
 

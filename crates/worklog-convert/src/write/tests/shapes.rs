@@ -26,7 +26,7 @@ fn changes(document: &Composed) -> Vec<&str> {
         .collect()
 }
 
-fn shown(adapters: &Adapters, address: &str) -> worklog_next::app::show::ShownDocument {
+fn shown(adapters: &Adapters, address: &str) -> worklog::app::show::ShownDocument {
     match show(&adapters.deps(), address).unwrap() {
         Shown::Document(shown) => shown,
         Shown::Version(_) => panic!("{address} shows a version"),

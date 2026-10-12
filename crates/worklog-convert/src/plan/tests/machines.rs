@@ -1,4 +1,4 @@
-use worklog::domain::version::{TOMBSTONE, note_body};
+use worklog_old::domain::version::{TOMBSTONE, note_body};
 
 use super::*;
 

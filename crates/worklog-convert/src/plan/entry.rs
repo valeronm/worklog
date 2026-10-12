@@ -1,4 +1,4 @@
-use worklog_next::domain::schema::{Content, Date, Entry, Record};
+use worklog::domain::schema::{Content, Date, Entry, Record};
 
 use super::Frame;
 use super::chain::Settled;

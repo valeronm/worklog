@@ -11,11 +11,11 @@ mod tests;
 pub(crate) use read::{dated, read, shaped};
 // The grammars of an operation word, a followup's state, a recheck, a closing note and a
 // link are the functions of the crate that wrote the store.
-pub(crate) use worklog::app::operation::Operation;
-pub(crate) use worklog::domain::followup::FollowupState;
-pub(crate) use worklog::domain::links::linked;
-pub(crate) use worklog::domain::recheck::Recheck;
-pub(crate) use worklog::domain::version::with_note;
+pub(crate) use worklog_old::app::operation::Operation;
+pub(crate) use worklog_old::domain::followup::FollowupState;
+pub(crate) use worklog_old::domain::links::linked;
+pub(crate) use worklog_old::domain::recheck::Recheck;
+pub(crate) use worklog_old::domain::version::with_note;
 
 /// The kinds in the order a store's documents are listed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]

@@ -1,9 +1,9 @@
-use worklog::domain::frontmatter::Value as StoredValue;
-use worklog::domain::version::Version as Stored;
+use worklog_old::domain::frontmatter::Value as StoredValue;
+use worklog_old::domain::version::Version as Stored;
 
 use std::collections::BTreeSet;
 
-use worklog::domain::version::Document as StoredDocument;
+use worklog_old::domain::version::Document as StoredDocument;
 
 use super::read::{USAGE, document_of, version_of};
 use super::{
@@ -11,9 +11,9 @@ use super::{
     parent_first, read, unmatched,
 };
 use crate::fixture::{At, OldStore, at, composed, following, scalar};
-use worklog::domain::ports::Store as _;
-use worklog::domain::slug::{Kind as StoredKind, Slug};
-use worklog::fs::FsStore;
+use worklog_old::domain::ports::Store as _;
+use worklog_old::domain::slug::{Kind as StoredKind, Slug};
+use worklog_old::fs::FsStore;
 
 const MORNING: &str = "2026-09-04T10:15:07.412093+01:00";
 const NOON: &str = "2026-09-04T12:00:00+00:00";
@@ -557,7 +557,7 @@ fn a_document_with_a_file_that_does_not_read_is_collected_and_the_rest_is_read()
 
 #[test]
 fn the_usage_log_is_under_the_name_the_converted_store_keeps_its_own_under() {
-    assert_eq!(USAGE, worklog_next::wiring::USAGE_DIRECTORY);
+    assert_eq!(USAGE, worklog::wiring::USAGE_DIRECTORY);
 }
 
 #[test]
@@ -892,7 +892,7 @@ fn the_order_files_are_written_in_changes_nothing_read() {
     assert_eq!(read_forward.documents[0].versions.len(), 8);
 }
 
-fn composed_topic(old: &OldStore) -> worklog::domain::version::Version {
+fn composed_topic(old: &OldStore) -> worklog_old::domain::version::Version {
     old.topic("lantern", "A lamp", &[], desk(MORNING))
 }
 

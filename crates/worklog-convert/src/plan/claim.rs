@@ -1,10 +1,8 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 
-use worklog_next::domain::id::DocumentId;
-use worklog_next::domain::schema::{
-    Claim, Content, Date, Directory, Ending, KindOf, Reason, Record,
-};
+use worklog::domain::id::DocumentId;
+use worklog::domain::schema::{Claim, Content, Date, Directory, Ending, KindOf, Reason, Record};
 
 use super::authored::{Authoring, Draft, Recorded};
 use super::chain::Settled;

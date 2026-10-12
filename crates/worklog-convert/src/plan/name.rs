@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use worklog_next::domain::id::DocumentId;
-use worklog_next::domain::schema::{Date, Name};
+use worklog::domain::id::DocumentId;
+use worklog::domain::schema::{Date, Name};
 
 use super::Frame;
 use crate::decisions::{Answer, FormerAnswer};

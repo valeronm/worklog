@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use worklog_next::domain::id::DocumentId;
-use worklog_next::domain::schema::Date;
-use worklog_next::domain::version::Stamp;
+use worklog::domain::id::DocumentId;
+use worklog::domain::schema::Date;
+use worklog::domain::version::Stamp;
 
 use super::Frame;
 use super::chain::{Chains, Settled};

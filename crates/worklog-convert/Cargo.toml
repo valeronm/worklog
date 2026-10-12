@@ -3,7 +3,7 @@ name = "worklog-convert"
 version = "0.0.0"
 edition = "2024"
 license = "MIT"
-description = "Converts a worklog store to the store the next worklog keeps"
+description = "One-time converter from a store of worklog 0.4 to the store of worklog 0.5"
 repository = "https://github.com/valeronm/worklog"
 publish = false
 
@@ -20,8 +20,8 @@ blake3 = "1"
 clap = { version = "4", features = ["derive", "wrap_help"] }
 # preserve_order so what a decision file refuses is listed in the order the file holds it.
 toml = { version = "1.1.8", features = ["preserve_order"] }
+worklog-old = { path = "../worklog-old" }
 worklog = { path = "../.." }
-worklog-next = { path = "../worklog-next" }
 
 [dev-dependencies]
 tempfile = "3"

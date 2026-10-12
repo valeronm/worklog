@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::fmt::{self, Write as _};
 
-use worklog_next::domain::schema::KindOf;
+use worklog::domain::schema::KindOf;
 
 use crate::old;
 use crate::plan::{Complete, Origin};

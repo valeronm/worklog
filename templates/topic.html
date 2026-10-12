@@ -1,22 +1,15 @@
 {% extends "base.html" %}
 {% import "macros.html" as m %}
-{% block title %}{{ name }}{% endblock %}
-{% block nav %}topics{% endblock %}
+{% block title %}{{ document.label }}{% endblock %}
 {% block content %}
-<h1>{{ summary|safe }}</h1>
-{% call m::meta("topic", name_link, history) %}{% endcall %}
-{% for h in heads %}{% call m::head(h) %}{% endcall %}{% endfor %}
-<p class="tabs">{% for t in tabs %}<a href="{{ t.href }}"{% if t.current %} aria-current="page"{% endif %}>{{ t.name }} <span class="label">{{ t.count }}</span></a>{% endfor %}</p>
-{% if section == Section::Ideas %}
-<h2>{% call m::ideas_heading() %}{% endcall %}</h2>
-{% else %}
-<h2>{{ section.name() }}</h2>
-{% endif %}
-{% if !open.is_empty() %}
-{% call m::open(open) %}{% endcall %}
-{% else if !rows.is_empty() %}
+{% call m::sheet(document) %}{% endcall %}
+<p class="tabs">{% for tab in tabs %}<a href="{{ tab.href }}"{% if tab.current %} aria-current="page"{% endif %}>{{ tab.name }} <span class="label">{{ tab.count }}</span></a>{% endfor %}</p>
+<h2>{% if let Some(href) = listing %}<a href="{{ href }}">{{ section }}</a>{% else %}{{ section }}{% endif %}</h2>
+{% if !parts.is_empty() -%}
+<ul class="topics">{% for t in parts %}<li>{% call m::topic(t) %}{% endcall %}</li>{% endfor %}</ul>
+{%- else if !rows.is_empty() -%}
 {% call m::items(rows) %}{% endcall %}
-{% else %}
+{%- else -%}
 <p class="muted">None.</p>
-{% endif %}
+{%- endif %}
 {% endblock %}

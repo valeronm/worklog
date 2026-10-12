@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use worklog_next::domain::id::DocumentId;
-use worklog_next::domain::schema::{Content, Date, Fact, KindOf, Name, Record, Topic};
-use worklog_next::domain::version::Links;
+use worklog::domain::id::DocumentId;
+use worklog::domain::schema::{Content, Date, Fact, KindOf, Name, Record, Topic};
+use worklog::domain::version::Links;
 
 use super::chain::{Chain, Settled};
 use super::fact::{self, Refiled};

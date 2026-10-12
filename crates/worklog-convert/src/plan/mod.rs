@@ -4,9 +4,9 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 
-use worklog_next::domain::id::DocumentId;
-use worklog_next::domain::schema::{KindOf, Record};
-use worklog_next::domain::version::{Links, Stamp};
+use worklog::domain::id::DocumentId;
+use worklog::domain::schema::{KindOf, Record};
+use worklog::domain::version::{Links, Stamp};
 
 use crate::decisions::Decisions;
 use crate::key::{DocumentField, DocumentKey, Folded, Key};

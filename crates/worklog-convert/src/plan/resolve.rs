@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use worklog_next::domain::id::DocumentId;
+use worklog::domain::id::DocumentId;
 
 use super::Frame;
 use super::chain::Chains;

@@ -1,4 +1,4 @@
-use worklog_next::domain::schema::{Claim, Directory};
+use worklog::domain::schema::{Claim, Directory};
 
 use super::*;
 

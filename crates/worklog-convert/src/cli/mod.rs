@@ -8,9 +8,9 @@ use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 
 use clap::Parser;
-use worklog_next::app::check::Finding;
-use worklog_next::domain::id::DocumentId;
-use worklog_next::domain::schema::{Content, Record};
+use worklog::app::check::Finding;
+use worklog::domain::id::DocumentId;
+use worklog::domain::schema::{Content, Record};
 
 use crate::decisions::Decisions;
 use crate::key::{DocumentKey, Folded};
@@ -95,7 +95,7 @@ fn decisions(file: Option<&Path>) -> Result<Decisions, Ran> {
 
 // The rebuilt tool's command line is not reachable from this crate, so nothing holds these
 // words to it.
-const NEXT: &str = "worklog-next";
+const NEXT: &str = "worklog";
 const BIND: &str = "init";
 const STORE: &str = "--store";
 

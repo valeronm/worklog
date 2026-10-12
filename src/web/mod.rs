@@ -1,432 +1,232 @@
-//! The store as read-only pages. A request takes one snapshot of the
-//! store and renders a template over the reads a page composes from it,
-//! nothing kept between requests, so a page shows what a command run at
-//! that moment would.
+//! The store as read-only pages: a request is answered from what the read use cases return
+//! for it, and nothing is kept between requests.
 
-pub mod markdown;
-pub mod pages;
+mod markdown;
+mod pages;
+mod query;
+mod server;
+#[cfg(test)]
+mod tests;
 
 use askama::Template;
 
-use crate::app::output::Search;
-use crate::app::{Deps, Failure, read};
-use crate::domain::slug::{Kind, Slug};
+use crate::app::show::{self, Shown, ShownDocument};
+use crate::app::{Deps, Failure, check, list, search};
+use crate::domain::schema::KindOf;
 
 use pages::{
-    CheckPage, DocPage, ErrorPage, FactsPage, FollowupsPage, ForksPage, HistoryPage, Home,
-    ListingPage, LogPage, SearchPage, Section, TagsPage, TopicPage, VersionPage,
+    CheckPage, DOC, DocumentPage, ErrorPage, ForksPage, HISTORY, Held, HistoryPage, Home, Listing,
+    LogPage, Place, Scope, SearchPage, Section, TopicPage, VersionPage, shown_link,
 };
+use query::{Query, decoded};
+pub use server::Server;
 
+#[derive(Debug)]
 pub struct Page {
     pub status: u16,
     pub html: String,
 }
 
+impl Page {
+    fn ok(html: String) -> Page {
+        Page { status: 200, html }
+    }
+}
+
 enum Problem {
     NotFound(String),
     BadRequest(String),
+    NotAllowed(String),
+    Misdirected,
     Broken(String),
+    Busy,
+}
+
+impl Problem {
+    fn said(self) -> (u16, String) {
+        match self {
+            Problem::BadRequest(message) => (400, message),
+            Problem::NotFound(message) => (404, message),
+            Problem::NotAllowed(message) => (405, message),
+            Problem::Misdirected => (
+                421,
+                "the request names a host this server does not answer as".to_owned(),
+            ),
+            Problem::Broken(message) => (500, message),
+            Problem::Busy => (
+                503,
+                "too many responses are still being read; ask again".to_owned(),
+            ),
+        }
+    }
+
+    fn page(self) -> Page {
+        let (status, message) = self.said();
+        let html = ErrorPage::new(status, message)
+            .render()
+            .unwrap_or_else(|_| "the page could not be rendered".to_owned());
+        Page { status, html }
+    }
 }
 
 impl From<Failure> for Problem {
-    fn from(e: Failure) -> Problem {
-        match e {
+    fn from(failure: Failure) -> Problem {
+        match failure {
             Failure::Refused(text) => Problem::NotFound(text),
             Failure::Usage(text) => Problem::BadRequest(text),
-            Failure::Store(e) => Problem::Broken(e.to_string()),
+            Failure::Store(error) => Problem::Broken(error.to_string()),
         }
     }
 }
 
 impl From<askama::Error> for Problem {
-    fn from(e: askama::Error) -> Problem {
-        Problem::Broken(e.to_string())
+    fn from(error: askama::Error) -> Problem {
+        Problem::Broken(error.to_string())
     }
 }
 
-/// The query string as pairs, `+` and percent escapes undone.
-struct Query(Vec<(String, String)>);
-
-impl Query {
-    fn parse(text: &str) -> Query {
-        Query(
-            text.split('&')
-                .filter(|pair| !pair.is_empty())
-                .map(|pair| {
-                    let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
-                    (decode(key), decode(value))
-                })
-                .collect(),
-        )
-    }
-
-    fn get(&self, key: &str) -> Option<&str> {
-        self.0
-            .iter()
-            .find(|(k, _)| k == key)
-            .map(|(_, v)| v.as_str())
-    }
-}
-
-fn decode(text: &str) -> String {
-    let bytes = text.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'+' => out.push(b' '),
-            b'%' if i + 2 < bytes.len() => {
-                let hex = text.get(i + 1..i + 3).unwrap_or("");
-                match u8::from_str_radix(hex, 16) {
-                    Ok(byte) => {
-                        out.push(byte);
-                        i += 2;
-                    }
-                    Err(_) => out.push(b'%'),
-                }
-            }
-            byte => out.push(byte),
-        }
-        i += 1;
-    }
-    String::from_utf8_lossy(&out).into_owned()
-}
-
-/// The page for a request target, `/path?query`, whatever it names.
+/// The error page for `failure`: a 404 for a refusal, a 400 for a usage failure and a 500 for
+/// a store failure.
 #[must_use]
-pub fn respond(deps: &Deps, target: &str) -> Page {
+pub fn failed(failure: Failure) -> Page {
+    Problem::from(failure).page()
+}
+
+fn undecodable(text: &str) -> Problem {
+    Problem::BadRequest(format!("{text}: an escape in it does not decode"))
+}
+
+const LONGEST_TARGET: usize = 8192;
+
+/// The page for a request, whatever its method and target are: `target` is the request line's
+/// `/path?query`, and a method other than `GET` and `HEAD` is answered 405.
+#[must_use]
+pub fn respond(deps: &Deps, method: &str, target: &str) -> Page {
+    answer(deps, method, target).unwrap_or_else(Problem::page)
+}
+
+fn answer(deps: &Deps, method: &str, target: &str) -> Result<Page, Problem> {
+    if !matches!(method, "GET" | "HEAD") {
+        return Err(Problem::NotAllowed(format!(
+            "{method}: only GET and HEAD are answered"
+        )));
+    }
+    if target.len() > LONGEST_TARGET {
+        return Err(Problem::BadRequest("the address is too long".to_owned()));
+    }
+    if !target.starts_with('/') {
+        return Err(Problem::BadRequest(format!("{target}: not a path")));
+    }
     let (path, query) = target.split_once('?').unwrap_or((target, ""));
-    let query = Query::parse(query);
-    match deps.cached(|deps| route(deps, path, &query)) {
-        Ok(html) => Page { status: 200, html },
+    let path = decoded(path, false).ok_or_else(|| undecodable(path))?;
+    route(deps, &path, &Query::parse(query).map_err(undecodable)?)
+}
+
+fn topic_page(deps: &Deps, document: &ShownDocument, query: &Query) -> Result<String, Problem> {
+    let section = match query.get("show") {
+        None => Section::FIRST,
+        Some(show) => Section::named(show)
+            .ok_or_else(|| Problem::BadRequest(format!("show: {show} is no section of a topic")))?,
+    };
+    let id = document.document.to_string();
+    let topic = Some(id.as_str());
+    let held = Held {
+        parts: &list::topics(deps, topic, false)?,
+        facts: &list::facts(deps, topic, false)?,
+        ideas: &list::ideas(deps, topic, false)?,
+        followups: &list::followups(deps, topic, false)?,
+        entries: &list::entries(deps, topic, None, false)?,
+    };
+    Ok(TopicPage::new(document, &held, section).render()?)
+}
+
+fn shown(deps: &Deps, target: &str, query: &Query) -> Result<String, Problem> {
+    match show::show(deps, target)? {
+        Shown::Version(compared) => Ok(VersionPage::new(&compared).render()?),
+        Shown::Document(document) if document.reads_as == Some(KindOf::Topic) => {
+            topic_page(deps, &document, query)
+        }
+        Shown::Document(document) => Ok(DocumentPage::new(&document).render()?),
+    }
+}
+
+fn searched(deps: &Deps, query: &Query) -> Result<Page, Problem> {
+    let asked = search::Query {
+        term: query.get("q").unwrap_or_default(),
+        regex: query.get("regex") == Some("1"),
+        topic: given(query.get("topic")),
+        ended: query.get("ended") == Some("1"),
+    };
+    if asked.term.trim().is_empty() {
+        return Ok(Page::ok(SearchPage::form(&asked).render()?));
+    }
+    match search::search(deps, &asked).map_err(Problem::from) {
+        Ok(hits) => Ok(Page::ok(SearchPage::found(&asked, &hits).render()?)),
+        Err(broken @ Problem::Broken(_)) => Err(broken),
         Err(problem) => {
-            let (status, message) = match problem {
-                Problem::NotFound(m) => (404, m),
-                Problem::BadRequest(m) => (400, m),
-                Problem::Broken(m) => (500, m),
-            };
-            let page = ErrorPage { status, message };
-            let html = page.render().unwrap_or(page.message);
-            Page { status, html }
+            let (status, why) = problem.said();
+            let html = SearchPage::failed(&asked, why).render()?;
+            Ok(Page { status, html })
         }
     }
 }
 
-fn route(deps: &Deps, path: &str, query: &Query) -> Result<String, Problem> {
-    let path = path.trim_end_matches('/');
-    if let Some(name) = path.strip_prefix("/topic/") {
-        return topic(deps, name, query.get("show"));
+const LOGGED: usize = 100;
+const MOST_LOGGED: usize = 500;
+
+fn logged(deps: &Deps, query: &Query) -> Result<String, Problem> {
+    let limit = match query.get("n") {
+        None => LOGGED,
+        Some(n) => (n.parse().ok())
+            .filter(|n| (1..=MOST_LOGGED).contains(n))
+            .ok_or_else(|| Problem::BadRequest(format!("n: a number from 1 to {MOST_LOGGED}")))?,
+    };
+    Ok(LogPage::new(&search::log(deps, limit, None)?).render()?)
+}
+
+// A form sends a field left empty.
+fn given(value: Option<&str>) -> Option<&str> {
+    value.filter(|value| !value.is_empty())
+}
+
+fn route(deps: &Deps, path: &str, query: &Query) -> Result<Page, Problem> {
+    let page = path.trim_end_matches('/');
+    if let Some(target) = page.strip_prefix(DOC) {
+        return shown(deps, target, query).map(Page::ok);
     }
-    if let Some(tag) = path.strip_prefix("/tag/") {
-        return Ok(ListingPage::tagged(tag, &read::tag(deps, tag)?).render()?);
+    if let Some(target) = page.strip_prefix(HISTORY) {
+        return Ok(Page::ok(
+            HistoryPage::new(&show::history(deps, target)?).render()?,
+        ));
     }
-    if let Some(rest) = path.strip_prefix("/doc/") {
-        return match rest.strip_suffix("/history") {
-            Some(slug) => {
-                let slug = Slug::parse(slug).map_err(Failure::from)?;
-                Ok(HistoryPage::from(&read::history(deps, &slug)?).render()?)
-            }
-            None => Ok(DocPage::from(&read::show(deps, rest, None)?).render()?),
-        };
-    }
-    if let Some(id) = path.strip_prefix("/version/") {
-        return version(deps, id);
-    }
-    match path {
-        "" => home(deps),
-        "/entries" => Ok(ListingPage::entries(&read::list(deps, Kind::Entry)?).render()?),
-        "/facts" => Ok(FactsPage::from(&read::facts(deps, None, false)?).render()?),
-        "/followups" => {
-            let all = query.get("all").is_some();
-            Ok(FollowupsPage::new(&read::followups(deps, None, all)?, all).render()?)
+    let topic = given(query.get("topic"));
+    let ended = query.get("ended") == Some("1");
+    // Asked after the listing, whose refusal of the target is the one to show.
+    let scope = || -> Result<Scope, Problem> {
+        let under = topic.map(|target| show::show(deps, target)).transpose()?;
+        Ok(Scope {
+            topic,
+            under: under.as_ref().map(shown_link),
+            ended,
+        })
+    };
+    let Some(place) = Place::at(page) else {
+        return Err(Problem::NotFound(format!("no page at {path}")));
+    };
+    let html = match place {
+        Place::Topics => Home::new(&list::topics(deps, None, false)?).render()?,
+        Place::Facts => Listing::facts(&list::facts(deps, topic, ended)?, scope()?).render()?,
+        Place::Ideas => Listing::ideas(&list::ideas(deps, topic, ended)?, scope()?).render()?,
+        Place::Entries => {
+            Listing::entries(&list::entries(deps, topic, None, ended)?, scope()?).render()?
         }
-        "/tags" => Ok(TagsPage::from(&read::tags(deps)?).render()?),
-        "/search" => {
-            let term = query.get("q").unwrap_or("").trim();
-            let topic = query.get("topic").map(str::trim).filter(|t| !t.is_empty());
-            let found = if term.is_empty() {
-                Search {
-                    topic: topic.map(str::to_owned),
-                    ..Search::default()
-                }
-            } else {
-                read::search(deps, term, false, topic)?
-            };
-            Ok(SearchPage::from(&found).render()?)
+        Place::Followups => {
+            Listing::followups(&list::followups(deps, topic, ended)?, scope()?).render()?
         }
-        "/log" => Ok(LogPage::from(&read::log(deps, 100, None)?).render()?),
-        "/check" => Ok(CheckPage::from(&read::check(deps)?).render()?),
-        "/forks" => Ok(ForksPage::from(&read::forks(deps)?).render()?),
-        _ => Err(Problem::NotFound(format!("no page at {path}"))),
-    }
-}
-
-fn home(deps: &Deps) -> Result<String, Problem> {
-    let topics = read::topics(deps)?;
-    let open = read::followups(deps, None, false)?;
-    let forks = read::forks(deps)?;
-    Ok(Home::new(&topics, &open, &forks).render()?)
-}
-
-fn topic(deps: &Deps, name: &str, show: Option<&str>) -> Result<String, Problem> {
-    let section = Section::parse(show)?;
-    let shown = read::show(deps, name, Some(Kind::Topic))?;
-    let facts = read::facts(deps, Some(name), false)?;
-    let tagged = read::tag(deps, name)?;
-    let open = read::followups(deps, Some(name), false)?;
-    Ok(TopicPage::new(&shown, &facts, &tagged, &open, section).render()?)
-}
-
-fn version(deps: &Deps, id: &str) -> Result<String, Problem> {
-    let shown = read::show(deps, id, None)?;
-    let diff = read::diff(deps, id, None, None)?;
-    let head = shown
-        .heads
-        .first()
-        .ok_or_else(|| Problem::NotFound(format!("{id} names no version")))?;
-    Ok(VersionPage::new(&shown.slug, head, &diff).render()?)
-}
-
-/// A bound socket, answering one request at a time on the calling thread.
-pub struct Server {
-    inner: tiny_http::Server,
-}
-
-impl Server {
-    pub fn bind(addr: &str) -> Result<Server, Failure> {
-        let inner = tiny_http::Server::http(addr)
-            .map_err(|e| Failure::Refused(format!("cannot listen on {addr}: {e}")))?;
-        Ok(Server { inner })
-    }
-
-    /// Where it listens, with the port the system chose for a `:0`.
-    #[must_use]
-    pub fn address(&self) -> String {
-        self.inner
-            .server_addr()
-            .to_ip()
-            .map_or_else(|| "?".to_owned(), |a| a.to_string())
-    }
-
-    /// Serves until the process ends.
-    #[allow(
-        clippy::missing_panics_doc,
-        reason = "the one expect is on a header spelled as a literal"
-    )]
-    pub fn run(&self, deps: &Deps) {
-        let html = tiny_http::Header::from_bytes("Content-Type", "text/html; charset=utf-8")
-            .expect("a well-formed header");
-        for request in self.inner.incoming_requests() {
-            let page = match request.method() {
-                tiny_http::Method::Get | tiny_http::Method::Head => respond(deps, request.url()),
-                _ => Page {
-                    status: 405,
-                    html: String::from("only GET"),
-                },
-            };
-            let response = tiny_http::Response::from_string(page.html)
-                .with_status_code(page.status)
-                .with_header(html.clone());
-            // A client that hung up before the page was written is not
-            // the server's problem.
-            let _ = request.respond(response);
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::app::testing::World;
-    use crate::app::write;
-    use crate::domain::testing::CountingStore;
-
-    fn seeded() -> World {
-        let w = World::new("desk");
-        let deps = w.deps();
-        write::put_topic(
-            &deps,
-            "lantern",
-            "A Rust app that dims a lamp",
-            &[],
-            Some("\nWhat to know first: see [[lantern/relay-pin-is-fixed]].\n"),
-        )
-        .unwrap();
-        write::put_topic(&deps, "phone", "A test phone", &[], None).unwrap();
-        write::put_fact(
-            &deps,
-            "lantern/relay-pin-is-fixed",
-            "The relay pin is fixed on the board",
-            &["lantern"],
-            false,
-        )
-        .unwrap();
-        write::put_fact(
-            &deps,
-            "phone/beta-builds",
-            "Move the phone to beta",
-            &["phone"],
-            true,
-        )
-        .unwrap();
-        write::put_entry(
-            &deps,
-            "2026-09/2026-09-01-lamp-driver",
-            "2026-09-01",
-            "Wired the lamp driver",
-            &["lantern"],
-        )
-        .unwrap();
-        write::put_followup(
-            &deps,
-            "2026-09-01-port",
-            "2026-09/2026-09-01-lamp-driver",
-            "Add the second relay",
-            &["lantern"],
-            Some("2026-09-03 the board is back"),
-        )
-        .unwrap();
-        w
-    }
-
-    fn page(w: &World, target: &str) -> Page {
-        respond(&w.deps(), target)
-    }
-
-    fn ok(w: &World, target: &str) -> String {
-        let p = page(w, target);
-        assert_eq!(p.status, 200, "{target}: {}", p.html);
-        p.html
-    }
-
-    #[test]
-    fn home_lists_topics_with_counts_and_what_is_due() {
-        let w = seeded();
-        let html = ok(&w, "/");
-        assert!(
-            html.contains("<a href=\"/topic/lantern\">lantern</a>"),
-            "{html}"
-        );
-        assert!(html.contains("A Rust app that dims a lamp"));
-        assert!(html.contains("Add the second relay"), "due item: {html}");
-        assert!(html.contains("href=\"/doc/2026-09-01-port\""));
-    }
-
-    #[test]
-    fn a_topic_page_shows_its_open_work_and_one_section_at_a_time() {
-        let w = seeded();
-        let html = ok(&w, "/topic/lantern");
-        assert!(html.contains("Add the second relay"));
-        assert!(
-            html.contains("What to know first"),
-            "the body renders: {html}"
-        );
-        assert!(
-            html.contains("href=\"/topic/lantern?show=entries\">Entries <span class=\"label\">1<"),
-            "the tab counts: {html}"
-        );
-        assert!(
-            !html.contains("The relay pin is fixed on the board"),
-            "facts wait for their tab: {html}"
-        );
-        let html = ok(&w, "/topic/lantern?show=facts");
-        assert!(html.contains("The relay pin is fixed on the board"));
-        assert!(html.contains("href=\"/doc/lantern/relay-pin-is-fixed\""));
-        assert!(!html.contains("Add the second relay"));
-        let html = ok(&w, "/topic/lantern?show=entries");
-        assert!(html.contains("Wired the lamp driver"));
-        assert!(html.contains("href=\"/doc/2026-09/2026-09-01-lamp-driver\""));
-        assert!(!html.contains("The relay pin is fixed on the board"));
-        assert_eq!(page(&w, "/topic/lantern?show=tags").status, 400);
-    }
-
-    #[test]
-    fn a_document_page_renders_fields_body_and_derived_followups() {
-        let w = seeded();
-        let html = ok(&w, "/doc/2026-09/2026-09-01-lamp-driver");
-        assert!(html.contains("<h2>What</h2>"), "{html}");
-        assert!(html.contains("href=\"/tag/lantern\""));
-        assert!(
-            html.contains("Add the second relay"),
-            "derived follow-ups: {html}"
-        );
-        assert!(html.contains("/doc/2026-09/2026-09-01-lamp-driver/history"));
-        let html = ok(&w, "/doc/2026-09-01-port");
-        assert!(
-            html.contains("href=\"/doc/2026-09/2026-09-01-lamp-driver\""),
-            "the entry field links: {html}"
-        );
-    }
-
-    fn version_href(w: &World) -> String {
-        let html = ok(w, "/doc/lantern/relay-pin-is-fixed/history");
-        let start = html.find("href=\"/version/").expect("a version link") + "href=\"".len();
-        let end = html[start..].find('"').unwrap() + start;
-        html[start..end].to_owned()
-    }
-
-    #[test]
-    fn history_and_version_pages_follow_the_chain() {
-        let w = seeded();
-        let html = ok(&w, &version_href(&w));
-        assert!(
-            html.contains("class=\"added\""),
-            "a first version is all additions: {html}"
-        );
-        assert!(html.contains("The relay pin is fixed on the board"));
-    }
-
-    #[test]
-    fn listings_search_and_the_rest_answer() {
-        let w = seeded();
-        assert!(ok(&w, "/entries").contains("Wired the lamp driver"));
-        let facts = ok(&w, "/facts");
-        assert!(facts.contains("relay-pin-is-fixed") && facts.contains("beta-builds"));
-        assert!(ok(&w, "/followups").contains("Add the second relay"));
-        assert!(ok(&w, "/followups?all=1").contains("Add the second relay"));
-        assert!(ok(&w, "/tags").contains("href=\"/tag/lantern\""));
-        assert!(ok(&w, "/tag/lantern").contains("Wired the lamp driver"));
-        assert!(ok(&w, "/search?q=relay+pin").contains("relay-pin-is-fixed"));
-        assert!(ok(&w, "/search").contains("<form"));
-        let within = ok(&w, "/search?q=relay&topic=lantern");
-        assert!(within.contains("relay-pin-is-fixed") && within.contains("value=\"lantern\""));
-        assert!(ok(&w, "/search?q=relay&topic=phone").contains("No documents match"));
-        assert!(ok(&w, "/search?topic=lantern").contains("value=\"lantern\""));
-        assert!(ok(&w, "/log").contains("lantern/relay-pin-is-fixed"));
-        assert!(ok(&w, "/check").contains("documents"));
-        assert!(ok(&w, "/forks").contains("fork"));
-    }
-
-    #[test]
-    fn a_page_built_from_several_reads_asks_the_store_each_thing_once() {
-        let w = seeded();
-        let version = version_href(&w);
-        for target in ["/", "/topic/lantern", version.as_str()] {
-            let counting = CountingStore::over(&w.store);
-            let deps = Deps {
-                store: &counting,
-                ..w.deps()
-            };
-            assert_eq!(respond(&deps, target).status, 200);
-            assert_eq!(counting.repeated(), Vec::<String>::new(), "{target}");
-        }
-    }
-
-    #[test]
-    fn a_missing_document_is_404_and_a_bad_slug_400() {
-        let w = seeded();
-        assert_eq!(page(&w, "/doc/lantern/nothing").status, 404);
-        assert_eq!(page(&w, "/nowhere").status, 404);
-        assert_eq!(page(&w, "/doc/not a slug").status, 400);
-    }
-
-    #[test]
-    fn the_query_decodes_escapes() {
-        assert_eq!(decode("a+b%20c%2Fd"), "a b c/d");
-        assert_eq!(decode("100%"), "100%");
-        let q = Query::parse("q=x&all");
-        assert_eq!(q.get("q"), Some("x"));
-        assert_eq!(q.get("all"), Some(""));
-        assert_eq!(q.get("none"), None);
-    }
+        Place::Search => return searched(deps, query),
+        Place::Log => logged(deps, query)?,
+        Place::Check => CheckPage::new(&check::check(deps)?).render()?,
+        Place::Forks => ForksPage::new(&list::forks(deps)?).render()?,
+    };
+    Ok(Page::ok(html))
 }

@@ -1,63 +1,34 @@
 # worklog
 
-A store of work done, durable facts, follow-ups and topics, kept as
-append-only versioned documents and read and written only through this
-binary. It is the memory a coding agent opens a session with: which facts
-hold for the directory it is in, what is due, and what happened last time.
+A store of work done, durable facts, ideas, follow-ups and topics, read and
+written only through this binary. It is the memory a coding agent opens a
+session with: which facts hold for the directory it is in, what is due, and
+what happened last time.
 
 ## The store
 
 One directory, meant to be shared between machines by a file sync such as
-Syncthing. Nothing in it is ever edited or deleted; a write is a new file.
+Syncthing. Nothing in it is edited or deleted; a write is a new file.
 
-```
-~/worklog/
-  entry/2026-09/2026-09-04-lamp-driver/<hash>.md   one piece of work, dated
-  fact/lantern/relay-pin-is-fixed/<hash>.md     what is true now
-  followup/2026-09-04-port/<hash>.md            open work from an entry
-  topic/lantern/<hash>.md                       what a subject is
-```
+A document is a directory named by an id it is given when it is made, and
+every file in it is one immutable version, named by the hash of its bytes
+and listing the versions it follows. A document's name is a field of its
+versions and one document refers to another by id, so a rename moves no
+file and rewrites no other document, and two machines never write the same
+path with different content.
 
-Every file is one version of one document, named by the hash of its
-bytes and naming the versions it follows. Two machines writing from the
-same parent make a fork, which every command reports and a person
-settles; nothing merges on its own.
+Two machines that change one document before they sync leave it with two
+current versions. That is a fork: reads show every one, `check` counts it,
+and a person settles it by saving a version that follows them all. Nothing
+merges on its own, so the store needs no merge tool and no server, only a
+sync that carries files.
 
-A topic says what a subject is and which other topics a session about it
-also needs. A machine's own topic says where the topics live on that host,
-so the same store serves machines with different layouts.
-
-## Use
-
-```
-worklog init desk --store ~/sync/worklog   # once per host
-worklog new topic lantern                  # what the project is; then save
-worklog claim lantern                      # this checkout is lantern, on this host
-worklog context                            # the index a session opens with
-worklog new entry lamp-driver              # prints a draft path to edit
-worklog save 2026-09/2026-09-04-lamp-driver
-worklog new followup port --entry 2026-09/2026-09-04-lamp-driver \
-    --summary "Add the second relay" --recheck "2026-10-01 the board is back"
-worklog followups lantern                  # open work with each item's state
-worklog done 2026-09-04-port "dissolved by [[2026-09/2026-09-10-relay-landed]]"
-worklog check                              # every rule the store has to keep
-worklog usage                              # how often each command ran, per machine
-```
-
-Prose goes through a draft: `new` or `checkout` prints a file to edit,
-`diff` shows it against the store, `save` validates it and writes the
-version. State changes such as `done`, `recheck`, `verify`, `tombstone` and
-`rename` write a version directly; `done` takes a note saying what
-dissolved the followup, and `tombstone` requires one saying what ended the
-document. `--json` on any command gives the same data structured.
-`worklog --help` lists everything.
-
-`worklog serve` answers on `127.0.0.1:8080`, or `--bind` elsewhere, with
-the store as read-only pages: topics with their facts, entries and open
-work, every document with its history and each version's diff against its
-parents, listings, search and `check`. Nothing is cached; a page is what
-the command would print at that moment, so a machine holding a synced copy
-of the store can serve it.
+A topic is a project, a device, a tool or a subject, and facts, ideas,
+entries and followups are filed under topics. Each machine has a topic of
+its own, and a claim places a topic in a directory of one machine, so the
+same store serves machines with different layouts. `docs/documents.md` has
+the kinds and the rule for what a session loads, and `docs/store.md` the
+file format.
 
 ## Install
 
@@ -65,47 +36,81 @@ of the store can serve it.
 curl -fsSL https://raw.githubusercontent.com/valeronm/worklog/main/packaging/get.sh | sh
 ```
 
-Downloads the release for this machine's architecture into `~/.local/bin`,
-verifying the checksum published beside it. Or build from source with a
-current stable Rust: `cargo install --path .`.
+Downloads the release for this machine's operating system and architecture
+into `~/.local/bin`, or into `$PREFIX`, after verifying the checksum
+published beside it. Or build from source with the Rust toolchain
+`mise.toml` pins: `cargo install --path .`.
 
-From then on `worklog upgrade` does the same from the binary itself when
-a newer release exists, verified the same way, and either way brings the
-completions and the agents up to the binary in place.
+From then on `worklog upgrade` does the same from the binary itself when a
+newer release exists, verified the same way, and `worklog upgrade --check`
+only reports the two versions.
 
-The binary carries the agent skill that teaches a coding agent the store
-and its commands, and the SessionStart hook that opens every session with
-`worklog context`. `worklog init` offers them on a terminal and places
-them only when told to. `worklog agents install` places them for every
-agent whose home exists, Claude Code under `~/.claude` and Codex under
-`~/.codex`: the skill under the agent's skills, and one hook entry merged
-into `~/.claude/settings.json` or `~/.codex/hooks.json`, keeping the rest
-of the file as it is.
+## Set up a host
 
-`worklog agents uninstall` takes both away again and leaves whatever else
-the files hold. `worklog agents refresh` brings everything this host takes
-from the binary up to the one that runs it, only where it already is: the
-skill describes the commands of the binary it shipped with, the hook names
-the binary's path, which an install to a new place leaves stale, and the
-fish completions name the binary's path too. The installer and `upgrade`
-run it, so none of these drift from the binary.
+A host is bound once to its machine topic and to the directory of the
+store. `init` takes both, with no default for either:
 
-Completions are answered by the binary itself, so what a shell offers is
-read from the store as it stands: topics where a topic is expected, slugs
-where a document is, drafts for `save`, `discard` and `diff`, open
-followups for `done` and `drop`, facts for `verify`, tags for `tag`, and
-directories for `context` and `claim`.
-Free text, a search term or a machine name, gets nothing rather than file
-names. `worklog completions <shell>` prints the line a shell other than
-fish adds to its startup file to take them.
+```
+worklog init desk --store ~/sync/worklog --summary "The desk machine"
+```
+
+Where the store holds a topic named `desk`, `init` binds the host to it;
+where it holds none, `--summary` makes the topic. A second host joins a
+store another machine made by the same command with its own machine
+topic. The store directory may be missing, empty, or a store already; a
+directory of other files is refused.
+
+Until a host is set up, every command that uses the store is refused, and
+`context` prints a note and exits 0 so a session still opens.
+
+A project is then given a topic and its checkout a claim:
+
+```
+worklog new topic lantern      # prints the path of a draft to edit
+worklog save lantern           # stores the edited draft
+worklog claim lantern          # run inside the checkout
+worklog context                # what a session in this directory opens with
+```
+
+Prose goes through a draft: a command prints the path of a file to edit,
+and `save` checks it and stores it as the document's next version. State
+changes are commands that write a version directly. `--json` gives a
+command's result structured, and `worklog --help` lists the commands.
+
+`worklog serve` answers with the store as read-only pages, on the loopback
+address unless `--bind` gives another. On any other address the store is
+served without a login to whatever reaches it. Each request reads the
+store as it then stands, so a machine holding a synced copy can serve it.
+
+## Agents
+
+The binary carries the skill that teaches a coding agent the store and its
+commands, and a SessionStart hook that opens every session with `worklog
+context`. `worklog agents install`, or `init --agents`, places both for
+each agent it knows whose home directory exists: the skill under the
+agent's skills, and one hook merged into the agent's hooks file, the rest
+of which is kept. Without the flag `init` writes neither.
+
+`worklog agents uninstall` takes both away and leaves whatever else the
+files hold. `worklog agents refresh` brings a skill, a hook and the fish
+completions up to the binary that runs it, only where each already is: the
+skill describes the commands of the binary it shipped with, and the hook
+and the completions hold the binary's path, which an install to a new
+place leaves stale. The installer and `upgrade` run it.
+
+## Completions
+
+Completions are answered by the binary, so a shell is offered what the
+store holds as it stands: topics where a topic is expected, documents
+where a document is, open drafts for `save`. `worklog completions <shell>`
+prints the line a shell's startup file holds to take them; for fish,
+`agents refresh` writes that line where fish reads completions, once that
+directory exists.
 
 ## Develop
 
-`cargo test` runs the unit tests, the layer test and the command-line
-scenarios over a scratch store. `init` writes `~/.config/worklog/config`,
-the machine name and the store directory, and nothing reads a store before
-it exists. `WORKLOG_HOME=<dir>` points a run at `<dir>/config`,
-`<dir>/drafts` and a default store of `<dir>/store`, which is how the tests
-keep clear of the real ones. CLAUDE.md holds the constraints worth knowing
-before changing anything; `docs/store.md` is the file format, versions and
-operations, and `docs/documents.md` the four kinds and their fields.
+`cargo test --workspace` runs the unit tests, the layer test and the
+command-line scenarios, each over a scratch store. `WORKLOG_HOME=<dir>`
+moves the host's config and drafts under `<dir>`, which is how the
+scenarios keep clear of a real store.
+`CLAUDE.md` holds the constraints worth knowing before changing anything.

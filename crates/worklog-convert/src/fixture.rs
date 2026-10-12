@@ -6,19 +6,19 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use tempfile::TempDir;
-use worklog::domain::entry::Entry;
-use worklog::domain::fact::Fact;
-use worklog::domain::followup::{Followup, FollowupState};
-use worklog::domain::frontmatter::{Fields, Value};
-use worklog::domain::machine::MachineName;
-use worklog::domain::ports::Store as _;
-use worklog::domain::slug::{Kind, Slug};
-use worklog::domain::topic::Topic;
-use worklog::domain::version::{
+use worklog::domain::id::DocumentId;
+use worklog_old::domain::entry::Entry;
+use worklog_old::domain::fact::Fact;
+use worklog_old::domain::followup::{Followup, FollowupState};
+use worklog_old::domain::frontmatter::{Fields, Value};
+use worklog_old::domain::machine::MachineName;
+use worklog_old::domain::ports::Store as _;
+use worklog_old::domain::slug::{Kind, Slug};
+use worklog_old::domain::topic::Topic;
+use worklog_old::domain::version::{
     RENAME, TOMBSTONE, Version, VersionBlock, VersionId, note_body, with_note,
 };
-use worklog::fs::FsStore;
-use worklog_next::domain::id::DocumentId;
+use worklog_old::fs::FsStore;
 
 use crate::key::DocumentKey;
 use crate::old;
@@ -457,7 +457,7 @@ pub(crate) fn no_host(under: &Path) -> impl Fn(&str) -> Option<OsString> + use<>
     let next = under.join("next").into_os_string();
     let home = under.join("home").into_os_string();
     move |name: &str| match name {
-        "WORKLOG_NEXT_HOME" => Some(next.clone()),
+        "WORKLOG_HOME" => Some(next.clone()),
         "HOME" => Some(home.clone()),
         _ => None,
     }

@@ -6,102 +6,132 @@ constraints that are not visible from the code or those docs.
 
 ## Layers
 
+`tests/layers.rs` reads the sources and holds the boundaries below, since
+a convention nothing checks is one a routine edit falsifies. The one it
+does not hold is that `app` prints nothing.
+
 `domain` holds the model and its rules and reaches nothing outside memory:
-no file, clock, environment or process. `tests/layers.rs` reads the sources
-and fails on an I/O import, because the boundary is what makes every rule
-testable with the in-memory ports in `domain::testing`. `app` is one use
-case per command over the ports and never prints. `fs` implements the ports
-on a directory tree, and `net` the one port that reaches the network, the
-releases `upgrade` reads; `WORKLOG_RELEASES=<dir>` swaps in the `fs`
-implementation so no test touches it. `cli` parses arguments and renders.
-`web` is a second renderer over the reads, one request being one snapshot of
-the store, since every read loads all of it and a page composes several, and
-the layer test keeps it from reaching `fs` or `net`: a page that needs data
-no read returns gets a read use case, which `--json` then has too, never
-logic in a handler. A use case that wants something new from outside adds it
-to a port, not to a parameter.
+no file, clock, environment, process or random source. The boundary is
+what makes every rule testable with the in-memory ports in
+`domain::testing`. Inside it, `schema` alone knows the kinds: the version,
+the document and the directory store do not refer to it, which is what
+lets a store keep documents of a kind this binary does not know.
+
+`app` is one use case per command over the ports. It prints nothing, uses
+no renderer and reaches the host only through a port, so a use case that
+wants something new from outside adds it to a port, not to a parameter.
+One module puts a version in the store and one appends to the usage log. A
+module of `app` is held to the rules of a read, which decides no ending
+and writes nothing, unless the test lists it as a write or as shared.
+
+`wiring` builds the adapters and keeps them to itself: `fs` implements the
+ports on a directory tree and `net` the one port that reaches the network,
+the releases `upgrade` reads. `WORKLOG_RELEASES=<dir>` swaps in a
+directory, and the layer test holds every helper of `tests/cli.rs` that
+runs the binary to set it, so no test touches the network.
+
+`cli` parses arguments and renders, and `main.rs` only calls it. It reads
+the process only where the process starts and where a shell asks for
+completions, and it alone gives a result its JSON form, under the
+convention at the top of `cli/json.rs`. A result type with no JSON
+snapshot there does not compile in a test build.
+
+`web` is a second renderer over the read use cases: it is handed its
+ports, calls no write use case and decides no ending, so a page that needs
+data no read returns gets a read use case, not logic in a handler. One
+request is one reading of the store, since a page composes several reads.
+No template turns escaping off, and `Markup` in `web/markdown.rs` is the
+one type printed unescaped. Neither `cli` nor `web` refers to the store
+port, in its tests either. `render` holds what the two show the same way
+and can run no use case.
 
 ## The store's invariants
 
-`docs/store.md` is the format, and `fs::store` is where a file outside it
-is refused. Extend the grammar only if the writer and the reader change
-together, and only by adding, since that is what an older binary
-tolerates; `docs/release.md` has the step for anything else.
+`docs/store.md` is the format, with what a reader refuses, and
+`docs/release.md` has what a change to it asks of the machines sharing a
+store. A version is composed only if its bytes read back to the same
+parts, which is what holds the writer and the reader to each other.
 
-`init` asks on a terminal when given no name; nothing reads a store
-before it exists.
+The rules of the store are applied by the one module that stores a
+version. `wiring::write_version` applies none; it exists for the
+converter, and the layer test keeps the rest of the crate from calling it.
+
+The check that keeps a usage line out of a directory holding nothing of
+the machine's topic runs on every logged run and reads that one document,
+not the tree.
 
 ## Documents
 
-`docs/documents.md` has the kinds, their slugs and their fields. An entry
-sits under a month directory so no directory grows past a few dozen
-children, and a topic needs a letter so it cannot be read as one. An
-idea is flagged by `idea` rather than `kind` because `kind` names the
-document.
+`docs/documents.md` has the kinds and their fields. The references of a
+kind in `schema::kind` are the one list of the fields that refer to
+another document, `ended_by` apart. A save, `check`, a draft's addresses
+and the ending of a topic all read it, so a field carrying an id that is
+not on it is seen by none of them.
 
 ## Retrieval
 
-`domain::graph::resolve` is the whole rule, stated in `docs/documents.md`
-under Topic. Since every matching claim loads, a topic that should not
-reach every project must not be claimed for a wide directory.
+`app::context` is the whole rule, stated in `docs/documents.md` under
+What a session reaches. Since every claim covering the directory loads, a
+topic that should not reach every project must not be claimed for a wide
+directory.
 
-A topic is renamed without rewriting what names it: `load` maps every
-stored topic name to the topic's name now, so nothing after it compares
-against an old one. The mapping takes each kind apart field by field, so
-a new field does not compile until it is placed there; what nothing
-checks is that a use case taking a topic name from the command line
-resolves it the same way. A write never starts from `load`, since storing
-its documents back would rewrite the names: `claim` and `unclaim` read
-the machine topic as stored, and `tests/layers.rs` holds `write` to that.
-
-`context` is printed at session start, and Claude Code replaces a hook's
-output past a size limit with a short preview of its start, so the text
-renderer holds it under that limit, must-act-on items first, and counts a
-topic's facts once their names would not fit. `tests/cli.rs` pins the shape.
+`context` is printed at session start, and an agent keeps only the start
+of a hook's output past a size limit, so the text renderer holds it under
+that limit, what is due first. The tests beside the renderer pin the
+limit.
 
 ## Output contract
 
 stdout carries data only; refusals and notes go to stderr. Exit 1 is a
-refusal or a store problem, 2 a usage error. A listing that reports a
-problem a person may act on, a fork, a claim on a directory this host
-lacks, still exits 0: the listing is the answer, and `check` is the
-command whose exit code means something. `check` exits 1 on a problem, a
-rule the store must keep; a notice is a judgement call, printed with a
-`notice:` prefix and counted in the summary, and never moves the exit
-code.
+refusal or a store problem, 2 a usage error. A listing that reports
+something a person may act on, a fork among them, still exits 0: the
+listing is the answer. `check` is the command whose exit code means
+something: 1 on a problem, a rule the store must keep, while a notice is a
+judgment call, printed with a `notice:` prefix and counted in the
+summary, and does not move the exit code. `upgrade --check` exits 0
+whether or not a newer release exists, and 1 only when the check itself
+failed.
+
+`agents refresh` prints the paths it wrote on stdout and everything else
+on stderr. The installer and the binary that ran `upgrade`, which may be
+an older release, both read that stdout as the list of files written.
 
 ## The skill
 
 `skill/SKILL.md` is compiled into the binary so the skill a session reads
-is the one written for the commands it has, and `tests/skill.rs` holds the
-two to each other. The session hook is merged into the agent's hooks file
-rather than written over it, because that file is the user's and holds
-other hooks. What the tool owns in it is any `SessionStart` group whose
-command runs `worklog context`, whoever wrote it: that is the unit a
-refresh replaces and an uninstall removes, and the rule a change to the
-recognition must keep. The file is kept as data, so key order survives a
-write and formatting does not. A scripted `init` touches neither the skill
-nor the hooks file unless told to, since a script writing into an agent's
-home unasked is the kind of surprise the store exists to avoid, and a
-refresh writes only where the thing already is, a fish completions
-directory included, which is what lets the installer and `upgrade` run it
-on every host without a network. The skill is public and written
+is the one written for the commands it has, and the tests beside
+`cli/skill.rs` hold the two to each other. The skill is public and written
 for a stranger: it holds how to use the store, including the follow-up
-triage put to the user, and nothing about any one person's other tools.
-It says what the tool gives and how to use it, not how the tool works: a
-rule restated there is a copy `tests/skill.rs` cannot hold to the code.
+triage put to the user, and nothing about any one person's other tools. It
+holds what the tool gives and how to use it, not how the tool works: a rule
+restated there is a copy those tests cannot hold to the code.
+
+The session hook is merged into the agent's hooks file, because that file
+is the user's and holds other hooks. What the tool owns in it is any
+`SessionStart` group holding a hook whose command runs a file named
+`worklog` with `context` as its next word, whoever wrote it. An install
+adds none where one is, a refresh leaves one such group with one such hook
+running this binary, and an uninstall removes every such group; a change
+to the recognition must keep all three. A binary under another file name is
+refused a hook, since it would not find it again. The file is kept as
+data, so key order survives a write and formatting does not.
+
+`init` touches neither the skill nor the hooks file unless given
+`--agents`. A refresh writes only where the thing already is, fish's
+completions directory included, which is what lets the installer and
+`upgrade` run it on every host.
 
 A usage line gets its session from the environment variable an agent sets
 for a command it runs. Nothing checks the name the agent table holds
 against the agent, so a rename on the agent's side leaves the session out
-rather than failing a test. The first agent in the table whose variable is
-set is the one logged when one agent runs inside another.
+without failing a test. The first agent in the table whose variable is set
+is the one logged when one agent runs inside another.
 
 ## What stays out of the repo
 
 No store content reaches the repo, and nothing in it refers to whoever
 keeps one. Fixtures, examples and test expectations are invented: no text,
-slug, path, machine name or recheck lifted from a real store, no real
+name, id, path, machine name or trigger lifted from a real store, no real
 project, device or host names, and no "the author" or "my machine", since a
 sentence like that is itself the disclosure. The invented vocabulary in the
 tests, `lantern`, `atlas`, `phone`, `desk`, is the one to extend. A decision
@@ -110,19 +140,20 @@ too, since they hold a store's slugs, tags, names and summaries.
 
 ## Build and check
 
-`cargo fmt --all --check`, `cargo clippy --workspace --all-targets
---all-features -- -D warnings` and `cargo test --workspace` are what CI
-runs; pedantic clippy is on for each crate and a suppression lives at its
-site with a `reason`. `crates/worklog-next` is the store being rebuilt, a
-second crate so it cannot reach into this one. `crates/worklog-convert`
-converts a store of this crate to one of `worklog-next`, once: it depends
-on both, so a change to what either makes public is checked against it,
-and neither may depend on it, since it is removed after the one release
-that carries its source, and no release builds it. Without `--workspace` a
-check covers the root package alone. The
-toolchain is pinned in `mise.toml` and CI reads the pin from there.
-Releases are cut by tag; `docs/release.md` has the steps.
+`docs/release.md` has the checks CI runs. Pedantic clippy is on for each
+crate and a suppression carries a `reason`. Without `--workspace` a check
+covers the root package alone. The toolchain is pinned in `mise.toml` and
+CI reads the pin from there. Releases are cut by tag.
 
-A benchmark or a loop never runs the installed `worklog`, since the
-binary PATH finds logs every run into the store's usage: time a build run
-by its path, or point `WORKLOG_HOME` at a copy of the store.
+`crates/worklog-old` is the library of the tool before the store was
+rebuilt, kept so the converter can read a store of that format.
+`crates/worklog-convert` converts such a store to this one, once: it
+depends on both, so a change to what either makes public is checked
+against it, and neither may depend on it. No release builds either, and
+both are removed after the one release that carries their source; the
+converter's README lists what goes with them.
+
+A benchmark or a loop never runs the installed `worklog`, since the binary
+`PATH` finds logs every run into the store's usage: time a build run by its
+path, or set `WORKLOG_HOME` to a directory whose config carries the path of
+a copy of the store.

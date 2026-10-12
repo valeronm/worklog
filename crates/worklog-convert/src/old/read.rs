@@ -2,13 +2,13 @@ use std::collections::BTreeSet;
 use std::fmt;
 use std::path::Path;
 
-use worklog::domain::frontmatter::Value as StoredValue;
-use worklog::domain::ports::{Store as _, StoreError};
-use worklog::domain::slug::{Kind as StoredKind, Slug};
-use worklog::domain::version::{
+use worklog_old::domain::frontmatter::Value as StoredValue;
+use worklog_old::domain::ports::{Store as _, StoreError};
+use worklog_old::domain::slug::{Kind as StoredKind, Slug};
+use worklog_old::domain::version::{
     Document as StoredDocument, State as StoredState, Version as StoredVersion, VersionId,
 };
-use worklog::fs::FsStore;
+use worklog_old::fs::FsStore;
 
 use super::{
     Document, Failure, Found, Kind, Problem, State, Store, Value, Version, unmatched, unreadable,
@@ -79,7 +79,7 @@ pub(crate) fn shaped(slug: &str) -> Option<Kind> {
 }
 
 pub(super) fn field_keys(kind: Kind) -> &'static [&'static str] {
-    worklog::domain::kind_keys(stored_kind(kind))
+    worklog_old::domain::kind_keys(stored_kind(kind))
 }
 
 fn value_of(value: &StoredValue) -> Value {

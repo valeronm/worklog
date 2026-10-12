@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
 
 use toml::{Table, Value};
-use worklog_next::domain::id::DocumentId;
-use worklog_next::domain::schema::graph::{Edges, closes_cycle, reach_from};
-use worklog_next::domain::schema::{Content, KindOf, Record};
-use worklog_next::domain::version::{Links, Stamp};
+use worklog::domain::id::DocumentId;
+use worklog::domain::schema::graph::{Edges, closes_cycle, reach_from};
+use worklog::domain::schema::{Content, KindOf, Record};
+use worklog::domain::version::{Links, Stamp};
 
 use super::{Document, Questions, Version};
 use crate::question::{Blocked, Open};

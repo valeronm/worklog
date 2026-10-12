@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use clap::CommandFactory;
-use worklog::cli::args::Cli;
-use worklog_next::domain::schema::{KindOf, Reason};
+use worklog::domain::schema::{KindOf, Reason};
+use worklog_old::cli::args::Cli;
 
 use super::{Counts, Itself, Run, Standing, ordered, stub, written_itself};
 use crate::decisions::{Decisions, Unasked};
@@ -604,7 +604,7 @@ fn every_blocked_variant_has_its_table() {
 
 ### Forked
 
-Close each fork with `worklog resolve` and `worklog save`.
+Close each fork with `worklog resolve` and `worklog save`, run with a `worklog` 0.4 binary.
 
 | document | heads |
 | --- | --- |
@@ -612,7 +612,7 @@ Close each fork with `worklog resolve` and `worklog save`.
 
 ### Waiting for versions
 
-Sync with the machine that holds the missing versions, until `worklog check` passes.
+Sync with the machine that holds the missing versions, until `worklog check` passes, run with a `worklog` 0.4 binary.
 
 | document | missing |
 | --- | --- |
@@ -620,7 +620,7 @@ Sync with the machine that holds the missing versions, until `worklog check` pas
 
 ### Unreadable
 
-Bring each file back from a machine that reads it, until `worklog check` passes.
+Bring each file back from a machine that reads it, until `worklog check` passes, run with a `worklog` 0.4 binary.
 
 | path | reason |
 | --- | --- |
@@ -684,7 +684,7 @@ No command rewrites a stored version: the converter has to read this case first.
 
 ### Names of several topics
 
-No key of the file tells topics apart that differ in case alone. Where one of them is a live topic under that name, give it another name with `worklog rename`, and the name in any case is then the topic renamed, as the store reads it. Where none is, a line of the file can name a renamed topic by the name it has now; a name a version of the store holds, or the name of a removed topic, waits for the converter to read this case.
+No key of the file tells topics apart that differ in case alone. Where one of them is a live topic under that name, give it another name with `worklog rename`, run with a `worklog` 0.4 binary, and the name in any case is then the topic renamed, as the store reads it. Where none is, a line of the file can name a renamed topic by the name it has now; a name a version of the store holds, or the name of a removed topic, waits for the converter to read this case.
 
 | name | topics |
 | --- | --- |
@@ -1229,14 +1229,14 @@ fn an_item_the_store_leaves_out_as_it_renames_says_so_in_its_row_and_its_line() 
         printed.contains(
             "| topic | item | names a topic |\n\
              | --- | --- | --- |\n\
-             | lantern | atlas | yes, though `worklog` leaves the item out as it renames it |\n"
+             | lantern | atlas | yes, though `worklog` 0.4 leaves the item out as it renames it |\n"
         ),
         "{printed}"
     );
     assert!(
         printed.contains(
-            "\n  \"?\",  # write atlas here, or in uses, or in drop: worklog does not act on \
-             this item, which it leaves out of the list as it renames it\n"
+            "\n  \"?\",  # write atlas here, or in uses, or in drop: `worklog` 0.4 does not act \
+             on this item, which it leaves out of the list as it renames it\n"
         ),
         "{printed}"
     );

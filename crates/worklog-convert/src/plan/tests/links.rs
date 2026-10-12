@@ -305,7 +305,7 @@ fn a_link_in_a_note_or_in_a_recheck_is_rewritten_and_has_no_row() {
     };
     assert_eq!(
         followup.trigger,
-        Some(worklog_next::domain::schema::Trigger::LookAgain {
+        Some(worklog::domain::schema::Trigger::LookAgain {
             on: date("2026-10-01"),
             why: "After [[2026-09-04-lamp-driver]]".to_owned(),
         })

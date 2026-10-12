@@ -1,12 +1,12 @@
 # worklog-convert
 
-Converts a store of the `worklog` crate, with its whole history, to the store
-`worklog-next` keeps. It is run once per store, from a clone: one release
+Converts a store of the `worklog-old` crate, with its whole history, to the
+store `worklog` keeps. It is run once per store, from a clone: one release
 carries its source and no release builds it. After that release it is removed,
-and with it the workspace member in the root `Cargo.toml`,
-`worklog_next::wiring::write_version` with its tests, the test in
-`crates/worklog-next/tests/layers.rs` that keeps that function out of the rest
-of `worklog-next`, and the passages of the root `CLAUDE.md` that name this
+and with it `crates/worklog-old`, both workspace members in the root
+`Cargo.toml`, `worklog::wiring::write_version` with its tests, the test in
+`tests/layers.rs` that keeps that function out of the rest of `worklog`, and
+the passages of the root `CLAUDE.md` and of `docs/release.md` that name this
 crate.
 
 ## Running it
@@ -32,7 +32,7 @@ and so is one whose `.partial` directory would be.
 
 The same old store and the same decision file give the same bytes on any
 machine. A converted store is bound to a host with
-`worklog-next init <its machine topic> --store <NEW_STORE>`.
+`worklog init <its machine topic> --store <NEW_STORE>`.
 
 ## The decision file
 
@@ -103,8 +103,8 @@ touching = "atlas"      # where its recheck touches no live topic: a name, or ""
 
 | in the report | resolved |
 | --- | --- |
-| Blocked: a forked, waiting or unreadable document, a path no command reads, a rename cut short | in the old store, with the released `worklog`, as the table's advice says |
-| Blocked: two topics whose names differ only in case, under a name no key of the file tells apart | in the old store with `worklog rename` where one of them is live under that name; else on the line of the file that holds the name, or in the converter, as the table's advice says |
+| Blocked: a forked, waiting or unreadable document, a path no command reads, a rename cut short | in the old store, with a `worklog` 0.4 binary, as the table's advice says |
+| Blocked: two topics whose names differ only in case, under a name no key of the file tells apart | in the old store with that binary's `rename` where one of them is live under that name; else on the line of the file that holds the name, or in the converter, as the table's advice says |
 | Blocked: a stored form the converter does not place | in the converter: the advice says so, and no answer mends it |
 | Open | in the decision file, under the key the stub gives or, with no stub, on the line the row names |
 | Unused decisions | in the decision file: correct the line, answer the `"?"` or remove it |

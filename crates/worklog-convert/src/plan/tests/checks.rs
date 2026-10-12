@@ -308,7 +308,7 @@ fn a_reference_the_plan_does_not_hold_blocks_when_nothing_else_was_asked() {
         record.ending.as_mut().unwrap().by = Some(ended_by.clone());
         ended
     };
-    let followup = Content::Followup(worklog_next::domain::schema::Followup {
+    let followup = Content::Followup(worklog::domain::schema::Followup {
         created: date("2026-09-04"),
         topics: vec![lantern.clone(), missing.clone(), pin.clone()],
         entry: Some(pin.clone()),

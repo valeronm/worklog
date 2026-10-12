@@ -104,17 +104,17 @@ const fn head(title: &'static str, advice: &'static str, columns: &'static [&'st
 
 const FORKED: Head = head(
     "Forked",
-    "Close each fork with `worklog resolve` and `worklog save`.",
+    "Close each fork with `worklog resolve` and `worklog save`, run with a `worklog` 0.4 binary.",
     &["document", "heads"],
 );
 const WAITING: Head = head(
     "Waiting for versions",
-    "Sync with the machine that holds the missing versions, until `worklog check` passes.",
+    "Sync with the machine that holds the missing versions, until `worklog check` passes, run with a `worklog` 0.4 binary.",
     &["document", "missing"],
 );
 const UNREADABLE: Head = head(
     "Unreadable",
-    "Bring each file back from a machine that reads it, until `worklog check` passes.",
+    "Bring each file back from a machine that reads it, until `worklog check` passes, run with a `worklog` 0.4 binary.",
     &["path", "reason"],
 );
 const SKIPPED: Head = head(
@@ -297,7 +297,7 @@ const UNHELD: Head = head(
 );
 const TOPIC_CASE: Head = head(
     "Names of several topics",
-    "No key of the file tells topics apart that differ in case alone. Where one of them is a live topic under that name, give it another name with `worklog rename`, and the name in any case is then the topic renamed, as the store reads it. Where none is, a line of the file can name a renamed topic by the name it has now; a name a version of the store holds, or the name of a removed topic, waits for the converter to read this case.",
+    "No key of the file tells topics apart that differ in case alone. Where one of them is a live topic under that name, give it another name with `worklog rename`, run with a `worklog` 0.4 binary, and the name in any case is then the topic renamed, as the store reads it. Where none is, a line of the file can name a renamed topic by the name it has now; a name a version of the store holds, or the name of a removed topic, waits for the converter to read this case.",
     &["name", "topics"],
 );
 const FORMER_NAME: Head = head(
@@ -437,7 +437,7 @@ fn names_a_topic(missing: bool, ended: bool, unread: bool) -> &'static str {
     match (missing, ended, unread) {
         (true, _, _) => "no",
         (false, true, _) => "yes, an ended one",
-        (false, false, true) => "yes, though `worklog` leaves the item out as it renames it",
+        (false, false, true) => "yes, though `worklog` 0.4 leaves the item out as it renames it",
         (false, false, false) => "yes",
     }
 }

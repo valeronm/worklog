@@ -1,17 +1,15 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use worklog_next::app::check::{Finding, check};
-use worklog_next::app::context::context;
-use worklog_next::app::list::{facts, followups};
-use worklog_next::app::setup::init;
-use worklog_next::app::show::{Shown, history, show};
-use worklog_next::domain::id::{DocumentId, VersionId};
-use worklog_next::domain::schema::{Content, Date, KindOf, Reason, Record};
-use worklog_next::domain::version::{
-    Envelope, Kind as NewKind, Links, Stamp, Version as NewVersion,
-};
-use worklog_next::wiring::{Adapters, wire};
+use worklog::app::check::{Finding, check};
+use worklog::app::context::context;
+use worklog::app::list::{facts, followups};
+use worklog::app::setup::init;
+use worklog::app::show::{Shown, history, show};
+use worklog::domain::id::{DocumentId, VersionId};
+use worklog::domain::schema::{Content, Date, KindOf, Reason, Record};
+use worklog::domain::version::{Envelope, Kind as NewKind, Links, Stamp, Version as NewVersion};
+use worklog::wiring::{Adapters, wire};
 
 use super::compose::Defect;
 use super::compose::{Composed, compose, file_of};
@@ -583,7 +581,7 @@ fn staged() -> (Scratch, Vec<Composed>) {
     let complete = finished(&store);
     let composed = compose(&complete).unwrap();
     for version in composed.iter().flat_map(|document| &document.versions) {
-        worklog_next::wiring::write_version(&scratch.staging(), version).unwrap();
+        worklog::wiring::write_version(&scratch.staging(), version).unwrap();
     }
     (scratch, composed)
 }
@@ -663,7 +661,7 @@ fn a_document_holding_a_version_no_plan_made_is_faulted() {
         "\nMore.\n".to_owned(),
     )
     .unwrap();
-    worklog_next::wiring::write_version(&scratch.staging(), &more).unwrap();
+    worklog::wiring::write_version(&scratch.staging(), &more).unwrap();
 
     let faults = verify(&composed, &scratch.staging()).unwrap_err();
     let strays: Vec<&Fault> = (faults.iter())

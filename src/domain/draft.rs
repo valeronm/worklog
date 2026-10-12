@@ -1,161 +1,216 @@
-use super::frontmatter::{self, Fields, ParseError};
-use super::slug::Slug;
-use super::version::{Version, VersionError, VersionId};
+//! A document being edited on this machine: its fields and body as a
+//! session edits them, and beside them what the edit started from.
 
-/// A document being written: the kind's own fields and the body, plus the
-/// versions it was checked out from. Everything else a version carries is
-/// stamped by `save`.
+use std::fmt;
+
+use toml::Table;
+
+use super::fence::{self, FenceError};
+use super::id::{DocumentId, VersionId};
+use super::version::{self, Fields, Kind, Version};
+
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DraftError {
+    Fence(FenceError),
+    NotToml(String),
+    /// The file kept beside the draft does not say what it started from.
+    Origin(String),
+}
+
+impl fmt::Display for DraftError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DraftError::Fence(e) => e.fmt(f),
+            DraftError::NotToml(why) => write!(f, "the fields are not TOML: {why}"),
+            DraftError::Origin(why) => write!(f, "the draft's origin: {why}"),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct Draft {
-    pub slug: Slug,
+    pub document: DocumentId,
+    pub kind: Kind,
+    /// The heads the edit started from; none for a document being created.
     pub parents: Vec<VersionId>,
     pub fields: Fields,
     pub body: String,
 }
 
-const CONFLICT_OPEN: &str = "<<<<<<<";
-const CONFLICT_SEPARATOR: &str = "=======";
-const CONFLICT_CLOSE: &str = ">>>>>>>";
+fn content(text: &str) -> Result<(Fields, String), DraftError> {
+    let (fields, body) = fence::split(text).map_err(DraftError::Fence)?;
+    let fields = fields
+        .parse()
+        .map_err(|e: toml::de::Error| DraftError::NotToml(e.to_string()))?;
+    Ok((fields, body.to_owned()))
+}
 
 impl Draft {
-    /// The file a person edits: the kind's own fields and the body, the
-    /// same text `show` prints, so nothing in it belongs to the tool.
     #[must_use]
-    pub fn to_text(&self) -> String {
-        frontmatter::emit(&self.fields, &self.body)
-    }
-
-    /// Reads the edited file back; the slug and the parents are kept beside
-    /// it by whoever stores drafts, never in the text.
-    pub fn from_text(slug: Slug, parents: Vec<VersionId>, text: &str) -> Result<Draft, ParseError> {
-        let split = frontmatter::parse(text)?;
-        Ok(Draft {
-            slug,
-            parents,
-            fields: split.fields,
-            body: split.body,
-        })
-    }
-
-    /// The parents as stored beside the draft: one id per line.
-    #[must_use]
-    pub fn parents_text(&self) -> String {
-        self.parents.iter().fold(String::new(), |mut out, p| {
-            out.push_str(&p.to_string());
-            out.push('\n');
-            out
-        })
-    }
-
-    pub fn parse_parents(text: &str) -> Result<Vec<VersionId>, VersionError> {
-        text.lines()
-            .filter(|l| !l.trim().is_empty())
-            .map(|l| VersionId::parse(l.trim()))
-            .collect()
-    }
-
-    /// A draft holding every head of a fork, for a person to reconcile:
-    /// the first head's fields, and the bodies between conflict markers.
-    #[must_use]
-    pub fn merging(heads: &[Version]) -> Draft {
-        let mut body = String::new();
-        for (i, head) in heads.iter().enumerate() {
-            let marker = if i == 0 {
-                CONFLICT_OPEN
-            } else {
-                CONFLICT_SEPARATOR
-            };
-            let header = format!(
-                "{marker} {} written {} on {}\n",
-                head.id.short(),
-                head.block.written,
-                head.block.machine
-            );
-            body.push_str(&header);
-            if head.fields != heads[0].fields {
-                body.push_str("(fields differ from the first head:)\n");
-                body.push_str(&frontmatter::emit(&head.fields, ""));
-            }
-            body.push_str(&head.body);
-        }
-        body.push_str(CONFLICT_CLOSE);
-        body.push('\n');
+    pub fn first(document: DocumentId, kind: Kind, fields: Fields, body: String) -> Draft {
         Draft {
-            slug: heads[0].slug.clone(),
-            parents: heads.iter().map(|h| h.id.clone()).collect(),
-            fields: heads[0].fields.clone(),
+            document,
+            kind,
+            parents: Vec::new(),
+            fields,
             body,
         }
     }
 
-    /// Whether a merging draft still carries its markers.
     #[must_use]
-    pub fn has_conflict_markers(&self) -> bool {
-        self.body
-            .lines()
-            .any(|l| l.starts_with(CONFLICT_OPEN) || l.starts_with(CONFLICT_CLOSE))
+    pub fn of(version: &Version) -> Draft {
+        Draft {
+            document: version.envelope.document.clone(),
+            kind: version.envelope.kind.clone(),
+            parents: vec![version.id.clone()],
+            fields: version.fields.clone(),
+            body: version.body.clone(),
+        }
+    }
+
+    pub fn text(&self) -> Result<String, DraftError> {
+        let fields =
+            toml::to_string(&self.fields).map_err(|e| DraftError::NotToml(e.to_string()))?;
+        fence::join(&fields, &self.body).map_err(DraftError::Fence)
+    }
+
+    /// The draft with the fields and body of an edited `text`.
+    pub fn with_text(&self, text: &str) -> Result<Draft, DraftError> {
+        let (fields, body) = content(text)?;
+        Ok(Draft {
+            fields,
+            body,
+            ..self.clone()
+        })
+    }
+
+    /// What is kept beside the text.
+    #[must_use]
+    pub fn origin(&self) -> String {
+        let parents: Vec<String> = self.parents.iter().map(|id| format!("\"{id}\"")).collect();
+        format!(
+            "kind = \"{}\"\nparents = [{}]\n",
+            self.kind,
+            parents.join(", ")
+        )
+    }
+
+    pub fn read(document: DocumentId, origin: &str, text: &str) -> Result<Draft, DraftError> {
+        let wrong = |why: &dyn fmt::Display| DraftError::Origin(why.to_string());
+        let mut origin: Table = origin.parse().map_err(|e: toml::de::Error| wrong(&e))?;
+        let kind = version::text_of(&mut origin, "kind").map_err(|e| wrong(&e))?;
+        let parents = version::versions_of(&mut origin, "parents").map_err(|e| wrong(&e))?;
+        let (fields, body) = content(text)?;
+        Ok(Draft {
+            document,
+            kind: Kind::parse(&kind).map_err(|e| wrong(&e))?,
+            parents,
+            fields,
+            body,
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::testing::{first, lantern};
+
+    fn draft() -> Draft {
+        Draft::of(&first(
+            &lantern(),
+            "fact",
+            "name = \"relay\"\ntopics = [\"lantern\", \"phone\"]",
+            "The relay is wired to GPIO 5.\n",
+        ))
+    }
 
     #[test]
-    fn round_trip() {
-        let mut fields = Fields::default();
-        fields.push_scalar("summary", "s");
-        let draft = Draft {
-            slug: Slug::parse("lantern/x").unwrap(),
-            parents: vec![VersionId::of("a")],
-            fields,
-            body: "\nbody\n".into(),
-        };
-        let text = draft.to_text();
-        assert_eq!(text, "---\nsummary: s\n---\n\nbody\n");
-        let parents = Draft::parse_parents(&draft.parents_text()).unwrap();
+    fn a_draft_of_a_version_starts_from_it() {
+        let version = first(&lantern(), "fact", "name = \"relay\"", "body\n");
+        let draft = Draft::of(&version);
+        assert_eq!(draft.document, lantern());
+        assert_eq!(draft.kind.as_str(), "fact");
+        assert_eq!(draft.parents, std::slice::from_ref(&version.id));
+        assert_eq!(draft.fields, version.fields);
+        assert_eq!(draft.body, "body\n");
+        let fresh = Draft::first(lantern(), draft.kind.clone(), Fields::new(), String::new());
+        assert!(fresh.parents.is_empty());
+    }
+
+    #[test]
+    fn the_text_is_the_fields_and_the_body_and_nothing_of_the_tools() {
+        let draft = draft();
+        let text = draft.text().unwrap();
         assert_eq!(
-            Draft::from_text(draft.slug.clone(), parents, &text).unwrap(),
-            draft
+            text,
+            "+++\nname = \"relay\"\ntopics = [\"lantern\", \"phone\"]\n+++\nThe relay is wired to GPIO 5.\n"
         );
+        assert_eq!(draft.with_text(&text), Ok(draft));
     }
 
     #[test]
-    fn a_parents_file_holds_only_ids() {
-        assert_eq!(Draft::parse_parents("\n").unwrap(), vec![]);
-        assert!(Draft::parse_parents("not-an-id\n").is_err());
+    fn an_edited_text_keeps_where_the_draft_started() {
+        let draft = draft();
+        let edited = draft
+            .with_text("+++\nname = \"relay-pin\"\n+++\nRewired.\n")
+            .unwrap();
+        assert_eq!(
+            edited.fields.get("name").and_then(|name| name.as_str()),
+            Some("relay-pin")
+        );
+        assert_eq!(edited.fields.len(), 1);
+        assert_eq!(edited.body, "Rewired.\n");
+        assert_eq!(edited.parents, draft.parents);
+        assert_eq!(edited.document, draft.document);
     }
 
     #[test]
-    fn merging_carries_markers_until_edited() {
-        use super::super::machine::MachineName;
-        use super::super::version::VersionBlock;
-        let head = |body: &str| {
-            let mut fields = Fields::default();
-            fields.push_scalar("summary", "s");
-            Version::compose(
-                Slug::parse("t").unwrap(),
-                VersionBlock {
-                    parents: vec![],
-                    written: "2026-09-04T10:00:00+01:00".into(),
-                    machine: MachineName::parse("m").unwrap(),
-                    operation: "save".into(),
-                    superseded_by: None,
-                    renamed_from: None,
-                    raw: None,
-                },
-                fields,
-                body.to_owned(),
-            )
-        };
-        let draft = Draft::merging(&[head("\none\n"), head("\ntwo\n")]);
-        assert_eq!(draft.parents.len(), 2);
-        assert!(draft.has_conflict_markers());
-        assert!(draft.body.contains("\none\n=======") && draft.body.contains("\ntwo\n>>>>>>>"));
-        let settled = Draft {
-            body: "\nboth\n".into(),
-            ..draft
-        };
-        assert!(!settled.has_conflict_markers());
+    fn a_text_that_is_no_draft_is_refused_with_the_reason() {
+        let draft = draft();
+        assert_eq!(
+            draft.with_text("name = \"relay\"\n"),
+            Err(DraftError::Fence(FenceError::NoOpening))
+        );
+        match draft.with_text("+++\nname: relay\n+++\n") {
+            Err(DraftError::NotToml(why)) => assert!(!why.is_empty()),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_field_holding_a_fence_line_has_no_text() {
+        let mut draft = draft();
+        draft
+            .fields
+            .insert("note".into(), "before\n+++\nafter".into());
+        assert_eq!(draft.text(), Err(DraftError::Fence(FenceError::InHeader)));
+    }
+
+    #[test]
+    fn a_draft_reads_back_from_its_origin_and_its_text() {
+        let draft = draft();
+        let text = draft.text().unwrap();
+        assert_eq!(
+            Draft::read(lantern(), &draft.origin(), &text),
+            Ok(draft.clone())
+        );
+        let fresh = Draft::first(lantern(), draft.kind.clone(), Fields::new(), String::new());
+        assert_eq!(fresh.origin(), "kind = \"fact\"\nparents = []\n");
+        for origin in [
+            "",
+            "kind = \"fact\"\n",
+            "kind = \"Fact\"\nparents = []\n",
+            "kind = \"fact\"\nparents = [\"abc\"]\n",
+            "kind",
+        ] {
+            assert!(
+                matches!(
+                    Draft::read(lantern(), origin, &text),
+                    Err(DraftError::Origin(_))
+                ),
+                "{origin}"
+            );
+        }
     }
 }

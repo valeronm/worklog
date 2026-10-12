@@ -1343,42 +1343,7 @@ dependencies = [
 
 [[package]]
 name = "worklog"
-version = "0.4.0"
-dependencies = [
- "askama",
- "assert_cmd",
- "blake3",
- "chrono",
- "clap",
- "clap_complete",
- "directories",
- "pulldown-cmark",
- "regex",
- "serde",
- "serde_json",
- "sha2",
- "similar",
- "tempfile",
- "terminal_size",
- "tiny_http",
- "ureq",
-]
-
-[[package]]
-name = "worklog-convert"
-version = "0.0.0"
-dependencies = [
- "blake3",
- "clap",
- "tempfile",
- "toml",
- "worklog",
- "worklog-next",
-]
-
-[[package]]
-name = "worklog-next"
-version = "0.0.0"
+version = "0.5.0"
 dependencies = [
  "askama",
  "assert_cmd",
@@ -1396,6 +1361,40 @@ dependencies = [
  "tempfile",
  "tiny_http",
  "toml",
+ "ureq",
+]
+
+[[package]]
+name = "worklog-convert"
+version = "0.0.0"
+dependencies = [
+ "blake3",
+ "clap",
+ "tempfile",
+ "toml",
+ "worklog",
+ "worklog-old",
+]
+
+[[package]]
+name = "worklog-old"
+version = "0.4.0"
+dependencies = [
+ "askama",
+ "blake3",
+ "chrono",
+ "clap",
+ "clap_complete",
+ "directories",
+ "pulldown-cmark",
+ "regex",
+ "serde",
+ "serde_json",
+ "sha2",
+ "similar",
+ "tempfile",
+ "terminal_size",
+ "tiny_http",
  "ureq",
 ]
 

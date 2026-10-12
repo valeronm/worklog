@@ -1,57 +1,116 @@
-//! The `SessionStart` hook: one entry in an agent's hooks file that runs
-//! `worklog context` when a session opens. Claude Code's `settings.json`
-//! and Codex's `hooks.json` hold hooks in the same shape, so one entry and
-//! one set of edits serve both.
-
 use std::path::Path;
 
 use serde_json::{Map, Value, json};
 
+use super::NAME;
 use crate::app::Failure;
-use crate::fs::Agent;
+use crate::wiring::Agent;
 
-/// The command the hook runs. The binary's own path rather than a bare
-/// name, since a hook runs with whatever PATH the agent was started with;
-/// a missing store prints a notice and exits 0, so the `|| true` covers
-/// only a binary that is gone.
-fn command(binary: &Path) -> String {
-    format!("\"{}\" context 2>/dev/null || true", binary.display())
+// A shell still interprets these inside double quotes.
+const UNQUOTABLE: [char; 4] = ['"', '$', '\\', '`'];
+
+fn refuse_binary(binary: &Path, reason: &str) -> Failure {
+    Failure::at(binary.display(), reason)
 }
 
-/// The hook entry as a hooks file holds it.
-fn entry(binary: &Path) -> Value {
+fn spelled<'a>(binary: &'a str, homes: &[&Path]) -> (&'static str, &'a str) {
+    for home in homes {
+        if let Some(rest) = Path::new(binary)
+            .strip_prefix(home)
+            .ok()
+            .and_then(Path::to_str)
+        {
+            return ("$HOME/", rest);
+        }
+    }
+    ("", binary)
+}
+
+/// `binary` in double quotes for a shell to run, spelled with a leading `$HOME` under one of
+/// `homes`; refuses a path that is not UTF-8 or holds one of `UNQUOTABLE`.
+pub(super) fn quoted(binary: &Path, homes: &[&Path]) -> Result<String, Failure> {
+    let Some(text) = binary.to_str() else {
+        return Err(refuse_binary(binary, "is not UTF-8"));
+    };
+    let (home, rest) = spelled(text, homes);
+    if let Some(found) = rest.chars().find(|c| UNQUOTABLE.contains(c)) {
+        return Err(refuse_binary(
+            binary,
+            &format!("holds {found:?}, which a shell command cannot quote"),
+        ));
+    }
+    Ok(format!("\"{home}{rest}\""))
+}
+
+/// The command the hook runs for `binary`, quoted as `quoted` does; refuses also a path whose
+/// command `runs_context` does not match.
+pub(super) fn command(binary: &Path, homes: &[&Path]) -> Result<String, Failure> {
+    let command = format!("{} context 2>/dev/null || true", quoted(binary, homes)?);
+    if !runs_context(&command) {
+        return Err(misnamed(binary, "its hook is not found again"));
+    }
+    Ok(command)
+}
+
+pub(super) fn misnamed(binary: &Path, or_else: &str) -> Failure {
+    let reason = format!("the binary's file name must be {NAME}, or {or_else}");
+    refuse_binary(binary, &reason)
+}
+
+fn agent_command(binary: &Path, agent: &Agent) -> Result<String, Failure> {
+    command(binary, &agent.homes())
+}
+
+fn entry(command: &str) -> Value {
     json!({
-        "hooks": [{ "type": "command", "command": command(binary) }]
+        "hooks": [{ "type": "command", "command": command }]
     })
 }
 
-/// Whether a command line runs `worklog context`: a `worklog` binary, by
-/// any path, quoting or version suffix, followed by `context`.
-fn runs_context(command: &str) -> bool {
-    let mut words = command
-        .split_whitespace()
-        .map(|w| w.trim_matches(|c| c == '"' || c == '\''));
-    while let Some(word) = words.next() {
-        let binary = word.rsplit('/').next().unwrap_or(word);
-        let ours = binary == "worklog" || binary.starts_with("worklog-");
-        if ours && words.next() == Some("context") {
-            return true;
+// `None` marks an operator, which ends the adjacency of the words around it.
+fn words(command: &str) -> Vec<Option<String>> {
+    let mut found = Vec::new();
+    let mut word = String::new();
+    let mut quote = None;
+    for c in command.chars() {
+        let operator = ";|&()<>".contains(c);
+        match quote {
+            Some(open) if c == open => quote = None,
+            None if c == '"' || c == '\'' => quote = Some(c),
+            None if c.is_whitespace() || operator => {
+                if !word.is_empty() {
+                    found.push(Some(std::mem::take(&mut word)));
+                }
+                if operator {
+                    found.push(None);
+                }
+            }
+            Some(_) | None => word.push(c),
         }
     }
-    false
+    if !word.is_empty() {
+        found.push(Some(word));
+    }
+    found
+}
+
+fn runs_context(command: &str) -> bool {
+    words(command).windows(2).any(|pair| {
+        matches!(pair, [Some(binary), Some(next)]
+            if binary.rsplit('/').next() == Some(NAME) && next == "context")
+    })
+}
+
+fn runs_context_hook(hook: &Value) -> bool {
+    hook["command"].as_str().is_some_and(runs_context)
 }
 
 fn any_runs_context(session_start: &Value) -> bool {
-    session_start["hooks"].as_array().is_some_and(|hooks| {
-        hooks
-            .iter()
-            .any(|h| h["command"].as_str().is_some_and(runs_context))
-    })
+    session_start["hooks"]
+        .as_array()
+        .is_some_and(|hooks| hooks.iter().any(runs_context_hook))
 }
 
-/// The `hooks.SessionStart` entries of a document, the path to them made
-/// where missing; a change that then finds nothing to do returns `None`
-/// and the made path is never written.
 fn entries(root: &mut Value) -> Result<&mut Vec<Value>, String> {
     let object = root
         .as_object_mut()
@@ -68,30 +127,53 @@ fn entries(root: &mut Value) -> Result<&mut Vec<Value>, String> {
         .ok_or_else(|| "`hooks.SessionStart` is not an array".into())
 }
 
-/// Adds the hook to a hooks document and returns it, or `None` when one is
-/// there.
-fn merge(mut root: Value, entry: Value) -> Result<Option<Value>, String> {
-    let entries = entries(&mut root)?;
+fn merge(entries: &mut Vec<Value>, entry: Value) -> bool {
     if entries.iter().any(any_runs_context) {
-        return Ok(None);
+        return false;
     }
     entries.push(entry);
-    Ok(Some(root))
+    true
 }
 
-/// Takes every entry that runs `worklog context` out of a hooks document
-/// and returns it, or `None` when there is none. A `SessionStart` left
-/// empty goes with them, and a `hooks` left empty with that, since
-/// `merge` is what made them.
-fn remove(mut root: Value) -> Result<Option<Value>, String> {
-    let entries = entries(&mut root)?;
+fn remove(entries: &mut Vec<Value>) -> bool {
     let before = entries.len();
     entries.retain(|group| !any_runs_context(group));
-    if entries.len() == before {
-        return Ok(None);
+    entries.len() != before
+}
+
+fn keep_first(list: &mut Vec<Value>, owned: fn(&Value) -> bool) -> bool {
+    let before = list.len();
+    let mut found = false;
+    list.retain(|item| !owned(item) || !std::mem::replace(&mut found, true));
+    list.len() != before
+}
+
+// A group that runs `context` may hold a person's own keys and hooks beside that hook.
+fn replace(entries: &mut Vec<Value>, command: &str) -> bool {
+    let mut changed = keep_first(entries, any_runs_context);
+    let hooks = entries
+        .iter_mut()
+        .find(|group| any_runs_context(group))
+        .and_then(|group| group.get_mut("hooks"))
+        .and_then(Value::as_array_mut);
+    if let Some(hooks) = hooks {
+        changed |= keep_first(hooks, runs_context_hook);
+        if let Some(hook) = hooks.iter_mut().find(|hook| runs_context_hook(hook))
+            && hook["command"] != command
+        {
+            hook["command"] = Value::from(command);
+            changed = true;
+        }
     }
-    if entries.is_empty()
-        && let Some(hooks) = root["hooks"].as_object_mut()
+    changed
+}
+
+fn pruned(mut root: Value) -> Value {
+    if let Some(hooks) = root.get_mut("hooks").and_then(Value::as_object_mut)
+        && hooks
+            .get("SessionStart")
+            .and_then(Value::as_array)
+            .is_some_and(Vec::is_empty)
     {
         hooks.remove("SessionStart");
         if hooks.is_empty()
@@ -100,140 +182,518 @@ fn remove(mut root: Value) -> Result<Option<Value>, String> {
             object.remove("hooks");
         }
     }
-    Ok(Some(root))
+    root
 }
 
-/// Puts the current entry in the place of every entry that runs `worklog
-/// context`, so a hook that names a binary since moved names this one,
-/// and returns the document, or `None` when there is none or none differ.
-fn replace(mut root: Value, entry: &Value) -> Result<Option<Value>, String> {
-    let entries = entries(&mut root)?;
-    let mut changed = false;
-    for group in entries.iter_mut().filter(|g| any_runs_context(g)) {
-        if group != entry {
-            *group = entry.clone();
-            changed = true;
-        }
-    }
-    Ok(changed.then_some(root))
+fn edited(
+    file: &Path,
+    mut root: Value,
+    change: impl FnOnce(&mut Vec<Value>) -> Result<bool, Failure>,
+) -> Result<Option<Value>, Failure> {
+    let entries = entries(&mut root).map_err(|reason| Failure::at(file.display(), reason))?;
+    Ok(change(entries)?.then(|| pruned(root)))
 }
 
-/// Applies a change to an agent's hooks document, an absent file being an
-/// empty one, writes it back when the change returns one, and says
-/// whether it did.
-fn edit(
+// A hooks file is a person's, not a result of a command.
+fn text_of(root: &Value) -> String {
+    let mut text = serde_json::to_string_pretty(root).expect("a value with text for keys");
+    text.push('\n');
+    text
+}
+
+fn planned(
     agent: &Agent,
-    change: impl FnOnce(Value) -> Result<Option<Value>, String>,
-) -> Result<bool, Failure> {
-    let refuse = |reason: String| Failure::Refused(format!("{}: {reason}", agent.hooks.display()));
+    change: impl FnOnce(&mut Vec<Value>) -> Result<bool, Failure>,
+) -> Result<Option<String>, Failure> {
+    let file = agent.hooks();
     let text = agent.read_hooks()?.unwrap_or_else(|| "{}".to_owned());
-    let root =
-        serde_json::from_str(&text).map_err(|e| refuse(format!("not readable as JSON, {e}")))?;
-    match change(root).map_err(refuse)? {
-        Some(root) => {
-            agent.write_hooks(&super::pretty_json(&root)?)?;
-            Ok(true)
+    let root = serde_json::from_str(&text)
+        .map_err(|e| Failure::at(file.display(), format!("not readable as JSON, {e}")))?;
+    Ok(edited(file, root, change)?.as_ref().map(text_of))
+}
+
+/// Reads the agent's hooks file and writes nothing: its text with the hook for `binary` added,
+/// or `None` where a hook is there, and a refusal where it is not the shape of a hooks file.
+pub(super) fn installed(agent: &Agent, binary: &Path) -> Result<Option<String>, Failure> {
+    let command = agent_command(binary, agent)?;
+    planned(agent, |entries| Ok(merge(entries, entry(&command))))
+}
+
+/// Reads the agent's hooks file and writes nothing: its text with the hook taken out, or `None`
+/// where there is none.
+pub(super) fn uninstalled(agent: &Agent) -> Result<Option<String>, Failure> {
+    planned(agent, |entries| Ok(remove(entries)))
+}
+
+/// Reads the agent's hooks file and writes nothing: its text with one hook, running `binary`,
+/// or `None` where that is what it holds; `binary` is asked for only where a hook is there.
+pub(super) fn refreshed<'p>(
+    agent: &Agent,
+    binary: impl FnOnce() -> Result<&'p Path, Failure>,
+) -> Result<Option<String>, Failure> {
+    planned(agent, |entries| {
+        if !entries.iter().any(any_runs_context) {
+            return Ok(false);
         }
-        None => Ok(false),
-    }
-}
-
-/// Merges the hook into the agent's hooks file and says whether it was
-/// written.
-pub fn install(agent: &Agent, binary: &Path) -> Result<bool, Failure> {
-    edit(agent, |root| merge(root, entry(binary)))
-}
-
-/// Takes the hook out of the agent's hooks file and says whether it was
-/// written.
-pub fn uninstall(agent: &Agent) -> Result<bool, Failure> {
-    edit(agent, remove)
-}
-
-/// Brings the hook in the agent's hooks file up to this binary and says
-/// whether it was written.
-pub fn refresh(agent: &Agent, binary: &Path) -> Result<bool, Failure> {
-    edit(agent, |root| replace(root, &entry(binary)))
+        Ok(replace(entries, &agent_command(binary()?, agent)?))
+    })
 }
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::*;
 
+    fn made(binary: &str) -> String {
+        command(Path::new(binary), &[Path::new("/home/desk")]).unwrap()
+    }
+
     fn probe() -> Value {
-        json!({ "hooks": [{ "type": "command", "command": "worklog context" }] })
+        entry(&made("/opt/bin/worklog"))
+    }
+
+    fn theirs() -> Value {
+        json!({ "hooks": [{ "type": "command", "command": "date" }] })
+    }
+
+    fn applied(root: Value, change: impl FnOnce(&mut Vec<Value>) -> bool) -> Option<Value> {
+        let file = Path::new("/home/desk/.codex/hooks.json");
+        edited(file, root, |entries| Ok(change(entries))).unwrap()
+    }
+
+    fn merged(root: Value, entry: Value) -> Option<Value> {
+        applied(root, |entries| merge(entries, entry))
+    }
+
+    fn removed(root: Value) -> Option<Value> {
+        applied(root, remove)
+    }
+
+    fn replaced(root: Value, command: &str) -> Option<Value> {
+        applied(root, |entries| replace(entries, command))
     }
 
     #[test]
-    fn recognises_the_hook_however_it_is_spelled() {
-        assert!(runs_context("worklog context"));
-        assert!(runs_context(
+    fn the_command_spells_a_binary_under_home_with_the_variable() {
+        assert_eq!(
+            made("/home/desk/.local/bin/worklog"),
             "\"$HOME/.local/bin/worklog\" context 2>/dev/null || true"
-        ));
-        assert!(runs_context("'/opt/bin/worklog' context"));
-        assert!(runs_context("worklog-0.2 context"));
-        assert!(!runs_context("mylog context"));
-        assert!(!runs_context("echo worklog; echo context"));
-        assert!(!runs_context("worklog check"));
+        );
+        assert_eq!(
+            made("/opt/bin/worklog"),
+            "\"/opt/bin/worklog\" context 2>/dev/null || true"
+        );
+        assert_eq!(
+            made("/home/deskette/worklog"),
+            "\"/home/deskette/worklog\" context 2>/dev/null || true"
+        );
+        let linked = [Path::new("/home/link"), Path::new("/real/home")];
+        assert_eq!(
+            command(Path::new("/real/home/bin/worklog"), &linked).unwrap(),
+            "\"$HOME/bin/worklog\" context 2>/dev/null || true"
+        );
     }
 
     #[test]
-    fn merges_once_and_keeps_the_rest() {
-        let root = merge(json!({}), probe()).unwrap().expect("gained");
-        assert_eq!(root["hooks"]["SessionStart"].as_array().unwrap().len(), 1);
-        assert_eq!(merge(root, probe()).unwrap(), None);
-        let existing =
-            serde_json::from_str::<Value>(r#"{"zeta": 1, "hooks": {"Stop": []}, "alpha": 2}"#)
+    fn a_command_made_for_any_quotable_path_is_one_the_recognition_finds() {
+        let homes = [Path::new("/home/desk"), Path::new("/real/desk")];
+        for binary in [
+            "/opt/bin/worklog",
+            "/atlas/my tools/worklog",
+            "/atlas/a (b); c & d/worklog",
+            "/atlas/it's/worklog",
+            "/atlas/<in>|out/worklog",
+            "/home/desk/.local/bin/worklog",
+            "/home/desk/my tools/it's (x)/worklog",
+            "/real/desk/bin/worklog",
+        ] {
+            let command = command(Path::new(binary), &homes).unwrap();
+            assert!(runs_context(&command), "{binary}: {command}");
+            let root = merged(json!({}), entry(&command)).unwrap();
+            assert_eq!(merged(root.clone(), entry(&command)), None);
+            assert_eq!(replaced(root.clone(), &command), None, "{binary}");
+            assert_eq!(removed(root), Some(json!({})), "{binary}");
+        }
+    }
+
+    #[test]
+    fn a_binary_the_command_could_not_quote_or_find_again_is_refused_by_name() {
+        use std::os::unix::ffi::OsStrExt as _;
+        let homes = [Path::new("/home/desk")];
+        for (binary, reason) in [
+            ("/opt/a\"b/worklog", "holds '\"'"),
+            ("/opt/$x/worklog", "holds '$'"),
+            ("/opt/a\\b/worklog", "holds '\\\\'"),
+            ("/opt/a`b/worklog", "holds '`'"),
+            ("/home/desk/$x/worklog", "holds '$'"),
+            (
+                "/opt/bin/worklog-0.3.0",
+                "the binary's file name must be worklog",
+            ),
+            (
+                "/opt/bin/worklog-old",
+                "the binary's file name must be worklog",
+            ),
+            ("/opt/bin/worklo", "the binary's file name must be worklog"),
+            (
+                "/opt/bin/worklog (deleted)",
+                "the binary's file name must be worklog",
+            ),
+            (
+                "/opt/worklog/bin/other",
+                "the binary's file name must be worklog",
+            ),
+        ] {
+            let Err(Failure::Refused(why)) = command(Path::new(binary), &homes) else {
+                panic!("{binary} must be refused");
+            };
+            assert!(why.starts_with(&format!("{binary}: ")), "{why}");
+            assert!(why.contains(reason), "{why}");
+        }
+        let odd = Path::new(std::ffi::OsStr::from_bytes(b"/opt/\xff/worklog"));
+        let Err(Failure::Refused(why)) = command(odd, &homes) else {
+            panic!("a path that is not UTF-8 must be refused");
+        };
+        assert!(why.ends_with("is not UTF-8"), "{why}");
+    }
+
+    #[test]
+    fn the_shell_runs_the_command_that_was_made() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let kept = tempfile::tempdir().unwrap();
+        let home = std::fs::canonicalize(kept.path()).unwrap().join("home");
+        for (directory, spelled_with_home) in [
+            (home.join("my tools"), true),
+            (home.join("bin"), true),
+            (kept.path().join("apart (a); b/it's"), false),
+        ] {
+            fs::create_dir_all(&directory).unwrap();
+            let script = directory.join("worklog");
+            fs::write(
+                &script,
+                "#!/bin/sh\n[ \"$1\" = context ] && touch \"$(dirname \"$0\")/marker\"\n",
+            )
+            .unwrap();
+            fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+            let command = command(&script, &[home.as_path()]).unwrap();
+            assert_eq!(command.contains("$HOME/"), spelled_with_home, "{command}");
+            let status = std::process::Command::new("sh")
+                .arg("-c")
+                .arg(&command)
+                .env("HOME", &home)
+                .status()
                 .unwrap();
-        let root = merge(existing, probe()).unwrap().expect("gained");
-        let keys: Vec<&str> = root
-            .as_object()
-            .unwrap()
-            .keys()
-            .map(String::as_str)
-            .collect();
-        assert_eq!(keys, ["zeta", "hooks", "alpha"]);
-        assert_eq!(root["hooks"]["Stop"], json!([]));
-        assert!(merge(json!([]), probe()).is_err());
-        assert!(merge(json!({"hooks": 1}), probe()).is_err());
-        assert!(merge(json!({"hooks": {"SessionStart": {}}}), probe()).is_err());
+            assert!(status.success(), "{command}");
+            assert!(directory.join("marker").is_file(), "{command}");
+        }
     }
 
     #[test]
-    fn removes_only_the_hook_and_what_it_made() {
-        let root = merge(json!({"hooks": {"Stop": []}}), probe())
-            .unwrap()
-            .expect("gained");
-        let root = remove(root).unwrap().expect("lost");
+    fn recognizes_the_hook_by_the_binary_s_exact_name_however_it_is_spelled() {
+        for ours in [
+            "worklog context",
+            "/opt/bin/worklog context",
+            "\"$HOME/.local/bin/worklog\" context 2>/dev/null || true",
+            "'/opt/bin/worklog' context",
+            "\"/opt/bin/worklog\" context",
+            "worklog context;",
+            "worklog context>/dev/null",
+            "(worklog context)",
+            "FOO=1 worklog context",
+            "exec worklog context",
+            "worklog context||true",
+            "worklog worklog context",
+            "exec worklog context 2>/dev/null || true",
+            "\"/atlas/my tools/worklog\" context",
+            "'/atlas/my tools/worklog' context 2>/dev/null",
+            "echo worklog context",
+        ] {
+            assert!(runs_context(ours), "{ours}");
+        }
+        for theirs in [
+            "worklog-old context",
+            "\"$HOME/.local/bin/worklog-old\" context 2>/dev/null || true",
+            "worklog-0.2 context",
+            "worklogish context",
+            "worklo context",
+            "/opt/bin/worklo context",
+            "worklog check",
+            "worklog",
+            "echo worklog; echo context",
+            "mylog context",
+            "/opt/worklog/bin/other context",
+            "worklog check context",
+            "worklog; context",
+            "command -v worklog && context",
+            "worklog | context",
+            "\"/a/b worklog\" context",
+            "\"/atlas/my tools/worklog context",
+        ] {
+            assert!(!runs_context(theirs), "{theirs}");
+        }
+    }
+
+    #[test]
+    fn merges_once_and_after_what_is_there() {
+        let root = merged(json!({}), probe()).expect("gained");
+        assert_eq!(root["hooks"]["SessionStart"].as_array().unwrap().len(), 1);
+        assert_eq!(merged(root, probe()), None);
+        let both = json!({"hooks": {"SessionStart": [theirs()]}});
+        let root = merged(both, probe()).expect("gained");
+        assert_eq!(root["hooks"]["SessionStart"], json!([theirs(), probe()]));
+    }
+
+    #[test]
+    fn another_binary_s_hook_is_not_this_one() {
+        for theirs in ["worklog-old context", "worklo context"] {
+            let other = json!({ "hooks": [{ "type": "command", "command": theirs }] });
+            let root = merged(json!({"hooks": {"SessionStart": [other.clone()]}}), probe())
+                .expect("gained");
+            assert_eq!(
+                root["hooks"]["SessionStart"],
+                json!([other.clone(), probe()])
+            );
+            let root = removed(root).expect("lost");
+            assert_eq!(root, json!({"hooks": {"SessionStart": [other]}}));
+        }
+    }
+
+    #[test]
+    fn removes_only_the_hook_and_what_merging_made() {
+        let root = merged(json!({"hooks": {"Stop": []}}), probe()).expect("gained");
+        let root = removed(root).expect("lost");
         assert_eq!(root, json!({"hooks": {"Stop": []}}));
-        assert_eq!(remove(root).unwrap(), None);
-        assert_eq!(remove(json!({})).unwrap(), None);
-        let root = merge(json!({"model": "x"}), probe())
-            .unwrap()
-            .expect("gained");
-        assert_eq!(remove(root).unwrap(), Some(json!({"model": "x"})));
-        let theirs = json!({ "hooks": [{ "type": "command", "command": "date" }] });
-        let both = json!({"hooks": {"SessionStart": [theirs.clone(), probe()]}});
-        let root = remove(both).unwrap().expect("lost");
-        assert_eq!(root, json!({"hooks": {"SessionStart": [theirs]}}));
-        assert!(remove(json!({"hooks": {"SessionStart": {}}})).is_err());
+        assert_eq!(removed(root), None);
+        assert_eq!(removed(json!({})), None);
+        let root = merged(json!({"model": "x"}), probe()).expect("gained");
+        assert_eq!(removed(root), Some(json!({"model": "x"})));
+        let both = json!({"hooks": {"SessionStart": [theirs(), probe()]}});
+        let root = removed(both).expect("lost");
+        assert_eq!(root, json!({"hooks": {"SessionStart": [theirs()]}}));
     }
 
     #[test]
-    fn replaces_the_hook_in_place_and_only_when_it_differs() {
-        let theirs = json!({ "hooks": [{ "type": "command", "command": "date" }] });
-        let stale = json!({ "hooks": [{ "type": "command", "command": "/old/worklog context" }] });
-        let root = json!({"hooks": {"SessionStart": [stale, theirs.clone()], "Stop": []}});
-        let root = replace(root, &probe()).unwrap().expect("replaced");
+    fn replaces_the_command_in_place_and_only_when_it_differs() {
+        let stale = entry(&made("/old/worklog"));
+        let root = json!({"hooks": {"SessionStart": [stale, theirs()], "Stop": []}});
+        let root = replaced(root, &made("/opt/bin/worklog")).expect("replaced");
         assert_eq!(
             root,
-            json!({"hooks": {"SessionStart": [probe(), theirs], "Stop": []}})
+            json!({"hooks": {"SessionStart": [probe(), theirs()], "Stop": []}})
         );
-        assert_eq!(replace(root, &probe()).unwrap(), None);
-        assert_eq!(replace(json!({}), &probe()).unwrap(), None);
+        let command = made("/opt/bin/worklog");
+        assert_eq!(replaced(root, &command), None);
+        assert_eq!(replaced(json!({}), &command), None);
+        assert_eq!(replaced(json!({"hooks": {"Stop": []}}), &command), None);
+    }
+
+    #[test]
+    fn a_refresh_keeps_what_a_person_added_to_the_group() {
+        let old = made("/old/worklog");
+        let new = made("/opt/bin/worklog");
+        let group = json!({
+            "matcher": "startup",
+            "hooks": [
+                {"type": "command", "command": "date"},
+                {"type": "command", "command": old, "timeout": 5},
+            ],
+        });
+        let root = json!({"hooks": {"SessionStart": [group]}});
+        let root = replaced(root, &new).expect("replaced");
         assert_eq!(
-            replace(json!({"hooks": {"Stop": []}}), &probe()).unwrap(),
-            None
+            root["hooks"]["SessionStart"],
+            json!([{
+                "matcher": "startup",
+                "hooks": [
+                    {"type": "command", "command": "date"},
+                    {"type": "command", "command": new, "timeout": 5},
+                ],
+            }])
         );
+        assert_eq!(replaced(root, &new), None);
+    }
+
+    #[test]
+    fn a_refresh_leaves_one_owned_hook_in_the_group_it_keeps() {
+        let new = made("/opt/bin/worklog");
+        let group = json!({
+            "hooks": [
+                {"type": "command", "command": made("/old/worklog")},
+                {"type": "command", "command": "date"},
+                {"type": "command", "command": "worklog context"},
+                {"type": "command", "command": new},
+            ],
+        });
+        let root = json!({"hooks": {"SessionStart": [group]}});
+        let root = replaced(root, &new).expect("replaced");
+        assert_eq!(
+            root["hooks"]["SessionStart"],
+            json!([{
+                "hooks": [
+                    {"type": "command", "command": new},
+                    {"type": "command", "command": "date"},
+                ],
+            }])
+        );
+        assert_eq!(replaced(root, &new), None);
+    }
+
+    #[test]
+    fn two_owned_groups_become_one_and_the_others_stay() {
+        let old = made("/old/worklog");
+        let new = made("/opt/bin/worklog");
+        let by_hand = json!({"matcher": "startup", "hooks": [{"type": "command", "command": "worklog context"}]});
+        let root = json!({"hooks": {"SessionStart": [by_hand, theirs(), entry(&old)]}});
+        let root = replaced(root, &new).expect("replaced");
+        assert_eq!(
+            root["hooks"]["SessionStart"],
+            json!([
+                {"matcher": "startup", "hooks": [{"type": "command", "command": new}]},
+                theirs(),
+            ])
+        );
+        let same = json!({"hooks": {"SessionStart": [entry(&new), entry(&new)]}});
+        let root = replaced(same, &new).expect("one dropped");
+        assert_eq!(root["hooks"]["SessionStart"], json!([entry(&new)]));
+    }
+
+    mod on_disk {
+        use std::fs;
+
+        use super::*;
+        use crate::wiring::agents;
+
+        fn claude(home: &Path) -> Agent {
+            fs::create_dir_all(home.join(".claude")).unwrap();
+            let home = home.as_os_str().to_owned();
+            let variable = move |name: &str| (name == "HOME").then(|| home.clone());
+            agents(&variable).unwrap().remove(0)
+        }
+
+        fn binary(home: &Path) -> std::path::PathBuf {
+            home.join(".local/bin/worklog")
+        }
+
+        fn written(agent: &Agent, planned: Result<Option<String>, Failure>) -> bool {
+            let planned = planned.unwrap();
+            if let Some(text) = &planned {
+                agent.write_hooks(text).unwrap();
+            }
+            planned.is_some()
+        }
+
+        fn install(agent: &Agent, binary: &Path) -> bool {
+            written(agent, installed(agent, binary))
+        }
+
+        fn refresh(agent: &Agent, binary: &Path) -> bool {
+            written(agent, refreshed(agent, || Ok(binary)))
+        }
+
+        fn uninstall(agent: &Agent) -> bool {
+            written(agent, uninstalled(agent))
+        }
+
+        #[test]
+        fn an_absent_file_is_an_empty_object_and_the_hook_is_written_pretty_with_the_variable() {
+            let kept = tempfile::tempdir().unwrap();
+            let agent = claude(kept.path());
+            assert!(install(&agent, &binary(kept.path())));
+            let text = fs::read_to_string(agent.hooks()).unwrap();
+            assert_eq!(
+                text,
+                concat!(
+                    "{\n  \"hooks\": {\n    \"SessionStart\": [\n      {\n        \"hooks\": [\n",
+                    "          {\n            \"type\": \"command\",\n",
+                    "            \"command\": \"\\\"$HOME/.local/bin/worklog\\\" context 2>/dev/null || true\"\n",
+                    "          }\n        ]\n      }\n    ]\n  }\n}\n"
+                )
+            );
+            assert!(!install(&agent, &binary(kept.path())));
+        }
+
+        #[test]
+        fn install_refresh_and_uninstall_say_whether_they_wrote() {
+            let kept = tempfile::tempdir().unwrap();
+            let agent = claude(kept.path());
+            assert!(!refresh(&agent, &binary(kept.path())));
+            assert!(!uninstall(&agent));
+            assert!(!agent.hooks().exists());
+            assert!(install(&agent, Path::new("/old/worklog")));
+            assert!(refresh(&agent, &binary(kept.path())));
+            assert!(!refresh(&agent, &binary(kept.path())));
+            assert!(uninstall(&agent));
+            assert_eq!(fs::read_to_string(agent.hooks()).unwrap(), "{}\n");
+            assert!(!uninstall(&agent));
+        }
+
+        #[test]
+        fn a_file_that_cannot_be_edited_is_refused_with_its_path_and_left_as_it_was() {
+            for text in [
+                "{ not json",
+                "",
+                "[]\n",
+                "{\"hooks\": 1}",
+                "{\"hooks\":   {\"SessionStart\": {}}}",
+            ] {
+                let kept = tempfile::tempdir().unwrap();
+                let agent = claude(kept.path());
+                fs::write(agent.hooks(), text).unwrap();
+                let binary = binary(kept.path());
+                for result in [
+                    installed(&agent, &binary),
+                    refreshed(&agent, || Ok(&binary)),
+                    uninstalled(&agent),
+                ] {
+                    let Err(Failure::Refused(why)) = result else {
+                        panic!("{text:?} must be refused");
+                    };
+                    assert!(
+                        why.starts_with(&agent.hooks().display().to_string()),
+                        "{why}"
+                    );
+                }
+                assert_eq!(fs::read_to_string(agent.hooks()).unwrap(), text);
+            }
+        }
+
+        #[test]
+        fn a_binary_that_makes_no_command_is_refused_where_its_command_would_be_written() {
+            let kept = tempfile::tempdir().unwrap();
+            let agent = claude(kept.path());
+            fs::write(agent.hooks(), "{}").unwrap();
+            let others = ["/opt/bin/other", "/opt/a\"b/worklog"].map(Path::new);
+            for other in others {
+                assert!(matches!(installed(&agent, other), Err(Failure::Refused(_))));
+                assert_eq!(refreshed(&agent, || Ok(other)), Ok(None));
+            }
+            assert!(install(&agent, &binary(kept.path())));
+            for other in others {
+                let Err(Failure::Refused(why)) = refreshed(&agent, || Ok(other)) else {
+                    panic!("{} must be refused", other.display());
+                };
+                assert!(why.starts_with(&format!("{}: ", other.display())), "{why}");
+            }
+        }
+
+        #[test]
+        fn what_the_file_holds_beside_the_hook_survives_in_its_order() {
+            let kept = tempfile::tempdir().unwrap();
+            let agent = claude(kept.path());
+            fs::write(
+                agent.hooks(),
+                "{\"zeta\": 1, \"hooks\": {\"Stop\": []}, \"alpha\": 2}",
+            )
+            .unwrap();
+            assert!(install(&agent, &binary(kept.path())));
+            let text = fs::read_to_string(agent.hooks()).unwrap();
+            assert!(text.find("zeta") < text.find("hooks"));
+            assert!(text.find("hooks") < text.find("alpha"));
+            assert!(uninstall(&agent));
+            let root: Value =
+                serde_json::from_str(&fs::read_to_string(agent.hooks()).unwrap()).unwrap();
+            assert_eq!(root, json!({"zeta": 1, "hooks": {"Stop": []}, "alpha": 2}));
+        }
     }
 }

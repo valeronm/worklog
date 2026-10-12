@@ -3,11 +3,11 @@ use std::ffi::OsString;
 use std::fmt;
 use std::path::Path;
 
-use worklog_next::app::Deps;
-use worklog_next::app::check::{Finding, check};
-use worklog_next::app::show::history;
-use worklog_next::domain::id::{DocumentId, VersionId};
-use worklog_next::wiring::wire;
+use worklog::app::Deps;
+use worklog::app::check::{Finding, check};
+use worklog::app::show::history;
+use worklog::domain::id::{DocumentId, VersionId};
+use worklog::wiring::wire;
 
 use super::compose::{Composed, file_of};
 use super::rules;
@@ -125,7 +125,7 @@ impl fmt::Display for Fault {
 
 // No config is at a path under a directory this run made.
 const NO_HOST: &str = ".no-host";
-const HOME_OF_THE_TOOL: &str = "WORKLOG_NEXT_HOME";
+const HOME_OF_THE_TOOL: &str = "WORKLOG_HOME";
 
 fn walk(root: &Path, under: &str, found: &mut BTreeSet<String>) -> std::io::Result<()> {
     for entry in std::fs::read_dir(root.join(under))? {

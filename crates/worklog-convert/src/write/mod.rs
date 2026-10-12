@@ -4,8 +4,8 @@
 use std::fmt;
 use std::path::Path;
 
-use worklog_next::app::check::Finding;
-use worklog_next::wiring::write_version;
+use worklog::app::check::Finding;
+use worklog::wiring::write_version;
 
 use crate::old;
 use crate::plan::Complete;

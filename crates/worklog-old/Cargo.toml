@@ -1,0 +1,39 @@
+[package]
+name = "worklog-old"
+version = "0.4.0"
+edition = "2024"
+license = "MIT"
+description = "The store format of worklog before the rebuild, kept for the converter to read"
+repository = "https://github.com/valeronm/worklog"
+publish = false
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+
+[features]
+# In-memory ports for tests of the layers above the domain.
+testing = []
+
+[dependencies]
+askama = "0.16"
+blake3 = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+clap = { version = "4", features = ["derive", "wrap_help"] }
+clap_complete = { version = "4", features = ["unstable-dynamic"] }
+terminal_size = "0.4"
+directories = "6"
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+# preserve_order so a settings file written back keeps its key order.
+serde_json = { version = "1", features = ["preserve_order"] }
+# The release checksums are shasum's, not the store's blake3.
+sha2 = "0.10"
+similar = { version = "2", features = ["inline"] }
+tiny_http = "0.12"
+# gzip off: the release assets are binaries, and the redirect it reads
+# for the tag carries no body.
+ureq = { version = "3", default-features = false, features = ["rustls"] }
+
+[dev-dependencies]
+tempfile = "3"

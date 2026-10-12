@@ -1,16 +1,16 @@
 use std::collections::BTreeSet;
 
-use worklog::app::load::{Loaded, load};
-use worklog::app::operation::Operation;
-use worklog::domain::recheck::Recheck;
-use worklog::domain::version::Version as Stored;
-use worklog::fs::FsStore;
-use worklog_next::domain::id::DocumentId;
-use worklog_next::domain::schema::{
+use worklog::domain::id::DocumentId;
+use worklog::domain::schema::{
     Content, Date, Ending, Fact, Followup, KindOf, Name, Reason, Record, Topic, Trigger,
 };
-use worklog_next::domain::version::Kind as NewKind;
-use worklog_next::domain::version::{Links, Stamp};
+use worklog::domain::version::Kind as NewKind;
+use worklog::domain::version::{Links, Stamp};
+use worklog_old::app::load::{Loaded, load};
+use worklog_old::app::operation::Operation;
+use worklog_old::domain::recheck::Recheck;
+use worklog_old::domain::version::Version as Stored;
+use worklog_old::fs::FsStore;
 
 use super::chain::Chains;
 use super::id::created_topic_id;

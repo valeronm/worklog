@@ -1,5 +1,5 @@
-use worklog_next::domain::id::DocumentId;
-use worklog_next::domain::schema::{Content, Date, Fact, Record};
+use worklog::domain::id::DocumentId;
+use worklog::domain::schema::{Content, Date, Fact, Record};
 
 use super::Frame;
 use super::chain::Settled;

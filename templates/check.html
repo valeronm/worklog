@@ -1,16 +1,25 @@
 {% extends "base.html" %}
 {% import "macros.html" as m %}
 {% block title %}Check{% endblock %}
-{% block nav %}check{% endblock %}
 {% block content %}
-<p class="summary">{{ documents }} documents, {{ links }} links{% if !forks.is_empty() %}, forks: {% call m::links(forks) %}{% endcall %}{% endif %}</p>
-{% if problems.is_empty() %}
+<h1>Check</h1>
+<p class="summary">{{ problem_count }}, {{ notice_count }}, <a href="{{ forks.href }}">{{ forks.text }}</a></p>
+{% if problems.is_empty() -%}
 <p>Every rule the store has to keep holds.</p>
-{% else %}
-{% call m::messages(problems, "problem") %}{% endcall %}
-{% endif %}
-{% if !notices.is_empty() %}
+{%- else -%}
+<h2>Problems</h2>
+<ul class="items">
+{% for found in problems -%}
+<li>{% call m::text(found.title, "title") %}{% endcall %} <span class="problem">{{ found.what }}</span></li>
+{% endfor -%}
+</ul>
+{%- endif %}
+{% if !notices.is_empty() -%}
 <h2>Notices</h2>
-{% call m::messages(notices, "notice") %}{% endcall %}
-{% endif %}
+<ul class="items">
+{% for found in notices -%}
+<li>{% call m::text(found.title, "title") %}{% endcall %} <span class="notice">{{ found.what }}</span></li>
+{% endfor -%}
+</ul>
+{%- endif %}
 {% endblock %}

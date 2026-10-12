@@ -1,6 +1,6 @@
-use worklog_next::app::TriggerShown;
-use worklog_next::app::claim::unclaim;
-use worklog_next::app::context::Via;
+use worklog::app::TriggerShown;
+use worklog::app::claim::unclaim;
+use worklog::app::context::Via;
 
 use super::*;
 

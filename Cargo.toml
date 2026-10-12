@@ -1,38 +1,39 @@
 [package]
 name = "worklog"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2024"
 license = "MIT"
 description = "Append-only versioned store of work done, durable facts, follow-ups and topics"
 repository = "https://github.com/valeronm/worklog"
 
 [workspace]
-members = ["crates/worklog-next", "crates/worklog-convert"]
+members = ["crates/worklog-old", "crates/worklog-convert"]
 
 [lints.clippy]
 pedantic = { level = "warn", priority = -1 }
 
 [features]
-# In-memory ports for tests of the layers above the domain; never in the binary.
+# In-memory ports for tests of the layers above the domain; never in a binary.
 testing = []
 
 [dependencies]
 askama = "0.16"
 blake3 = "1"
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 clap = { version = "4", features = ["derive", "wrap_help"] }
 clap_complete = { version = "4", features = ["unstable-dynamic"] }
-terminal_size = "0.4"
-directories = "6"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+getrandom = "0.4"
 pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
 regex = "1"
 serde = { version = "1", features = ["derive"] }
-# preserve_order so a settings file written back keeps its key order.
+# preserve_order so a value read back keeps the order its keys were printed in.
 serde_json = { version = "1", features = ["preserve_order"] }
 # The release checksums are shasum's, not the store's blake3.
 sha2 = "0.10"
-similar = { version = "2", features = ["inline"] }
+similar = "2"
 tiny_http = "0.12"
+# preserve_order so a header keeps the order its keys were written in.
+toml = { version = "1.1.8", features = ["preserve_order"] }
 # gzip off: the release assets are binaries, and the redirect it reads
 # for the tag carries no body.
 ureq = { version = "3", default-features = false, features = ["rustls"] }

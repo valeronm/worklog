@@ -1,18 +1,14 @@
 {% extends "base.html" %}
 {% import "macros.html" as m %}
-{% block title %}{{ head.short }} of {{ slug.text }}{% endblock %}
-{% block nav %}{{ nav }}{% endblock %}
+{% block title %}{{ head.stamp.version.text }} of {{ document.text }}{% endblock %}
 {% block content %}
-{% call m::crumbs(crumbs) %}{% endcall %}
-<h1>{{ head.summary|safe }}</h1>
-{% call m::meta("version", short_link, history) %}{% endcall %}
-<h2>Against {% if several_parents %}each parent{% else %}its parent{% endif %}</h2>
-{% if first_version %}<p class="muted">A first version: nothing came before it.</p>{% endif %}
-{% if let Some((from, to)) = renamed %}<p class="muted">Renamed from {% call m::link(from) %}{% endcall %} to {% call m::link(to) %}{% endcall %}.</p>{% endif %}
-{% for note in notes %}<p class="notice">{{ note }}</p>
-{% endfor %}{% for d in diffs %}{% if let Some(p) = d.parent %}<ul class="parents"><li>{% call m::link(p) %}{% endcall %}</li></ul>{% endif %}
-<pre class="diff">{% for l in d.lines %}<span class="{{ l.class }}">{{ l.sign }}{{ l.text }}</span>{% endfor %}</pre>
-{% endfor %}
+<h1>{{ document.text }}</h1>
+<p class="meta"><span class="kind">version</span>{{ head.stamp.version.text }} of <a href="{{ document.href }}">{{ document.text }}</a> · <a href="{{ history }}">history</a>{% if is_head %} <span class="label">head</span>{% endif %}</p>
+<h2>Changes</h2>
+{% for side in sides -%}
+<p class="parents">against {% call m::text(side.against, "") %}{% endcall %}</p>
+{% if side.lines.is_empty() %}<p class="muted">no changes</p>{% else %}<pre class="diff">{% for line in side.lines %}<span class="{{ line.class }}">{{ line.text }}</span>{% endfor %}</pre>{% endif %}
+{% endfor -%}
 <h2>As written</h2>
-{% call m::head(head) %}{% endcall %}
+{% call m::head(head, false) %}{% endcall %}
 {% endblock %}

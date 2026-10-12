@@ -1,3 +1,3 @@
 fn main() {
-    std::process::exit(worklog::cli::run());
+    std::process::exit(worklog::cli::main());
 }

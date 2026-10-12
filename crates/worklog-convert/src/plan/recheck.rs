@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
-use worklog_next::domain::id::DocumentId;
-use worklog_next::domain::schema::{Content, Followup, KindOf, Record, Trigger};
+use worklog::domain::id::DocumentId;
+use worklog::domain::schema::{Content, Followup, KindOf, Record, Trigger};
 
 use super::chain::Settled;
 use super::followup::{Touch, touched};
