@@ -197,8 +197,8 @@ read, which is what a sync delivers of a line it cut short.
 A line is appended only by a binary that `PATH` finds under the name it
 was run by, since the log counts use and a build under test is not use. It
 is appended for a command that reads or writes the store and for `serve`;
-binding a host, the commands for the agents, the completions and
-`upgrade` write none, and neither does a shell asking for completions. A
+binding a host, the commands for the agents, `refresh`, the completions
+and `upgrade` write none, and neither does a shell asking for completions. A
 command line the parser refuses is logged with its exit code under the
 last command its words reach. No line is written into a
 directory that holds nothing of the host's machine topic, so a store that

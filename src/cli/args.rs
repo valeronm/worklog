@@ -100,6 +100,9 @@ pub enum Invoked {
         #[command(subcommand)]
         action: AgentsAction,
     },
+    /// Bring what `agents install` placed and the fish completions already there up to this
+    /// binary, and write nothing else
+    Refresh,
     /// The line a shell's startup file holds to take its completions from this binary
     Completions { shell: Shell },
     /// Put the latest release in the place of this binary when it is newer, and bring the
@@ -115,8 +118,7 @@ pub enum Invoked {
 pub enum AgentsAction {
     /// Configure every agent on this host to use this tool
     Install,
-    /// Bring what an install placed and the fish completions already there up to this binary, and
-    /// write nothing else
+    /// Bring what an install placed up to this binary, and write nothing else
     Refresh,
     /// Take back from every agent what an install placed
     Uninstall,
@@ -671,6 +673,7 @@ mod tests {
             Invoked::Serve { bind, hosts } => (bind.to_string(), hosts),
             Invoked::Run(_)
             | Invoked::Agents { .. }
+            | Invoked::Refresh
             | Invoked::Completions { .. }
             | Invoked::Upgrade { .. } => {
                 panic!("{line}: expected a serve")

@@ -91,9 +91,11 @@ summary, and does not move the exit code. `upgrade --check` exits 0
 whether or not a newer release exists, and 1 only when the check itself
 failed.
 
-`agents refresh` prints the paths it wrote on stdout and everything else
-on stderr. The installer and the binary that ran `upgrade`, which may be
-an older release, both read that stdout as the list of files written.
+`refresh` and `agents refresh` print the paths they wrote on stdout and
+everything else on stderr. The installer and the binary that ran
+`upgrade` both read that stdout as the list of files written. A release
+before `refresh` existed runs `agents refresh` on the binary it installed,
+so that command keeps its name and its stdout.
 
 ## The skill
 

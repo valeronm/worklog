@@ -1,5 +1,5 @@
 use super::render::{Output, Render, Stopped, output};
-use super::{Environment, agents};
+use super::{Environment, agents, refresh};
 use crate::app::upgrade::{self, Checked, Outcome, Upgrade};
 
 impl Render for Checked {
@@ -36,7 +36,7 @@ pub(super) fn run(check: bool, environment: &Environment, json: bool) -> Result<
         (installed.written, installed.notes, installed.ended)
     } else {
         let mut done = agents::Done::default();
-        let ended = agents::refresh_into(environment, &mut done);
+        let ended = refresh::refresh_into(environment, &mut done);
         (done.written, done.notes, ended)
     };
     let mut made = output(&checked.upgrade(written), json);
@@ -175,7 +175,7 @@ mod tests {
 
         fn whose_refresh_stops() -> Installed {
             Installed::with(MemoryBinary {
-                stops: Some(StoreError::io("lantern agents refresh", "no agents here")),
+                stops: Some(StoreError::io("lantern refresh", "no agents here")),
                 ..MemoryBinary::built_as(ASSET)
             })
         }
@@ -302,7 +302,7 @@ mod tests {
 
     #[test]
     fn an_upgraded_binary_whose_refresh_fails_is_said_to_be_upgraded_before_the_failure() {
-        let failure = said("lantern agents refresh: no agents here");
+        let failure = said("lantern refresh: no agents here");
         let host = Installed::whose_refresh_stops();
         let written = format!("{BINARY}\n{REFRESHED}\n");
         let noted = said("upgraded 0.2.1 to 0.3.0") + &failure;
@@ -407,10 +407,10 @@ mod tests {
         let host = Installed::new();
         std::fs::write(host.hooks(), "[]").unwrap();
         let named = format!("{NAME}: {}", host.hooks().display());
-        let (out, err, code) = host.run(SAME, &["agents", "refresh"]);
+        let (out, err, code) = host.run(SAME, &["refresh"]);
         assert_eq!((out.as_str(), code), ("", 1));
         assert!(err.starts_with(&named) && err.lines().count() == 1, "{err}");
-        let (out, said, code) = host.json(SAME, &["agents", "refresh", "--json"]);
+        let (out, said, code) = host.json(SAME, &["refresh", "--json"]);
         assert_eq!((out, said, code), (json!({"written": []}), err, 1));
     }
 
@@ -433,10 +433,10 @@ mod tests {
             assert!(last.starts_with(&named), "{err}");
         };
 
-        let (out, err, code) = host.run_as(SAME, Some(&renamed), &["agents", "refresh"]);
+        let (out, err, code) = host.run_as(SAME, Some(&renamed), &["refresh"]);
         assert_eq!((out.as_str(), code), ("", 1));
         failed(&err, &[&skipped]);
-        let line = ["agents", "refresh", "--json"];
+        let line = ["refresh", "--json"];
         let (out, err, code) = host.run_as(SAME, Some(&renamed), &line);
         assert_eq!((out.as_str(), code), ("{\n  \"written\": []\n}\n", 1));
         failed(&err, &[&skipped]);
@@ -483,12 +483,12 @@ mod tests {
         };
 
         let host = stale();
-        let (out, err, code) = host.run(SAME, &["agents", "refresh"]);
+        let (out, err, code) = host.run(SAME, &["refresh"]);
         assert_eq!((out, code), (format!("{}\n", skill(&host)), 1));
         failed(&host, &err, &[]);
 
         let host = stale();
-        let (out, err, code) = host.json(SAME, &["agents", "refresh", "--json"]);
+        let (out, err, code) = host.json(SAME, &["refresh", "--json"]);
         assert_eq!((out, code), (json!({"written": [skill(&host)]}), 1));
         failed(&host, &err, &[]);
 

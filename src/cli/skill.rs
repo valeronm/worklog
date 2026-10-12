@@ -15,10 +15,11 @@ mod tests {
 
     const HELP: &str = "help";
 
-    const SETUP: [&str; 7] = [
+    const SETUP: [&str; 8] = [
         "init",
         "serve",
         "agents",
+        "refresh",
         "usage",
         "completions",
         "upgrade",
@@ -299,7 +300,7 @@ mod tests {
     fn a_command_the_skill_is_excused_from_is_a_command() {
         assert_eq!(not_commands(&root(), &SETUP), [""; 0]);
         assert_eq!(not_commands(&root(), &["init", "polish"]), ["polish"]);
-        assert_eq!(not_commands(&root(), &["refresh"]), ["refresh"]);
+        assert_eq!(not_commands(&root(), &["install"]), ["install"]);
     }
 
     #[test]

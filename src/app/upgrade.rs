@@ -156,7 +156,7 @@ mod tests {
         };
         assert_eq!(install(&releases, &binary, &tag), Ok(installed));
         assert_eq!(*binary.calls.borrow(), ["replace", "refresh"]);
-        let stopped = StoreError::io("lantern agents refresh", "no agents here");
+        let stopped = StoreError::io("lantern refresh", "no agents here");
         let failing = MemoryBinary {
             stops: Some(stopped.clone()),
             notes: vec!["fish left out".to_owned()],

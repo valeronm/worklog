@@ -6,7 +6,7 @@ use crate::domain::release;
 
 use super::{io_error, replace};
 
-const REFRESH: [&str; 2] = ["agents", "refresh"];
+const REFRESH: [&str; 1] = ["refresh"];
 
 pub struct FsBinary {
     exe: PathBuf,
@@ -154,12 +154,12 @@ mod tests {
     }
 
     #[test]
-    fn a_refresh_runs_the_binary_s_own_agents_refresh_and_gives_each_line_it_printed() {
+    fn a_refresh_runs_the_binary_s_own_refresh_and_gives_each_line_it_printed() {
         let kept = tempfile::tempdir().unwrap();
         let echoing = script(kept.path(), "desk", "printf '%s\\n' \"$0\" \"$*\"");
         assert_eq!(
             refreshed(&binary(&echoing)),
-            wrote(&[&echoing.display().to_string(), "agents refresh"])
+            wrote(&[&echoing.display().to_string(), "refresh"])
         );
         let silent = script(kept.path(), "phone", "exit 0");
         assert_eq!(refreshed(&binary(&silent)), wrote(&[]));
@@ -193,7 +193,7 @@ mod tests {
             let stopped = refreshed(&binary(&exe));
             assert_eq!((stopped.written, stopped.notes), (Vec::new(), Vec::new()));
             let refused = stopped.ended.unwrap_err().to_string();
-            let ran = format!("{} agents refresh: ", exe.display());
+            let ran = format!("{} refresh: ", exe.display());
             refused.strip_prefix(&ran).map(str::to_owned)
         };
         let why = Some("no agents here".to_owned());
@@ -210,7 +210,7 @@ mod tests {
         let kept = tempfile::tempdir().unwrap();
         let body = "echo /home/desk/skill\necho 'lantern: no room' >&2\nexit 1";
         let exe = script(kept.path(), "lantern", body);
-        let ran = format!("{} agents refresh", exe.display());
+        let ran = format!("{} refresh", exe.display());
         assert_eq!(
             refreshed(&binary(&exe)),
             Refreshed {

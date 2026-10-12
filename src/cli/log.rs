@@ -207,7 +207,10 @@ mod tests {
         let unlogged: Vec<&str> = (all.get_subcommands().map(clap::Command::get_name))
             .filter(|name| !is_logged(name))
             .collect();
-        assert_eq!(unlogged, [INIT, "agents", "completions", "upgrade"]);
+        assert_eq!(
+            unlogged,
+            [INIT, "agents", "refresh", "completions", "upgrade"]
+        );
     }
 
     fn lines_that_parse(command: &clap::Command, path: &[String], found: &mut Vec<Vec<String>>) {
@@ -305,6 +308,7 @@ mod tests {
             ("new followup --topics lantern", "new followup"),
             ("init desk --store kept", "init"),
             ("agents refresh", "agents refresh"),
+            ("refresh", "refresh"),
             ("serve --bind 127.0.0.1:0", "serve"),
             ("completions fish", "completions"),
             ("upgrade --check", "upgrade"),
@@ -319,6 +323,7 @@ mod tests {
             ("", true),
             ("init", false),
             ("agents refresh", false),
+            ("refresh", false),
             ("completions", false),
             ("upgrade", false),
         ] {

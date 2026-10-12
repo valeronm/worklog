@@ -102,11 +102,12 @@ offers it, and given arguments does it with `--agents` and otherwise
 writes neither.
 
 `worklog agents uninstall` takes both away and leaves whatever else the
-files hold. `worklog agents refresh` brings a skill, a hook and the fish
-completions up to the binary that runs it, only where each already is: the
-skill describes the commands of the binary it shipped with, and the hook
-and the completions hold the binary's path, which an install to a new
-place leaves stale. The installer and `upgrade` run it.
+files hold. `worklog agents refresh` brings a skill and a hook up to the
+binary that runs it, only where each already is: the skill describes the
+commands of the binary it shipped with, and the hook holds the binary's
+path, which an install to a new place leaves stale. `worklog refresh` does
+the same for the agents and for fish's completions, and `upgrade` runs it.
+The installer runs `agents refresh`.
 
 Codex runs a command in a sandbox that holds everything outside the
 project read-only, the store with it, so a `worklog` it ran would read the
@@ -122,7 +123,7 @@ Completions are answered by the binary, so a shell is offered what the
 store holds as it stands: topics where a topic is expected, documents
 where a document is, open drafts for `save`. `worklog completions <shell>`
 prints the line a shell's startup file holds to take them; for fish,
-`agents refresh` writes that line where fish reads completions, once that
+`refresh` writes that line where fish reads completions, once that
 directory exists.
 
 ## Develop

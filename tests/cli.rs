@@ -2610,21 +2610,21 @@ fn completions_prints_the_line_a_shell_takes_them_from_this_binary_with() {
 }
 
 #[test]
-fn agents_refresh_writes_the_completions_where_fish_reads_them_and_only_where_fish_is() {
+fn refresh_writes_the_completions_where_fish_reads_them_and_only_where_fish_is() {
     let host = Host::new().with_agents(&[".claude"]);
-    assert_eq!(host.ok(&["agents", "refresh"]), "");
+    assert_eq!(host.ok(&["refresh"]), "");
     assert!(!host.home().join(".config").exists());
 
     fs::create_dir_all(host.home().join(".config/fish")).unwrap();
     fs::write(host.home().join(".config/fish/completions"), "").unwrap();
-    assert_eq!(host.ok(&["agents", "refresh"]), "");
+    assert_eq!(host.ok(&["refresh"]), "");
     fs::remove_file(host.home().join(".config/fish/completions")).unwrap();
 
     let completions = host.fish();
     fs::create_dir_all(host.skill_of(".claude").parent().unwrap()).unwrap();
     fs::write(host.skill_of(".claude"), "old").unwrap();
     assert_eq!(
-        host.ok(&["agents", "refresh"]),
+        host.ok(&["refresh"]),
         lines(&[host.skill_of(".claude"), completions.clone()])
     );
     assert_eq!(fs::read_to_string(&completions).unwrap(), fish_line());
@@ -2634,22 +2634,38 @@ fn agents_refresh_writes_the_completions_where_fish_reads_them_and_only_where_fi
     );
 
     fs::write(&completions, "old").unwrap();
-    let again = host.json(&["agents", "refresh"]);
+    let again = host.json(&["refresh"]);
     let path = completions.display().to_string();
     assert_eq!(again, serde_json::json!({"written": [path]}));
     assert_eq!(fs::read_to_string(&completions).unwrap(), fish_line());
-    assert_eq!(host.ok(&["agents", "refresh"]), lines(&[completions]));
+    assert_eq!(host.ok(&["refresh"]), lines(&[completions]));
 }
 
 #[test]
-fn agents_refresh_follows_the_config_directory_the_environment_gives_fish() {
+fn agents_refresh_leaves_the_completions_as_they_are() {
+    let host = Host::new().with_agents(&[".claude"]);
+    let completions = host.fish();
+    fs::create_dir_all(host.skill_of(".claude").parent().unwrap()).unwrap();
+    fs::write(host.skill_of(".claude"), "old").unwrap();
+    assert_eq!(
+        host.ok(&["agents", "refresh"]),
+        lines(&[host.skill_of(".claude")])
+    );
+    assert!(!completions.exists());
+    fs::write(&completions, "old").unwrap();
+    assert_eq!(host.ok(&["agents", "refresh"]), "");
+    assert_eq!(fs::read_to_string(&completions).unwrap(), "old");
+}
+
+#[test]
+fn refresh_follows_the_config_directory_the_environment_gives_fish() {
     let host = Host::new();
     let under_home = host.fish();
     let given = host.root.join("config");
     fs::create_dir_all(given.join("fish/completions")).unwrap();
     let mut program = Command::cargo_bin("worklog").expect("the binary");
     program.env("XDG_CONFIG_HOME", &given);
-    let ran = host.run_as(program, &host.home(), &["agents", "refresh"]);
+    let ran = host.run_as(program, &host.home(), &["refresh"]);
     let written = given.join("fish/completions/worklog.fish");
     assert_eq!(
         (ran.stdout, ran.stderr, ran.code),
@@ -2665,7 +2681,7 @@ fn agents_refresh_follows_the_config_directory_the_environment_gives_fish() {
     fs::create_dir_all(host.home().join("config/fish/completions")).unwrap();
     let mut program = Command::cargo_bin("worklog").expect("the binary");
     program.env("XDG_CONFIG_HOME", "config");
-    let ran = host.run_as(program, &host.home(), &["agents", "refresh"]);
+    let ran = host.run_as(program, &host.home(), &["refresh"]);
     assert_eq!(
         (ran.stdout, ran.stderr, ran.code),
         (
@@ -2687,14 +2703,14 @@ fn fish_left_out(renamed: &Path) -> String {
 }
 
 #[test]
-fn agents_refresh_under_another_file_name_writes_for_the_agents_and_no_completions() {
+fn refresh_under_another_file_name_writes_for_the_agents_and_no_completions() {
     let host = Host::new().with_agents(&[".claude"]);
     let completions = host.fish();
     let renamed = host.root.join("worklog-0.3.0");
     copy_of_the_binary(&renamed);
     let run = |line: &[&str]| host.run_as(Command::new(&renamed), &host.home(), line);
     let before = snapshot(&host);
-    let ran = run(&["agents", "refresh"]);
+    let ran = run(&["refresh"]);
     assert_eq!(
         (ran.stdout.as_str(), ran.stderr, ran.code),
         ("", fish_left_out(&renamed), Some(0))
@@ -2712,7 +2728,7 @@ fn agents_refresh_under_another_file_name_writes_for_the_agents_and_no_completio
 
     fs::create_dir_all(host.skill_of(".claude").parent().unwrap()).unwrap();
     fs::write(host.skill_of(".claude"), "old").unwrap();
-    let ran = run(&["agents", "refresh"]);
+    let ran = run(&["refresh"]);
     assert_eq!(
         (ran.stdout, ran.stderr, ran.code),
         (
@@ -2722,7 +2738,7 @@ fn agents_refresh_under_another_file_name_writes_for_the_agents_and_no_completio
         )
     );
     assert_ne!(fs::read_to_string(host.skill_of(".claude")).unwrap(), "old");
-    let again = run(&["agents", "refresh", "--json"]);
+    let again = run(&["refresh", "--json"]);
     assert_eq!(
         one_value(&again.stdout),
         Some(serde_json::json!({"written": []}))
@@ -2749,7 +2765,7 @@ fn install_and_uninstall_leave_the_fish_completions_as_they_are() {
     assert!(!completions.exists());
 
     assert_eq!(
-        host.ok(&["agents", "refresh"]),
+        host.ok(&["refresh"]),
         lines(std::slice::from_ref(&completions))
     );
     let skills = host.skill_of(".claude").parent().unwrap().to_path_buf();
@@ -3267,7 +3283,7 @@ fn a_command_line_the_parser_refuses_is_logged_under_the_command_it_named() {
         &["serve", "--json"],
         &["init", "--no-such-flag"],
         &["agents"],
-        &["agents", "refresh"],
+        &["refresh"],
         &["--help"],
         &["--version"],
         &["help", "facts"],
@@ -3369,7 +3385,7 @@ fn a_host_that_is_not_set_up_logs_nothing_and_neither_does_setting_one_up() {
     let made = host.used_ok(&[&line[..], &["--summary", "A machine"]].concat());
     assert_eq!(made, "desk created\n");
     assert_ne!(host.used(&line).code, Some(0));
-    host.used(&["agents", "refresh"]);
+    host.used(&["refresh"]);
     assert_eq!(logs(&host), 0);
     host.used_ok(&["topics"]);
     assert_eq!(commands(&host.logged()), [("topics", 0, vec![])]);
@@ -3782,7 +3798,7 @@ fn the_refresh_after_an_upgrade_is_run_by_the_file_at_the_binary_s_own_path() {
     let path = installed.display();
     assert_eq!(
         (upgraded.stdout, upgraded.code),
-        (format!("{path}\n{path}\nagents refresh\n"), Some(0))
+        (format!("{path}\n{path}\nrefresh\n"), Some(0))
     );
     assert_eq!(fs::read(&installed).unwrap(), echoing);
     assert_eq!(beside(&installed), ["worklog"]);
@@ -3795,7 +3811,7 @@ fn the_refresh_after_an_upgrade_is_run_by_the_file_at_the_binary_s_own_path() {
         stopped.stderr,
         format!(
             "worklog: upgraded {CURRENT} to 9.9.9\n\
-             worklog: {path} agents refresh: no agents here\n"
+             worklog: {path} refresh: no agents here\n"
         )
     );
     assert_eq!(
@@ -3819,7 +3835,7 @@ fn the_refresh_after_an_upgrade_is_run_by_the_file_at_the_binary_s_own_path() {
     assert_eq!(
         (stopped.stderr, stopped.code),
         (
-            format!("worklog: {path} agents refresh: no agents here\n"),
+            format!("worklog: {path} refresh: no agents here\n"),
             Some(1)
         )
     );
@@ -3847,7 +3863,7 @@ fn an_upgrade_whose_new_binary_cannot_write_for_fish_says_what_that_binary_wrote
     assert_eq!(said.len(), 2, "{}", stopped.stderr);
     assert_eq!(said[0], format!("worklog: upgraded {CURRENT} to 9.9.9"));
     let failed = format!(
-        "worklog: {} agents refresh: {}: ",
+        "worklog: {} refresh: {}: ",
         stale.installed.display(),
         stale.completions.display()
     );
@@ -3924,7 +3940,7 @@ fn a_misnamed_binary_whose_hook_is_installed_is_upgraded_and_its_refresh_refused
         upgraded.stderr,
         format!(
             "worklog: upgraded {CURRENT} to 9.9.9\n\
-             worklog: {} agents refresh: {refusal}",
+             worklog: {} refresh: {refusal}",
             installed.display()
         )
     );
@@ -4005,7 +4021,7 @@ impl Host {
 }
 
 #[test]
-fn agents_refresh_takes_the_hook_the_tool_before_the_rebuild_left_as_its_own() {
+fn refresh_takes_the_hook_the_tool_before_the_rebuild_left_as_its_own() {
     for spelled_with_home in [true, false] {
         let host = Host::new().with_agents(&[".claude"]);
         let home = if spelled_with_home {
@@ -4019,7 +4035,7 @@ fn agents_refresh_takes_the_hook_the_tool_before_the_rebuild_left_as_its_own() {
         let before = serde_json::json!({"hooks": {"SessionStart": [theirs, left]}});
         fs::write(host.hooks_of(".claude"), before.to_string()).unwrap();
 
-        let printed = host.ok(&["agents", "refresh"]);
+        let printed = host.ok(&["refresh"]);
         assert_eq!(printed, lines(&[host.hooks_of(".claude")]), "{command}");
         let ours = serde_json::json!({"hooks": [{"type": "command", "command": hook_command()}]});
         assert_eq!(
@@ -4027,19 +4043,19 @@ fn agents_refresh_takes_the_hook_the_tool_before_the_rebuild_left_as_its_own() {
             serde_json::json!([theirs, ours]),
             "{command}"
         );
-        assert_eq!(host.ok(&["agents", "refresh"]), "", "{command}");
+        assert_eq!(host.ok(&["refresh"]), "", "{command}");
     }
 }
 
 #[test]
-fn agents_refresh_writes_its_skill_over_the_one_the_tool_before_the_rebuild_left() {
+fn refresh_writes_its_skill_over_the_one_the_tool_before_the_rebuild_left() {
     let host = Host::new().with_agents(&[".codex"]);
     let left = host.home().join(".codex/skills/worklog/SKILL.md");
     fs::create_dir_all(left.parent().unwrap()).unwrap();
     fs::write(&left, "---\nname: worklog\ndescription: Lamp notes\n---\n").unwrap();
     assert_eq!(left, host.skill_of(".codex"));
 
-    let printed = host.ok(&["agents", "refresh"]);
+    let printed = host.ok(&["refresh"]);
     assert_eq!(
         printed,
         lines(&[host.skill_of(".codex"), host.rule_of_codex()])
@@ -4048,7 +4064,7 @@ fn agents_refresh_writes_its_skill_over_the_one_the_tool_before_the_rebuild_left
         fs::read_to_string(&left).unwrap(),
         include_str!("../skill/SKILL.md")
     );
-    assert_eq!(host.ok(&["agents", "refresh"]), "");
+    assert_eq!(host.ok(&["refresh"]), "");
 }
 
 #[test]

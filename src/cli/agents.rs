@@ -1,11 +1,11 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde::Serialize;
 
-use super::args::{AgentsAction, Shell};
+use super::args::AgentsAction;
 use super::render::{Output, Render, Stopped, output};
 use super::skill::SKILL;
-use super::{Environment, NAME, complete, hook};
+use super::{Environment, NAME, hook};
 use crate::app::Failure;
 use crate::app::setup::Bound;
 use crate::domain::id::DocumentId;
@@ -67,7 +67,7 @@ pub(super) struct Done {
 }
 
 impl Done {
-    fn wrote(&mut self, path: &Path) {
+    pub(super) fn wrote(&mut self, path: &Path) {
         self.written.push(path.display().to_string());
     }
 
@@ -94,7 +94,7 @@ impl Done {
         made
     }
 
-    fn ended(self, ended: Result<(), Failure>, json: bool) -> Result<Output, Stopped> {
+    pub(super) fn ended(self, ended: Result<(), Failure>, json: bool) -> Result<Output, Stopped> {
         let done = self.output(None, json);
         match ended {
             Ok(()) => Ok(done),
@@ -192,51 +192,51 @@ pub(super) fn initialized(
     Ok(done.output(Some(bound), json))
 }
 
-fn fish_completions(
-    environment: &Environment,
-    homes: &[&Path],
-    done: &mut Done,
-) -> Result<Option<(PathBuf, String)>, Failure> {
-    let Some(file) = wiring::fish_completions(environment.variable, NAME)? else {
-        return Ok(None);
-    };
-    let binary = environment.binary()?;
-    if !complete::runs_as_the_command(binary) {
-        done.notes.push(format!(
-            "{}: fish's completions are not written, since the binary's file name is not {NAME}",
-            binary.display()
-        ));
-        return Ok(None);
-    }
-    let line = complete::registration(Shell::Fish, binary, homes)?;
-    Ok(Some((file, line)))
+/// A refresh planned and not yet written: each hooks file was edited in memory.
+pub(super) struct Refreshing(Vec<Refreshed>);
+
+struct Refreshed {
+    agent: Agent,
+    holds_hook: bool,
+    hooks: Option<String>,
 }
 
-pub(super) fn refresh_into(environment: &Environment, done: &mut Done) -> Result<(), Failure> {
-    let refreshed = |agent: Agent| {
-        let (holds_hook, hooks) = hook::refreshed(&agent, || environment.binary())?;
-        Ok((agent, holds_hook, hooks))
-    };
-    let agents = wiring::agents(environment.variable)?;
-    let agents: Vec<_> = (agents.into_iter().map(refreshed)).collect::<Result<_, Failure>>()?;
-    // A binary whose path is unknown or cannot be quoted is refused before the first write.
-    let homes = agents.first().map(|(agent, ..)| agent.homes());
-    let completions = fish_completions(environment, &homes.unwrap_or_default(), done)?;
-    for (agent, holds_hook, hooks) in &agents {
-        let skill = agent.read_skill()?;
-        if skill.as_deref().is_some_and(|held| held != SKILL) {
-            done.wrote(&agent.write_skill(SKILL)?);
-        }
-        if let Some(rule) = agent.refresh_rule(skill.is_some() || *holds_hook)? {
-            done.wrote(&rule);
-        }
-        done.hooks(agent, hooks.as_deref())?;
+impl Refreshing {
+    pub(super) fn on_this_host(environment: &Environment) -> Result<Refreshing, Failure> {
+        let agents = wiring::agents(environment.variable)?;
+        let refreshed = |agent: Agent| {
+            let (holds_hook, hooks) = hook::refreshed(&agent, || environment.binary())?;
+            Ok(Refreshed {
+                agent,
+                holds_hook,
+                hooks,
+            })
+        };
+        agents
+            .into_iter()
+            .map(refreshed)
+            .collect::<Result<_, _>>()
+            .map(Refreshing)
     }
-    if let Some((file, line)) = completions {
-        wiring::write_completions(&file, &line)?;
-        done.wrote(&file);
+
+    pub(super) fn write_into(&self, done: &mut Done) -> Result<(), Failure> {
+        for Refreshed {
+            agent,
+            holds_hook,
+            hooks,
+        } in &self.0
+        {
+            let skill = agent.read_skill()?;
+            if skill.as_deref().is_some_and(|held| held != SKILL) {
+                done.wrote(&agent.write_skill(SKILL)?);
+            }
+            if let Some(rule) = agent.refresh_rule(skill.is_some() || *holds_hook)? {
+                done.wrote(&rule);
+            }
+            done.hooks(agent, hooks.as_deref())?;
+        }
+        Ok(())
     }
-    Ok(())
 }
 
 fn uninstall_into(environment: &Environment, done: &mut Done) -> Result<(), Failure> {
@@ -259,13 +259,14 @@ pub(super) fn run(
     json: bool,
 ) -> Result<Output, Stopped> {
     let mut done = Done::default();
-    let ended = match action {
-        AgentsAction::Install => {
-            Placing::on_this_host(environment).and_then(|placing| placing.install_into(&mut done))
-        }
-        AgentsAction::Refresh => refresh_into(environment, &mut done),
-        AgentsAction::Uninstall => uninstall_into(environment, &mut done),
-    };
+    let ended =
+        match action {
+            AgentsAction::Install => Placing::on_this_host(environment)
+                .and_then(|placing| placing.install_into(&mut done)),
+            AgentsAction::Refresh => Refreshing::on_this_host(environment)
+                .and_then(|agents| agents.write_into(&mut done)),
+            AgentsAction::Uninstall => uninstall_into(environment, &mut done),
+        };
     done.ended(ended, json)
 }
 

@@ -8,6 +8,7 @@ mod hook;
 mod json;
 mod log;
 mod prompt;
+mod refresh;
 mod render;
 mod run;
 mod skill;
@@ -295,6 +296,9 @@ where
         }
         Invoked::Agents { action } => {
             return ended(agents::run(*action, environment, cli.json), out, err);
+        }
+        Invoked::Refresh => {
+            return ended(refresh::run(environment, cli.json), out, err);
         }
         Invoked::Completions { shell } => {
             return finished(complete::registered(*shell, environment), out, err);
@@ -1166,8 +1170,7 @@ mod tests {
         std::fs::write(&skill, "old").unwrap();
         let fish = home.join(".config/fish/completions");
         std::fs::create_dir_all(&fish).unwrap();
-        let refresh =
-            |binary: Option<PathBuf>| run_with(Some(&home), binary, &["agents", "refresh"]);
+        let refresh = |binary: Option<PathBuf>| run_with(Some(&home), binary, &["refresh"]);
 
         refused(&refresh(None), "the path of this binary is unknown");
         let quoted = refresh(Some(root.join("a\"b").join(NAME)));
