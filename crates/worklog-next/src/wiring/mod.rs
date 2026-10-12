@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 mod fs;
 
 use crate::app::{Deps, Failure, Stored};
+use crate::domain::ports::Store as _;
+use crate::domain::version::Version;
 use fs::{Config, FsAgent, FsDrafts, FsHost, FsStore, Paths, RandomIds, SystemClock};
 
 /// The ports of one command, since the store among them is read once.
@@ -67,6 +69,14 @@ pub fn wire(
         clock: SystemClock,
         host,
     }))
+}
+
+/// Adds `version` to the store at `store`, which is made when it is not there, and applies no
+/// rule of the store, so the caller holds the result to `check`. A file already under the
+/// version's name is left as it is, whatever it holds, and a store with a Syncthing folder
+/// marker and no ignore file is given one.
+pub fn write_version(store: &Path, version: &Version) -> Result<(), Failure> {
+    Ok(FsStore::new(store.to_path_buf()).put(version)?)
 }
 
 pub const SKILL_DIRECTORY: &str = fs::SKILL_DIRECTORY;
@@ -154,7 +164,7 @@ mod tests {
     use std::path::Path;
 
     use super::*;
-    use crate::domain::testing::lantern;
+    use crate::domain::testing::{first, lantern};
 
     fn scratch() -> (tempfile::TempDir, PathBuf) {
         let kept = tempfile::tempdir().unwrap();
@@ -214,6 +224,34 @@ mod tests {
         assert!(matches!(wired(&root, None), Err(Failure::Store(_))));
         let chosen = Some(root.join("store"));
         assert!(matches!(wired(&root, chosen), Err(Failure::Store(_))));
+    }
+
+    #[test]
+    fn a_version_is_written_where_the_directory_store_reads_it() {
+        let (_kept, root) = scratch();
+        let store = root.join("store");
+        let version = first(&lantern(), "topic", "name = \"lantern\"", "A lamp.\n");
+
+        write_version(&store, &version).unwrap();
+        let held = FsStore::new(store.clone()).document(&lantern()).unwrap();
+        assert_eq!(held.history(), [&version]);
+
+        write_version(&store, &version).unwrap();
+        let held = FsStore::new(store.clone()).document(&lantern()).unwrap();
+        assert_eq!(held.history(), [&version]);
+        assert!(held.unreadable().is_empty());
+    }
+
+    #[test]
+    fn a_version_that_cannot_be_written_is_a_failure() {
+        let (_kept, root) = scratch();
+        let store = root.join("store");
+        std::fs::write(&store, "").unwrap();
+        let version = first(&lantern(), "topic", "name = \"lantern\"", "A lamp.\n");
+        assert!(matches!(
+            write_version(&store, &version),
+            Err(Failure::Store(_))
+        ));
     }
 
     fn with_home(home: Option<&Path>, next: Option<&Path>) -> impl Fn(&str) -> Option<OsString> {

@@ -104,7 +104,9 @@ keeps one. Fixtures, examples and test expectations are invented: no text,
 slug, path, machine name or recheck lifted from a real store, no real
 project, device or host names, and no "the author" or "my machine", since a
 sentence like that is itself the disclosure. The invented vocabulary in the
-tests, `lantern`, `atlas`, `phone`, `desk`, is the one to extend.
+tests, `lantern`, `atlas`, `phone`, `desk`, is the one to extend. A decision
+file for `worklog-convert` and the report of its dry run are store content
+too, since they hold a store's slugs, tags, names and summaries.
 
 ## Build and check
 
@@ -112,8 +114,12 @@ tests, `lantern`, `atlas`, `phone`, `desk`, is the one to extend.
 --all-features -- -D warnings` and `cargo test --workspace` are what CI
 runs; pedantic clippy is on for each crate and a suppression lives at its
 site with a `reason`. `crates/worklog-next` is the store being rebuilt, a
-second crate so it cannot reach into this one, and without `--workspace`
-a check covers the root package alone. The
+second crate so it cannot reach into this one. `crates/worklog-convert`
+converts a store of this crate to one of `worklog-next`, once: it depends
+on both, so a change to what either makes public is checked against it,
+and neither may depend on it, since it is removed after the one release
+that carries its source, and no release builds it. Without `--workspace` a
+check covers the root package alone. The
 toolchain is pinned in `mise.toml` and CI reads the pin from there.
 Releases are cut by tag; `docs/release.md` has the steps.
 

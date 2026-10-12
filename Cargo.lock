@@ -1365,6 +1365,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "worklog-convert"
+version = "0.0.0"
+dependencies = [
+ "blake3",
+ "clap",
+ "tempfile",
+ "toml",
+ "worklog",
+ "worklog-next",
+]
+
+[[package]]
 name = "worklog-next"
 version = "0.0.0"
 dependencies = [

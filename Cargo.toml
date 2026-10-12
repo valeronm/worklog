@@ -7,7 +7,7 @@ description = "Append-only versioned store of work done, durable facts, follow-u
 repository = "https://github.com/valeronm/worklog"
 
 [workspace]
-members = ["crates/worklog-next"]
+members = ["crates/worklog-next", "crates/worklog-convert"]
 
 [lints.clippy]
 pedantic = { level = "warn", priority = -1 }

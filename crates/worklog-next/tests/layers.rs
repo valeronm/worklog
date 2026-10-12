@@ -320,6 +320,51 @@ fn a_wiring_that_lets_an_adapter_out_is_found() {
     }
 }
 
+// `write_version` applies no rule of the store.
+fn rule_free_write_named(text: &str) -> Vec<String> {
+    let text = uncommented(text.split(TEST_MODULE).next().unwrap_or_default());
+    let tokens = tokens(&text);
+    let mut named = Vec::new();
+    for (at, token) in tokens.iter().enumerate() {
+        let defined = at >= 1 && tokens[at - 1] == "fn";
+        if *token == "write_version" && !defined {
+            named.push("names `write_version`".to_owned());
+        }
+    }
+    named
+}
+
+#[test]
+fn no_file_of_the_crate_writes_a_version_past_the_rules_of_the_store() {
+    assert_eq!(violations(&src(), rule_free_write_named), [""; 0]);
+}
+
+#[test]
+fn a_file_that_names_the_write_past_the_rules_is_found() {
+    for clean in [
+        "pub fn write_version(store: &Path, version: &Version) -> Result<(), Failure> {\n}\n",
+        "/// As `write_version` does.\npub fn wire() {}\n",
+        "pub fn wire() {} // not write_version\n",
+        "pub fn wire() {}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    fn put() {\n        write_version(&store, &version).unwrap();\n    }\n}\n",
+    ] {
+        assert_eq!(rule_free_write_named(clean), [""; 0], "{clean}");
+    }
+    for broken in [
+        "crate::wiring::write_version(&store, &version)?;",
+        "use crate::wiring::write_version;",
+        "use crate::wiring::{wire, write_version};",
+        "versions.iter().try_for_each(|version| write_version(root, version))",
+        "let write = wiring::write_version;",
+        "pub fn write_version(store: &Path) {\n    write_version(store)\n}\n",
+    ] {
+        assert_eq!(
+            rule_free_write_named(broken),
+            ["names `write_version`"],
+            "{broken}"
+        );
+    }
+}
+
 fn outside_tests(text: &str) -> String {
     squeezed(text.split(TEST_MODULE).next().unwrap_or_default())
 }

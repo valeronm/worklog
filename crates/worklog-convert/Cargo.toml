@@ -1,0 +1,27 @@
+[package]
+name = "worklog-convert"
+version = "0.0.0"
+edition = "2024"
+license = "MIT"
+description = "Converts a worklog store to the store the next worklog keeps"
+repository = "https://github.com/valeronm/worklog"
+publish = false
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+
+[[bin]]
+name = "worklog-convert"
+path = "src/main.rs"
+
+[dependencies]
+# The id of a converted document is a hash of the slug it was first stored under.
+blake3 = "1"
+clap = { version = "4", features = ["derive", "wrap_help"] }
+# preserve_order so what a decision file refuses is listed in the order the file holds it.
+toml = { version = "1.1.8", features = ["preserve_order"] }
+worklog = { path = "../.." }
+worklog-next = { path = "../worklog-next" }
+
+[dev-dependencies]
+tempfile = "3"
