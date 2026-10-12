@@ -1385,15 +1385,18 @@ dependencies = [
  "blake3",
  "chrono",
  "clap",
+ "clap_complete",
  "getrandom 0.4.3",
  "pulldown-cmark",
  "regex",
  "serde",
  "serde_json",
+ "sha2",
  "similar",
  "tempfile",
  "tiny_http",
  "toml",
+ "ureq",
 ]
 
 [[package]]

@@ -11,7 +11,7 @@ use crate::domain::document::{Document, State};
 use crate::domain::id::{DocumentId, VersionId};
 use crate::domain::ports::{Store, StoreError};
 use crate::domain::schema::address::{Address, Candidate, Found, Holds, choose, displayed, holds};
-use crate::domain::schema::{Content, KindOf, Name, Record};
+use crate::domain::schema::{Content, Date, KindOf, Name, Record};
 use crate::domain::version::{Kind, Version};
 
 pub(super) fn with_article(word: &str) -> String {
@@ -88,6 +88,128 @@ impl<'a> Stored<'a> {
 }
 
 type Question = (String, Vec<String>);
+
+// A fact is named under its topic and an entry under its date.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum Held {
+    Topic(Name),
+    Fact(DocumentId, Name),
+    Entry(Date, Name),
+}
+
+impl Held {
+    fn kind(&self) -> KindOf {
+        match self {
+            Held::Topic(_) => KindOf::Topic,
+            Held::Fact(..) => KindOf::Fact,
+            Held::Entry(..) => KindOf::Entry,
+        }
+    }
+}
+
+// An id is no name.
+fn named(
+    address: &Address,
+    holders: impl Fn(&Held) -> Result<Vec<Candidate>, Failure>,
+) -> Result<Found, Failure> {
+    let held = match address {
+        Address::Topic(name) => Held::Topic(name.clone()),
+        Address::Fact { topic, name } => match choose(&holders(&Held::Topic(topic.clone()))?) {
+            Found::One(topic) => Held::Fact(topic, name.clone()),
+            other => return Ok(other),
+        },
+        Address::Entry { date, name } => Held::Entry(*date, name.clone()),
+        Address::Id(_) => return Ok(Found::None),
+    };
+    Ok(choose(&holders(&held)?))
+}
+
+/// Each kind is read whole the first time a name of it is asked for.
+pub(super) struct Names<'l, 'a> {
+    lookup: &'l Lookup<'a>,
+    holders: RefCell<BTreeMap<Held, Vec<Candidate>>>,
+    read: RefCell<BTreeSet<&'static str>>,
+    sharing_a_short_id: RefCell<Option<BTreeMap<String, usize>>>,
+}
+
+impl<'l, 'a> Names<'l, 'a> {
+    pub(super) fn of(lookup: &'l Lookup<'a>) -> Names<'l, 'a> {
+        Names {
+            lookup,
+            holders: RefCell::default(),
+            read: RefCell::default(),
+            sharing_a_short_id: RefCell::default(),
+        }
+    }
+
+    fn holders_of(&self, held: &Held) -> Result<Vec<Candidate>, Failure> {
+        let kind = held.kind();
+        if self.read.borrow_mut().insert(kind.word()) {
+            let mut holders = self.holders.borrow_mut();
+            for document in self.lookup.of_kind(kind)? {
+                for (_, record) in readable_heads(&document) {
+                    hold(&mut holders, document.id(), &record);
+                }
+            }
+        }
+        Ok((self.holders.borrow().get(held).cloned()).unwrap_or_default())
+    }
+
+    fn find(&self, address: &str) -> Result<Found, Failure> {
+        match Address::parse(address) {
+            Ok(address) => named(&address, |held| self.holders_of(held)),
+            Err(_) => Ok(Found::None),
+        }
+    }
+
+    fn sharing(&self, short: &str) -> Result<usize, Failure> {
+        let mut sharing = self.sharing_a_short_id.borrow_mut();
+        if sharing.is_none() {
+            let mut counted = BTreeMap::new();
+            // The store lists ids only under a start, and every id starts with one of these.
+            for digit in "0123456789abcdef".chars() {
+                for id in self.lookup.under(&digit.to_string())? {
+                    *counted.entry(id.short().to_owned()).or_default() += 1;
+                }
+            }
+            *sharing = Some(counted);
+        }
+        let counted = sharing.as_ref().and_then(|counted| counted.get(short));
+        Ok(counted.copied().unwrap_or_default())
+    }
+
+    /// `label`, the start of the id or the whole id: the first that `Lookup::find` resolves
+    /// to the document.
+    pub(super) fn address(&self, id: &DocumentId, label: &str) -> Result<String, Failure> {
+        if self.find(label)? == Found::One(id.clone()) {
+            return Ok(label.to_owned());
+        }
+        let short = id.short();
+        if self.find(short)? == Found::None && self.sharing(short)? == 1 {
+            Ok(short.to_owned())
+        } else {
+            Ok(id.to_string())
+        }
+    }
+}
+
+fn hold(holders: &mut BTreeMap<Held, Vec<Candidate>>, id: &DocumentId, record: &Record) {
+    let Some((current, former)) = record.content.naming() else {
+        return;
+    };
+    for name in std::iter::once(current).chain(former) {
+        let held = match &record.content {
+            Content::Topic(_) => Held::Topic(name.clone()),
+            Content::Fact(fact) => Held::Fact(fact.topic.clone(), name.clone()),
+            Content::Entry(entry) => Held::Entry(entry.date, name.clone()),
+            Content::Followup(_) | Content::Claim(_) => return,
+        };
+        if let Some(holds) = holds(record, name) {
+            let id = id.clone();
+            (holders.entry(held).or_default()).push(Candidate { id, holds });
+        }
+    }
+}
 
 pub(super) struct Unknown {
     pub(super) kind: Kind,
@@ -174,23 +296,7 @@ impl<'a> Lookup<'a> {
     // A name is tried before an id prefix.
     pub(super) fn find(&self, address: &str) -> Result<Found, Failure> {
         let parsed = Address::parse(address).map_err(|error| Failure::Usage(error.to_string()))?;
-        let named = match &parsed {
-            Address::Topic(name) => self.topic_named(name)?,
-            Address::Fact { topic, name } => match self.topic_named(topic)? {
-                Found::One(topic) => self.candidates(
-                    KindOf::Fact,
-                    name,
-                    |record| matches!(&record.content, Content::Fact(fact) if fact.topic == topic),
-                )?,
-                other => return Ok(other),
-            },
-            Address::Entry { date, name } => self.candidates(
-                KindOf::Entry,
-                name,
-                |record| matches!(&record.content, Content::Entry(entry) if entry.date == *date),
-            )?,
-            Address::Id(_) => Found::None,
-        };
+        let named = named(&parsed, |held| self.holders_of(held))?;
         if named != Found::None {
             return Ok(named);
         }
@@ -399,8 +505,20 @@ impl<'a> Lookup<'a> {
         )
     }
 
-    fn topic_named(&self, name: &Name) -> Result<Found, Failure> {
-        self.candidates(KindOf::Topic, name, |_| true)
+    fn holders_of(&self, held: &Held) -> Result<Vec<Candidate>, Failure> {
+        match held {
+            Held::Topic(name) => self.candidates(KindOf::Topic, name, |_| true),
+            Held::Fact(topic, name) => self.candidates(
+                KindOf::Fact,
+                name,
+                |record| matches!(&record.content, Content::Fact(fact) if fact.topic == *topic),
+            ),
+            Held::Entry(date, name) => self.candidates(
+                KindOf::Entry,
+                name,
+                |record| matches!(&record.content, Content::Entry(entry) if entry.date == *date),
+            ),
+        }
     }
 
     fn candidates(
@@ -408,7 +526,7 @@ impl<'a> Lookup<'a> {
         kind: KindOf,
         name: &Name,
         wanted: impl Fn(&Record) -> bool,
-    ) -> Result<Found, Failure> {
+    ) -> Result<Vec<Candidate>, Failure> {
         let mut candidates = Vec::new();
         for key in ["name", "former_names"] {
             for id in self.holding(key, &BTreeSet::from([name.as_str()]))? {
@@ -432,7 +550,7 @@ impl<'a> Lookup<'a> {
                 break;
             }
         }
-        Ok(choose(&candidates))
+        Ok(candidates)
     }
 }
 

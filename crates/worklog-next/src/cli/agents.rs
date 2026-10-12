@@ -1,11 +1,11 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use super::args::AgentsAction;
-use super::render::{Output, Render, output};
+use super::args::{AgentsAction, Shell};
+use super::render::{Output, Render, Stopped, output};
 use super::skill::SKILL;
-use super::{Environment, NAME, hook};
+use super::{Environment, NAME, complete, hook};
 use crate::app::Failure;
 use crate::app::setup::Bound;
 use crate::domain::id::DocumentId;
@@ -40,7 +40,7 @@ impl Initialized {
     }
 }
 
-fn lines(written: &[String]) -> String {
+pub(super) fn lines(written: &[String]) -> String {
     written
         .iter()
         .flat_map(|path| [path.as_str(), "\n"])
@@ -62,8 +62,8 @@ impl Render for Initialized {
 
 #[derive(Default)]
 pub(super) struct Done {
-    written: Vec<String>,
-    notes: Vec<String>,
+    pub(super) written: Vec<String>,
+    pub(super) notes: Vec<String>,
 }
 
 impl Done {
@@ -92,6 +92,17 @@ impl Done {
         };
         made.notes = self.notes;
         made
+    }
+
+    fn ended(self, ended: Result<(), Failure>, json: bool) -> Result<Output, Stopped> {
+        let done = self.output(None, json);
+        match ended {
+            Ok(()) => Ok(done),
+            Err(failure) => Err(Stopped {
+                done: Some(done),
+                failure,
+            }),
+        }
     }
 }
 
@@ -134,8 +145,7 @@ impl Placing {
         planned(agents, |agent| hook::installed(agent, binary)).map(Placing)
     }
 
-    pub(super) fn install(&self) -> Result<Done, Failure> {
-        let mut done = Done::default();
+    fn install_into(&self, done: &mut Done) -> Result<(), Failure> {
         for (agent, hooks) in &self.0 {
             done.wrote(&agent.write_skill(SKILL)?);
             if !done.hooks(agent, hooks.as_deref())? {
@@ -145,46 +155,81 @@ impl Placing {
                 ));
             }
         }
+        Ok(())
+    }
+
+    pub(super) fn install(&self) -> Result<Done, Failure> {
+        let mut done = Done::default();
+        self.install_into(&mut done)?;
         Ok(done)
     }
 }
 
-fn refresh(environment: &Environment) -> Result<Done, Failure> {
+fn fish_completions(
+    environment: &Environment,
+    homes: &[&Path],
+    done: &mut Done,
+) -> Result<Option<(PathBuf, String)>, Failure> {
+    let Some(file) = wiring::fish_completions(environment.variable, NAME)? else {
+        return Ok(None);
+    };
+    let binary = environment.binary()?;
+    if !complete::runs_as_the_command(binary) {
+        done.notes.push(format!(
+            "{}: fish's completions are not written, since the binary's file name is not {NAME}",
+            binary.display()
+        ));
+        return Ok(None);
+    }
+    let line = complete::registration(Shell::Fish, binary, homes)?;
+    Ok(Some((file, line)))
+}
+
+pub(super) fn refresh_into(environment: &Environment, done: &mut Done) -> Result<(), Failure> {
     let agents = wiring::agents(environment.variable)?;
     let binary = || environment.binary();
-    let mut done = Done::default();
-    for (agent, hooks) in planned(agents, |agent| hook::refreshed(agent, binary))? {
+    let agents = planned(agents, |agent| hook::refreshed(agent, binary))?;
+    // A binary whose path is unknown or cannot be quoted is refused before the first write.
+    let homes = agents.first().map(|(agent, _)| agent.homes());
+    let completions = fish_completions(environment, &homes.unwrap_or_default(), done)?;
+    for (agent, hooks) in &agents {
         if agent.read_skill()?.is_some_and(|held| held != SKILL) {
             done.wrote(&agent.write_skill(SKILL)?);
         }
-        done.hooks(&agent, hooks.as_deref())?;
+        done.hooks(agent, hooks.as_deref())?;
     }
-    Ok(done)
+    if let Some((file, line)) = completions {
+        wiring::write_completions(&file, &line)?;
+        done.wrote(&file);
+    }
+    Ok(())
 }
 
-fn uninstall(environment: &Environment) -> Result<Done, Failure> {
+fn uninstall_into(environment: &Environment, done: &mut Done) -> Result<(), Failure> {
     let agents = wiring::agents(environment.variable)?;
-    let mut done = Done::default();
     for (agent, hooks) in planned(agents, hook::uninstalled)? {
         if let Some(dir) = agent.remove_skill()? {
             done.wrote(&dir);
         }
         done.hooks(&agent, hooks.as_deref())?;
     }
-    Ok(done)
+    Ok(())
 }
 
 pub(super) fn run(
     action: AgentsAction,
     environment: &Environment,
     json: bool,
-) -> Result<Output, Failure> {
-    let done = match action {
-        AgentsAction::Install => Placing::on_this_host(environment)?.install()?,
-        AgentsAction::Refresh => refresh(environment)?,
-        AgentsAction::Uninstall => uninstall(environment)?,
+) -> Result<Output, Stopped> {
+    let mut done = Done::default();
+    let ended = match action {
+        AgentsAction::Install => {
+            Placing::on_this_host(environment).and_then(|placing| placing.install_into(&mut done))
+        }
+        AgentsAction::Refresh => refresh_into(environment, &mut done),
+        AgentsAction::Uninstall => uninstall_into(environment, &mut done),
     };
-    Ok(done.output(None, json))
+    done.ended(ended, json)
 }
 
 #[cfg(test)]

@@ -193,6 +193,14 @@ pub struct FollowupRow {
     pub about: Option<Reference>,
 }
 
+pub(super) fn urgency(trigger: Option<&Trigger>, today: Date) -> (u8, Option<Date>) {
+    match trigger {
+        Some(Trigger::LookAgain { on, .. }) => (u8::from(*on > today), Some(*on)),
+        Some(Trigger::Touching(_)) => (2, None),
+        None => (3, None),
+    }
+}
+
 pub(super) fn followup_rows(
     lookup: &Lookup,
     topics: &Topics,
@@ -207,6 +215,7 @@ pub(super) fn followup_rows(
         };
         let label =
             |id: &Option<DocumentId>| id.as_ref().map(|id| lookup.reference(id)).transpose();
+        let urgency = urgency(followup.trigger.as_ref(), today);
         let (trigger, is_due) = match followup.trigger {
             Some(Trigger::LookAgain { on, why }) => {
                 (Some(TriggerShown::LookAgain { on, why }), on <= today)
@@ -219,24 +228,17 @@ pub(super) fn followup_rows(
             ),
             None => (None, false),
         };
-        rows.push(FollowupRow {
+        let row = FollowupRow {
             row,
             trigger,
             due: is_due,
             entry: label(&followup.entry)?,
             about: label(&followup.about)?,
-        });
-    }
-    rows.sort_by_cached_key(|row| {
-        let (rank, on) = match (&row.trigger, row.due) {
-            (Some(TriggerShown::LookAgain { on, .. }), true) => (0, Some(*on)),
-            (Some(TriggerShown::LookAgain { on, .. }), false) => (1, Some(*on)),
-            (Some(TriggerShown::Touching { .. }), _) => (2, None),
-            (None, _) => (3, None),
         };
-        (rank, on, row.row.document.short().to_owned())
-    });
-    Ok(rows)
+        rows.push((urgency, row));
+    }
+    rows.sort_by_cached_key(|(urgency, row)| (*urgency, row.row.document.short().to_owned()));
+    Ok(rows.into_iter().map(|(_, row)| row).collect())
 }
 
 pub(super) fn by_label<T>(rows: &mut [T], row_of: impl Fn(&T) -> &Row) {

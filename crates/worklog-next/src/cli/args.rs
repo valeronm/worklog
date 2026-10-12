@@ -4,9 +4,9 @@ use std::path::PathBuf;
 use std::net::SocketAddr;
 
 use clap::error::ErrorKind;
-use clap::{CommandFactory as _, Parser, Subcommand};
+use clap::{CommandFactory as _, FromArgMatches as _, Parser, Subcommand, ValueEnum, ValueHint};
 
-use super::NAME;
+use super::{NAME, complete};
 use crate::domain::schema::{KindOf, Reason};
 use crate::web::Server;
 
@@ -17,6 +17,16 @@ fn reasons() -> String {
         let _ = write!(text, "\n  {word:<10}{}", words.join(", "));
     }
     text
+}
+
+// A command that prints no result has no JSON form.
+const NO_JSON: [&str; 2] = ["serve", "completions"];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub enum Shell {
+    Fish,
+    Bash,
+    Zsh,
 }
 
 #[derive(Parser)]
@@ -38,17 +48,34 @@ pub struct Cli {
 }
 
 impl Cli {
-    // `--json` is refused beside `serve`, which prints no result.
+    /// The definition a shell is answered from, where `--json` is not offered beside a command
+    /// of `NO_JSON`.
+    pub fn asked_by_a_shell() -> clap::Command {
+        let mut command = Cli::command();
+        // A global flag is in a command's own arguments only once the definition is built.
+        command.build();
+        for name in NO_JSON {
+            command = command.mut_subcommand(name, |refusing| {
+                refusing.mut_arg("json", |json| json.hide(true))
+            });
+        }
+        command
+    }
+
+    /// `--json` is refused beside a command of `NO_JSON`.
     pub fn parsed<I, T>(args: I) -> Result<Cli, clap::Error>
     where
         I: IntoIterator<Item = T>,
         T: Into<std::ffi::OsString> + Clone,
     {
-        let cli = Cli::try_parse_from(args)?;
-        if cli.json && matches!(cli.command, Invoked::Serve { .. }) {
+        let matches = Cli::command().try_get_matches_from(args)?;
+        let cli =
+            Cli::from_arg_matches(&matches).map_err(|error| error.format(&mut Cli::command()))?;
+        let named = matches.subcommand_name();
+        if let Some(command) = named.filter(|name| cli.json && NO_JSON.contains(name)) {
             return Err(Cli::command().error(
                 ErrorKind::ArgumentConflict,
-                "the argument '--json' cannot be used with 'serve'",
+                format!("the argument '--json' cannot be used with '{command}'"),
             ));
         }
         Ok(cli)
@@ -73,13 +100,23 @@ pub enum Invoked {
         #[command(subcommand)]
         action: AgentsAction,
     },
+    /// The line a shell's startup file holds to take its completions from this binary
+    Completions { shell: Shell },
+    /// Put the latest release in the place of this binary when it is newer, and bring the
+    /// skill, the hook and the fish completions already there up to it
+    Upgrade {
+        /// Only say whether a newer release exists; exit 1 when one does
+        #[arg(long)]
+        check: bool,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Subcommand)]
 pub enum AgentsAction {
     /// Write the skill and add the session hook for every agent on this host
     Install,
-    /// Bring a skill and a hook already there up to this binary, and write nothing else
+    /// Bring a skill, a hook and the fish completions already there up to this binary, and
+    /// write nothing else
     Refresh,
     /// Remove the skill and the session hook from every agent
     Uninstall,
@@ -92,7 +129,7 @@ pub enum Command {
         /// The machine topic: an existing topic to bind to, or the name of a new one
         name: String,
         /// The store directory
-        #[arg(long)]
+        #[arg(long, value_hint = ValueHint::DirPath)]
         store: PathBuf,
         /// What the machine is, for a topic that does not exist yet
         #[arg(long)]
@@ -119,13 +156,25 @@ pub enum DraftCommand {
         what: NewWhat,
     },
     /// Open a document as it stands as a draft to edit
-    Checkout { target: String },
+    Checkout {
+        #[arg(add = complete::documents())]
+        target: String,
+    },
     /// Check a draft and store it as the document's next version
-    Save { target: String },
+    Save {
+        #[arg(add = complete::drafts())]
+        target: String,
+    },
     /// Delete a draft without storing it
-    Discard { target: String },
+    Discard {
+        #[arg(add = complete::drafts())]
+        target: String,
+    },
     /// Open a draft over every head of a forked document
-    Resolve { target: String },
+    Resolve {
+        #[arg(add = complete::forked())]
+        target: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -146,7 +195,7 @@ pub enum NewWhat {
     /// Open work under one or more topics; stored at once with --summary
     Followup {
         /// The topics it belongs to, separated by commas
-        #[arg(long, required = true, value_delimiter = ',')]
+        #[arg(long, required = true, value_delimiter = ',', add = complete::topics())]
         topics: Vec<String>,
         /// What is open, in one line; given, the followup is stored at once
         #[arg(long)]
@@ -158,13 +207,13 @@ pub enum NewWhat {
         #[arg(long, requires = "look_again")]
         why: Option<String>,
         /// One of its topics, to raise it when work next touches that topic
-        #[arg(long)]
+        #[arg(long, add = complete::topics())]
         touching: Option<String>,
         /// The entry it arose in
-        #[arg(long)]
+        #[arg(long, add = complete::entries())]
         entry: Option<String>,
         /// The document it is about
-        #[arg(long)]
+        #[arg(long, add = complete::documents())]
         about: Option<String>,
     },
 }
@@ -172,54 +221,75 @@ pub enum NewWhat {
 #[derive(Subcommand)]
 pub enum ChangeCommand {
     /// Give a topic, a fact or an entry a new name; the old one keeps working
-    Rename { target: String, name: String },
+    Rename {
+        #[arg(add = complete::renamable())]
+        target: String,
+        name: String,
+    },
     /// File documents under another topic
     Move {
         /// The topic they are under
+        #[arg(add = complete::topics())]
         from: String,
         /// The topic to put them under
+        #[arg(add = complete::topics())]
         to: String,
-        #[arg(required = true)]
+        #[arg(required = true, add = complete::movable())]
         targets: Vec<String>,
     },
     /// Record that a fact was confirmed today
-    Verify { fact: String },
+    Verify {
+        #[arg(add = complete::facts())]
+        fact: String,
+    },
     /// End a document for a reason its kind has, with a note saying why
     #[command(after_help = reasons())]
     End {
+        #[arg(add = complete::documents())]
         target: String,
         /// One of the reasons the document's kind ends for
+        #[arg(add = complete::reasons())]
         reason: String,
         /// Why; only `done` goes without one
         note: Option<String>,
         /// The document that ended it
-        #[arg(long)]
+        #[arg(long, add = complete::documents())]
         by: Option<String>,
     },
     /// Bring an ended document back
-    Reopen { target: String, why: String },
+    Reopen {
+        #[arg(add = complete::ended())]
+        target: String,
+        why: String,
+    },
     /// End a followup as done; the note is optional
     Done {
+        #[arg(add = complete::followups())]
         followup: String,
         note: Option<String>,
     },
     /// End a followup as dropped, with a note saying why
     Drop {
+        #[arg(add = complete::followups())]
         followup: String,
         note: Option<String>,
     },
     /// Set when a followup comes up again: `<date> <why>`, `touching <topic>`, or `none`
     Trigger {
+        #[arg(add = complete::followups())]
         followup: String,
         /// A day, `YYYY-MM-DD`, the word `touching`, or `none` to clear the trigger
+        #[arg(add = complete::triggers())]
         when: String,
         /// Why on that day, or the topic
         what: Option<String>,
     },
     /// Place a topic in a directory on this machine
     Claim {
+        #[arg(add = complete::topics())]
         topic: String,
         /// The working directory when not given
+        #[arg(value_hint = ValueHint::DirPath)]
         dir: Option<PathBuf>,
         /// In no directory: it loads in a session no claimed directory covers
         #[arg(long, conflicts_with = "dir")]
@@ -227,8 +297,10 @@ pub enum ChangeCommand {
     },
     /// End this machine's claim of a directory for a topic
     Unclaim {
+        #[arg(add = complete::topics())]
         topic: String,
         /// The working directory when not given
+        #[arg(value_hint = ValueHint::DirPath)]
         dir: Option<PathBuf>,
         /// The claim made in no directory
         #[arg(long, conflicts_with = "dir")]
@@ -239,11 +311,18 @@ pub enum ChangeCommand {
 #[derive(Subcommand)]
 pub enum ReadCommand {
     /// Print a document as it stands, every head of a fork, or one version by its id
-    Show { target: String },
+    Show {
+        #[arg(add = complete::documents())]
+        target: String,
+    },
     /// Every version of a document
-    History { target: String },
+    History {
+        #[arg(add = complete::documents())]
+        target: String,
+    },
     /// A draft against what it started from, a version against its parents, or two versions
     Diff {
+        #[arg(add = complete::drafts())]
         target: String,
         other: Option<String>,
     },
@@ -252,7 +331,7 @@ pub enum ReadCommand {
         #[arg(default_value_t = 20)]
         n: usize,
         /// Only what this machine topic wrote
-        #[arg(long)]
+        #[arg(long, add = complete::topics())]
         machine: Option<String>,
     },
     /// Documents whose name, summary or text holds the term, facts first
@@ -262,7 +341,7 @@ pub enum ReadCommand {
         #[arg(long)]
         regex: bool,
         /// Only what is under this topic
-        #[arg(long)]
+        #[arg(long, add = complete::topics())]
         topic: Option<String>,
         /// The ended ones too
         #[arg(long)]
@@ -271,15 +350,26 @@ pub enum ReadCommand {
     /// What a session starting in a directory is opened with
     Context {
         /// The working directory when not given
+        #[arg(value_hint = ValueHint::DirPath)]
         dir: Option<PathBuf>,
     },
     /// The followups that are due for a session in a directory
     Due {
         /// The working directory when not given
+        #[arg(value_hint = ValueHint::DirPath)]
         dir: Option<PathBuf>,
     },
     /// Every rule the store has to keep; exit 1 when one is broken
     Check,
+    /// How often each command was run, on this machine and on every machine that syncs here
+    Usage {
+        /// Only what this machine topic ran
+        #[arg(long, add = complete::topics())]
+        machine: Option<String>,
+        /// Only from this day on, `YYYY-MM-DD`
+        #[arg(long)]
+        since: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -289,6 +379,7 @@ pub enum ListCommand {
     /// Every topic with what it is, or the topics that are part of one
     Topics {
         /// A topic, to list the topics that are part of it
+        #[arg(add = complete::topics())]
         topic: Option<String>,
         /// The ended ones too
         #[arg(long, conflicts_with = "topic")]
@@ -296,6 +387,7 @@ pub enum ListCommand {
     },
     /// The facts, or those under a topic and its parts
     Facts {
+        #[arg(add = complete::topics())]
         topic: Option<String>,
         /// The ended ones too
         #[arg(long)]
@@ -303,6 +395,7 @@ pub enum ListCommand {
     },
     /// The ideas, or those under a topic and its parts
     Ideas {
+        #[arg(add = complete::topics())]
         topic: Option<String>,
         /// The ended ones too
         #[arg(long)]
@@ -310,6 +403,7 @@ pub enum ListCommand {
     },
     /// The entries, newest first, or those under a topic and its parts
     Entries {
+        #[arg(add = complete::topics())]
         topic: Option<String>,
         /// At most this many
         #[arg(short)]
@@ -321,6 +415,7 @@ pub enum ListCommand {
     /// Open work, due items first
     Followups {
         /// A topic, or an entry for the followups that name it
+        #[arg(add = complete::topics_and_entries())]
         about: Option<String>,
         /// The ended ones too
         #[arg(long)]
@@ -328,9 +423,10 @@ pub enum ListCommand {
     },
     /// Where topics are placed on this machine
     Where {
+        #[arg(add = complete::topics())]
         topic: Option<String>,
         /// Another machine topic's placements
-        #[arg(long)]
+        #[arg(long, add = complete::topics())]
         machine: Option<String>,
     },
     /// Documents with more than one current version
@@ -414,9 +510,17 @@ mod tests {
             "worklog-next due",
             "worklog-next due /atlas/lantern",
             "worklog-next check",
+            "worklog-next usage",
+            "worklog-next usage --machine desk --since 2026-10-09",
             "worklog-next serve",
             "worklog-next serve --bind 127.0.0.1:0",
             "worklog-next serve --bind [::1]:8080 --host desk.local --host atlas",
+            "worklog-next completions fish",
+            "worklog-next completions bash",
+            "worklog-next completions zsh",
+            "worklog-next upgrade",
+            "worklog-next upgrade --check",
+            "worklog-next upgrade --check --json",
         ] {
             assert!(parsed(line).is_ok(), "{line}");
         }
@@ -492,13 +596,77 @@ mod tests {
             ErrorKind::ArgumentConflict
         );
         assert_eq!(refused("worklog-next polish"), ErrorKind::InvalidSubcommand);
+        assert_eq!(
+            refused("worklog-next completions"),
+            ErrorKind::MissingRequiredArgument
+        );
+        for shell in ["tcsh", "elvish", "powershell"] {
+            assert_eq!(
+                refused(&format!("worklog-next completions {shell}")),
+                ErrorKind::InvalidValue
+            );
+        }
+    }
+
+    #[test]
+    fn a_shell_is_not_offered_json_where_it_is_refused() {
+        let asked = Cli::asked_by_a_shell();
+        let hidden = |command: &str| {
+            let command = asked.find_subcommand(command).expect("the command");
+            let json = command.get_arguments().find(|arg| arg.get_id() == "json");
+            json.expect("the global flag").is_hide_set()
+        };
+        assert!(hidden("serve") && hidden("completions"));
+        assert!(!hidden("topics") && !hidden("agents") && !hidden("upgrade"));
+        let mut parsed = Cli::command();
+        parsed.build();
+        let flags = |command: &clap::Command| -> Vec<(String, Vec<String>)> {
+            let ids = |sub: &clap::Command| {
+                let mut ids: Vec<String> = (sub.get_arguments())
+                    .map(|arg| arg.get_id().to_string())
+                    .collect();
+                ids.sort();
+                (sub.get_name().to_owned(), ids)
+            };
+            let mut every: Vec<_> = command.get_subcommands().map(ids).collect();
+            every.sort();
+            every
+        };
+        assert_eq!(flags(&asked), flags(&parsed));
+    }
+
+    #[test]
+    fn json_is_refused_beside_a_command_with_no_json_form() {
+        for line in [
+            "worklog-next serve --json",
+            "worklog-next --json serve --bind 127.0.0.1:0",
+            "worklog-next completions fish --json",
+            "worklog-next --json completions zsh",
+        ] {
+            let Err(error) = parsed(line) else {
+                panic!("{line} parsed");
+            };
+            assert_eq!(error.kind(), ErrorKind::ArgumentConflict, "{line}");
+            let command = if line.contains("serve") {
+                "serve"
+            } else {
+                "completions"
+            };
+            let said = format!("the argument '--json' cannot be used with '{command}'");
+            assert!(error.to_string().contains(&said), "{error}");
+        }
     }
 
     #[test]
     fn serve_listens_on_the_loopback_unless_told_and_takes_each_host_it_is_given() {
         let served = |line: &str| match parsed(line).unwrap().command {
             Invoked::Serve { bind, hosts } => (bind.to_string(), hosts),
-            Invoked::Run(_) | Invoked::Agents { .. } => panic!("{line}: expected a serve"),
+            Invoked::Run(_)
+            | Invoked::Agents { .. }
+            | Invoked::Completions { .. }
+            | Invoked::Upgrade { .. } => {
+                panic!("{line}: expected a serve")
+            }
         };
         assert_eq!(
             served("worklog-next serve"),
@@ -581,5 +749,19 @@ mod tests {
         };
         assert!(!init("worklog-next init desk --store kept"));
         assert!(init("worklog-next init desk --store kept --agents"));
+    }
+
+    #[test]
+    fn upgrade_replaces_the_binary_unless_it_is_only_to_check() {
+        let check = |line: &str| match parsed(line).unwrap().command {
+            Invoked::Upgrade { check } => check,
+            _ => panic!("{line}: expected an upgrade"),
+        };
+        assert!(!check("worklog-next upgrade"));
+        assert!(check("worklog-next upgrade --check"));
+        assert_eq!(
+            refused("worklog-next upgrade lantern"),
+            ErrorKind::UnknownArgument
+        );
     }
 }

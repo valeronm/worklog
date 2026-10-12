@@ -7,7 +7,7 @@ use crate::app::followup::{NewFollowup, TriggerArg};
 use crate::app::search::Query;
 use crate::app::{
     Deps, Failure, amend, bulk, check, claim, context, draft, followup, fork, list, save, search,
-    setup, show,
+    setup, show, usage,
 };
 use crate::domain::schema::Reason;
 
@@ -223,6 +223,10 @@ fn read(
             output(&context::due(deps, &directory)?, json)
         }
         ReadCommand::Check => output(&check::check(deps)?, json),
+        ReadCommand::Usage { machine, since } => output(
+            &usage::usage(deps, machine.as_deref(), since.as_deref())?,
+            json,
+        ),
     })
 }
 
@@ -287,9 +291,13 @@ mod tests {
     use crate::app::testing::{
         World, claim_fields, entry, fact, followup, fork, topic, world_with_atlas,
     };
+    use crate::cli::NAME;
     use crate::cli::args::{Cli, Invoked};
     use crate::cli::render::{CONTEXT_BYTES, assert_fits};
+    use crate::cli::tests::environment;
     use crate::domain::id::DocumentId;
+    use crate::domain::ports::Usage as _;
+    use crate::domain::testing::ran;
 
     const PROJECT: &str = "/home/desk/projects/lantern";
 
@@ -307,14 +315,13 @@ mod tests {
         }
 
         fn run_in(&self, cwd: Option<&str>, line: &[&str]) -> Result<Output, Failure> {
-            let cli = Cli::parsed([&["worklog-next"], line].concat()).expect("a command");
+            let cli = Cli::parsed([&[NAME], line].concat()).expect("a command");
             let Invoked::Run(command) = &cli.command else {
                 panic!("{line:?} returns no result");
             };
             let environment = Environment {
                 cwd: cwd.map(PathBuf::from),
-                binary: None,
-                variable: &|_| None,
+                ..environment(&|_| None)
             };
             run(&self.world.deps(), &environment, cli.json, command)
         }
@@ -677,6 +684,38 @@ mod tests {
         );
         fixture.text_in("/home/desk/projects", &["unclaim", "lantern", "../link"]);
         assert_eq!(fixture.text(&["where"]), "");
+    }
+
+    #[test]
+    fn usage_counts_the_runs_logged_for_a_machine_topic_and_since_a_day() {
+        let fixture = Fixture::new();
+        let world = &fixture.world;
+        for (command, day) in [("show", "2026-09-01"), ("facts", "2026-09-02")] {
+            let run = ran(&world.machine(), command, day);
+            world.usage.record(&run).unwrap();
+        }
+        let counted = fixture.text(&["usage"]);
+        assert_eq!(counted, "desk — 2 runs\n      1 facts\n      1 show\n");
+        assert_eq!(fixture.text(&["usage", "--machine", "desk"]), counted);
+        let none = fixture.run(&["usage", "--machine", "atlas"]).unwrap();
+        assert_eq!((none.text.as_str(), none.exit), ("", 0));
+        assert_eq!(none.notes, ["nothing logged"]);
+        assert_eq!(
+            fixture.text(&["usage", "--since", "2026-09-02"]),
+            "desk — 1 run\n      1 facts\n"
+        );
+        let later = ["usage", "--since", "2026-09-03", "--json"];
+        assert_eq!(fixture.text(&later), "[]\n");
+        assert_eq!(
+            usage(fixture.run(&["usage", "--since", "soon"])),
+            "`soon` is not a date (YYYY-MM-DD)"
+        );
+        assert_eq!(
+            refused(fixture.run(&["usage", "--machine", "torch"])),
+            "torch: names no document"
+        );
+        assert_eq!(fixture.run(&["search", "lantern"]).unwrap().hits, Some(1));
+        assert_eq!(fixture.run(&["topics"]).unwrap().hits, None);
     }
 
     #[test]

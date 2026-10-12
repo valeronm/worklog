@@ -15,6 +15,10 @@ impl Render for Vec<Hit> {
         }
         text
     }
+
+    fn hits(&self) -> Option<usize> {
+        Some(self.len())
+    }
 }
 
 impl Render for Vec<Logged> {
@@ -36,6 +40,7 @@ impl Render for Vec<Logged> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::output;
     use super::super::testing::{WRITTEN, row, stamp, to};
     use super::*;
     use crate::domain::id::VersionId;
@@ -70,6 +75,20 @@ mod tests {
              \x20   … 2 more\n"
         );
         assert_eq!(Vec::<Hit>::new().text(), "");
+    }
+
+    #[test]
+    fn a_search_says_how_many_documents_it_matched_in_text_and_in_json() {
+        let hit = Hit {
+            row: row(&lantern(), "lantern/relay", "Pin four"),
+            lines: Vec::new(),
+        };
+        let hits = vec![hit.clone(), hit];
+        for json in [false, true] {
+            assert_eq!(output(&hits, json).hits, Some(2));
+            assert_eq!(output(&Vec::<Hit>::new(), json).hits, Some(0));
+            assert_eq!(output(&Vec::<Logged>::new(), json).hits, None);
+        }
     }
 
     #[test]

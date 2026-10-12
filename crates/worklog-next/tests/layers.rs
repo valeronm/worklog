@@ -85,10 +85,70 @@ fn no_module_outside_the_schema_names_it() {
     }
 }
 
+// A line of the usage log is a format of the store, worded by the file that writes it.
+const WORDS_ITS_OWN_LINE: &str = "wiring/fs/usage.rs";
+
+fn json_named(file: &str, text: &str) -> Vec<String> {
+    let layer = file.split('/').next().unwrap_or_default();
+    let barred = ["domain", "app", "wiring"].contains(&layer) && file != WORDS_ITS_OWN_LINE;
+    if barred && text.contains("serde_json") {
+        vec!["names `serde_json`".to_owned()]
+    } else {
+        Vec::new()
+    }
+}
+
 #[test]
 fn a_result_is_given_its_json_form_by_the_command_line_alone() {
-    for layer in ["domain", "app", "wiring"] {
-        reaches_nothing_in(layer, &["serde_json"]);
+    let mut found = Vec::new();
+    sources(&src(), &mut found);
+    let mut broken = Vec::new();
+    let mut wording_a_line = Vec::new();
+    for (path, text) in found {
+        let file = Path::new(&path).strip_prefix(src()).expect("a file of it");
+        let file = file.display().to_string();
+        for what in json_named(&file, &text) {
+            broken.push(format!("{file}: {what}"));
+        }
+        if file == WORDS_ITS_OWN_LINE && text.contains("serde_json") {
+            wording_a_line.push(file);
+        }
+    }
+    assert_eq!(broken, [""; 0]);
+    assert_eq!(wording_a_line, [WORDS_ITS_OWN_LINE]);
+}
+
+#[test]
+fn a_file_below_the_command_line_that_names_json_is_found_but_the_one_wording_a_stored_line() {
+    let naming = "use serde_json::Value;
+let line = serde_json::to_string(&line);";
+    for clean in [
+        "wiring/fs/usage.rs",
+        "cli/json.rs",
+        "cli/usage.rs",
+        "web/mod.rs",
+    ] {
+        assert_eq!(json_named(clean, naming), [""; 0], "{clean}");
+    }
+    for broken in [
+        "wiring/fs/store.rs",
+        "wiring/fs/mod.rs",
+        "wiring/fs/usage/line.rs",
+        "wiring/usage.rs",
+        "wiring/mod.rs",
+        "wiring/net.rs",
+        "app/usage.rs",
+        "app/record.rs",
+        "app/wiring/fs/usage.rs",
+        "domain/usage.rs",
+        "domain/testing.rs",
+    ] {
+        assert_eq!(
+            json_named(broken, naming),
+            ["names `serde_json`"],
+            "{broken}"
+        );
+        assert_eq!(json_named(broken, "use serde::Serialize;"), [""; 0]);
     }
 }
 
@@ -114,6 +174,45 @@ fn a_result_s_json_carries_every_field_under_the_convention() {
                 "{path} renames its keys to another case"
             );
         }
+    }
+}
+
+fn json_written_by_hand(text: &str) -> Vec<String> {
+    let text = uncommented(text);
+    let tokens = tokens(&text);
+    let mut written = Vec::new();
+    for at in 0..tokens.len().saturating_sub(2) {
+        if tokens[at] == "Serialize" && tokens[at + 1] == "for" {
+            written.push(tokens[at + 2].to_owned());
+        }
+    }
+    written
+}
+
+#[test]
+fn a_result_s_json_is_written_by_hand_for_these_alone() {
+    let mut by_hand = violations(&src().join("app"), json_written_by_hand);
+    by_hand.sort();
+    assert_eq!(
+        by_hand,
+        [
+            format!("{}: Made", app().join("followup.rs").display()),
+            format!("{}: Compared", app().join("show.rs").display()),
+        ]
+    );
+}
+
+#[test]
+fn a_result_that_writes_its_own_json_is_found() {
+    for (text, found) in [
+        ("impl Serialize for Checked {", &["Checked"][..]),
+        ("impl\n    Serialize\n    for Checked {", &["Checked"]),
+        ("impl serde::Serialize for Made {}", &["Made"]),
+        ("#[derive(Serialize)]\npub struct Checked {", &[]),
+        ("// impl Serialize for Checked {", &[]),
+        ("impl<S: Serialize> Render for S {", &[]),
+    ] {
+        assert_eq!(json_written_by_hand(text), found, "{text}");
     }
 }
 
@@ -244,15 +343,86 @@ fn a_command_line_file_that_names_the_store_is_found() {
 
 const TEST_MODULE: &str = "#[cfg(test)]\nmod tests";
 
+fn process_read(text: &str) -> Vec<String> {
+    let text = text.split(TEST_MODULE).next().unwrap_or_default();
+    modules_named(text, "std", &["env"])
+}
+
+#[test]
+fn the_command_line_reads_its_process_where_it_starts_and_where_a_shell_asks() {
+    let cli = src().join("cli");
+    let mut found = Vec::new();
+    sources(&cli, &mut found);
+    let mut readers = Vec::new();
+    for (path, text) in found {
+        let file = Path::new(&path).strip_prefix(&cli).expect("a file of it");
+        for read in process_read(&text) {
+            readers.push(format!("{}: {read}", file.display()));
+        }
+    }
+    readers.sort();
+    assert_eq!(
+        readers,
+        [
+            "complete.rs: names `std::env` as `std::env::var_os`",
+            "mod.rs: names `std::env` as `std::env::args_os`",
+            "mod.rs: names `std::env` as `std::env::current_dir`",
+            "mod.rs: names `std::env` as `std::env::current_exe`",
+            "mod.rs: names `std::env` as `std::env::var_os`",
+        ]
+    );
+}
+
+#[test]
+fn a_command_line_file_that_reads_the_process_is_found() {
+    for clean in [
+        "let cwd = environment.cwd.as_deref();\nlet path = (environment.variable)(\"PATH\");",
+        "// std::env::var_os is read where the process starts.\nlet env = 1;",
+        "let name = env!(\"CARGO_PKG_NAME\");",
+        "pub fn run() {}\n\n#[cfg(test)]\nmod tests {\n    fn joined() {\n        std::env::join_paths(dirs).unwrap();\n    }\n}\n",
+    ] {
+        assert_eq!(process_read(clean), [""; 0], "{clean}");
+    }
+    for (broken, found) in [
+        (
+            "let home = std::env::var_os(\"HOME\");",
+            "names `std::env` as `std::env::var_os`",
+        ),
+        (
+            "use std::env;\nlet cwd = env::current_dir();",
+            "names `std::env` as `std::env`",
+        ),
+        (
+            "use std::{env::args_os, io};",
+            "names `std::env` as `std::env::args_os`",
+        ),
+        (
+            "let words: Vec<_> = std :: env :: args().collect();",
+            "names `std::env` as `std::env::args`",
+        ),
+    ] {
+        let named = process_read(broken);
+        assert_eq!(named.first().map(String::as_str), Some(found), "{broken}");
+    }
+}
+
+const ADAPTERS: [&str; 2] = ["fs", "net"];
+
 fn wiring_opened(text: &str) -> Vec<String> {
     let text = outside_tests(text);
     let mut found = Vec::new();
-    if !text.contains("modfs;") {
-        found.push("does not declare `mod fs;`".to_owned());
+    for module in ADAPTERS {
+        if !text.contains(&format!("mod{module};")) {
+            found.push(format!("does not declare `mod {module};`"));
+        }
+        if text.contains(&format!("pubmod{module}")) {
+            found.push(format!("declares `pub mod {module}`"));
+        }
+        if text.contains(&format!(")mod{module}")) {
+            found.push(format!("declares `mod {module}` to others"));
+        }
     }
     for (needle, what) in [
-        ("pubmodfs", "declares `pub mod fs`"),
-        (")modfs", "declares `mod fs` to others"),
         ("pubuse", "has a `pub use`"),
         (")use", "has a `pub use` to others"),
     ] {
@@ -281,7 +451,7 @@ fn the_wiring_keeps_its_adapters_to_itself() {
 
 #[test]
 fn a_wiring_that_lets_an_adapter_out_is_found() {
-    let kept = "mod fs;\n\nuse fs::{FsHost, FsStore};\n\npub struct Adapters {\n    store: FsStore,\n    host: FsHost,\n}\n\n#[cfg(test)]\nmod tests {\n    pub use super::*;\n}\n";
+    let kept = "mod fs;\nmod net;\n\nuse fs::{FsHost, FsStore};\nuse net::GitHubReleases;\n\npub struct Adapters {\n    store: FsStore,\n    host: FsHost,\n}\n\n#[cfg(test)]\nmod tests {\n    pub use super::*;\n}\n";
     assert_eq!(wiring_opened(kept), [""; 0]);
     for (from, to, found) in [
         ("mod fs;", "pub mod fs;", "declares `pub mod fs`"),
@@ -292,6 +462,18 @@ fn a_wiring_that_lets_an_adapter_out_is_found() {
             "declares `mod fs` to others",
         ),
         ("mod fs;", "", "does not declare `mod fs;`"),
+        ("mod net;", "pub mod net;", "declares `pub mod net`"),
+        (
+            "mod net;",
+            "pub(super) mod\n    net;",
+            "declares `mod net` to others",
+        ),
+        ("mod net;", "", "does not declare `mod net;`"),
+        (
+            "use net::GitHubReleases;",
+            "pub use net::GitHubReleases;",
+            "has a `pub use`",
+        ),
         ("use fs::{", "pub use fs::{", "has a `pub use`"),
         (
             "use fs::{",
@@ -317,6 +499,231 @@ fn a_wiring_that_lets_an_adapter_out_is_found() {
         assert!(kept.contains(from), "{from}");
         let broken = kept.replacen(from, to, 1);
         assert_eq!(wiring_opened(&broken), [found], "{broken}");
+    }
+}
+
+fn network_reached(text: &str) -> Vec<String> {
+    let text = uncommented(text);
+    let mut found = Vec::new();
+    for path in paths(&text) {
+        let named = path.join("::");
+        // From a file under `wiring`, `super` reaches its modules as `wiring` does.
+        if (path.windows(2)).any(|pair| pair == ["wiring", "net"] || pair == ["super", "net"]) {
+            found.push(format!("names `wiring::net` as `{named}`"));
+        }
+        if path.contains(&"ureq") {
+            found.push(format!("names `ureq` as `{named}`"));
+        }
+    }
+    found
+}
+
+#[test]
+fn the_network_is_reached_by_one_module_the_wiring_alone_names() {
+    let reader = src().join("wiring").join("net.rs");
+    let mut found = Vec::new();
+    sources(&src(), &mut found);
+    let mut broken = Vec::new();
+    let mut readers = 0;
+    for (path, text) in found {
+        if Path::new(&path) == reader {
+            readers += usize::from(tokens(&uncommented(&text)).contains(&"ureq"));
+            continue;
+        }
+        for what in network_reached(&text) {
+            broken.push(format!("{path}: {what}"));
+        }
+    }
+    assert_eq!(readers, 1);
+    assert_eq!(broken, [""; 0]);
+}
+
+#[test]
+fn a_file_that_reaches_the_network_past_the_wiring_is_found() {
+    for clean in [
+        "mod fs;\nmod net;\n\nuse fs::{DirReleases, FsBinary};\nuse net::GitHubReleases;",
+        "None => Box::new(GitHubReleases::new()),",
+        "use std::net::{SocketAddr, TcpListener};\nlet bound = std::net::TcpStream::connect(to);",
+        "// ureq reads them, in crate::wiring::net.\nlet request = 1; let net = wiring.net;",
+        "let releases = wiring::releases(environment.variable);",
+    ] {
+        assert_eq!(network_reached(clean), [""; 0], "{clean}");
+    }
+    for (broken, found) in [
+        ("use ureq::Agent;", "names `ureq` as `ureq::Agent`"),
+        (
+            "let agent = ureq::Agent::new_with_defaults();",
+            "names `ureq` as `ureq::Agent::new_with_defaults`",
+        ),
+        ("use {serde::Serialize, ureq};", "names `ureq` as `ureq`"),
+        ("extern crate ureq;", "names `ureq` as `ureq`"),
+        (
+            "let body = ::ureq::get(url).call()?;",
+            "names `ureq` as `ureq::get`",
+        ),
+        (
+            "use crate::wiring::net::GitHubReleases;",
+            "names `wiring::net` as `crate::wiring::net::GitHubReleases`",
+        ),
+        (
+            "use crate::wiring::{self, net};",
+            "names `wiring::net` as `crate::wiring::net`",
+        ),
+        (
+            "let releases = super::net::GitHubReleases::new();",
+            "names `wiring::net` as `super::net::GitHubReleases::new`",
+        ),
+        (
+            "use super :: super :: net :: GitHubReleases;",
+            "names `wiring::net` as `super::super::net::GitHubReleases`",
+        ),
+        (
+            "let releases = wiring::net::GitHubReleases::new();",
+            "names `wiring::net` as `wiring::net::GitHubReleases::new`",
+        ),
+    ] {
+        assert_eq!(network_reached(broken), [found], "{broken}");
+    }
+}
+
+fn network_reader_made(text: &str) -> Vec<String> {
+    let text = uncommented(text);
+    let tokens = tokens(&text);
+    let mut found = Vec::new();
+    for (at, token) in tokens.iter().enumerate() {
+        let called = tokens.get(at + 1) == Some(&"(");
+        let defined_or_a_method = at >= 1 && matches!(tokens[at - 1], "fn" | ".");
+        if *token == "releases" && called && !defined_or_a_method {
+            found.push("calls `releases`".to_owned());
+        }
+        if *token == "GitHubReleases" {
+            found.push("names `GitHubReleases`".to_owned());
+        }
+    }
+    found
+}
+
+#[test]
+fn the_network_reader_is_made_where_the_process_starts_and_by_no_unit_test() {
+    let mut found = Vec::new();
+    sources(&src(), &mut found);
+    let mut makers = Vec::new();
+    for (path, text) in found {
+        let file = Path::new(&path).strip_prefix(src()).expect("a file of it");
+        let (shipped, tests) = text.split_once(TEST_MODULE).unwrap_or((&text, ""));
+        for (part, where_) in [(shipped, ""), (tests, " in its tests")] {
+            for what in network_reader_made(part) {
+                makers.push(format!("{}{where_}: {what}", file.display()));
+            }
+        }
+    }
+    makers.sort();
+    makers.dedup();
+    assert_eq!(
+        makers,
+        [
+            "cli/mod.rs: calls `releases`",
+            "wiring/mod.rs: names `GitHubReleases`",
+            "wiring/net.rs: names `GitHubReleases`",
+        ]
+    );
+}
+
+#[test]
+fn a_file_that_makes_the_network_reader_is_found() {
+    for clean in [
+        "pub fn releases(variable: &dyn Fn(&str) -> Option<OsString>) -> Box<dyn Releases> {",
+        "let releases = (environment.releases)();\nlet current = environment.version;",
+        "version: release::current(),\nreleases: &UNPUBLISHED,",
+        "// wiring::releases(&variable) makes a GitHubReleases.\nlet dir = host.releases();",
+        "let held = release_directory(&given).expect(\"a directory\");",
+    ] {
+        assert_eq!(network_reader_made(clean), [""; 0], "{clean}");
+    }
+    for (broken, found) in [
+        (
+            "releases: &|| wiring::releases(&variable),",
+            "calls `releases`",
+        ),
+        ("let held = releases(&given);", "calls `releases`"),
+        (
+            "let source = crate::wiring :: releases (&|_| None);",
+            "calls `releases`",
+        ),
+        (
+            "let reader = GitHubReleases::new();",
+            "names `GitHubReleases`",
+        ),
+        (
+            "None => Box::new(net::GitHubReleases::new()),",
+            "names `GitHubReleases`",
+        ),
+    ] {
+        assert_eq!(network_reader_made(broken), [found], "{broken}");
+    }
+}
+
+const RUNS_A_PROGRAM: [&str; 4] = ["output", "spawn", "status", "assert"];
+
+// A binary run without `RELEASES` set reads its releases from the network.
+fn run_past_the_releases(text: &str) -> Vec<String> {
+    let text = uncommented(text);
+    let tokens = tokens(&text);
+    let starts: Vec<usize> = (0..tokens.len())
+        .filter(|at| tokens[*at] == "fn" && tokens.get(at + 1).is_some_and(|name| word(name)))
+        .collect();
+    let mut found = Vec::new();
+    for (nth, start) in starts.iter().enumerate() {
+        let end = starts.get(nth + 1).copied().unwrap_or(tokens.len());
+        let body = &tokens[*start..end];
+        let runs = body
+            .windows(3)
+            .any(|call| call[0] == "." && RUNS_A_PROGRAM.contains(&call[1]) && call[2] == "(");
+        if runs && !body.contains(&"RELEASES") {
+            found.push(format!("`{}` runs a program without `RELEASES`", body[1]));
+        }
+    }
+    found
+}
+
+#[test]
+fn every_scenario_runs_the_binary_with_its_releases_given() {
+    let scenarios = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/cli.rs");
+    assert_eq!(violations(&scenarios, run_past_the_releases), [""; 0]);
+    let text = fs::read_to_string(&scenarios).expect("the scenarios");
+    assert!(text.contains("\nconst RELEASES: &str = \"WORKLOG_NEXT_RELEASES\";\n"));
+}
+
+#[test]
+fn a_helper_that_runs_the_binary_without_its_releases_is_found() {
+    for clean in [
+        "fn run_as(&self, mut program: Command) -> Ran {\n    program.env(RELEASES, self.unpublished());\n    program.output()\n}\n",
+        "fn spawned(&self) -> Child {\n    program\n        .env(RELEASES, dir)\n        .spawn()\n        .expect(\"the binary runs\")\n}\n",
+        "fn run(&self, args: &[&str]) -> Ran {\n    self.run_in(&self.home(), args)\n}\n",
+        "fn listed(list: fn(&Host) -> Ran, host: &Host) -> Ran {\n    list(host)\n}\n",
+        "fn waited() {\n    // program.output() is run_as's.\n    let output = ran.output;\n}\n",
+    ] {
+        assert_eq!(run_past_the_releases(clean), [""; 0], "{clean}");
+    }
+    for (broken, found) in [
+        (
+            "fn bare(program: &mut Command) -> Output {\n    program.output().unwrap()\n}\n",
+            "`bare` runs a program without `RELEASES`",
+        ),
+        (
+            "fn run_as() {\n    program.env(RELEASES, dir).output();\n}\n\nfn served(program: &mut Command) -> Child {\n    program\n        . spawn ()\n        .unwrap()\n}\n",
+            "`served` runs a program without `RELEASES`",
+        ),
+        (
+            "impl Host {\n    fn checked(&self) {\n        Command::cargo_bin(\"lantern\").unwrap().assert().success();\n    }\n}\n",
+            "`checked` runs a program without `RELEASES`",
+        ),
+        (
+            "fn exits(program: &mut Command) -> bool {\n    program.status().unwrap().success()\n}\n",
+            "`exits` runs a program without `RELEASES`",
+        ),
+    ] {
+        assert_eq!(run_past_the_releases(broken), [found], "{broken}");
     }
 }
 
@@ -373,12 +780,13 @@ fn app() -> PathBuf {
     src().join("app")
 }
 
-const WRITES: [&str; 9] = [
-    "amend", "bulk", "claim", "draft", "followup", "fork", "live", "save", "setup",
+const WRITES: [&str; 11] = [
+    "amend", "bulk", "claim", "draft", "followup", "fork", "live", "record", "save", "setup",
+    "upgrade",
 ];
 const SHARED: [&str; 5] = ["heads", "lookup", "mod", "rules", "testing"];
-const WRITES_A_READ_MAY_NOT_USE: [&str; 8] = [
-    "amend", "bulk", "claim", "followup", "fork", "live", "save", "setup",
+const WRITES_A_READ_MAY_NOT_USE: [&str; 10] = [
+    "amend", "bulk", "claim", "followup", "fork", "live", "record", "save", "setup", "upgrade",
 ];
 
 const TEST_SUPPORT: &str = "testing";
@@ -406,6 +814,90 @@ fn one_use_case_puts_a_version_in_the_store() {
         }
     }
     assert_eq!(writers, ["save"]);
+}
+
+const APPENDS: &str = "appends to the log";
+const READS: &str = "reads the log";
+const HANDS_ON: &str = "hands the log on";
+
+// The log is the field `usage` of whatever holds the ports.
+fn log_reached(text: &str) -> Vec<String> {
+    let text = uncommented(text.split(TEST_MODULE).next().unwrap_or_default());
+    let tokens = tokens(&text);
+    let mut found = Vec::new();
+    for at in 1..tokens.len() {
+        if tokens[at] == "usage" && tokens[at - 1] == "." {
+            let called = tokens.get(at + 1) == Some(&".") && tokens.get(at + 3) == Some(&"(");
+            found.push(match tokens.get(at + 2) {
+                Some(&"record") if called => APPENDS,
+                Some(&"read") if called => READS,
+                _ => HANDS_ON,
+            });
+        }
+        let by_path = tokens[at] == "record" && tokens[at - 1] == "::";
+        let of_the_port =
+            tokens[..at - 1].ends_with(&["Usage"]) || tokens[..at - 1].ends_with(&["Usage", ">"]);
+        if by_path && of_the_port {
+            found.push(APPENDS);
+        }
+    }
+    found.into_iter().map(str::to_owned).collect()
+}
+
+#[test]
+fn one_use_case_appends_to_the_usage_log() {
+    let mut found = Vec::new();
+    sources(&src(), &mut found);
+    let mut reached = Vec::new();
+    for (path, text) in found {
+        if module_of(&path) == TEST_SUPPORT {
+            continue;
+        }
+        let file = Path::new(&path).strip_prefix(src()).expect("a file of it");
+        for what in log_reached(&text) {
+            reached.push(format!("{}: {what}", file.display()));
+        }
+    }
+    reached.sort();
+    assert_eq!(
+        reached,
+        [
+            format!("app/record.rs: {APPENDS}"),
+            format!("app/usage.rs: {READS}"),
+            format!("app/usage.rs: {READS}"),
+            format!("wiring/mod.rs: {HANDS_ON}"),
+        ]
+    );
+}
+
+#[test]
+fn a_file_that_reaches_the_usage_log_is_found() {
+    for clean in [
+        "let counted = usage::usage(deps, machine.as_deref(), since.as_deref())?;",
+        "use crate::app::{setup, show, usage};\nlet usage = page(&world, target); usage.status",
+        "recorder.record(&deps, outcome);\nlet record = read_or_skip(head)?;",
+        "// deps.usage.record(&run) is the recorder's.\nlet usage = 1;",
+        "pub fn usage() {}\n\n#[cfg(test)]\nmod tests {\n    fn logged() {\n        world.usage.record(&run).unwrap();\n    }\n}\n",
+    ] {
+        assert_eq!(log_reached(clean), [""; 0], "{clean}");
+    }
+    for (broken, found) in [
+        ("deps.usage.record(&invocation)?;", APPENDS),
+        (
+            "Ok(deps\n    .usage\n    .record(&Invocation {\n        exit: 0,\n    })?)",
+            APPENDS,
+        ),
+        ("let _ = adapters.deps() . usage . record (run);", APPENDS),
+        ("Usage::record(log, &invocation)?;", APPENDS),
+        ("<dyn Usage>::record(log, &invocation)?;", APPENDS),
+        ("for run in deps.usage.read(&kept)? {", READS),
+        ("let log = deps.usage;", HANDS_ON),
+        ("let record = deps.usage.record;", HANDS_ON),
+        ("logged(self.usage, &run)", HANDS_ON),
+        ("usage: &self.usage,", HANDS_ON),
+    ] {
+        assert_eq!(log_reached(broken), [found], "{broken}");
+    }
 }
 
 #[test]
@@ -545,6 +1037,7 @@ fn a_web_file_that_names_a_write_use_case_is_found() {
         "use crate::app::{FollowupRow, Reference, Row, TriggerShown, counted};",
         "// crate::app::save::save stores it.\nlet save = 1;",
         "let draft = saved.draft; let claim = row.claim;",
+        "use crate::app::usage::{self, MachineUsage};\nlet record = shown.record;",
     ] {
         assert_eq!(write_use_case_named(clean), [""; 0], "{clean}");
     }
@@ -592,6 +1085,14 @@ fn a_web_file_that_names_a_write_use_case_is_found() {
         (
             "use super::super::app::live;",
             "names `app::live` as `super::super::app::live`",
+        ),
+        (
+            "use crate::app::record::record;",
+            "names `app::record` as `crate::app::record::record`",
+        ),
+        (
+            "let path = crate::app::upgrade::replace(releases, binary, &checked)?;",
+            "names `app::upgrade` as `crate::app::upgrade::replace`",
         ),
     ] {
         assert_eq!(write_use_case_named(broken), [found], "{broken}");

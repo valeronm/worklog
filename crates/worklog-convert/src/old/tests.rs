@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 
 use worklog::domain::version::Document as StoredDocument;
 
-use super::read::{document_of, version_of};
+use super::read::{USAGE, document_of, version_of};
 use super::{
     Document, Failure, Found, Kind, Problem, State, Store, Value, Version, foreign_block_keys,
     parent_first, read, unmatched,
@@ -553,6 +553,11 @@ fn a_document_with_a_file_that_does_not_read_is_collected_and_the_rest_is_read()
     ];
     expected.sort_unstable();
     assert_eq!(paths, expected);
+}
+
+#[test]
+fn the_usage_log_is_under_the_name_the_converted_store_keeps_its_own_under() {
+    assert_eq!(USAGE, worklog_next::wiring::USAGE_DIRECTORY);
 }
 
 #[test]

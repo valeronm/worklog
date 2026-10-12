@@ -16,7 +16,7 @@ use serde::Serialize;
 use super::json::{Pinned, nothing, printed};
 use crate::app::draft::DraftRow;
 use crate::app::followup::Made;
-use crate::app::{DraftRef, Row, Written};
+use crate::app::{DraftRef, Failure, Row, Written};
 use crate::render::{change_or_ending, ended, written};
 
 #[cfg(test)]
@@ -24,12 +24,13 @@ pub(super) use context::CONTEXT_BYTES;
 #[cfg(test)]
 pub(super) use testing::assert_fits;
 
-/// What one command gives back: `text` for stdout, `notes` for stderr, and its exit code.
+/// `text` goes to stdout and `notes` to stderr.
 #[derive(Debug, PartialEq, Eq)]
 pub(super) struct Output {
     pub(super) text: String,
     pub(super) notes: Vec<String>,
     pub(super) exit: i32,
+    pub(super) hits: Option<usize>,
 }
 
 impl Output {
@@ -39,6 +40,22 @@ impl Output {
             text: if json { nothing() } else { String::new() },
             notes: vec![note],
             exit: 0,
+            hits: None,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct Stopped {
+    pub(super) done: Option<Output>,
+    pub(super) failure: Failure,
+}
+
+impl From<Failure> for Stopped {
+    fn from(failure: Failure) -> Stopped {
+        Stopped {
+            done: None,
+            failure,
         }
     }
 }
@@ -55,6 +72,10 @@ pub(super) trait Render {
     fn exit(&self) -> i32 {
         0
     }
+
+    fn hits(&self) -> Option<usize> {
+        None
+    }
 }
 
 /// The text of `result` with its notes, or under `json` the result itself with no notes,
@@ -69,6 +90,7 @@ pub(super) fn output<T: Render + Serialize + Pinned>(result: &T, json: bool) -> 
         text,
         notes,
         exit: result.exit(),
+        hits: result.hits(),
     }
 }
 
@@ -181,6 +203,7 @@ mod tests {
         let made = output(&draft(), false);
         assert_eq!(made.text, "/home/desk/drafts/lantern.md\n");
         assert_eq!((made.notes.len(), made.exit), (0, 0));
+        assert_eq!(made.hits, None);
         let json = output(&draft(), true);
         assert_eq!(
             json.text,

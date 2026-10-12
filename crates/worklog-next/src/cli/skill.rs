@@ -15,7 +15,17 @@ mod tests {
 
     const FAMILY: &str = "worklog";
 
-    const SETUP: [&str; 4] = ["init", "serve", "agents", "help"];
+    const HELP: &str = "help";
+
+    const SETUP: [&str; 7] = [
+        "init",
+        "serve",
+        "agents",
+        "usage",
+        "completions",
+        "upgrade",
+        HELP,
+    ];
 
     struct Quoted {
         path: String,
@@ -282,6 +292,18 @@ mod tests {
         assert_eq!(unknown(SKILL), Vec::<String>::new());
     }
 
+    fn not_commands<'n>(root: &Command, names: &[&'n str]) -> Vec<&'n str> {
+        let absent = |name: &&str| root.find_subcommand(name).is_none();
+        names.iter().copied().filter(absent).collect()
+    }
+
+    #[test]
+    fn a_command_the_skill_is_excused_from_is_a_command() {
+        assert_eq!(not_commands(&root(), &SETUP), [""; 0]);
+        assert_eq!(not_commands(&root(), &["init", "polish"]), ["polish"]);
+        assert_eq!(not_commands(&root(), &["refresh"]), ["refresh"]);
+    }
+
     #[test]
     fn the_skill_covers_the_commands_a_session_uses() {
         let mut every = BTreeSet::new();
@@ -291,7 +313,7 @@ mod tests {
                 continue;
             }
             let nested: Vec<&str> = (sub.get_subcommands().map(Command::get_name))
-                .filter(|nested| !SETUP.contains(nested))
+                .filter(|nested| *nested != HELP)
                 .collect();
             if nested.is_empty() {
                 every.insert(name.to_owned());

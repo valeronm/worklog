@@ -1,14 +1,20 @@
 //! The adapters a front end runs its use cases over, built from this host's environment.
 
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 
 mod fs;
+mod net;
 
 use crate::app::{Deps, Failure, Stored};
-use crate::domain::ports::Store as _;
+use crate::domain::ports::{Binary, Releases, Store as _};
+use crate::domain::usage::Session;
 use crate::domain::version::Version;
-use fs::{Config, FsAgent, FsDrafts, FsHost, FsStore, Paths, RandomIds, SystemClock};
+use fs::{
+    Config, DirReleases, FsAgent, FsBinary, FsDrafts, FsHost, FsStore, FsUsage, Paths, RandomIds,
+    SystemClock,
+};
+use net::GitHubReleases;
 
 /// The ports of one command, since the store among them is read once.
 pub struct Adapters {
@@ -17,6 +23,7 @@ pub struct Adapters {
     ids: RandomIds,
     clock: SystemClock,
     host: FsHost,
+    usage: FsUsage,
 }
 
 impl Adapters {
@@ -28,6 +35,7 @@ impl Adapters {
             ids: &self.ids,
             clock: &self.clock,
             host: &self.host,
+            usage: &self.usage,
         }
     }
 
@@ -41,24 +49,28 @@ impl Adapters {
 /// The adapters over the store this host's config holds, or over `chosen`, the store a host
 /// with no config is about to be bound to; `None` for a host with neither, one that is not
 /// set up. Refuses a configured store that is not a directory unless a store is being chosen,
-/// and a `chosen` one that is a file, or a directory holding something not dot-named and no
-/// store.
+/// and a `chosen` one that is a file, or a directory holding no store and something that is
+/// neither dot-named nor its usage log.
 pub fn wire(
     variable: &dyn Fn(&str) -> Option<OsString>,
     chosen: Option<PathBuf>,
 ) -> Result<Option<Adapters>, Failure> {
     let paths = Paths::resolved(variable)?;
-    let (store, host) = match (Config::read(&paths.config)?, chosen) {
+    let session = session(variable);
+    let (root, store, host) = match (Config::read(&paths.config)?, chosen) {
         (Some(held), chosen) => {
+            let root = held.store.clone();
             let store = match chosen {
-                None => FsStore::open(held.store.clone())?,
-                Some(_) => FsStore::new(held.store.clone()),
+                None => FsStore::open(root.clone())?,
+                Some(_) => FsStore::new(root.clone()),
             };
-            (store, FsHost::bound(paths.config, paths.home, held))
+            let host = FsHost::bound(paths.config, paths.home, held, session);
+            (root, store, host)
         }
         (None, Some(chosen)) => (
+            chosen.clone(),
             FsStore::chosen(chosen.clone())?,
-            FsHost::unbound(paths.config, paths.home, chosen),
+            FsHost::unbound(paths.config, paths.home, chosen, session),
         ),
         (None, None) => return Ok(None),
     };
@@ -68,7 +80,35 @@ pub fn wire(
         ids: RandomIds,
         clock: SystemClock,
         host,
+        usage: FsUsage::new(root.join(USAGE_DIRECTORY)),
     }))
+}
+
+// The first agent whose variable is set is the one a command run by an agent inside another
+// is logged under.
+fn session(variable: &dyn Fn(&str) -> Option<OsString>) -> Option<Session> {
+    AGENTS.iter().find_map(|known| {
+        let id = fs::set(variable, known.session)?.into_string().ok()?;
+        Some(Session {
+            agent: known.name.to_owned(),
+            id,
+        })
+    })
+}
+
+/// Whether `binary`, the file that is running, is the one `path`, the value of `PATH`, finds
+/// for `name`, the file name it was run by.
+#[must_use]
+pub(crate) fn found_on_path(binary: &Path, name: &OsStr, path: &OsStr) -> bool {
+    // A link on the path is found by the file it leads to.
+    let Ok(running) = std::fs::canonicalize(binary) else {
+        return false;
+    };
+    std::env::split_paths(path)
+        .map(|dir| dir.join(name))
+        .find(|candidate| candidate.is_file())
+        .and_then(|candidate| std::fs::canonicalize(candidate).ok())
+        .is_some_and(|found| found == running)
 }
 
 /// Adds `version` to the store at `store`, which is made when it is not there, and applies no
@@ -80,6 +120,33 @@ pub fn write_version(store: &Path, version: &Version) -> Result<(), Failure> {
 }
 
 pub const SKILL_DIRECTORY: &str = fs::SKILL_DIRECTORY;
+
+/// The directory of a store that holds its usage log and no document.
+pub const USAGE_DIRECTORY: &str = fs::USAGE_DIRECTORY;
+
+struct Known {
+    name: &'static str,
+    /// Under the user's home.
+    home: &'static str,
+    hooks: &'static str,
+    /// The variable the agent sets to its session's id for a command it runs.
+    session: &'static str,
+}
+
+const AGENTS: [Known; 2] = [
+    Known {
+        name: "Claude Code",
+        home: ".claude",
+        hooks: "settings.json",
+        session: "CLAUDE_CODE_SESSION_ID",
+    },
+    Known {
+        name: "Codex",
+        home: ".codex",
+        hooks: "hooks.json",
+        session: "CODEX_THREAD_ID",
+    },
+];
 
 /// A coding agent on this host: its skill and the file its hooks are read from.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -99,7 +166,6 @@ impl Agent {
         self.files.hooks()
     }
 
-    /// The user's home directory as given and, where a link leads elsewhere, as it resolves.
     #[must_use]
     pub(crate) fn homes(&self) -> Vec<&Path> {
         self.homes.iter().map(PathBuf::as_path).collect()
@@ -137,26 +203,73 @@ impl Agent {
 /// The agents this tool knows, present on this host or not, under `HOME` and not under the
 /// directory `WORKLOG_NEXT_HOME` moves the rest to.
 pub fn agents(variable: &dyn Fn(&str) -> Option<OsString>) -> Result<Vec<Agent>, Failure> {
-    let paths = Paths::resolved(variable)?;
-    let Some(home) = paths.home else {
+    let homes = homes(variable)?;
+    let Some(home) = homes.first() else {
         return Err(Failure::at("$HOME", "not set"));
     };
-    let home = PathBuf::from(home);
-    let mut homes = vec![home.clone()];
-    if let Ok(resolved) = std::fs::canonicalize(&home)
-        && resolved != home
+    let agent = |known: &Known| Agent {
+        files: FsAgent::new(known.name, home.join(known.home), known.hooks),
+        homes: homes.clone(),
+    };
+    Ok(AGENTS.iter().map(agent).collect())
+}
+
+/// The user's home directory as given and, where a link leads elsewhere, as it resolves; empty
+/// where `HOME` is not set.
+pub(crate) fn homes(variable: &dyn Fn(&str) -> Option<OsString>) -> Result<Vec<PathBuf>, Failure> {
+    let Some(home) = Paths::home(variable)?.map(PathBuf::from) else {
+        return Ok(Vec::new());
+    };
+    let mut homes = vec![home];
+    if let Ok(resolved) = std::fs::canonicalize(&homes[0])
+        && resolved != homes[0]
     {
         homes.push(resolved);
     }
-    Ok([
-        ("Claude Code", ".claude", "settings.json"),
-        ("Codex", ".codex", "hooks.json"),
-    ]
-    .map(|(name, directory, hooks)| Agent {
-        files: FsAgent::new(name, home.join(directory), hooks),
-        homes: homes.clone(),
-    })
-    .into())
+    Ok(homes)
+}
+
+/// The file fish reads the completions of `command` from, under `XDG_CONFIG_HOME` or the home
+/// directory's `.config` and not under the directory `WORKLOG_NEXT_HOME` moves the rest to;
+/// `None` where neither is set or fish's completions directory is not there.
+pub(crate) fn fish_completions(
+    variable: &dyn Fn(&str) -> Option<OsString>,
+    command: &str,
+) -> Result<Option<PathBuf>, Failure> {
+    let config_home = Paths::resolved(variable)?.config_home;
+    let dir = config_home.map(|config_home| config_home.join("fish").join("completions"));
+    let dir = dir.filter(|dir| dir.is_dir());
+    Ok(dir.map(|dir| dir.join(format!("{command}.fish"))))
+}
+
+/// Refuses a `file` whose directory is not there; nothing here creates it.
+pub(crate) fn write_completions(file: &Path, text: &str) -> Result<(), Failure> {
+    let dir = file.parent().unwrap_or(file);
+    Ok(fs::replace_under(dir, file, text)?)
+}
+
+const RELEASES: &str = "WORKLOG_NEXT_RELEASES";
+
+fn release_directory(variable: &dyn Fn(&str) -> Option<OsString>) -> Option<DirReleases> {
+    let dir = fs::set(variable, RELEASES)?;
+    Some(DirReleases::new(PathBuf::from(dir)))
+}
+
+/// Where releases of this binary are published: the directory `WORKLOG_NEXT_RELEASES` holds,
+/// and the network without one.
+#[must_use]
+pub(crate) fn releases(variable: &dyn Fn(&str) -> Option<OsString>) -> Box<dyn Releases> {
+    match release_directory(variable) {
+        Some(directory) => Box::new(directory),
+        None => Box::new(GitHubReleases::new()),
+    }
+}
+
+/// The executable at `path`, the one this process runs from, whose own messages start with
+/// `command`.
+#[must_use]
+pub(crate) fn binary(path: &Path, command: &str) -> Box<dyn Binary> {
+    Box::new(FsBinary::new(path.to_path_buf(), command))
 }
 
 #[cfg(test)]
@@ -164,7 +277,8 @@ mod tests {
     use std::path::Path;
 
     use super::*;
-    use crate::domain::testing::{first, lantern};
+    use crate::domain::testing::{LANTERN, first, lantern, ran};
+    use crate::domain::usage::Kept;
 
     fn scratch() -> (tempfile::TempDir, PathBuf) {
         let kept = tempfile::tempdir().unwrap();
@@ -242,6 +356,101 @@ mod tests {
         assert!(held.unreadable().is_empty());
     }
 
+    fn bound(root: &Path) -> PathBuf {
+        let store = root.join("store");
+        let config = Config {
+            store: store.clone(),
+            machine: lantern(),
+        };
+        config.write(&root.join("next/config.toml")).unwrap();
+        std::fs::create_dir_all(&store).unwrap();
+        store
+    }
+
+    #[test]
+    fn the_usage_log_of_the_adapters_is_under_the_store_they_are_over() {
+        let (_kept, root) = scratch();
+        let store = bound(&root);
+        let adapters = wired(&root, None).unwrap().unwrap();
+        let run = ran(&lantern(), "show", "2026-09-04");
+        adapters.deps().usage.record(&run).unwrap();
+        let file = store.join(format!("usage/{LANTERN}-2026-09.jsonl"));
+        assert!(file.is_file());
+        let all = Kept::default();
+        assert_eq!(adapters.deps().usage.read(&all), Ok(vec![run]));
+
+        let chosen = wired(&root, Some(root.join("elsewhere"))).unwrap().unwrap();
+        assert_eq!(chosen.deps().usage.read(&all).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_host_is_in_the_session_of_the_first_agent_whose_variable_is_set() {
+        let (_kept, root) = scratch();
+        bound(&root);
+        let within = |set: &[(&str, &str)]| {
+            let variable = |name: &str| match name {
+                "WORKLOG_NEXT_HOME" => Some(root.join("next").into_os_string()),
+                _ => (set.iter().find(|(key, _)| *key == name)).map(|(_, id)| OsString::from(id)),
+            };
+            let adapters = wire(&variable, None).unwrap().unwrap();
+            let session = adapters.deps().host.session();
+            session.map(|session| (session.agent, session.id))
+        };
+        let session = |agent: &str, id: &str| Some((agent.to_owned(), id.to_owned()));
+        assert_eq!(within(&[]), None);
+        assert_eq!(
+            within(&[("CLAUDE_CODE_SESSION_ID", "s-1")]),
+            session("Claude Code", "s-1")
+        );
+        assert_eq!(
+            within(&[("CODEX_THREAD_ID", "s-2")]),
+            session("Codex", "s-2")
+        );
+        assert_eq!(
+            within(&[
+                ("CODEX_THREAD_ID", "s-2"),
+                ("CLAUDE_CODE_SESSION_ID", "s-1")
+            ]),
+            session("Claude Code", "s-1")
+        );
+        assert_eq!(
+            within(&[("CLAUDE_CODE_SESSION_ID", ""), ("CODEX_THREAD_ID", "s-2")]),
+            session("Codex", "s-2")
+        );
+        assert_eq!(within(&[("CODEX_THREAD_ID", "")]), None);
+    }
+
+    #[test]
+    fn a_binary_is_found_on_the_path_only_as_the_first_file_of_its_name_there() {
+        let (_kept, root) = scratch();
+        let name = OsStr::new("lantern");
+        for dir in ["bin", "bench", "empty", "linked", "holding/lantern"] {
+            std::fs::create_dir_all(root.join(dir)).unwrap();
+        }
+        let binary = root.join("bin/lantern");
+        std::fs::write(&binary, "").unwrap();
+        std::fs::write(root.join("bench/lantern"), "").unwrap();
+        std::os::unix::fs::symlink(&binary, root.join("linked/lantern")).unwrap();
+        let found = |binary: &Path, dirs: &[&str]| {
+            let path = std::env::join_paths(dirs.iter().map(|dir| root.join(dir))).unwrap();
+            found_on_path(binary, name, &path)
+        };
+
+        assert!(found(&binary, &["bin"]));
+        assert!(found(&binary, &["empty", "holding", "bin", "bench"]));
+        assert!(found(&binary, &["linked"]));
+        assert!(found(&root.join("linked/lantern"), &["bin"]));
+        assert!(!found(&binary, &["bench", "bin"]));
+        assert!(!found(&binary, &["empty"]));
+        assert!(!found(&binary, &[]));
+        assert!(!found(&root.join("gone/lantern"), &["bin"]));
+        assert!(!found_on_path(
+            &binary,
+            OsStr::new("atlas"),
+            root.join("bin").as_os_str()
+        ));
+    }
+
     #[test]
     fn a_version_that_cannot_be_written_is_a_failure() {
         let (_kept, root) = scratch();
@@ -304,6 +513,101 @@ mod tests {
         );
         assert!(!root.join(".claude").exists());
         assert_eq!(codex.homes(), [root.as_path()]);
+    }
+
+    #[test]
+    fn fish_reads_its_completions_under_the_config_directory_and_only_where_that_is_there() {
+        let (_kept, root) = scratch();
+        let home = root.join("home");
+        let next = root.join("next");
+        let under_home = with_home(Some(&home), Some(&next));
+        assert_eq!(fish_completions(&under_home, "lantern"), Ok(None));
+        std::fs::create_dir_all(home.join(".config/fish")).unwrap();
+        std::fs::write(home.join(".config/fish/completions"), "").unwrap();
+        assert_eq!(fish_completions(&under_home, "lantern"), Ok(None));
+        std::fs::remove_file(home.join(".config/fish/completions")).unwrap();
+
+        let dir = home.join(".config/fish/completions");
+        let file = dir.join("lantern.fish");
+        assert!(write_completions(&file, "atlas").is_err());
+        assert!(!dir.exists());
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(
+            fish_completions(&under_home, "lantern"),
+            Ok(Some(file.clone()))
+        );
+        write_completions(&file, "atlas\n").unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "atlas\n");
+        write_completions(&file, "desk\n").unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "desk\n");
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+        assert!(!next.exists());
+
+        let elsewhere = root.join("config/fish/completions");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        let given = |name: &str| match name {
+            "HOME" => Some(home.clone().into_os_string()),
+            "XDG_CONFIG_HOME" => Some(root.join("config").into_os_string()),
+            _ => None,
+        };
+        assert_eq!(
+            fish_completions(&given, "lantern"),
+            Ok(Some(elsewhere.join("lantern.fish")))
+        );
+        assert_eq!(
+            fish_completions(&with_home(None, Some(&next)), "lantern"),
+            Ok(None)
+        );
+    }
+
+    #[test]
+    fn releases_are_read_from_the_directory_the_environment_gives() {
+        let (_kept, root) = scratch();
+        std::fs::write(root.join("latest"), "v0.3.0\n").unwrap();
+        std::fs::write(root.join("lantern"), "atlas").unwrap();
+        let given = |name: &str| match name {
+            "WORKLOG_NEXT_RELEASES" => Some(root.clone().into_os_string()),
+            _ => None,
+        };
+        let held = release_directory(&given).expect("a directory");
+        assert_eq!(held.latest(), Ok("v0.3.0".to_owned()));
+        assert_eq!(held.fetch("v0.3.0", "lantern"), Ok(b"atlas".to_vec()));
+        let unset = |name: &str| (name != "WORKLOG_NEXT_RELEASES").then(OsString::new);
+        assert!(release_directory(&unset).is_none());
+        let empty = |_: &str| Some(OsString::new());
+        assert!(release_directory(&empty).is_none());
+    }
+
+    #[test]
+    fn the_homes_are_the_one_given_and_the_one_it_resolves_to_and_none_without_a_home() {
+        let (_kept, root) = scratch();
+        std::fs::create_dir(root.join("real")).unwrap();
+        std::os::unix::fs::symlink(root.join("real"), root.join("link")).unwrap();
+        assert_eq!(
+            homes(&with_home(Some(&root.join("link")), None)).unwrap(),
+            [root.join("link"), root.join("real")]
+        );
+        assert_eq!(
+            homes(&with_home(Some(&root.join("real")), None)).unwrap(),
+            [root.join("real")]
+        );
+        assert_eq!(
+            homes(&with_home(Some(&root.join("gone")), None)).unwrap(),
+            [root.join("gone")]
+        );
+        assert_eq!(
+            homes(&with_home(None, Some(&root))).unwrap(),
+            Vec::<PathBuf>::new()
+        );
+        assert_eq!(
+            homes(&with_home(None, None)).unwrap(),
+            Vec::<PathBuf>::new()
+        );
+        let odd = |name: &str| {
+            use std::os::unix::ffi::OsStringExt as _;
+            (name == "HOME").then(|| OsString::from_vec(vec![b'/', 0xff]))
+        };
+        assert!(homes(&odd).is_err());
     }
 
     #[test]

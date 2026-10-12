@@ -52,13 +52,18 @@ mod tests {
         ENDED as RETIRED, ENDED_FACT, NOW, World, claim_fields, entry, fact, followup, fork, head,
         part_of, topic, topic_fields, uses, world, world_with_atlas, written_at,
     };
+    use crate::app::upgrade::{Checked, Upgrade};
+    use crate::app::usage::MachineUsage;
     use crate::app::{
         DraftRef, FollowupRow, Written, amend, bulk, check, context, draft, followup as followups,
-        list, search, setup, show,
+        list, search, setup, show, upgrade, usage,
     };
     use crate::domain::id::{DocumentId, VersionId};
+    use crate::domain::ports::Usage as _;
     use crate::domain::schema::{Date, Directory, KindOf, Name};
-    use crate::domain::testing::{LANTERN, atlas, first};
+    use crate::domain::testing::{
+        ASSET, BINARY, LANTERN, REFRESHED, atlas, first, published, ran, version as release,
+    };
     use crate::domain::version::{Kind, ReadError, Stamp};
 
     fn snake(word: &str) -> bool {
@@ -144,6 +149,11 @@ mod tests {
         a_diff_holds_the_version_each_side_is_against_and_the_text_after: Diff = diffs,
         a_context_says_by_type_what_loaded_each_topic: Context = contexts,
         a_check_holds_its_findings_and_its_count_of_forks: Check = checks,
+        a_machine_s_usage_holds_its_topic_and_a_count_for_each_command: Vec<MachineUsage> =
+            usages,
+        a_check_for_a_release_holds_the_version_running_and_the_latest: Checked = checked,
+        an_upgrade_holds_both_versions_what_became_of_the_binary_and_the_paths_written: Upgrade =
+            upgrades,
     }
 
     fn to(id: &DocumentId, label: &str) -> Value {
@@ -1127,6 +1137,84 @@ mod tests {
             "fork_count": 0,
         });
         vec![(check::check(&world.deps()).unwrap(), expected)]
+    }
+
+    fn usages() -> Vec<(Vec<MachineUsage>, Value)> {
+        let (world, _) = world();
+        let unheld = DocumentId::from_bytes([0xde; 16]);
+        for (machine, command) in [
+            (&world.machine(), "show"),
+            (&world.machine(), "new entry"),
+            (&world.machine(), "show"),
+            (&unheld, "context"),
+        ] {
+            let run = ran(machine, command, "2026-09-04");
+            world.usage.record(&run).unwrap();
+        }
+        let expected = json!([
+            {
+                "machine": to(&unheld, unheld.as_str()),
+                "topic": null,
+                "commands": [{"command": "context", "run_count": 1}],
+            },
+            {
+                "machine": to(&world.machine(), "desk"),
+                "topic": "desk",
+                "commands": [
+                    {"command": "show", "run_count": 2},
+                    {"command": "new entry", "run_count": 1},
+                ],
+            },
+        ]);
+        let deps = world.deps();
+        let none = usage::usage(&deps, None, Some("2099-01-01")).unwrap();
+        vec![
+            (usage::usage(&deps, None, None).unwrap(), expected),
+            (none, json!([])),
+        ]
+    }
+
+    fn checked() -> Vec<(Checked, Value)> {
+        let releases = published("v0.10.0", ASSET, b"", b"");
+        let found = |current: &str, newer: bool| {
+            let (checked, _) = upgrade::check(&releases, release(current)).unwrap();
+            let expected = json!({"current": current, "latest": "0.10.0", "newer": newer});
+            (checked, expected)
+        };
+        vec![
+            found("0.9.0", true),
+            found("0.10.0", false),
+            found("0.11.0", false),
+        ]
+    }
+
+    fn upgrades() -> Vec<(Upgrade, Value)> {
+        let releases = published("v0.3.0", ASSET, b"new", b"new");
+        let own = "/home/desk/.claude/settings.json";
+        let ran = |current: &str, written: &[&str]| {
+            let (checked, _) = upgrade::check(&releases, release(current)).unwrap();
+            checked.upgrade(written.iter().map(|path| (*path).to_owned()).collect())
+        };
+        let stayed = |current: &str, outcome: &str| json!({"current": current, "latest": "0.3.0", "outcome": outcome, "written": [own]});
+        let upgraded = json!({
+            "current": "0.2.1",
+            "latest": "0.3.0",
+            "outcome": "upgraded",
+            "written": [BINARY, REFRESHED],
+        });
+        vec![
+            (ran("0.2.1", &[BINARY, REFRESHED]), upgraded),
+            (ran("0.3.0", &[own]), stayed("0.3.0", "current")),
+            (ran("0.4.0", &[own]), stayed("0.4.0", "ahead")),
+        ]
+    }
+
+    #[test]
+    fn a_check_for_a_release_exits_under_json_as_its_newer_key_says() {
+        for (checked, expected) in checked() {
+            let code = i32::from(expected["newer"] == json!(true));
+            assert_eq!(output(&checked, true).exit, code, "{expected}");
+        }
     }
 
     #[test]

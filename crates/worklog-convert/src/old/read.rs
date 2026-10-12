@@ -14,7 +14,7 @@ use super::{
     Document, Failure, Found, Kind, Problem, State, Store, Value, Version, unmatched, unreadable,
 };
 
-const USAGE: &str = "usage";
+pub(super) const USAGE: &str = "usage";
 
 struct Listed {
     name: String,

@@ -1,5 +1,4 @@
 use std::fs;
-use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
 use std::path::{Path, PathBuf};
 
 use crate::domain::ports::StoreError;
@@ -65,13 +64,17 @@ impl FsAgent {
         self.in_home(&self.hooks, text)
     }
 
-    // `replace` creates every missing directory above the file, a missing home among them.
     fn in_home(&self, file: &Path, text: &str) -> Result<(), StoreError> {
-        if !self.is_present() {
-            return Err(StoreError::io(self.home.display(), "is not a directory"));
-        }
-        replace_file(file, text)
+        replace_under(&self.home, file, text)
     }
+}
+
+// `replace` creates every missing directory above the file, a missing `dir` among them.
+pub fn replace_under(dir: &Path, file: &Path, text: &str) -> Result<(), StoreError> {
+    if !dir.is_dir() {
+        return Err(StoreError::io(dir.display(), "is not a directory"));
+    }
+    replace_file(file, text)
 }
 
 fn read_optional(path: &Path) -> Result<Option<String>, StoreError> {
@@ -102,27 +105,8 @@ fn target_of(path: &Path) -> Result<PathBuf, StoreError> {
 
 fn replace_file(path: &Path, text: &str) -> Result<(), StoreError> {
     let target = target_of(path)?;
-    replace(&target, text, |staging| create_staged(staging, &target))
-}
-
-// The text is never in a file with a wider mode than the target's.
-fn open_staged(staging: &Path, mode: u32) -> std::io::Result<fs::File> {
-    fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(mode)
-        .open(staging)
-}
-
-fn create_staged(staging: &Path, target: &Path) -> std::io::Result<fs::File> {
-    let Ok(existing) = fs::metadata(target) else {
-        return fs::File::create(staging);
-    };
-    let permissions = existing.permissions();
-    let file = open_staged(staging, permissions.mode())?;
-    file.set_permissions(permissions)?;
-    Ok(file)
+    let kept = fs::metadata(&target).ok().map(|held| held.permissions());
+    replace(&target, text.as_bytes(), kept.as_ref())
 }
 
 #[cfg(test)]
@@ -265,29 +249,6 @@ mod tests {
         assert_eq!(agent.read_hooks(), Ok(Some("{}".to_owned())));
         agent.write_skill("lantern").unwrap();
         assert_eq!(agent.read_skill(), Ok(Some("lantern".to_owned())));
-    }
-
-    #[test]
-    fn the_staged_file_is_no_wider_than_its_target_from_the_moment_it_exists() {
-        use std::os::unix::fs::PermissionsExt as _;
-        let kept = tempfile::tempdir().unwrap();
-        let file = open_staged(&kept.path().join("staged"), 0o600).unwrap();
-        assert_eq!(file.metadata().unwrap().len(), 0);
-        assert_eq!(file.metadata().unwrap().permissions().mode() & 0o777, 0o600);
-    }
-
-    #[test]
-    fn the_staged_file_ends_with_the_exact_mode_of_the_file_it_replaces() {
-        use std::os::unix::fs::PermissionsExt as _;
-        let kept = tempfile::tempdir().unwrap();
-        for mode in [0o600, 0o664] {
-            let target = kept.path().join(format!("target-{mode:o}"));
-            fs::write(&target, "{}").unwrap();
-            fs::set_permissions(&target, fs::Permissions::from_mode(mode)).unwrap();
-            let staging = kept.path().join(format!("staged-{mode:o}"));
-            let file = create_staged(&staging, &target).unwrap();
-            assert_eq!(file.metadata().unwrap().permissions().mode() & 0o777, mode);
-        }
     }
 
     #[test]

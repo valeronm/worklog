@@ -1,3 +1,4 @@
+use std::ffi::OsString;
 use std::fs;
 use std::io::{BufRead as _, BufReader, Read as _, Write as _};
 use std::net::{SocketAddr, TcpListener, TcpStream};
@@ -20,6 +21,11 @@ const CLOSING: &str = "Durable facts and ideas, by name where they fit and count
      `worklog-next show <topic>/<name>` for one,\n\
      `worklog-next followups <topic>` for open work.\n";
 const NOT_SET_UP: &str = "worklog-next: this host is not set up; run `worklog-next init`\n";
+const RELEASES: &str = "WORKLOG_NEXT_RELEASES";
+const SESSIONS: [(&str, &str); 2] = [
+    ("Claude Code", "CLAUDE_CODE_SESSION_ID"),
+    ("Codex", "CODEX_THREAD_ID"),
+];
 
 struct Ran {
     stdout: String,
@@ -37,7 +43,13 @@ impl Host {
         let kept = tempfile::tempdir().expect("a temp dir");
         let root = fs::canonicalize(kept.path()).expect("the temp dir's own path");
         fs::create_dir_all(root.join("home/projects/lantern")).unwrap();
-        Host { _kept: kept, root }
+        let host = Host { _kept: kept, root };
+        fs::create_dir(host.unpublished()).unwrap();
+        host
+    }
+
+    fn unpublished(&self) -> PathBuf {
+        self.root.join("unpublished")
     }
 
     fn set_up(name: &str) -> Host {
@@ -77,10 +89,23 @@ impl Host {
     }
 
     fn run_as(&self, mut program: Command, dir: &Path, args: &[&str]) -> Ran {
+        for (_, variable) in SESSIONS {
+            if !program.get_envs().any(|(name, _)| name == variable) {
+                program.env_remove(variable);
+            }
+        }
+        if !program
+            .get_envs()
+            .any(|(name, _)| name == "XDG_CONFIG_HOME")
+        {
+            program.env_remove("XDG_CONFIG_HOME");
+        }
+        if !program.get_envs().any(|(name, _)| name == RELEASES) {
+            program.env(RELEASES, self.unpublished());
+        }
         let output = program
             .env("WORKLOG_NEXT_HOME", self.root.join("next"))
             .env("HOME", self.home())
-            .env_remove("XDG_CONFIG_HOME")
             .env_remove("XDG_STATE_HOME")
             .current_dir(dir)
             .args(args)
@@ -1897,9 +1922,21 @@ impl Serving {
 
 impl Host {
     fn spawned(&self, args: &[&str]) -> Spawned {
-        let child = std::process::Command::new(env!("CARGO_BIN_EXE_worklog-next"))
+        self.spawned_on(None, args)
+    }
+
+    fn spawned_on(&self, path: Option<OsString>, args: &[&str]) -> Spawned {
+        let mut program = std::process::Command::new(env!("CARGO_BIN_EXE_worklog-next"));
+        if let Some(path) = path {
+            program.env("PATH", path);
+        }
+        for (_, variable) in SESSIONS {
+            program.env_remove(variable);
+        }
+        let child = program
             .env("WORKLOG_NEXT_HOME", self.root.join("next"))
             .env("HOME", self.home())
+            .env(RELEASES, self.unpublished())
             .env_remove("XDG_CONFIG_HOME")
             .env_remove("XDG_STATE_HOME")
             .current_dir(self.home())
@@ -1933,7 +1970,12 @@ impl Host {
     }
 
     fn serve(&self, rest: &[&str]) -> Serving {
-        let mut spawned = self.spawned(&[&["serve", "--bind", "127.0.0.1:0"], rest].concat());
+        self.serving(None, rest)
+    }
+
+    fn serving(&self, path: Option<OsString>, rest: &[&str]) -> Serving {
+        let line = [&["serve", "--bind", "127.0.0.1:0"], rest].concat();
+        let mut spawned = self.spawned_on(path, &line);
         let stdout = spawned.0.stdout.take().expect("a piped stdout");
         let (line, lines) = mpsc::channel();
         std::thread::spawn(move || {
@@ -2412,10 +2454,10 @@ fn agents_refresh_and_uninstall_over_a_hooks_file_that_is_not_json_change_nothin
 }
 
 #[test]
-fn agents_refresh_under_another_file_name_is_refused_only_where_a_hook_is_there_to_rewrite() {
+fn agents_refresh_under_another_file_name_is_refused_only_over_a_hook() {
     let host = Host::new().with_agents(&[".claude", ".codex"]);
     let renamed = host.root.join("worklog-next-0.3.0");
-    fs::copy(binary(), &renamed).unwrap();
+    copy_of_the_binary(&renamed);
     let refresh = || host.run_as(Command::new(&renamed), &host.home(), &["agents", "refresh"]);
     let before = snapshot(&host);
     let ran = refresh();
@@ -2435,4 +2477,1364 @@ fn agents_refresh_under_another_file_name_is_refused_only_where_a_hook_is_there_
         ),
     );
     assert_eq!(snapshot(&host), before);
+}
+
+impl Host {
+    fn fish(&self) -> PathBuf {
+        let dir = self.home().join(".config/fish/completions");
+        fs::create_dir_all(&dir).unwrap();
+        dir.join("worklog-next.fish")
+    }
+}
+
+fn fish_line() -> String {
+    format!("COMPLETE=fish \"{}\" | source\n", binary().display())
+}
+
+#[test]
+fn completions_prints_the_line_a_shell_takes_them_from_this_binary_with() {
+    let host = Host::new();
+    assert_eq!(host.ok(&["completions", "fish"]), fish_line());
+    for shell in ["bash", "zsh"] {
+        assert_eq!(
+            host.ok(&["completions", shell]),
+            format!("source <(COMPLETE={shell} \"{}\")\n", binary().display())
+        );
+    }
+    for line in [
+        &["completions", "fish", "--json"][..],
+        &["completions", "elvish"],
+        &["completions"],
+    ] {
+        let ran = host.run(line);
+        assert_eq!((ran.stdout.as_str(), ran.code), ("", Some(2)), "{line:?}");
+    }
+    assert!(!host.root.join("next").exists());
+}
+
+#[test]
+fn agents_refresh_writes_the_completions_where_fish_reads_them_and_only_where_fish_is() {
+    let host = Host::new().with_agents(&[".claude"]);
+    assert_eq!(host.ok(&["agents", "refresh"]), "");
+    assert!(!host.home().join(".config").exists());
+
+    fs::create_dir_all(host.home().join(".config/fish")).unwrap();
+    fs::write(host.home().join(".config/fish/completions"), "").unwrap();
+    assert_eq!(host.ok(&["agents", "refresh"]), "");
+    fs::remove_file(host.home().join(".config/fish/completions")).unwrap();
+
+    let completions = host.fish();
+    fs::create_dir_all(host.skill_of(".claude").parent().unwrap()).unwrap();
+    fs::write(host.skill_of(".claude"), "old").unwrap();
+    assert_eq!(
+        host.ok(&["agents", "refresh"]),
+        lines(&[host.skill_of(".claude"), completions.clone()])
+    );
+    assert_eq!(fs::read_to_string(&completions).unwrap(), fish_line());
+    assert_eq!(
+        host.ok(&["completions", "fish"]),
+        fs::read_to_string(&completions).unwrap()
+    );
+
+    fs::write(&completions, "old").unwrap();
+    let again = host.json(&["agents", "refresh"]);
+    let path = completions.display().to_string();
+    assert_eq!(again, serde_json::json!({"written": [path]}));
+    assert_eq!(fs::read_to_string(&completions).unwrap(), fish_line());
+    assert_eq!(host.ok(&["agents", "refresh"]), lines(&[completions]));
+}
+
+#[test]
+fn agents_refresh_follows_the_config_directory_the_environment_gives_fish() {
+    let host = Host::new();
+    let under_home = host.fish();
+    let given = host.root.join("config");
+    fs::create_dir_all(given.join("fish/completions")).unwrap();
+    let mut program = Command::cargo_bin("worklog-next").expect("the binary");
+    program.env("XDG_CONFIG_HOME", &given);
+    let ran = host.run_as(program, &host.home(), &["agents", "refresh"]);
+    let written = given.join("fish/completions/worklog-next.fish");
+    assert_eq!(
+        (ran.stdout, ran.stderr, ran.code),
+        (
+            lines(std::slice::from_ref(&written)),
+            String::new(),
+            Some(0)
+        )
+    );
+    assert_eq!(fs::read_to_string(written).unwrap(), fish_line());
+    assert!(!under_home.exists());
+
+    fs::create_dir_all(host.home().join("config/fish/completions")).unwrap();
+    let mut program = Command::cargo_bin("worklog-next").expect("the binary");
+    program.env("XDG_CONFIG_HOME", "config");
+    let ran = host.run_as(program, &host.home(), &["agents", "refresh"]);
+    assert_eq!(
+        (ran.stdout, ran.stderr, ran.code),
+        (
+            lines(std::slice::from_ref(&under_home)),
+            String::new(),
+            Some(0)
+        )
+    );
+    let relative = host.home().join("config/fish/completions");
+    assert_eq!(fs::read_dir(relative).unwrap().count(), 0);
+}
+
+fn fish_left_out(renamed: &Path) -> String {
+    format!(
+        "worklog-next: {}: fish's completions are not written, since the binary's file name is \
+         not worklog-next\n",
+        renamed.display()
+    )
+}
+
+#[test]
+fn agents_refresh_under_another_file_name_writes_for_the_agents_and_no_completions() {
+    let host = Host::new().with_agents(&[".claude"]);
+    let completions = host.fish();
+    let renamed = host.root.join("worklog-next-0.3.0");
+    copy_of_the_binary(&renamed);
+    let run = |line: &[&str]| host.run_as(Command::new(&renamed), &host.home(), line);
+    let before = snapshot(&host);
+    let ran = run(&["agents", "refresh"]);
+    assert_eq!(
+        (ran.stdout.as_str(), ran.stderr, ran.code),
+        ("", fish_left_out(&renamed), Some(0))
+    );
+    assert_refused(
+        &run(&["completions", "fish"]),
+        1,
+        &format!(
+            "worklog-next: {}: the binary's file name must be worklog-next, or its \
+             completions are registered for another command\n",
+            renamed.display()
+        ),
+    );
+    assert_eq!(snapshot(&host), before);
+
+    fs::create_dir_all(host.skill_of(".claude").parent().unwrap()).unwrap();
+    fs::write(host.skill_of(".claude"), "old").unwrap();
+    let ran = run(&["agents", "refresh"]);
+    assert_eq!(
+        (ran.stdout, ran.stderr, ran.code),
+        (
+            lines(&[host.skill_of(".claude")]),
+            fish_left_out(&renamed),
+            Some(0)
+        )
+    );
+    assert_ne!(fs::read_to_string(host.skill_of(".claude")).unwrap(), "old");
+    let again = run(&["agents", "refresh", "--json"]);
+    assert_eq!(
+        one_value(&again.stdout),
+        Some(serde_json::json!({"written": []}))
+    );
+    assert_eq!(
+        (again.stderr, again.code),
+        (fish_left_out(&renamed), Some(0))
+    );
+    assert!(!completions.exists());
+}
+
+#[test]
+fn install_and_uninstall_leave_the_fish_completions_as_they_are() {
+    let host = Host::new().with_agents(&[".claude"]);
+    let completions = host.fish();
+    let placed = host.placed(&[".claude"]);
+    assert_eq!(host.ok(&["agents", "install"]), lines(&placed));
+    assert!(!completions.exists());
+    host.ok(&["agents", "uninstall"]);
+    assert_eq!(
+        host.ok(&init_line(&["--agents"])),
+        format!("desk created\n{}", lines(&placed))
+    );
+    assert!(!completions.exists());
+
+    assert_eq!(
+        host.ok(&["agents", "refresh"]),
+        lines(std::slice::from_ref(&completions))
+    );
+    let skills = host.skill_of(".claude").parent().unwrap().to_path_buf();
+    assert_eq!(
+        host.ok(&["agents", "uninstall"]),
+        lines(&[skills, host.hooks_of(".claude")])
+    );
+    assert_eq!(fs::read_to_string(&completions).unwrap(), fish_line());
+}
+
+impl Host {
+    fn asking(&self, mut program: Command, words: &[&str]) -> Ran {
+        program.env("COMPLETE", "fish");
+        self.run_as(program, &self.home(), words)
+    }
+
+    fn completing(&self, program: Command, words: &[&str]) -> Ran {
+        self.asking(program, &[&["--", "worklog-next"], words].concat())
+    }
+
+    fn offered(&self, words: &[&str]) -> String {
+        let ran = self.completing(found(), words);
+        assert_eq!(ran.stderr, "", "{words:?}");
+        assert_eq!(ran.code, Some(0), "{words:?}");
+        ran.stdout
+    }
+
+    fn completed(&self, words: &[&str]) -> String {
+        let offered = self.offered(words);
+        let values = offered.split_inclusive('\n');
+        values.filter(|line| !line.starts_with('-')).collect()
+    }
+
+    fn forked_by(&self, line: &[&str]) {
+        let other = Host::new();
+        copy_tree(&self.store(), &other.store());
+        let store = other.store();
+        other.ok(&["init", "desk", "--store", store.to_str().unwrap()]);
+        self.ok(line);
+        other.ok(line);
+        copy_tree(&other.store(), &self.store());
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum Source {
+    Topics,
+    Facts,
+    Entries,
+    Followups,
+    Documents,
+    Renamable,
+    Movable,
+    TopicsAndEntries,
+    Forked,
+    Ended,
+    Drafts,
+    Reasons,
+    Triggers,
+}
+
+const SOURCED: [(&str, &[&str], Source); 36] = [
+    (
+        "new followup topics",
+        &["new", "followup", "--topics", ""],
+        Source::Topics,
+    ),
+    (
+        "new followup touching",
+        &["new", "followup", "--topics", "lantern", "--touching", ""],
+        Source::Topics,
+    ),
+    (
+        "new followup entry",
+        &["new", "followup", "--topics", "lantern", "--entry", ""],
+        Source::Entries,
+    ),
+    (
+        "new followup about",
+        &["new", "followup", "--topics", "lantern", "--about", ""],
+        Source::Documents,
+    ),
+    ("checkout target", &["checkout", ""], Source::Documents),
+    ("save target", &["save", ""], Source::Drafts),
+    ("discard target", &["discard", ""], Source::Drafts),
+    ("resolve target", &["resolve", ""], Source::Forked),
+    ("rename target", &["rename", ""], Source::Renamable),
+    ("move from", &["move", ""], Source::Topics),
+    ("move to", &["move", "lantern", ""], Source::Topics),
+    (
+        "move targets",
+        &["move", "lantern", "atlas", ""],
+        Source::Movable,
+    ),
+    ("verify fact", &["verify", ""], Source::Facts),
+    ("end target", &["end", ""], Source::Documents),
+    ("end reason", &["end", "lantern", ""], Source::Reasons),
+    (
+        "end by",
+        &["end", "lantern", "retired", "--by", ""],
+        Source::Documents,
+    ),
+    ("reopen target", &["reopen", ""], Source::Ended),
+    ("done followup", &["done", ""], Source::Followups),
+    ("drop followup", &["drop", ""], Source::Followups),
+    ("trigger followup", &["trigger", ""], Source::Followups),
+    ("trigger when", &["trigger", "0a1b", ""], Source::Triggers),
+    ("claim topic", &["claim", ""], Source::Topics),
+    ("unclaim topic", &["unclaim", ""], Source::Topics),
+    ("show target", &["show", ""], Source::Documents),
+    ("history target", &["history", ""], Source::Documents),
+    ("diff target", &["diff", ""], Source::Drafts),
+    ("log machine", &["log", "--machine", ""], Source::Topics),
+    (
+        "search topic",
+        &["search", "relay", "--topic", ""],
+        Source::Topics,
+    ),
+    ("usage machine", &["usage", "--machine", ""], Source::Topics),
+    ("topics topic", &["topics", ""], Source::Topics),
+    ("facts topic", &["facts", ""], Source::Topics),
+    ("ideas topic", &["ideas", ""], Source::Topics),
+    ("entries topic", &["entries", ""], Source::Topics),
+    (
+        "followups about",
+        &["followups", ""],
+        Source::TopicsAndEntries,
+    ),
+    ("where topic", &["where", ""], Source::Topics),
+    ("where machine", &["where", "--machine", ""], Source::Topics),
+];
+
+const REASONS: &str = "retired\ttopic\nmerged\ttopic, entry\nfalse\tfact\nmoved\tfact\n\
+                       superseded\tfact\nbuilt\tidea\nabandoned\tidea\nremoved\tentry, claim\n\
+                       done\tfollowup\ndropped\tfollowup\n";
+
+#[test]
+fn each_argument_is_completed_from_the_list_its_command_takes_and_a_tab_writes_nothing() {
+    let host = Host::stocked();
+    let open = host.followup("Order a fuse");
+    let wiring = host.entry("wiring");
+    host.ok(&["end", "lantern/fuse", "false", "It blew"]);
+    host.forked_by(&["verify", "lantern/relay"]);
+    host.ok(&["new", "topic", "phone"]);
+
+    let topics = "atlas\tA thing\ndesk\tA machine\nlantern\tA thing\n";
+    let facts = "lantern/relay\tPin four\nlantern/dimmer\tPin four\n";
+    let entries = format!("{wiring}\tPin four\n");
+    let followups = format!("{open}\tOrder a fuse\n");
+    let listed = |source: Source| match source {
+        Source::Topics => topics.to_owned(),
+        Source::Facts => facts.to_owned(),
+        Source::Entries => entries.clone(),
+        Source::Followups => followups.clone(),
+        Source::Documents => format!("{topics}{facts}{entries}{followups}"),
+        Source::Renamable => format!("{topics}{facts}{entries}"),
+        Source::Movable => format!("{facts}{entries}{followups}"),
+        Source::TopicsAndEntries => format!("{topics}{entries}"),
+        Source::Forked => "lantern/relay\tPin four\n".to_owned(),
+        Source::Ended => "lantern/fuse\tPin four\n".to_owned(),
+        Source::Drafts => "phone\ttopic\n".to_owned(),
+        Source::Reasons => REASONS.to_owned(),
+        Source::Triggers => "touching\tthen a topic\nnone\tno trigger\n".to_owned(),
+    };
+    let mut sources: Vec<Source> = SOURCED.iter().map(|(_, _, source)| *source).collect();
+    sources.sort_unstable();
+    sources.dedup();
+    assert_eq!(sources.len(), 13);
+    let mut lists: Vec<String> = sources.iter().map(|source| listed(*source)).collect();
+    lists.sort();
+    lists.dedup();
+    assert_eq!(lists.len(), 13, "two lists read the same on this host");
+
+    let before = snapshot(&host);
+    for (argument, words, source) in SOURCED {
+        assert_eq!(host.completed(words), listed(source), "{argument}");
+    }
+    assert_eq!(snapshot(&host), before);
+    assert_eq!(host.usage_files(), [""; 0]);
+}
+
+#[test]
+fn a_shell_completes_a_prefix_a_comma_list_and_directories_but_never_files() {
+    let host = Host::stocked();
+    fs::write(host.home().join("projects.txt"), "").unwrap();
+    let before = snapshot(&host);
+
+    assert_eq!(host.completed(&["facts", "la"]), "lantern\tA thing\n");
+    assert_eq!(
+        host.completed(&["new", "followup", "--topics", "atlas,la"]),
+        "atlas,lantern\tA thing\n"
+    );
+    assert!(!host.completed(&["show", ""]).contains("projects"));
+    assert_eq!(host.completed(&["context", "pro"]), "projects/\n");
+    assert_eq!(host.completed(&["claim", "lantern", "pro"]), "projects/\n");
+    for words in [
+        &["search", "pro"][..],
+        &["new", "topic", "pro"],
+        &["rename", "lantern", "pro"],
+        &["reopen", "lantern", "pro"],
+    ] {
+        assert_eq!(host.completed(words), "", "{words:?}");
+    }
+    assert_eq!(host.completed(&["completions", ""]), "fish\nbash\nzsh\n");
+
+    let flags = |words: &[&str]| -> Vec<String> {
+        let offered = host.offered(words);
+        let flag = |line: &str| line.split('\t').next().unwrap_or_default().to_owned();
+        offered.lines().map(flag).collect()
+    };
+    assert_eq!(flags(&["serve", "--"]), ["--bind", "--host", "--help"]);
+    assert_eq!(flags(&["completions", "--"]), ["--help"]);
+    assert_eq!(flags(&["forks", "--"]), ["--json", "--help"]);
+    assert_eq!(snapshot(&host), before);
+}
+
+#[test]
+fn a_forked_document_and_one_with_a_file_that_does_not_read_are_each_offered_once() {
+    let host = Host::stocked();
+    host.forked_by(&["verify", "lantern/relay"]);
+    assert_eq!(host.ok(&["forks"]).lines().count(), 3);
+    host.ok(&["rename", "lantern/fuse", "breaker"]);
+    let listed = host.ok(&["history", "lantern/breaker"]);
+    let first = listed.lines().nth(1).expect("two versions")[..12].to_owned();
+    fs::write(host.file_of(&first), "not a version\n").unwrap();
+    let whole = host.ok(&["history", "atlas"]);
+    fs::write(host.file_of(&whole[..12]), "not a version\n").unwrap();
+
+    let before = snapshot(&host);
+    assert_eq!(
+        host.completed(&["verify", ""]),
+        "lantern/breaker\tPin four\nlantern/relay\tPin four\nlantern/dimmer\tPin four\n"
+    );
+    assert_eq!(
+        host.completed(&["facts", ""]),
+        "desk\tA machine\nlantern\tA thing\n"
+    );
+    assert_eq!(
+        host.completed(&["resolve", ""]),
+        "lantern/relay\tPin four\n"
+    );
+    assert_eq!(snapshot(&host), before);
+}
+
+#[test]
+fn a_shell_asking_on_a_host_with_no_store_is_offered_nothing_and_told_nothing() {
+    let host = Host::new();
+    let before = snapshot(&host);
+    assert_eq!(host.completed(&["facts", ""]), "");
+    assert_eq!(host.completed(&["show", ""]), "");
+    assert_eq!(host.completed(&["reopen", ""]), "");
+    assert_eq!(host.completed(&["resolve", ""]), "");
+    assert_eq!(snapshot(&host), before);
+    let stocked = Host::stocked();
+    fs::remove_dir_all(stocked.store()).unwrap();
+    assert_eq!(stocked.completed(&["facts", ""]), "");
+    fs::write(stocked.root.join("next/config.toml"), "store = 4\n").unwrap();
+    let before = snapshot(&stocked);
+    assert_eq!(stocked.completed(&["save", ""]), "");
+    assert_eq!(snapshot(&stocked), before);
+}
+
+#[test]
+fn a_shell_asking_for_candidates_is_no_run_the_usage_log_holds() {
+    let host = Host::stocked();
+    let asked = host.completing(found(), &["facts", "la"]);
+    assert_eq!(
+        (asked.stdout.as_str(), asked.stderr.as_str(), asked.code),
+        ("lantern\tA thing\n", "", Some(0))
+    );
+    let script = host.asking(found(), &[]);
+    assert_eq!((script.stderr.as_str(), script.code), ("", Some(0)));
+    assert!(script.stdout.contains("worklog-next"), "{}", script.stdout);
+    host.used_ok(&["completions", "fish"]);
+    assert_eq!(host.usage_files(), [""; 0]);
+
+    let listed = host.used_ok(&["topics"]);
+    for unset in ["", "0"] {
+        let mut program = found();
+        program.env("COMPLETE", unset);
+        let ran = host.run_as(program, &host.home(), &["topics"]);
+        assert_eq!(
+            (ran.stdout.as_str(), ran.stderr.as_str(), ran.code),
+            (listed.as_str(), "", Some(0)),
+            "{unset:?}"
+        );
+    }
+    assert_eq!(commands(&host.logged()).len(), 3);
+}
+
+fn path_finding(binary: &Path) -> OsString {
+    let ahead = binary.parent().map(Path::to_path_buf).into_iter();
+    let rest = std::env::var_os("PATH").unwrap_or_default();
+    std::env::join_paths(ahead.chain(std::env::split_paths(&rest))).expect("a path")
+}
+
+fn path_finding_the_binary() -> OsString {
+    path_finding(Path::new(env!("CARGO_BIN_EXE_worklog-next")))
+}
+
+fn found() -> Command {
+    let mut program = Command::cargo_bin("worklog-next").expect("the binary");
+    program.env("PATH", path_finding_the_binary());
+    program
+}
+
+impl Host {
+    fn used(&self, args: &[&str]) -> Ran {
+        self.run_as(found(), &self.home(), args)
+    }
+
+    fn used_ok(&self, args: &[&str]) -> String {
+        let ran = self.used(args);
+        assert_eq!(ran.stderr, "", "{args:?}");
+        assert_eq!(ran.code, Some(0), "{args:?}");
+        ran.stdout
+    }
+
+    fn usage_files(&self) -> Vec<String> {
+        let Ok(files) = fs::read_dir(self.store().join("usage")) else {
+            return Vec::new();
+        };
+        let name = |file: std::io::Result<fs::DirEntry>| {
+            file.unwrap().file_name().into_string().expect("a name")
+        };
+        let mut names: Vec<String> = files.map(name).collect();
+        names.sort();
+        names
+    }
+
+    fn logged(&self) -> Vec<Value> {
+        let files = self.usage_files();
+        let mut machines: Vec<&str> = files.iter().map(|file| &file[..32]).collect();
+        machines.dedup();
+        assert_eq!(machines.len(), 1, "one machine's files: {files:?}");
+        let mut logged = Vec::new();
+        for file in &files {
+            let text = fs::read_to_string(self.store().join("usage").join(file)).unwrap();
+            assert!(text.ends_with('\n'), "{text}");
+            let lines = text.lines();
+            logged.extend(lines.map(|line| serde_json::from_str(line).expect("a line that reads")));
+        }
+        logged
+    }
+
+    fn machine(&self, name: &str) -> String {
+        let shown = self.json(&["show", name]);
+        shown["document"].as_str().expect("a document").to_owned()
+    }
+}
+
+fn commands(logged: &[Value]) -> Vec<(&str, i64, Vec<&str>)> {
+    (logged.iter())
+        .map(|line| {
+            let arguments = line["arguments"].as_array().expect("the arguments");
+            (
+                line["command"].as_str().expect("a command"),
+                line["exit"].as_i64().expect("an exit code"),
+                (arguments.iter().filter_map(Value::as_str)).collect(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn every_run_is_logged_under_the_machine_that_ran_it() {
+    let host = Host::stocked();
+    let desk = host.machine("desk");
+    assert_eq!(host.usage_files(), [""; 0]);
+    host.used_ok(&["facts", "lantern"]);
+    host.used_ok(&["facts", "lantern"]);
+    let refused = host.used(&["show", "lantern/nothing"]);
+    assert_eq!((refused.stdout.as_str(), refused.code), ("", Some(1)));
+    assert_eq!(
+        host.used_ok(&["usage"]),
+        "desk — 3 runs\n      2 facts\n      1 show\n"
+    );
+
+    let files = host.usage_files();
+    let month = files[0].strip_prefix(&format!("{desk}-")).expect("the id");
+    let month = month.strip_suffix(".jsonl").expect("a log's name");
+    assert_eq!(month.len(), "2026-10".len(), "{files:?}");
+    let logged = host.logged();
+    let keys: Vec<&String> = logged[2].as_object().expect("an object").keys().collect();
+    assert_eq!(
+        keys,
+        [
+            "written",
+            "machine",
+            "version",
+            "agent",
+            "session",
+            "command",
+            "exit",
+            "refusal",
+            "hits",
+            "directory",
+            "arguments"
+        ]
+    );
+    let refusal = logged[2]["refusal"].as_str().expect("what the run said");
+    assert_eq!(refused.stderr, format!("worklog-next: {refusal}\n"));
+    let written = logged[2]["written"].as_str().expect("a stamp");
+    assert!(written.starts_with(month), "{written}");
+    let expected = serde_json::json!({
+        "written": written,
+        "machine": desk,
+        "version": env!("CARGO_PKG_VERSION"),
+        "agent": null,
+        "session": null,
+        "command": "show",
+        "exit": 1,
+        "refusal": refusal,
+        "hits": null,
+        "directory": "~",
+        "arguments": ["lantern/nothing"],
+    });
+    assert_eq!(logged[2], expected);
+    assert_eq!(logged[0]["refusal"], Value::Null);
+
+    host.used_ok(&["--json", "topics"]);
+    host.used_ok(&["topics", "--json"]);
+    host.run_as(found(), &host.home().join("projects/lantern"), &["topics"]);
+    let logged = host.logged();
+    assert_eq!(
+        commands(&logged)[4..],
+        [
+            ("topics", 0, vec!["--json"]),
+            ("topics", 0, vec!["--json"]),
+            ("topics", 0, vec![])
+        ]
+    );
+    assert_eq!(logged[6]["directory"], "~/projects/lantern");
+
+    for line in [
+        &["usage", "--machine", "atlas"][..],
+        &["usage", "--since", "2099-01-01"],
+    ] {
+        let none = host.used(line);
+        assert_eq!(none.stderr, "worklog-next: nothing logged\n", "{line:?}");
+        assert_eq!((none.stdout.as_str(), none.code), ("", Some(0)), "{line:?}");
+    }
+    assert_eq!(
+        host.used_ok(&["usage", "--since", "2099-01-01", "--json"]),
+        "[]\n"
+    );
+    let unknown = host.used(&["usage", "--machine", "torch"]);
+    assert_refused(&unknown, 1, "worklog-next: torch: names no document\n");
+    let undated = host.used(&["usage", "--since", "soon"]);
+    assert_refused(
+        &undated,
+        2,
+        "worklog-next: `soon` is not a date (YYYY-MM-DD)\n",
+    );
+    let counted = one_value(&host.used_ok(&["usage", "--machine", "desk", "--json"]));
+    let counted = counted.expect("one value");
+    assert_eq!(
+        counted[0]["machine"],
+        serde_json::json!({"document": desk, "label": "desk"})
+    );
+    assert_eq!(
+        counted[0]["commands"][0],
+        serde_json::json!({"command": "usage", "run_count": 6})
+    );
+}
+
+#[test]
+fn a_search_is_logged_with_how_many_documents_it_matched() {
+    let host = Host::stocked();
+    host.used_ok(&["search", "relay"]);
+    host.used_ok(&["search", "relay", "--json"]);
+    assert_eq!(host.used_ok(&["search", "no-such-word-anywhere"]), "");
+    host.used_ok(&["facts", "lantern"]);
+    let logged = host.logged();
+    let hits: Vec<(&str, &Value)> = (logged.iter())
+        .map(|line| (line["command"].as_str().expect("a command"), &line["hits"]))
+        .collect();
+    let (one, none) = (Value::from(1), Value::from(0));
+    assert_eq!(
+        hits,
+        [
+            ("search", &one),
+            ("search", &one),
+            ("search", &none),
+            ("facts", &Value::Null)
+        ]
+    );
+}
+
+#[test]
+fn a_command_line_the_parser_refuses_is_logged_under_the_command_it_named() {
+    let host = Host::stocked();
+    let lines = [
+        &["facts", "--no-such-flag"][..],
+        &["new", "entry"],
+        &["no-such-command"],
+        &["serve", "--json"],
+        &["init", "--no-such-flag"],
+        &["agents"],
+        &["agents", "refresh"],
+        &["--help"],
+        &["--version"],
+        &["help", "facts"],
+    ];
+    let ran: Vec<Ran> = lines.iter().map(|line| host.used(line)).collect();
+    let logged = host.logged();
+    assert_eq!(
+        commands(&logged),
+        [
+            ("facts", 2, vec!["--no-such-flag"]),
+            ("new entry", 2, vec![]),
+            ("", 2, vec!["no-such-command"]),
+            ("serve", 2, vec!["--json"]),
+        ]
+    );
+    let refusal = logged[0]["refusal"].as_str().expect("what the parser said");
+    assert!(refusal.contains("--no-such-flag"), "{refusal}");
+    assert!(!refusal.starts_with("error"), "{refusal}");
+    assert_eq!(
+        ran[0].stderr.lines().next(),
+        Some(&*format!("error: {refusal}"))
+    );
+    assert_eq!(
+        host.used_ok(&["usage"]),
+        "desk — 3 runs\n      1 facts\n      1 new entry\n      1 serve\n"
+    );
+}
+
+#[test]
+fn a_run_inside_an_agent_s_session_is_logged_with_its_id_and_the_first_agent_s_when_nested() {
+    let host = Host::stocked();
+    let home = host.home();
+    for (variable, id) in [(SESSIONS[0].1, "s-0"), (SESSIONS[1].1, "s-1")] {
+        let mut program = found();
+        program.env(variable, id);
+        assert_eq!(host.run_as(program, &home, &["facts"]).code, Some(0));
+    }
+    let mut nested = found();
+    for (_, variable) in SESSIONS {
+        nested.env(variable, "s-nested");
+    }
+    assert_eq!(host.run_as(nested, &home, &["facts"]).code, Some(0));
+    host.used_ok(&["facts"]);
+    let logged = host.logged();
+    let sessions: Vec<(&Value, &Value)> = (logged.iter())
+        .map(|line| (&line["agent"], &line["session"]))
+        .collect();
+    let within = |agent: &str, id: &str| (Value::from(agent), Value::from(id));
+    let expected = [
+        within(SESSIONS[0].0, "s-0"),
+        within(SESSIONS[1].0, "s-1"),
+        within(SESSIONS[0].0, "s-nested"),
+        (Value::Null, Value::Null),
+    ];
+    let expected: Vec<(&Value, &Value)> = expected.iter().map(|(a, id)| (a, id)).collect();
+    assert_eq!(sessions, expected);
+}
+
+#[test]
+fn a_binary_the_path_does_not_find_logs_nothing() {
+    let host = Host::stocked();
+    let elsewhere = host.root.join("bench");
+    fs::create_dir_all(&elsewhere).unwrap();
+    let built = Path::new(env!("CARGO_BIN_EXE_worklog-next"));
+    fs::write(elsewhere.join(built.file_name().expect("a name")), "").unwrap();
+    let mut shadowed = found();
+    let finding = path_finding_the_binary();
+    let behind = std::iter::once(elsewhere.clone()).chain(std::env::split_paths(&finding));
+    shadowed.env("PATH", std::env::join_paths(behind).unwrap());
+    let mut unfound = Command::cargo_bin("worklog-next").expect("the binary");
+    unfound.env("PATH", &elsewhere);
+    for program in [shadowed, unfound] {
+        let off = host.run_as(program, &host.home(), &["facts", "lantern"]);
+        assert_eq!((off.stderr.as_str(), off.code), ("", Some(0)));
+    }
+    assert_eq!(host.usage_files(), [""; 0]);
+    host.used_ok(&["facts", "lantern"]);
+    assert_eq!(host.used_ok(&["usage"]), "desk — 1 run\n      1 facts\n");
+}
+
+#[test]
+fn a_host_that_is_not_set_up_logs_nothing_and_neither_does_setting_one_up() {
+    let host = Host::new();
+    assert_refused(&host.used(&["topics"]), 1, NOT_SET_UP);
+    let opened = host.used(&["context"]);
+    assert_eq!((opened.stderr.as_str(), opened.code), (NOT_SET_UP, Some(0)));
+    assert_eq!(host.used(&["facts", "--no-such-flag"]).code, Some(2));
+    let logs = |host: &Host| {
+        let held = snapshot(host);
+        let logs = held
+            .iter()
+            .filter(|(path, _)| path.starts_with("store/usage"));
+        logs.count()
+    };
+    assert_eq!(logs(&host), 0);
+
+    let store = host.store();
+    let line = ["init", "desk", "--store", store.to_str().unwrap()];
+    let made = host.used_ok(&[&line[..], &["--summary", "A machine"]].concat());
+    assert_eq!(made, "desk created\n");
+    assert_ne!(host.used(&line).code, Some(0));
+    host.used(&["agents", "refresh"]);
+    assert_eq!(logs(&host), 0);
+    host.used_ok(&["topics"]);
+    assert_eq!(commands(&host.logged()), [("topics", 0, vec![])]);
+}
+
+#[test]
+fn a_store_holding_its_usage_log_alone_is_one_a_host_can_be_bound_to() {
+    let host = Host::stocked();
+    host.used_ok(&["topics"]);
+    let other = Host::new();
+    copy_tree(&host.store().join("usage"), &other.store().join("usage"));
+    assert_eq!(other.init("phone", &other.store()), "phone created\n");
+    other.used_ok(&["topics"]);
+    assert_eq!(other.usage_files().len(), 2);
+    let counted = other.used_ok(&["usage"]);
+    let unheld = host.machine("desk");
+    let of_unheld = format!("{unheld} — 1 run\n      1 topics\n");
+    assert_eq!(
+        counted,
+        format!("{of_unheld}\nphone — 1 run\n      1 topics\n")
+    );
+    assert_eq!(other.used_ok(&["usage", "--machine", &unheld]), of_unheld);
+    let machines = other.json(&["usage"]);
+    assert_eq!(
+        machines[0]["machine"],
+        serde_json::json!({"document": unheld, "label": unheld})
+    );
+    assert_eq!(
+        [&machines[0]["topic"], &machines[1]["topic"]],
+        [&Value::Null, &Value::from("phone")]
+    );
+    let logged_nowhere = unheld.replace(|digit: char| digit != '0', "0");
+    assert_refused(
+        &other.used(&["usage", "--machine", &logged_nowhere]),
+        1,
+        &format!("worklog-next: {logged_nowhere}: names no document\n"),
+    );
+
+    let usage = other.store().join("usage");
+    for file in other.usage_files() {
+        let conflict = file.replace(".jsonl", ".sync-conflict-20261012-101010-ABCDEFG.jsonl");
+        fs::copy(usage.join(&file), usage.join(conflict)).unwrap();
+        fs::copy(
+            usage.join(&file),
+            usage.join(format!("desk-{}", &file[33..])),
+        )
+        .unwrap();
+    }
+    let again = other.used_ok(&["usage"]);
+    assert!(again.starts_with(&of_unheld), "{again}");
+    let by_id = other.used_ok(&["usage", "--machine", &other.machine("phone")[..8]]);
+    assert!(by_id.starts_with("phone — "), "{by_id}");
+}
+
+#[test]
+fn a_log_that_cannot_be_written_or_read_leaves_every_command_as_it_was() {
+    let host = Host::stocked();
+    let listed = host.ok(&["topics"]);
+    fs::write(host.store().join("usage"), "").unwrap();
+    let ran = host.used(&["topics"]);
+    assert_eq!(ran.stderr, "");
+    assert_eq!((ran.stdout, ran.code), (listed, Some(0)));
+    let unparsed = host.used(&["facts", "--no-such-flag"]);
+    assert_eq!(unparsed.code, Some(2));
+    assert!(
+        unparsed.stderr.starts_with("error: "),
+        "{}",
+        unparsed.stderr
+    );
+    let none = host.used(&["usage"]);
+    assert_eq!(none.stderr, "worklog-next: nothing logged\n");
+    assert_eq!((none.stdout.as_str(), none.code), ("", Some(0)));
+    assert_eq!(fs::read(host.store().join("usage")).unwrap(), b"");
+}
+
+#[test]
+fn a_renamed_machine_topic_keeps_its_file_and_is_printed_by_its_new_name() {
+    let host = Host::stocked();
+    host.used_ok(&["facts"]);
+    host.used_ok(&["rename", "desk", "bench"]);
+    host.used_ok(&["facts"]);
+    let files = host.usage_files();
+    assert_eq!(files.len(), 1, "{files:?}");
+    assert!(files[0].starts_with(&host.machine("bench")), "{files:?}");
+    let counted = "bench — 3 runs\n      2 facts\n      1 rename\n";
+    assert_eq!(host.used_ok(&["usage"]), counted);
+    let by_the_old_name = host.used_ok(&["usage", "--machine", "desk"]);
+    assert!(
+        by_the_old_name.starts_with("bench — 4 runs\n"),
+        "{by_the_old_name}"
+    );
+
+    let phone = host.sharing("phone");
+    phone.used_ok(&["topics"]);
+    assert_eq!(host.usage_files().len(), 2);
+    assert_eq!(
+        phone.used_ok(&["usage", "--machine", "phone"]),
+        "phone — 1 run\n      1 topics\n"
+    );
+}
+
+impl Host {
+    fn serve_used(&self) -> Serving {
+        self.serving(Some(path_finding_the_binary()), &[])
+    }
+}
+
+#[test]
+fn serve_is_logged_once_before_its_first_request() {
+    let host = Host::stocked();
+    let mut serving = host.serve_used();
+    let bound = ("serve", 0, vec!["--bind", "127.0.0.1:0"]);
+    assert_eq!(commands(&host.logged()), std::slice::from_ref(&bound));
+    assert!(serving.page("/").contains(">lantern</a>"));
+    assert!(serving.page("/facts").contains("lantern/relay"));
+    serving.running();
+    assert_eq!(commands(&host.logged()), std::slice::from_ref(&bound));
+
+    let mut again = found();
+    again.args(["serve", "--bind", &serving.address]);
+    let busy = host.run_as(again, &host.home(), &[]);
+    assert_eq!(busy.code, Some(1));
+    let logged = host.logged();
+    assert_eq!(
+        commands(&logged),
+        [bound, ("serve", 1, vec!["--bind", &serving.address])]
+    );
+    let refusal = logged[1]["refusal"]
+        .as_str()
+        .expect("why it did not listen");
+    assert_eq!(busy.stderr, format!("worklog-next: {refusal}\n"));
+}
+
+const CURRENT: &str = env!("CARGO_PKG_VERSION");
+
+fn release_asset() -> String {
+    worklog_next::domain::release::asset("worklog-next").expect("a release for this target")
+}
+
+impl Host {
+    fn releases(&self) -> PathBuf {
+        self.root.join("releases")
+    }
+
+    fn publish(&self, tag: &str, bytes: &[u8], checksum_of: &[u8]) {
+        let (dir, asset) = (self.releases(), release_asset());
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("latest"), format!("{tag}\n")).unwrap();
+        fs::write(dir.join(&asset), bytes).unwrap();
+        let digest = worklog_next::domain::release::sha256_hex(checksum_of);
+        fs::write(
+            dir.join(format!("{asset}.sha256")),
+            format!("{digest}  {asset}\n"),
+        )
+        .unwrap();
+    }
+
+    fn install_as(&self, name: &str) -> PathBuf {
+        let prefix = self.home().join(".local/bin");
+        fs::create_dir_all(&prefix).unwrap();
+        let installed = prefix.join(name);
+        copy_of_the_binary(&installed);
+        installed
+    }
+
+    fn install(&self) -> PathBuf {
+        self.install_as("worklog-next")
+    }
+
+    fn upgrade(&self, installed: &Path, args: &[&str]) -> Ran {
+        let mut program = Command::new(installed);
+        program.env(RELEASES, self.releases());
+        self.run_as(program, &self.home(), args)
+    }
+}
+
+fn copy_of_the_binary(to: &Path) {
+    fs::copy(binary(), to).unwrap();
+    let unpublished = to.with_extension("unpublished");
+    let version = || {
+        let mut copy = std::process::Command::new(to);
+        copy.arg("--version").env(RELEASES, &unpublished).output()
+    };
+    loop {
+        match version() {
+            Err(busy) if busy.kind() == std::io::ErrorKind::ExecutableFileBusy => {
+                std::thread::yield_now();
+            }
+            ran => break assert!(ran.expect("the copy runs").status.success()),
+        }
+    }
+}
+
+fn beside(file: &Path) -> Vec<OsString> {
+    let dir = file.parent().expect("a directory");
+    let entries = fs::read_dir(dir).unwrap();
+    entries.map(|entry| entry.unwrap().file_name()).collect()
+}
+
+struct Stale {
+    host: Host,
+    installed: PathBuf,
+    skill: PathBuf,
+    settings: PathBuf,
+    completions: PathBuf,
+}
+
+impl Stale {
+    fn new() -> Stale {
+        let host = Host::new().with_agents(&[".claude"]);
+        let (skill, settings) = (host.skill_of(".claude"), host.hooks_of(".claude"));
+        fs::create_dir_all(skill.parent().unwrap()).unwrap();
+        fs::write(&skill, "old").unwrap();
+        let stale = serde_json::json!(
+            {"hooks": [{"type": "command", "command": "\"/gone/worklog-next\" context"}]}
+        );
+        let hooks = serde_json::json!({"hooks": {"SessionStart": [stale]}});
+        fs::write(&settings, hooks.to_string()).unwrap();
+        Stale {
+            installed: host.install(),
+            completions: host.fish(),
+            host,
+            skill,
+            settings,
+        }
+    }
+
+    fn upgrade(&self, args: &[&str]) -> Ran {
+        self.host.upgrade(&self.installed, args)
+    }
+
+    fn hook(&self) -> String {
+        let hooks = self.host.hooks_json(".claude");
+        let command = &hooks["hooks"]["SessionStart"][0]["hooks"][0]["command"];
+        command.as_str().expect("a command").to_owned()
+    }
+
+    fn fish_line(&self) -> String {
+        fs::read_to_string(&self.completions).unwrap()
+    }
+}
+
+#[test]
+fn upgrade_has_the_release_it_put_in_place_refresh_the_host() {
+    let stale = Stale::new();
+    let released = stale.host.root.join("released/worklog-next");
+    fs::create_dir_all(released.parent().unwrap()).unwrap();
+    copy_of_the_binary(&released);
+    let handing_on = format!("#!/bin/sh\nexec \"{}\" \"$@\"\n", released.display());
+    stale
+        .host
+        .publish("v9.9.9", handing_on.as_bytes(), handing_on.as_bytes());
+    let checked = stale.upgrade(&["upgrade", "--check"]);
+    assert_eq!(
+        (checked.stdout, checked.stderr.as_str(), checked.code),
+        (format!("current: {CURRENT}\nlatest: 9.9.9\n"), "", Some(1))
+    );
+    let checked = stale.upgrade(&["upgrade", "--check", "--json"]);
+    assert_eq!((checked.stderr.as_str(), checked.code), ("", Some(1)));
+    assert_eq!(
+        one_value(&checked.stdout),
+        Some(serde_json::json!({"current": CURRENT, "latest": "9.9.9", "newer": true}))
+    );
+    assert_eq!(fs::read_to_string(&stale.skill).unwrap(), "old");
+    assert!(!stale.completions.exists());
+
+    let upgraded = stale.upgrade(&["upgrade"]);
+    assert_eq!(
+        upgraded.stderr,
+        format!("worklog-next: upgraded {CURRENT} to 9.9.9\n")
+    );
+    assert_eq!(
+        upgraded.stdout,
+        lines(&[
+            stale.installed.clone(),
+            stale.skill.clone(),
+            stale.settings.clone(),
+            stale.completions.clone()
+        ])
+    );
+    assert_eq!(upgraded.code, Some(0));
+    assert_eq!(beside(&stale.installed), ["worklog-next"]);
+    assert_eq!(fs::read(&stale.installed).unwrap(), handing_on.as_bytes());
+    assert_ne!(fs::read_to_string(&stale.skill).unwrap(), "old");
+    assert_eq!(
+        stale.hook(),
+        format!("\"{}\" context 2>/dev/null || true", released.display())
+    );
+    assert_eq!(
+        stale.fish_line(),
+        format!("COMPLETE=fish \"{}\" | source\n", released.display())
+    );
+}
+
+#[test]
+fn upgrade_replaces_the_binary_only_with_a_newer_release_whose_checksum_matches() {
+    let stale = Stale::new();
+    let bytes = fs::read(binary()).unwrap();
+    let path = |file: &Path| file.display().to_string();
+    stale.host.publish("v9.9.9", &bytes, &bytes);
+    let upgraded = stale.upgrade(&["upgrade", "--json"]);
+    assert_eq!((upgraded.stderr.as_str(), upgraded.code), ("", Some(0)));
+    assert_eq!(
+        one_value(&upgraded.stdout),
+        Some(serde_json::json!({
+            "current": CURRENT,
+            "latest": "9.9.9",
+            "outcome": "upgraded",
+            "written": [
+                path(&stale.installed),
+                path(&stale.skill),
+                path(&stale.settings),
+                path(&stale.completions),
+            ],
+        }))
+    );
+    assert_eq!(fs::read(&stale.installed).unwrap(), bytes);
+    assert_eq!(
+        stale.hook(),
+        "\"$HOME/.local/bin/worklog-next\" context 2>/dev/null || true"
+    );
+    assert_eq!(
+        stale.fish_line(),
+        "COMPLETE=fish \"$HOME/.local/bin/worklog-next\" | source\n"
+    );
+
+    stale.host.publish(&format!("v{CURRENT}"), b"", b"");
+    fs::write(&stale.skill, "old").unwrap();
+    let stayed = stale.upgrade(&["upgrade"]);
+    assert_eq!(
+        stayed.stderr,
+        format!("worklog-next: already at {CURRENT}\n")
+    );
+    assert_eq!(
+        (stayed.stdout, stayed.code),
+        (
+            lines(&[stale.skill.clone(), stale.completions.clone()]),
+            Some(0)
+        )
+    );
+    let checked = stale.upgrade(&["upgrade", "--check"]);
+    assert_eq!(
+        (checked.stdout, checked.stderr.as_str(), checked.code),
+        (
+            format!("current: {CURRENT}\nlatest: {CURRENT}\n"),
+            "",
+            Some(0)
+        )
+    );
+
+    stale.host.publish("v9.9.9", b"tampered", b"");
+    assert_refused(
+        &stale.upgrade(&["upgrade"]),
+        1,
+        &format!(
+            "worklog-next: {}: the checksum does not match the release\n",
+            release_asset()
+        ),
+    );
+    assert_eq!(fs::read(&stale.installed).unwrap(), bytes);
+    assert_eq!(beside(&stale.installed), ["worklog-next"]);
+}
+
+#[test]
+fn the_refresh_after_an_upgrade_is_run_by_the_file_at_the_binary_s_own_path() {
+    let host = Host::new();
+    let installed = host.install();
+    let echoing = b"#!/bin/sh\nprintf '%s\\n' \"$0\" \"$*\"\n";
+    host.publish("v9.9.9", echoing, echoing);
+    let upgraded = host.upgrade(&installed, &["upgrade"]);
+    assert_eq!(
+        upgraded.stderr,
+        format!("worklog-next: upgraded {CURRENT} to 9.9.9\n")
+    );
+    let path = installed.display();
+    assert_eq!(
+        (upgraded.stdout, upgraded.code),
+        (format!("{path}\n{path}\nagents refresh\n"), Some(0))
+    );
+    assert_eq!(fs::read(&installed).unwrap(), echoing);
+    assert_eq!(beside(&installed), ["worklog-next"]);
+
+    let installed = host.install();
+    let failing = b"#!/bin/sh\necho /desk/skill\necho 'worklog-next: no agents here' >&2\nexit 1\n";
+    host.publish("v9.9.9", failing, failing);
+    let stopped = host.upgrade(&installed, &["upgrade"]);
+    assert_eq!(
+        stopped.stderr,
+        format!(
+            "worklog-next: upgraded {CURRENT} to 9.9.9\n\
+             worklog-next: {path} agents refresh: no agents here\n"
+        )
+    );
+    assert_eq!(
+        (stopped.stdout, stopped.code),
+        (format!("{path}\n/desk/skill\n"), Some(1))
+    );
+    assert_eq!(fs::read(&installed).unwrap(), failing);
+
+    let installed = host.install();
+    host.publish("v9.9.9", failing, failing);
+    let stopped = host.upgrade(&installed, &["upgrade", "--json"]);
+    assert_eq!(
+        one_value(&stopped.stdout),
+        Some(serde_json::json!({
+            "current": CURRENT,
+            "latest": "9.9.9",
+            "outcome": "upgraded",
+            "written": [path.to_string(), "/desk/skill"],
+        }))
+    );
+    assert_eq!(
+        (stopped.stderr, stopped.code),
+        (
+            format!("worklog-next: {path} agents refresh: no agents here\n"),
+            Some(1)
+        )
+    );
+}
+
+#[test]
+fn an_upgrade_whose_new_binary_cannot_write_for_fish_says_what_that_binary_wrote() {
+    let stale = Stale::new();
+    fs::create_dir(&stale.completions).unwrap();
+    let bytes = fs::read(binary()).unwrap();
+    stale.host.publish("v9.9.9", &bytes, &bytes);
+    let stopped = stale.upgrade(&["upgrade"]);
+    assert_eq!(
+        (stopped.stdout, stopped.code),
+        (
+            lines(&[
+                stale.installed.clone(),
+                stale.skill.clone(),
+                stale.settings.clone()
+            ]),
+            Some(1)
+        )
+    );
+    let said: Vec<&str> = stopped.stderr.lines().collect();
+    assert_eq!(said.len(), 2, "{}", stopped.stderr);
+    assert_eq!(
+        said[0],
+        format!("worklog-next: upgraded {CURRENT} to 9.9.9")
+    );
+    let failed = format!(
+        "worklog-next: {} agents refresh: {}: ",
+        stale.installed.display(),
+        stale.completions.display()
+    );
+    assert!(said[1].starts_with(&failed), "{}", stopped.stderr);
+    assert_ne!(fs::read_to_string(&stale.skill).unwrap(), "old");
+}
+
+#[test]
+fn a_binary_under_another_file_name_is_upgraded_on_a_host_with_fish() {
+    let host = Host::new().with_agents(&[".claude"]);
+    let completions = host.fish();
+    let skill = host.skill_of(".claude");
+    fs::create_dir_all(skill.parent().unwrap()).unwrap();
+    fs::write(&skill, "old").unwrap();
+    let installed = host.install_as("worklog-next-0.3.0");
+    let bytes = fs::read(binary()).unwrap();
+    host.publish("v9.9.9", &bytes, &bytes);
+    let upgraded = host.upgrade(&installed, &["upgrade"]);
+    assert_eq!(
+        upgraded.stderr,
+        format!(
+            "worklog-next: upgraded {CURRENT} to 9.9.9\n{}",
+            fish_left_out(&installed)
+        )
+    );
+    assert_eq!(
+        (upgraded.stdout, upgraded.code),
+        (lines(&[installed.clone(), skill.clone()]), Some(0))
+    );
+    assert_ne!(fs::read_to_string(&skill).unwrap(), "old");
+
+    host.publish(&format!("v{CURRENT}"), b"", b"");
+    fs::write(&skill, "old").unwrap();
+    let stayed = host.upgrade(&installed, &["upgrade"]);
+    assert_eq!(
+        stayed.stderr,
+        format!(
+            "worklog-next: already at {CURRENT}\n{}",
+            fish_left_out(&installed)
+        )
+    );
+    assert_eq!(
+        (stayed.stdout, stayed.code),
+        (lines(std::slice::from_ref(&skill)), Some(0))
+    );
+    assert!(!completions.exists());
+}
+
+#[test]
+fn a_misnamed_binary_whose_hook_is_installed_is_upgraded_and_its_refresh_refused_by_the_hook_s_rule()
+ {
+    let host = Host::new().with_agents(&[".claude"]);
+    let completions = host.fish();
+    host.ok(&["agents", "install"]);
+    let installed = host.install_as("worklog-next-0.3.0");
+    let refusal = format!(
+        "{}: the binary's file name must be worklog-next, or its hook is not found again\n",
+        installed.display()
+    );
+    let bytes = fs::read(binary()).unwrap();
+    host.publish(&format!("v{CURRENT}"), b"", b"");
+    let before = snapshot(&host);
+    let stayed = host.upgrade(&installed, &["upgrade"]);
+    assert_refused(
+        &stayed,
+        1,
+        &format!("worklog-next: already at {CURRENT}\nworklog-next: {refusal}"),
+    );
+    assert_eq!(snapshot(&host), before);
+
+    host.publish("v9.9.9", &bytes, &bytes);
+    let upgraded = host.upgrade(&installed, &["upgrade"]);
+    assert_eq!(
+        upgraded.stderr,
+        format!(
+            "worklog-next: upgraded {CURRENT} to 9.9.9\n\
+             worklog-next: {} agents refresh: {refusal}",
+            installed.display()
+        )
+    );
+    assert_eq!(
+        (upgraded.stdout, upgraded.code),
+        (lines(std::slice::from_ref(&installed)), Some(1))
+    );
+    assert!(!completions.exists());
+    assert_eq!(host.hooks_json(".claude"), {
+        let hooks = &before
+            .iter()
+            .find(|(path, _)| path.ends_with("settings.json"));
+        let (_, bytes) = hooks.expect("the hooks file");
+        serde_json::from_slice::<Value>(bytes.as_ref().unwrap()).unwrap()
+    });
+}
+
+#[test]
+fn an_upgrade_and_the_refresh_it_has_the_new_binary_run_are_no_runs_the_usage_log_holds() {
+    let host = Host::set_up("desk").with_agents(&[".claude"]);
+    let installed = host.install();
+    let found = || {
+        let mut program = Command::new("worklog-next");
+        program.env("PATH", path_finding(&installed));
+        program.env(RELEASES, host.releases());
+        program
+    };
+    let used = |args: &[&str]| host.run_as(found(), &host.home(), args);
+    let logged = || -> Vec<String> {
+        let logged = host.logged();
+        let command = |line: &Value| line["command"].as_str().expect("a command").to_owned();
+        logged.iter().map(command).collect()
+    };
+    host.publish(&format!("v{CURRENT}"), b"", b"");
+    assert_eq!(used(&["topics"]).code, Some(0));
+    assert_eq!(logged(), ["topics"]);
+
+    assert_eq!(used(&["upgrade", "--check"]).code, Some(0));
+    let stayed = used(&["upgrade"]);
+    assert_eq!(
+        (stayed.stderr, stayed.code),
+        (format!("worklog-next: already at {CURRENT}\n"), Some(0))
+    );
+    let bytes = fs::read(binary()).unwrap();
+    host.publish("v9.9.9", &bytes, &bytes);
+    assert_eq!(used(&["upgrade", "--check"]).code, Some(1));
+    let upgraded = used(&["upgrade"]);
+    assert_eq!(
+        (upgraded.stderr, upgraded.code),
+        (
+            format!("worklog-next: upgraded {CURRENT} to 9.9.9\n"),
+            Some(0)
+        )
+    );
+    assert_eq!(upgraded.stdout, lines(std::slice::from_ref(&installed)));
+    assert_eq!(logged(), ["topics"]);
+
+    assert_eq!(used(&["facts"]).code, Some(0));
+    assert_eq!(logged(), ["topics", "facts"]);
 }

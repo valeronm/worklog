@@ -3,11 +3,14 @@
 
 mod agents;
 mod args;
+mod complete;
 mod hook;
 mod json;
+mod log;
 mod render;
 mod run;
 mod skill;
+mod upgrade;
 
 use std::ffi::OsString;
 use std::io::{ErrorKind, Write};
@@ -15,11 +18,13 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 use crate::app::Failure;
-use crate::domain::ports::StoreError;
+use crate::app::record::Outcome;
+use crate::domain::ports::{Binary, Releases, StoreError};
+use crate::domain::release::{self, ReleaseVersion};
 use crate::domain::schema::Directory;
 use crate::{web, wiring};
 use args::{Cli, Command, Invoked, ReadCommand};
-use render::Output;
+use render::{Output, Stopped};
 
 const NAME: &str = "worklog-next";
 
@@ -27,6 +32,9 @@ struct Environment<'a> {
     cwd: Option<PathBuf>,
     binary: Option<PathBuf>,
     variable: &'a dyn Fn(&str) -> Option<OsString>,
+    version: ReleaseVersion,
+    releases: &'a dyn Fn() -> Box<dyn Releases>,
+    binary_at: &'a dyn Fn(&Path) -> Box<dyn Binary>,
 }
 
 impl Environment<'_> {
@@ -62,13 +70,22 @@ impl Environment<'_> {
 /// Runs the process's own command line and returns its exit code.
 #[must_use]
 pub fn main() -> i32 {
+    let variable = |name: &str| std::env::var_os(name);
     let environment = Environment {
         cwd: std::env::current_dir().ok(),
         binary: std::env::current_exe().ok(),
-        variable: &|name| std::env::var_os(name),
+        variable: &variable,
+        version: release::current(),
+        releases: &|| wiring::releases(&variable),
+        binary_at: &|path| wiring::binary(path, NAME),
     };
+    let args: Vec<OsString> = std::env::args_os().collect();
+    let cwd = environment.cwd.as_deref();
+    if let Some(code) = complete::answered(&args, cwd, &mut std::io::stderr().lock()) {
+        return code;
+    }
     main_in(
-        std::env::args_os(),
+        args,
         &environment,
         &mut std::io::stdout().lock(),
         &mut std::io::stderr().lock(),
@@ -82,22 +99,48 @@ fn exit_code(failure: &Failure) -> i32 {
     }
 }
 
-fn answered(command: &Command, json: bool, environment: &Environment) -> Result<Output, Failure> {
+fn adapters_for(
+    command: &Command,
+    environment: &Environment,
+) -> Result<Option<wiring::Adapters>, Failure> {
     let chosen = match command {
         Command::Init { store, .. } => Some(environment.placed(store)?),
         _ => None,
     };
-    let Some(adapters) = wiring::wire(environment.variable, chosen)? else {
-        let not_set_up = Failure::not_set_up();
-        return match command {
-            // A session opens with `context` unasked, on a host set up or not.
-            Command::Read(ReadCommand::Context { .. }) => {
-                Ok(Output::note(not_set_up.to_string(), json))
-            }
-            _ => Err(not_set_up),
-        };
+    wiring::wire(environment.variable, chosen)
+}
+
+fn unbound(command: &Command, json: bool) -> Result<Output, Failure> {
+    let not_set_up = Failure::not_set_up();
+    match command {
+        // A session opens with `context` unasked, on a host set up or not.
+        Command::Read(ReadCommand::Context { .. }) => {
+            Ok(Output::note(not_set_up.to_string(), json))
+        }
+        _ => Err(not_set_up),
+    }
+}
+
+// A log that stalls must not hold back the run's output.
+fn ran(
+    command: &Command,
+    json: bool,
+    environment: &Environment,
+    words: &[OsString],
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    let adapters = match adapters_for(command, environment) {
+        Ok(Some(adapters)) => adapters,
+        Ok(None) => return finished(unbound(command, json), out, err),
+        Err(failure) => return finished(Err(failure), out, err),
     };
-    run::run(&adapters.deps(), environment, json, command)
+    let deps = adapters.deps();
+    let answer = run::run(&deps, environment, json, command);
+    let outcome = log::outcome(&answer);
+    let code = finished(answer, out, err);
+    log::ran(words, environment, &deps, outcome);
+    code
 }
 
 fn fail(err: &mut dyn Write, what: &dyn std::fmt::Display) {
@@ -134,23 +177,32 @@ fn wired(environment: &Environment) -> Result<wiring::Adapters, Failure> {
     wiring::wire(environment.variable, None)?.ok_or_else(Failure::not_set_up)
 }
 
+// The server ends only with the process.
 fn listening(
     bind: &SocketAddr,
     hosts: &[String],
     environment: &Environment,
+    words: &[OsString],
 ) -> Result<web::Server, Failure> {
-    wired(environment)?;
-    web::Server::bind(&bind.to_string(), hosts)
+    let adapters = wired(environment)?;
+    let server = web::Server::bind(&bind.to_string(), hosts);
+    let outcome = match &server {
+        Ok(_) => Outcome::default(),
+        Err(failure) => log::failed(failure),
+    };
+    log::ran(words, environment, &adapters.deps(), outcome);
+    server
 }
 
 fn serve(
     bind: &SocketAddr,
     hosts: &[String],
     environment: &Environment,
+    words: &[OsString],
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> i32 {
-    let server = match listening(bind, hosts, environment) {
+    let server = match listening(bind, hosts, environment, words) {
         Ok(server) => server,
         Err(failure) => {
             fail(err, &failure);
@@ -193,26 +245,48 @@ where
     I: IntoIterator<Item = T>,
     T: Into<OsString> + Clone,
 {
-    let cli = match Cli::parsed(args) {
+    let words: Vec<OsString> = args.into_iter().map(Into::into).collect();
+    let cli = match Cli::parsed(&words) {
         Ok(cli) => cli,
         Err(error) => {
             // clap sends help and the version to stdout with exit 0.
-            let _ = if error.use_stderr() {
-                write!(err, "{}", error.render())
+            if error.use_stderr() {
+                let _ = write!(err, "{}", error.render());
+                log::refused(&words, environment, &error);
             } else {
-                write!(out, "{}", error.render())
-            };
+                let _ = write!(out, "{}", error.render());
+            }
             return error.exit_code();
         }
     };
     let command = match &cli.command {
         Invoked::Run(command) => command,
-        Invoked::Serve { bind, hosts } => return serve(bind, hosts, environment, out, err),
+        Invoked::Serve { bind, hosts } => {
+            return serve(bind, hosts, environment, &words, out, err);
+        }
         Invoked::Agents { action } => {
-            return finished(agents::run(*action, environment, cli.json), out, err);
+            return ended(agents::run(*action, environment, cli.json), out, err);
+        }
+        Invoked::Completions { shell } => {
+            return finished(complete::registered(*shell, environment), out, err);
+        }
+        Invoked::Upgrade { check } => {
+            return ended(upgrade::run(*check, environment, cli.json), out, err);
         }
     };
-    finished(answered(command, cli.json, environment), out, err)
+    ran(command, cli.json, environment, &words, out, err)
+}
+
+fn ended(answer: Result<Output, Stopped>, out: &mut dyn Write, err: &mut dyn Write) -> i32 {
+    match answer {
+        Ok(output) => finished(Ok(output), out, err),
+        Err(Stopped { done, failure }) => {
+            if let Some(done) = done {
+                finished(Ok(done), out, err);
+            }
+            finished(Err(failure), out, err)
+        }
+    }
 }
 
 fn finished(answer: Result<Output, Failure>, out: &mut dyn Write, err: &mut dyn Write) -> i32 {
@@ -244,11 +318,111 @@ mod tests {
     use std::io;
 
     use super::*;
+    use crate::domain::testing::{MemoryBinary, MemoryReleases, version};
 
-    struct Ran {
-        out: String,
-        err: String,
-        code: i32,
+    const UNPUBLISHED: fn() -> Box<dyn Releases> = || Box::new(MemoryReleases::default());
+
+    pub(super) struct Ran {
+        pub(super) out: String,
+        pub(super) err: String,
+        pub(super) code: i32,
+    }
+
+    const IN_MEMORY: fn(&Path) -> Box<dyn Binary> = |_| Box::new(MemoryBinary::default());
+
+    pub(super) fn environment(variable: &dyn Fn(&str) -> Option<OsString>) -> Environment<'_> {
+        Environment {
+            cwd: None,
+            binary: None,
+            variable,
+            version: release::current(),
+            releases: &UNPUBLISHED,
+            binary_at: &IN_MEMORY,
+        }
+    }
+
+    pub(super) struct Process<'a> {
+        pub(super) next: Option<PathBuf>,
+        pub(super) home: Option<PathBuf>,
+        pub(super) invoked: OsString,
+        pub(super) binary: Option<PathBuf>,
+        pub(super) path: Option<OsString>,
+        pub(super) cwd: Option<PathBuf>,
+        pub(super) version: ReleaseVersion,
+        pub(super) releases: &'a dyn Fn() -> Box<dyn Releases>,
+        pub(super) binary_at: &'a dyn Fn(&Path) -> Box<dyn Binary>,
+    }
+
+    impl<'a> Process<'a> {
+        pub(super) fn nowhere() -> Process<'a> {
+            Process {
+                next: None,
+                home: None,
+                invoked: OsString::from(NAME),
+                binary: None,
+                path: None,
+                cwd: None,
+                version: release::current(),
+                releases: &UNPUBLISHED,
+                binary_at: &IN_MEMORY,
+            }
+        }
+
+        pub(super) fn under(root: &Path) -> Process<'a> {
+            Process {
+                next: Some(root.join("next")),
+                home: Some(root.join("home")),
+                binary: Some(root.join(NAME)),
+                cwd: Some(root.join("home")),
+                ..Process::nowhere()
+            }
+        }
+
+        pub(super) fn variable(&self, name: &str) -> Option<OsString> {
+            let set = |dir: &Option<PathBuf>| dir.clone().map(PathBuf::into_os_string);
+            match name {
+                "WORKLOG_NEXT_HOME" => set(&self.next),
+                "HOME" => set(&self.home),
+                "PATH" => self.path.clone(),
+                _ => None,
+            }
+        }
+
+        pub(super) fn run_to(
+            &self,
+            line: &[&str],
+            out: &mut dyn Write,
+            err: &mut dyn Write,
+        ) -> i32 {
+            let environment = Environment {
+                cwd: self.cwd.clone(),
+                binary: self.binary.clone(),
+                variable: &|name| self.variable(name),
+                version: self.version,
+                releases: self.releases,
+                binary_at: self.binary_at,
+            };
+            let mut args = vec![self.invoked.clone()];
+            args.extend(line.iter().map(OsString::from));
+            main_in(args, &environment, out, err)
+        }
+
+        pub(super) fn run(&self, line: &[&str]) -> Ran {
+            let (mut out, mut err) = (Vec::new(), Vec::new());
+            let code = self.run_to(line, &mut out, &mut err);
+            Ran {
+                out: String::from_utf8(out).unwrap(),
+                err: String::from_utf8(err).unwrap(),
+                code,
+            }
+        }
+    }
+
+    fn process_in<'a>(root: &Path, cwd: Option<&Path>) -> Process<'a> {
+        Process {
+            cwd: cwd.map(Path::to_path_buf),
+            ..Process::under(root)
+        }
     }
 
     fn run_to(
@@ -257,39 +431,291 @@ mod tests {
         line: &[&str],
         out: &mut dyn Write,
     ) -> (String, i32) {
-        let variable = |name: &str| match name {
-            "WORKLOG_NEXT_HOME" => Some(root.join("next").into_os_string()),
-            "HOME" => Some(root.join("home").into_os_string()),
-            _ => None,
-        };
-        let environment = Environment {
-            cwd: cwd.map(Path::to_path_buf),
-            binary: Some(root.join("worklog-next")),
-            variable: &variable,
-        };
         let mut err = Vec::new();
-        let args = [&["worklog-next"], line].concat();
-        let code = main_in(args, &environment, out, &mut err);
+        let code = process_in(root, cwd).run_to(line, out, &mut err);
         (String::from_utf8(err).unwrap(), code)
     }
 
     fn run_in(root: &Path, cwd: Option<&Path>, line: &[&str]) -> Ran {
-        let mut out = Vec::new();
-        let (err, code) = run_to(root, cwd, line, &mut out);
-        Ran {
-            out: String::from_utf8(out).unwrap(),
-            err,
-            code,
-        }
+        process_in(root, cwd).run(line)
     }
 
     fn run(root: &Path, line: &[&str]) -> Ran {
-        run_in(root, Some(&root.join("home")), line)
+        Process::under(root).run(line)
     }
 
     fn init(root: &Path) -> Ran {
         let line = ["init", "desk", "--store", "kept", "--summary", "A machine"];
         run(root, &line)
+    }
+
+    struct Found {
+        _kept: tempfile::TempDir,
+        root: PathBuf,
+    }
+
+    impl Found {
+        fn new() -> Found {
+            let kept = tempfile::tempdir().unwrap();
+            let root = std::fs::canonicalize(kept.path()).unwrap();
+            for dir in ["bin", "bench"] {
+                std::fs::create_dir_all(root.join(dir)).unwrap();
+                std::fs::write(root.join(dir).join(NAME), "").unwrap();
+            }
+            std::fs::create_dir(root.join("home")).unwrap();
+            Found { _kept: kept, root }
+        }
+
+        fn how<'a>(&self, dir: &str, path: &[&str], cwd: Option<&Path>) -> Process<'a> {
+            let binary = self.root.join(dir).join(NAME);
+            let path = path.iter().map(|dir| self.root.join(dir));
+            Process {
+                invoked: binary.clone().into_os_string(),
+                binary: Some(binary),
+                path: Some(std::env::join_paths(path).unwrap()),
+                ..process_in(&self.root, cwd)
+            }
+        }
+
+        fn run_as(&self, dir: &str, path: &[&str], cwd: Option<&Path>, line: &[&str]) -> Ran {
+            self.how(dir, path, cwd).run(line)
+        }
+
+        fn run_by(&self, invoked: &str, path: &[&str], line: &[&str]) -> Ran {
+            let home = self.root.join("home");
+            let mut how = self.how("bin", path, Some(&home));
+            how.invoked = OsString::from(invoked);
+            how.run(line)
+        }
+
+        fn run(&self, line: &[&str]) -> Ran {
+            let home = self.root.join("home");
+            self.run_as("bin", &["bin"], Some(&home), line)
+        }
+
+        fn logged(&self) -> Vec<serde_json::Value> {
+            let dir = self.root.join("home/kept/usage");
+            let Ok(files) = std::fs::read_dir(&dir) else {
+                return Vec::new();
+            };
+            let mut files: Vec<PathBuf> = files.map(|file| file.unwrap().path()).collect();
+            files.sort();
+            let mut logged = Vec::new();
+            for file in &files {
+                let text = std::fs::read_to_string(file).unwrap();
+                assert!(text.ends_with('\n'), "{text}");
+                let lines = text.lines();
+                logged.extend(
+                    lines.map(|line| serde_json::from_str(line).expect("a line that reads")),
+                );
+            }
+            logged
+        }
+
+        fn commands(&self) -> Vec<String> {
+            let logged = self.logged();
+            let command = |line: &serde_json::Value| line["command"].as_str().unwrap().to_owned();
+            logged.iter().map(command).collect()
+        }
+    }
+
+    #[test]
+    fn the_name_looked_for_on_the_path_is_the_one_the_binary_was_run_by() {
+        let found = Found::new();
+        found.run(&["init", "desk", "--store", "kept", "--summary", "s"]);
+        let links = found.root.join("links");
+        std::fs::create_dir(&links).unwrap();
+        std::os::unix::fs::symlink(found.root.join("bin").join(NAME), links.join("lamp")).unwrap();
+        let relative = format!("bin/{NAME}");
+        let dotted = format!("./{NAME}");
+        let elsewhere = found.root.join("bench").join(NAME);
+
+        for (invoked, path, logged) in [
+            (NAME, &["bin"][..], true),
+            (relative.as_str(), &["bin"], true),
+            (dotted.as_str(), &["bin"], true),
+            ("lamp", &["links"], true),
+            ("lamp", &["bin"], false),
+            (NAME, &["links"], false),
+            (NAME, &["bench", "bin"], false),
+            (elsewhere.to_str().unwrap(), &["bench"], false),
+        ] {
+            let before = found.commands().len();
+            let ran = found.run_by(invoked, path, &["topics"]);
+            assert_eq!((ran.err.as_str(), ran.code), ("", 0), "{invoked}");
+            let added = found.commands().len() - before;
+            assert_eq!(added, usize::from(logged), "{invoked} with {path:?}");
+        }
+    }
+
+    #[test]
+    fn a_bare_run_and_a_command_lacking_its_subcommand_are_logged_as_refusals() {
+        let found = Found::new();
+        found.run(&["init", "desk", "--store", "kept", "--summary", "s"]);
+        for line in [&[][..], &["new"]] {
+            let ran = found.run(line);
+            assert_eq!((ran.out.as_str(), ran.code), ("", 2), "{line:?}");
+        }
+        let logged = found.logged();
+        assert_eq!(found.commands(), ["", "new"]);
+        for line in &logged {
+            assert_eq!(line["exit"], 2);
+            assert!(
+                line["refusal"]
+                    .as_str()
+                    .is_some_and(|said| !said.is_empty())
+            );
+        }
+    }
+
+    #[test]
+    fn a_working_directory_that_is_not_utf_8_is_logged_with_what_of_it_reads() {
+        use std::os::unix::ffi::OsStringExt as _;
+        let found = Found::new();
+        found.run(&["init", "desk", "--store", "kept", "--summary", "s"]);
+        let named = OsString::from_vec(vec![b'l', 0xff]);
+        let cwd = found.root.join("home").join(named);
+        std::fs::create_dir(&cwd).unwrap();
+        let ran = found.run_as("bin", &["bin"], Some(&cwd), &["topics"]);
+        assert_eq!((ran.err.as_str(), ran.code), ("", 0));
+        let logged = found.logged();
+        assert_eq!(found.commands(), ["topics"]);
+        assert_eq!(logged[0]["directory"], "~/l\u{fffd}");
+    }
+
+    struct Watching {
+        log: PathBuf,
+        logged_at_first_write: Option<bool>,
+        text: Vec<u8>,
+    }
+
+    impl Write for Watching {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.logged_at_first_write.get_or_insert(self.log.exists());
+            self.text.extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_line_the_parser_refuses_is_said_before_it_is_logged() {
+        let found = Found::new();
+        found.run(&["init", "desk", "--store", "kept", "--summary", "s"]);
+        let home = found.root.join("home");
+        let mut err = Watching {
+            log: home.join("kept/usage"),
+            logged_at_first_write: None,
+            text: Vec::new(),
+        };
+        let how = found.how("bin", &["bin"], Some(&home));
+        let line = ["facts", "--no-such-flag"];
+        let code = how.run_to(&line, &mut Vec::new(), &mut err);
+        assert_eq!(code, 2);
+        assert!(err.text.starts_with(b"error: "));
+        assert_eq!(err.logged_at_first_write, Some(false));
+        assert_eq!(found.commands(), ["facts"]);
+    }
+
+    #[test]
+    fn a_run_says_what_it_has_to_say_before_it_is_logged() {
+        let found = Found::new();
+        found.run(&["init", "desk", "--store", "kept", "--summary", "s"]);
+        let home = found.root.join("home");
+        let log = home.join("kept/usage");
+        let watching = || Watching {
+            log: log.clone(),
+            logged_at_first_write: None,
+            text: Vec::new(),
+        };
+        let how = found.how("bin", &["bin"], Some(&home));
+
+        let mut out = watching();
+        let code = how.run_to(&["topics"], &mut out, &mut Vec::new());
+        assert_eq!(code, 0);
+        assert!(out.text.ends_with(b"  desk  s\n"));
+        assert_eq!(out.logged_at_first_write, Some(false));
+        assert_eq!(found.commands(), ["topics"]);
+
+        std::fs::remove_dir_all(&log).unwrap();
+        let mut err = watching();
+        let line = ["show", "lantern/relay"];
+        let code = how.run_to(&line, &mut Vec::new(), &mut err);
+        assert_eq!(code, 1);
+        assert!(err.text.starts_with(NAME.as_bytes()));
+        assert_eq!(err.logged_at_first_write, Some(false));
+        assert_eq!(found.commands(), ["show"]);
+    }
+
+    #[test]
+    fn a_run_is_logged_under_the_version_its_process_was_started_as() {
+        let found = Found::new();
+        found.run(&["init", "desk", "--store", "kept", "--summary", "s"]);
+        let home = found.root.join("home");
+        let ahead = Process {
+            version: version("0.4.0"),
+            ..found.how("bin", &["bin"], Some(&home))
+        };
+        assert_eq!(ahead.run(&["topics"]).code, 0);
+        assert_eq!(found.logged()[0]["version"], "0.4.0");
+    }
+
+    struct Removing {
+        store: PathBuf,
+        text: Vec<u8>,
+    }
+
+    impl Write for Removing {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            if self.store.exists() {
+                std::fs::remove_dir_all(&self.store)?;
+            }
+            self.text.extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_host_whose_store_is_gone_is_told_so_and_no_store_is_made_to_log_it() {
+        let found = Found::new();
+        found.run(&["init", "desk", "--store", "kept", "--summary", "s"]);
+        let home = found.root.join("home");
+        let store = home.join("kept");
+        let how = found.how("bin", &["bin"], Some(&home));
+        let mut out = Removing {
+            store: store.clone(),
+            text: Vec::new(),
+        };
+        let code = how.run_to(&["topics"], &mut out, &mut Vec::new());
+        assert_eq!(code, 0);
+        assert!(out.text.ends_with(b"  desk  s\n"));
+        assert!(!store.exists());
+
+        let gone = found.run(&["topics"]);
+        let said = format!(
+            "{NAME}: {}: this host's store is not a directory\n",
+            store.display()
+        );
+        assert_eq!((gone.out.as_str(), gone.err, gone.code), ("", said, 1));
+        assert_eq!(found.run(&["facts", "--no-such-flag"]).code, 2);
+        assert!(!store.exists());
+    }
+
+    #[test]
+    fn a_run_with_no_working_directory_logs_nothing() {
+        let found = Found::new();
+        found.run(&["init", "desk", "--store", "kept", "--summary", "s"]);
+        let nowhere = found.run_as("bin", &["bin"], None, &["topics"]);
+        assert_eq!((nowhere.err.as_str(), nowhere.code), ("", 0));
+        found.run_as("bin", &["bin"], None, &["facts", "--no-such-flag"]);
+        assert_eq!(found.commands(), [""; 0]);
     }
 
     struct Failing(ErrorKind);
@@ -328,7 +754,7 @@ mod tests {
             ("[fe80::1]:8080", "http://[fe80::1]:8080\n"),
         ] {
             let note = format!(
-                "worklog-next: {address}: the store is served without a login to whatever \
+                "{NAME}: {address}: the store is served without a login to whatever \
                  reaches this address, and a client that stalls can block the server\n"
             );
             assert_eq!(announced(address), (line.to_owned(), note));
@@ -338,7 +764,7 @@ mod tests {
             ("[::]:4000", "http://[::]:4000\n"),
         ] {
             let note = format!(
-                "worklog-next: {address}: the store is served without a login to every network \
+                "{NAME}: {address}: the store is served without a login to every network \
                  this host is on, and a client that stalls can block the server\n"
             );
             assert_eq!(announced(address), (line.to_owned(), note));
@@ -354,8 +780,7 @@ mod tests {
         let at = |cwd: Option<&str>, given: &str| {
             let environment = Environment {
                 cwd: cwd.map(PathBuf::from),
-                binary: None,
-                variable: &|_| None,
+                ..environment(&|_| None)
             };
             environment.placed(Path::new(given))
         };
@@ -388,7 +813,7 @@ mod tests {
         assert_eq!(ran.out, "");
         assert_eq!(
             ran.err,
-            "worklog-next: this host is not set up; run `worklog-next init`\n"
+            format!("{NAME}: this host is not set up; run `{NAME} init`\n")
         );
         assert_eq!(ran.code, 0);
         let json = run(scratch.path(), &["context", "--json"]);
@@ -417,7 +842,7 @@ mod tests {
         let scratch = tempfile::tempdir().unwrap();
         let root = scratch.path();
         let nowhere = run_in(root, None, &["init", "desk", "--store", "kept"]);
-        assert_eq!(nowhere.err, "worklog-next: no working directory\n");
+        assert_eq!(nowhere.err, format!("{NAME}: no working directory\n"));
         assert_eq!(nowhere.code, 1);
 
         init(root);
@@ -429,7 +854,7 @@ mod tests {
         );
         assert_eq!((listed.out.lines().count(), listed.code), (1, 0));
         let context = run_in(root, None, &["context"]);
-        assert_eq!(context.err, "worklog-next: no working directory\n");
+        assert_eq!(context.err, nowhere.err);
         assert_eq!((context.out.as_str(), context.code), ("", 1));
     }
 
@@ -443,7 +868,7 @@ mod tests {
         for line in [&["topics"][..], &["context"]] {
             let ran = run(root, line);
             assert_eq!(ran.out, "");
-            let named = format!("worklog-next: {}", damaged.display());
+            let named = format!("{NAME}: {}", damaged.display());
             assert!(ran.err.starts_with(&named), "{}", ran.err);
             assert_eq!(ran.code, 1);
         }
@@ -458,7 +883,7 @@ mod tests {
 
         let mut full = Failing(ErrorKind::StorageFull);
         let (err, code) = run_to(root, Some(&home), &["topics"], &mut full);
-        assert!(err.starts_with("worklog-next: stdout: "), "{err}");
+        assert!(err.starts_with(&format!("{NAME}: stdout: ")), "{err}");
         assert_eq!(code, 1);
 
         let mut closed = Failing(ErrorKind::BrokenPipe);
@@ -468,10 +893,126 @@ mod tests {
         );
         let mut closed = Failing(ErrorKind::BrokenPipe);
         let (err, code) = run_to(root, Some(&home), &["save", "lantern"], &mut closed);
+        assert_eq!((err, code), (format!("{NAME}: lantern: no draft\n"), 1));
+    }
+
+    fn run_with(home: Option<&Path>, binary: Option<PathBuf>, line: &[&str]) -> Ran {
+        let process = Process {
+            home: home.map(Path::to_path_buf),
+            binary,
+            ..Process::nowhere()
+        };
+        process.run(line)
+    }
+
+    fn printed(ran: &Ran, text: &str) {
         assert_eq!(
-            (err.as_str(), code),
-            ("worklog-next: lantern: no draft\n", 1)
+            (ran.out.as_str(), ran.err.as_str(), ran.code),
+            (text, "", 0)
         );
+    }
+
+    fn refused(ran: &Ran, why: &str) {
+        let said = format!("{NAME}: {why}\n");
+        assert_eq!(
+            (ran.out.as_str(), ran.err.as_str(), ran.code),
+            ("", said.as_str(), 1)
+        );
+    }
+
+    #[test]
+    fn completions_prints_a_shell_s_line_wherever_the_binary_is_known_by_its_own_name() {
+        let kept = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(kept.path()).unwrap();
+        let home = root.join("home");
+        let fish = ["completions", "fish"];
+        printed(
+            &run_with(Some(&home), Some(home.join("bin").join(NAME)), &fish),
+            &format!("COMPLETE=fish \"$HOME/bin/{NAME}\" | source\n"),
+        );
+        let elsewhere = root.join("bench").join(NAME);
+        let whole = format!("source <(COMPLETE=zsh \"{}\")\n", elsewhere.display());
+        let zsh = ["completions", "zsh"];
+        printed(
+            &run_with(Some(&home), Some(elsewhere.clone()), &zsh),
+            &whole,
+        );
+        printed(&run_with(None, Some(elsewhere), &zsh), &whole);
+
+        refused(
+            &run_with(Some(&home), None, &fish),
+            "the path of this binary is unknown",
+        );
+        assert!(!home.exists());
+    }
+
+    #[test]
+    fn a_refresh_whose_binary_makes_no_line_for_fish_writes_nothing_for_an_agent_either() {
+        let kept = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(kept.path()).unwrap();
+        let home = root.join("home");
+        let skill = home.join(".claude/skills").join(NAME).join("SKILL.md");
+        std::fs::create_dir_all(skill.parent().unwrap()).unwrap();
+        std::fs::write(&skill, "old").unwrap();
+        let fish = home.join(".config/fish/completions");
+        std::fs::create_dir_all(&fish).unwrap();
+        let refresh =
+            |binary: Option<PathBuf>| run_with(Some(&home), binary, &["agents", "refresh"]);
+
+        refused(&refresh(None), "the path of this binary is unknown");
+        let quoted = refresh(Some(root.join("a\"b").join(NAME)));
+        assert_eq!((quoted.out.as_str(), quoted.code), ("", 1));
+        assert!(quoted.err.contains("holds '\"'"), "{}", quoted.err);
+        assert_eq!(std::fs::read_to_string(&skill).unwrap(), "old");
+        assert_eq!(std::fs::read_dir(&fish).unwrap().count(), 0);
+
+        let named = root.join("bench").join(NAME);
+        let file = fish.join(format!("{NAME}.fish"));
+        let written = format!("{}\n{}\n", skill.display(), file.display());
+        printed(&refresh(Some(named.clone())), &written);
+        assert_eq!(
+            std::fs::read_to_string(file).unwrap(),
+            format!("COMPLETE=fish \"{}\" | source\n", named.display())
+        );
+    }
+
+    #[test]
+    fn an_install_and_an_uninstall_that_fail_say_what_they_wrote_before_the_failure() {
+        let kept = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(kept.path()).unwrap();
+        let home = root.join("home");
+        for agent in [".claude", ".codex"] {
+            std::fs::create_dir_all(home.join(agent)).unwrap();
+        }
+        let ran = |action: &str| {
+            let binary = Some(root.join("bin").join(NAME));
+            run_with(Some(&home), binary, &["agents", action])
+        };
+        let stopped = |ran: &Ran, written: &[PathBuf], at: &Path| {
+            let written: Vec<String> = (written.iter())
+                .map(|path| path.display().to_string())
+                .collect();
+            let lines = agents::lines(&written);
+            assert_eq!((ran.out.as_str(), ran.code), (lines.as_str(), 1));
+            let named = format!("{NAME}: {}", at.display());
+            assert!(ran.err.starts_with(&named), "{}", ran.err);
+            assert_eq!(ran.err.lines().count(), 1, "{}", ran.err);
+        };
+        let skill = home.join(".claude/skills").join(NAME);
+        let hooks = home.join(".claude/settings.json");
+
+        let blocked = home.join(".codex/skills");
+        std::fs::write(&blocked, "").unwrap();
+        stopped(
+            &ran("install"),
+            &[skill.join("SKILL.md"), hooks.clone()],
+            &blocked,
+        );
+
+        std::fs::remove_file(&blocked).unwrap();
+        std::fs::create_dir(&blocked).unwrap();
+        std::fs::write(blocked.join(NAME), "").unwrap();
+        stopped(&ran("uninstall"), &[skill, hooks], &blocked.join(NAME));
     }
 
     #[test]
@@ -479,38 +1020,24 @@ mod tests {
         let kept = tempfile::tempdir().unwrap();
         let root = std::fs::canonicalize(kept.path()).unwrap();
         std::fs::create_dir_all(root.join("home/.claude")).unwrap();
-        let variable = |name: &str| match name {
-            "HOME" => Some(root.join("home").into_os_string()),
-            _ => None,
-        };
-        let environment = Environment {
-            cwd: None,
-            binary: None,
-            variable: &variable,
-        };
+        let home = root.join("home");
         let ran = |action: &str| {
-            let (mut out, mut err) = (Vec::new(), Vec::new());
-            let args = ["worklog-next", "agents", action];
-            let code = main_in(args, &environment, &mut out, &mut err);
-            assert!(out.is_empty());
-            (String::from_utf8(err).unwrap(), code)
+            let ran = run_with(Some(&home), None, &["agents", action]);
+            assert!(ran.out.is_empty());
+            (ran.err, ran.code)
         };
-        let unknown = (
-            "worklog-next: the path of this binary is unknown\n".to_owned(),
-            1,
-        );
+        let unknown = (format!("{NAME}: the path of this binary is unknown\n"), 1);
         assert_eq!(ran("install"), unknown);
         assert_eq!(ran("refresh"), (String::new(), 0));
         assert!(!root.join("home/.claude/settings.json").exists());
 
-        let hooks =
-            r#"{"hooks": {"SessionStart": [{"hooks": [{"command": "worklog-next context"}]}]}}"#;
-        std::fs::write(root.join("home/.claude/settings.json"), hooks).unwrap();
+        let hooks = serde_json::json!({
+            "hooks": {"SessionStart": [{"hooks": [{"command": format!("{NAME} context")}]}]}
+        });
+        std::fs::write(root.join("home/.claude/settings.json"), hooks.to_string()).unwrap();
         assert_eq!(ran("refresh"), unknown);
         std::fs::remove_file(root.join("home/.claude/settings.json")).unwrap();
-        let (mut out, mut err) = (Vec::new(), Vec::new());
-        let args = ["worklog-next", "agents", "uninstall"];
-        assert_eq!(main_in(args, &environment, &mut out, &mut err), 0);
+        assert_eq!(ran("uninstall"), (String::new(), 0));
         assert!(!root.join("home/.claude/settings.json").exists());
     }
 }

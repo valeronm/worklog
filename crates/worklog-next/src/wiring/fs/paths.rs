@@ -11,25 +11,42 @@ pub struct Paths {
     pub config: PathBuf,
     pub drafts: PathBuf,
     pub home: Option<String>,
+    /// `XDG_CONFIG_HOME` or the home directory's `.config`, whatever `WORKLOG_NEXT_HOME` holds.
+    pub config_home: Option<PathBuf>,
+}
+
+/// A variable set to nothing is one not set.
+pub fn set(variable: impl Fn(&str) -> Option<OsString>, name: &str) -> Option<OsString> {
+    variable(name).filter(|value| !value.is_empty())
 }
 
 impl Paths {
+    /// Refuses a `HOME` that is not UTF-8.
+    pub fn home(variable: impl Fn(&str) -> Option<OsString>) -> Result<Option<String>, StoreError> {
+        match set(&variable, "HOME") {
+            Some(home) => match home.into_string() {
+                Ok(home) => Ok(Some(home)),
+                Err(_) => Err(StoreError::io("$HOME", "is not UTF-8")),
+            },
+            None => Ok(None),
+        }
+    }
+
     pub fn resolved(variable: impl Fn(&str) -> Option<OsString>) -> Result<Paths, StoreError> {
-        let set = |name: &str| {
-            variable(name)
-                .filter(|value| !value.is_empty())
-                .map(PathBuf::from)
-        };
-        let home = match set("HOME").map(|home| home.into_os_string().into_string()) {
-            Some(Ok(home)) => Some(home),
-            Some(Err(_)) => return Err(StoreError::io("$HOME", "is not UTF-8")),
-            None => None,
-        };
+        let set = |name: &str| set(&variable, name).map(PathBuf::from);
+        let home = Paths::home(&variable)?;
+        // The base directory specification has a relative path ignored.
+        let given = set("XDG_CONFIG_HOME").filter(|given| given.is_absolute());
+        let config_home = given.or_else(|| {
+            home.as_ref()
+                .map(|home| PathBuf::from(home).join(".config"))
+        });
         if let Some(root) = set(OVERRIDE) {
             return Ok(Paths {
                 config: root.join("config.toml"),
                 drafts: root.join("drafts"),
                 home,
+                config_home,
             });
         }
         let Some(home) = home else {
@@ -49,6 +66,7 @@ impl Paths {
                 .join(APP)
                 .join("drafts"),
             home: Some(home),
+            config_home,
         })
     }
 }
@@ -133,6 +151,39 @@ mod tests {
         let alone = resolved(&[("WORKLOG_NEXT_HOME", "/lantern")]).unwrap();
         assert_eq!(alone.config, PathBuf::from("/lantern/config.toml"));
         assert_eq!(alone.home, None);
+    }
+
+    #[test]
+    fn the_config_of_other_tools_stays_under_home_whatever_holds_this_tool_s() {
+        let under = |set: &[(&str, &str)]| resolved(set).unwrap().config_home;
+        let home = ("HOME", "/home/desk");
+        let next = ("WORKLOG_NEXT_HOME", "/lantern");
+        assert_eq!(under(&[home]), Some(PathBuf::from("/home/desk/.config")));
+        assert_eq!(
+            under(&[home, next]),
+            Some(PathBuf::from("/home/desk/.config"))
+        );
+        let given = ("XDG_CONFIG_HOME", "/atlas/config");
+        assert_eq!(under(&[home, given]), Some(PathBuf::from("/atlas/config")));
+        assert_eq!(
+            under(&[home, next, given]),
+            Some(PathBuf::from("/atlas/config"))
+        );
+        assert_eq!(under(&[next, given]), Some(PathBuf::from("/atlas/config")));
+        assert_eq!(under(&[next]), None);
+        for relative in ["config", "./config", "../atlas/config"] {
+            let given = ("XDG_CONFIG_HOME", relative);
+            assert_eq!(
+                under(&[home, given]),
+                Some(PathBuf::from("/home/desk/.config")),
+                "{relative}"
+            );
+            assert_eq!(under(&[next, given]), None, "{relative}");
+        }
+        assert_eq!(
+            under(&[home, next, ("XDG_CONFIG_HOME", "")]),
+            Some(PathBuf::from("/home/desk/.config"))
+        );
     }
 
     #[test]

@@ -1,11 +1,12 @@
-//! What a use case needs from outside the domain, as traits the `fs` layer
-//! implements and the tests stub.
+//! What a use case needs from outside the domain, as traits the adapters under `wiring`
+//! implement and the tests stub.
 
 use std::fmt;
 
 use super::document::Document;
 use super::draft::Draft;
 use super::id::{DocumentId, VersionId};
+use super::usage::{Invocation, Kept, Session};
 use super::version::{Kind, Stamp, Version};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -74,6 +75,43 @@ pub trait Drafts {
     fn location(&self, document: &DocumentId) -> String;
 }
 
+/// The runs every machine logged.
+pub trait Usage {
+    fn record(&self, invocation: &Invocation) -> Result<(), StoreError>;
+    /// The lines that read and that `kept` keeps; a line filed under another machine or
+    /// month than its own may be left out.
+    fn read(&self, kept: &Kept) -> Result<Vec<Invocation>, StoreError>;
+}
+
+/// Where releases of this binary are published.
+pub trait Releases {
+    /// The tag of the latest release.
+    fn latest(&self) -> Result<String, StoreError>;
+    /// An asset of the release the tag names, whole.
+    fn fetch(&self, tag: &str, asset: &str) -> Result<Vec<u8>, StoreError>;
+}
+
+/// What a binary's refresh of its host wrote and had to note, with why it stopped where it did
+/// not finish.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Refreshed {
+    pub written: Vec<String>,
+    pub notes: Vec<String>,
+    pub ended: Result<(), StoreError>,
+}
+
+/// The executable this process runs from.
+pub trait Binary {
+    /// The release asset built for the target this binary runs on; `None` where no release
+    /// is built for it.
+    fn asset(&self) -> Option<String>;
+    /// Puts `bytes` in the place of the running binary and returns where that is.
+    fn replace(&self, bytes: &[u8]) -> Result<String, StoreError>;
+    /// Has the binary now in place, which after `replace` is not this process, bring what
+    /// this host takes from it up to itself.
+    fn refresh(&self) -> Refreshed;
+}
+
 pub trait Clock {
     fn now(&self) -> Stamp;
 }
@@ -88,4 +126,6 @@ pub trait Host {
     /// `absolute` with the links followed through the longest part of it that exists on this
     /// host's file system, the rest kept as given.
     fn resolve(&self, absolute: &str) -> Result<String, StoreError>;
+    /// The agent session this process runs in; `None` at a terminal.
+    fn session(&self) -> Option<Session>;
 }

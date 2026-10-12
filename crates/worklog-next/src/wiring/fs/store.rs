@@ -8,7 +8,7 @@ use crate::domain::id::{DocumentId, VersionId, is_hex};
 use crate::domain::ports::{Store, StoreError};
 use crate::domain::version::{Kind, ReadError, Version};
 
-use super::{STAGING_PREFIX, directories, files, io_error};
+use super::{STAGING_PREFIX, USAGE_DIRECTORY, directories, files, io_error};
 
 // A version's file is never rewritten. One instance is one snapshot: the tree is walked
 // once and remembered.
@@ -75,6 +75,8 @@ impl FsStore {
         let store = FsStore::new(root);
         let root = &store.root;
         let mut entries = directories(root)?;
+        // A store holds its usage log before its first document.
+        entries.retain(|name| name != USAGE_DIRECTORY);
         entries.extend(files(root)?);
         let other = entries.iter().any(|name| !name.starts_with('.'));
         if other && store.documents("")?.is_empty() {
@@ -416,6 +418,34 @@ mod tests {
         assert_eq!(
             refused.to_string(),
             format!("{}: is not empty and holds no store", synced.display())
+        );
+    }
+
+    #[test]
+    fn a_directory_holding_the_usage_log_alone_is_chosen_as_an_empty_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let logged = dir.path().join("atlas");
+        fs::create_dir_all(logged.join(USAGE_DIRECTORY)).unwrap();
+        let line = "{}\n";
+        fs::write(
+            logged.join(USAGE_DIRECTORY).join("desk-2026-09.jsonl"),
+            line,
+        )
+        .unwrap();
+        fs::create_dir(logged.join(".stfolder")).unwrap();
+        assert!(FsStore::chosen(logged.clone()).is_ok());
+        fs::write(logged.join("notes.txt"), "a person's own").unwrap();
+        assert!(FsStore::chosen(logged).is_err());
+
+        let named = dir.path().join("phone");
+        fs::create_dir(&named).unwrap();
+        fs::write(named.join(USAGE_DIRECTORY), "a file").unwrap();
+        let Err(refused) = FsStore::chosen(named.clone()) else {
+            panic!("a file named as the log is no log");
+        };
+        assert_eq!(
+            refused.to_string(),
+            format!("{}: is not empty and holds no store", named.display())
         );
     }
 

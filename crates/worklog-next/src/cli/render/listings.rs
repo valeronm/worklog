@@ -1,6 +1,9 @@
+use std::fmt::Write as _;
+
 use super::{INDENT, Render, filed_counts, line, row_fields, row_line, written};
 use crate::app::list::{ClaimRow, EntryRow, FactRow, ForkRow, TopicRow};
-use crate::app::{FollowupRow, Reference, Row};
+use crate::app::usage::MachineUsage;
+use crate::app::{FollowupRow, Reference, Row, counted};
 use crate::render::trigger_state;
 
 fn dated(text: &mut String, day: &impl ToString, row: &Row) {
@@ -87,6 +90,32 @@ impl Render for Vec<ClaimRow> {
     }
 }
 
+impl Render for Vec<MachineUsage> {
+    fn text(&self) -> String {
+        let mut text = String::new();
+        for (at, counts) in self.iter().enumerate() {
+            if at > 0 {
+                text.push('\n');
+            }
+            let runs = counts.commands.iter().map(|count| count.run_count).sum();
+            let runs = counted(runs, "run", "runs");
+            let _ = writeln!(text, "{} — {runs}", counts.machine.label);
+            for count in &counts.commands {
+                let _ = writeln!(text, "{:>7} {}", count.run_count, count.command);
+            }
+        }
+        text
+    }
+
+    fn notes(&self) -> Vec<String> {
+        if self.is_empty() {
+            vec!["nothing logged".to_owned()]
+        } else {
+            Vec::new()
+        }
+    }
+}
+
 impl Render for Vec<ForkRow> {
     fn text(&self) -> String {
         let mut text = String::new();
@@ -117,12 +146,60 @@ mod tests {
     use super::*;
     use crate::app::TriggerShown;
     use crate::app::list::ForkHead;
+    use crate::app::testing::counted;
     use crate::domain::id::{DocumentId, VersionId};
     use crate::domain::schema::Date;
     use crate::domain::testing::{atlas, lantern};
 
     fn date(text: &str) -> Date {
         Date::parse(text).expect("a date")
+    }
+
+    #[test]
+    fn usage_is_each_machine_over_its_commands_with_how_often_each_ran() {
+        let counts = |label: &str, commands: &[(&str, usize)]| MachineUsage {
+            machine: to(label),
+            topic: Some(label.to_owned()),
+            commands: counted(commands),
+        };
+        let listed = vec![
+            counts("desk", &[("show", 1200), ("new entry", 2)]),
+            counts("phone", &[("context", 1)]),
+        ];
+        assert_eq!(
+            listed.text(),
+            "desk — 1202 runs\n\
+             \x20  1200 show\n\
+             \x20     2 new entry\n\
+             \n\
+             phone — 1 run\n\
+             \x20     1 context\n"
+        );
+        assert_eq!(Vec::<MachineUsage>::new().text(), "");
+    }
+
+    #[test]
+    fn a_machine_is_headed_by_its_label_and_no_run_at_all_is_a_note() {
+        let labeled = |label: &str, topic: Option<&str>| MachineUsage {
+            machine: Reference {
+                document: atlas(),
+                label: label.to_owned(),
+            },
+            topic: topic.map(str::to_owned),
+            commands: counted(&[("show", 2)]),
+        };
+        let listed = vec![labeled(atlas().as_str(), None)];
+        assert_eq!(
+            listed.text(),
+            format!("{} — 2 runs\n      2 show\n", atlas())
+        );
+        let short = atlas().short().to_owned();
+        assert_eq!(
+            vec![labeled(&short, Some(&short))].text(),
+            format!("{short} — 2 runs\n      2 show\n")
+        );
+        assert_eq!(listed.notes(), [""; 0]);
+        assert_eq!(Vec::<MachineUsage>::new().notes(), ["nothing logged"]);
     }
 
     #[test]

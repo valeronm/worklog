@@ -3,11 +3,16 @@
 
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
+use std::rc::Rc;
 
 use super::document::{Document, State, Unreadable};
 use super::draft::Draft;
 use super::id::{DocumentId, VersionId};
-use super::ports::{Clock, Drafts, Host, Ids, Store, StoreError};
+use super::ports::{
+    Binary, Clock, Drafts, Host, Ids, Refreshed, Releases, Store, StoreError, Usage,
+};
+use super::release::{ReleaseVersion, sha256_hex};
+use super::usage::{Invocation, Kept, Session};
 use super::version::{Envelope, Fields, Kind, Links, ReadError, Stamp, Version};
 
 pub struct FailingStore;
@@ -250,11 +255,168 @@ impl Clock for FixedClock {
     }
 }
 
+#[derive(Default)]
+pub struct MemoryUsage {
+    runs: RefCell<Vec<Invocation>>,
+}
+
+impl Usage for MemoryUsage {
+    fn record(&self, invocation: &Invocation) -> Result<(), StoreError> {
+        self.runs.borrow_mut().push(invocation.clone());
+        Ok(())
+    }
+
+    fn read(&self, kept: &Kept) -> Result<Vec<Invocation>, StoreError> {
+        let runs = self.runs.borrow();
+        Ok(runs.iter().filter(|run| kept.keeps(run)).cloned().collect())
+    }
+}
+
+/// One published release, its assets by name, that remembers in `fetched` the tag an asset
+/// was last asked for under.
+#[derive(Default)]
+pub struct MemoryReleases {
+    pub latest: String,
+    pub assets: BTreeMap<String, Vec<u8>>,
+    pub fetched: Cell<Option<String>>,
+}
+
+impl Releases for MemoryReleases {
+    fn latest(&self) -> Result<String, StoreError> {
+        Ok(self.latest.clone())
+    }
+
+    fn fetch(&self, tag: &str, asset: &str) -> Result<Vec<u8>, StoreError> {
+        self.fetched.set(Some(tag.to_owned()));
+        let held = self.assets.get(asset).cloned();
+        held.ok_or_else(|| StoreError::io(asset, "no such asset"))
+    }
+}
+
+pub const ASSET: &str = "lantern-x86_64-linux";
+
+/// The `.sha256` file of an asset, `<hex>  <name>` as `shasum` writes it.
+#[must_use]
+pub fn checksum_file(asset: &str, bytes: &[u8]) -> String {
+    format!("{}  {asset}\n", sha256_hex(bytes))
+}
+
+/// The release `tag` holding `asset` as `bytes` beside the checksum of `checksum_of`.
+#[must_use]
+pub fn published(tag: &str, asset: &str, bytes: &[u8], checksum_of: &[u8]) -> MemoryReleases {
+    let checksum = checksum_file(asset, checksum_of).into_bytes();
+    MemoryReleases {
+        latest: tag.to_owned(),
+        assets: BTreeMap::from([
+            (asset.to_owned(), bytes.to_vec()),
+            (format!("{asset}.sha256"), checksum),
+        ]),
+        fetched: Cell::new(None),
+    }
+}
+
+pub const BINARY: &str = "/home/desk/bin/lantern";
+pub const REFRESHED: &str = "/home/desk/.config/fish/completions/lantern.fish";
+
+/// A binary at `BINARY` that remembers what replaced it and, in `calls`, each call made of
+/// it in order; its refresh writes `REFRESHED`, notes `notes` and then stops with `stops`.
+#[derive(Default)]
+pub struct MemoryBinary {
+    pub asset: Option<String>,
+    pub notes: Vec<String>,
+    pub replaced_with: RefCell<Option<Vec<u8>>>,
+    pub calls: RefCell<Vec<&'static str>>,
+    pub stops: Option<StoreError>,
+}
+
+impl MemoryBinary {
+    #[must_use]
+    pub fn built_as(asset: &str) -> MemoryBinary {
+        MemoryBinary {
+            asset: Some(asset.to_owned()),
+            ..MemoryBinary::default()
+        }
+    }
+}
+
+impl Binary for MemoryBinary {
+    fn asset(&self) -> Option<String> {
+        self.asset.clone()
+    }
+
+    fn replace(&self, bytes: &[u8]) -> Result<String, StoreError> {
+        *self.replaced_with.borrow_mut() = Some(bytes.to_vec());
+        self.calls.borrow_mut().push("replace");
+        Ok(BINARY.to_owned())
+    }
+
+    fn refresh(&self) -> Refreshed {
+        self.calls.borrow_mut().push("refresh");
+        Refreshed {
+            written: vec![REFRESHED.to_owned()],
+            notes: self.notes.clone(),
+            ended: self.stops.clone().map_or(Ok(()), Err),
+        }
+    }
+}
+
+impl<B: Binary + ?Sized> Binary for Rc<B> {
+    fn asset(&self) -> Option<String> {
+        (**self).asset()
+    }
+
+    fn replace(&self, bytes: &[u8]) -> Result<String, StoreError> {
+        (**self).replace(bytes)
+    }
+
+    fn refresh(&self) -> Refreshed {
+        (**self).refresh()
+    }
+}
+
+/// # Panics
+///
+/// When `text` is not a version.
+#[must_use]
+pub fn version(text: &str) -> ReleaseVersion {
+    ReleaseVersion::parse(text).expect("a version")
+}
+
+#[must_use]
+pub fn lamp_session() -> Session {
+    Session {
+        agent: "Lamp".to_owned(),
+        id: "s-1".to_owned(),
+    }
+}
+
+/// A run of `command` on `day` at ten, in no session, that succeeded.
+///
+/// # Panics
+///
+/// When `day` is not a date.
+#[must_use]
+pub fn ran(machine: &DocumentId, command: &str, day: &str) -> Invocation {
+    Invocation {
+        written: Stamp::parse(&format!("{day}T10:00:00+01:00")).expect("a day"),
+        machine: machine.clone(),
+        version: None,
+        session: None,
+        command: command.to_owned(),
+        exit: 0,
+        refusal: None,
+        hits: None,
+        directory: "~".to_owned(),
+        arguments: Vec::new(),
+    }
+}
+
 pub struct FixedHost {
     machine: RefCell<Option<DocumentId>>,
     home: Option<String>,
     binds: bool,
     links: Vec<(String, String)>,
+    session: Option<Session>,
 }
 
 const FIXED_HOST: &str = "memory:host";
@@ -267,6 +429,7 @@ impl FixedHost {
             home,
             binds: true,
             links: Vec::new(),
+            session: None,
         }
     }
 
@@ -285,6 +448,10 @@ impl FixedHost {
 
     pub fn set_binds(&mut self, binds: bool) {
         self.binds = binds;
+    }
+
+    pub fn set_session(&mut self, session: Option<Session>) {
+        self.session = session;
     }
 
     /// Makes `link`, and every path under it, resolve to `target` and the same path under it.
@@ -319,6 +486,10 @@ impl Host for FixedHost {
             (rest.is_empty() || rest.starts_with('/')).then(|| format!("{target}{rest}"))
         });
         Ok(through.unwrap_or_else(|| absolute.to_owned()))
+    }
+
+    fn session(&self) -> Option<Session> {
+        self.session.clone()
     }
 }
 
@@ -644,6 +815,34 @@ mod tests {
         assert_eq!(host.home(), Ok(Some("/home/desk".to_owned())));
         assert_eq!(FixedHost::new(None, None).machine(), Ok(None));
         assert_eq!(FixedHost::new(None, None).home(), Ok(None));
+    }
+
+    #[test]
+    fn a_fixed_host_is_in_the_session_it_is_given() {
+        let mut host = FixedHost::new(None, None);
+        assert_eq!(host.session(), None);
+        let session = lamp_session();
+        host.set_session(Some(session.clone()));
+        assert_eq!(host.session(), Some(session));
+    }
+
+    #[test]
+    fn the_memory_usage_gives_back_the_runs_kept_in_the_order_recorded() {
+        let usage = MemoryUsage::default();
+        assert_eq!(usage.read(&Kept::default()), Ok(Vec::new()));
+        let runs = [
+            ran(&lantern(), "show", "2026-09-04"),
+            ran(&atlas(), "facts", "2026-09-05"),
+        ];
+        for run in &runs {
+            usage.record(run).unwrap();
+        }
+        assert_eq!(usage.read(&Kept::default()), Ok(runs.to_vec()));
+        let of_atlas = Kept {
+            machine: Some(atlas()),
+            since: None,
+        };
+        assert_eq!(usage.read(&of_atlas), Ok(runs[1..].to_vec()));
     }
 
     #[test]

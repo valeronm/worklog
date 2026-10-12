@@ -5,6 +5,7 @@ use crate::app::{Deps, Failure, kind_named, text};
 use crate::domain::id::DocumentId;
 use crate::domain::ports::{Host, StoreError};
 use crate::domain::schema::{KindOf, Name};
+use crate::domain::usage::Session;
 use crate::domain::version::Fields;
 
 const INIT: &str = "init";
@@ -37,6 +38,10 @@ impl Host for Becoming<'_> {
 
     fn resolve(&self, absolute: &str) -> Result<String, StoreError> {
         self.host.resolve(absolute)
+    }
+
+    fn session(&self) -> Option<Session> {
+        self.host.session()
     }
 }
 

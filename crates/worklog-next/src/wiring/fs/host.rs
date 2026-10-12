@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use crate::domain::id::DocumentId;
 use crate::domain::ports::{Host, StoreError};
+use crate::domain::usage::Session;
 
 use super::Config;
 
@@ -12,27 +13,40 @@ pub struct FsHost {
     home: Option<String>,
     machine: RefCell<Option<DocumentId>>,
     store: PathBuf,
+    session: Option<Session>,
 }
 
 impl FsHost {
     #[must_use]
-    pub fn bound(config: PathBuf, home: Option<String>, held: Config) -> FsHost {
+    pub fn bound(
+        config: PathBuf,
+        home: Option<String>,
+        held: Config,
+        session: Option<Session>,
+    ) -> FsHost {
         FsHost {
             config,
             home,
             machine: RefCell::new(Some(held.machine)),
             store: held.store,
+            session,
         }
     }
 
     // `store` has to be from the root: a config holding any other path is refused when read.
     #[must_use]
-    pub fn unbound(config: PathBuf, home: Option<String>, store: PathBuf) -> FsHost {
+    pub fn unbound(
+        config: PathBuf,
+        home: Option<String>,
+        store: PathBuf,
+        session: Option<Session>,
+    ) -> FsHost {
         FsHost {
             config,
             home,
             machine: RefCell::new(None),
             store,
+            session,
         }
     }
 }
@@ -83,12 +97,16 @@ impl Host for FsHost {
             .into_string()
             .map_err(|resolved| StoreError::io(Path::new(&resolved).display(), "is not UTF-8"))
     }
+
+    fn session(&self) -> Option<Session> {
+        self.session.clone()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::testing::{atlas, lantern};
+    use crate::domain::testing::{atlas, lamp_session, lantern};
 
     fn scratch() -> (tempfile::TempDir, PathBuf) {
         let dir = tempfile::tempdir().unwrap();
@@ -99,9 +117,19 @@ mod tests {
     #[test]
     fn a_host_with_no_config_has_no_machine() {
         let (_dir, config) = scratch();
-        let host = FsHost::unbound(config, None, PathBuf::from("/home/desk/store"));
+        let host = FsHost::unbound(config, None, PathBuf::from("/home/desk/store"), None);
         assert_eq!(host.machine(), Ok(None));
         assert_eq!(host.home(), Ok(None));
+        assert_eq!(host.session(), None);
+    }
+
+    #[test]
+    fn a_host_is_in_the_session_it_is_given() {
+        let (_dir, config) = scratch();
+        let session = lamp_session();
+        let store = PathBuf::from("/home/desk/store");
+        let host = FsHost::unbound(config, None, store, Some(session.clone()));
+        assert_eq!(host.session(), Some(session));
     }
 
     #[test]
@@ -109,7 +137,7 @@ mod tests {
         let (dir, config) = scratch();
         let store = dir.path().join("store");
         let home = Some("/home/desk".to_owned());
-        let host = FsHost::unbound(config.clone(), home.clone(), store.clone());
+        let host = FsHost::unbound(config.clone(), home.clone(), store.clone(), None);
         host.bind(&lantern()).unwrap();
         assert_eq!(host.machine(), Ok(Some(lantern())));
         assert_eq!(host.home(), Ok(Some("/home/desk".to_owned())));
@@ -119,7 +147,7 @@ mod tests {
         };
         assert_eq!(Config::read(&config), Ok(Some(kept.clone())));
 
-        let afresh = FsHost::bound(config.clone(), home, kept.clone());
+        let afresh = FsHost::bound(config.clone(), home, kept.clone(), None);
         assert_eq!(afresh.machine(), Ok(Some(lantern())));
         let refused = afresh.bind(&atlas()).unwrap_err().to_string();
         assert!(
@@ -136,7 +164,7 @@ mod tests {
         let root = std::fs::canonicalize(kept.path()).unwrap();
         std::fs::create_dir_all(root.join("projects/lantern")).unwrap();
         std::os::unix::fs::symlink(root.join("projects/lantern"), root.join("link")).unwrap();
-        let host = FsHost::unbound(root.join("config.toml"), None, root.join("store"));
+        let host = FsHost::unbound(root.join("config.toml"), None, root.join("store"), None);
         let read = |given: &str| {
             let given = root.join(given);
             host.resolve(given.to_str().unwrap()).map(PathBuf::from)
@@ -165,7 +193,7 @@ mod tests {
     #[test]
     fn a_host_bound_behind_one_that_read_no_config_is_not_bound_again() {
         let (dir, config) = scratch();
-        let host = FsHost::unbound(config.clone(), None, dir.path().join("store"));
+        let host = FsHost::unbound(config.clone(), None, dir.path().join("store"), None);
         let kept = Config {
             store: dir.path().join("elsewhere"),
             machine: lantern(),

@@ -26,10 +26,9 @@ fn spelled<'a>(binary: &'a str, homes: &[&Path]) -> (&'static str, &'a str) {
     ("", binary)
 }
 
-/// The command the hook runs for `binary`, spelled with a leading `$HOME` for a binary under
-/// one of `homes`; refuses a path that is not UTF-8 or holds one of `UNQUOTABLE`, and one whose
-/// command `runs_context` does not match.
-pub(super) fn command(binary: &Path, homes: &[&Path]) -> Result<String, Failure> {
+/// `binary` in double quotes for a shell to run, spelled with a leading `$HOME` under one of
+/// `homes`; refuses a path that is not UTF-8 or holds one of `UNQUOTABLE`.
+pub(super) fn quoted(binary: &Path, homes: &[&Path]) -> Result<String, Failure> {
     let Some(text) = binary.to_str() else {
         return Err(refuse_binary(binary, "is not UTF-8"));
     };
@@ -37,17 +36,25 @@ pub(super) fn command(binary: &Path, homes: &[&Path]) -> Result<String, Failure>
     if let Some(found) = rest.chars().find(|c| UNQUOTABLE.contains(c)) {
         return Err(refuse_binary(
             binary,
-            &format!("holds {found:?}, which a hook command cannot quote"),
+            &format!("holds {found:?}, which a shell command cannot quote"),
         ));
     }
-    let command = format!("\"{home}{rest}\" context 2>/dev/null || true");
+    Ok(format!("\"{home}{rest}\""))
+}
+
+/// The command the hook runs for `binary`, quoted as `quoted` does; refuses also a path whose
+/// command `runs_context` does not match.
+pub(super) fn command(binary: &Path, homes: &[&Path]) -> Result<String, Failure> {
+    let command = format!("{} context 2>/dev/null || true", quoted(binary, homes)?);
     if !runs_context(&command) {
-        return Err(refuse_binary(
-            binary,
-            &format!("the binary's file name must be {NAME}, or its hook is not found again"),
-        ));
+        return Err(misnamed(binary, "its hook is not found again"));
     }
     Ok(command)
+}
+
+pub(super) fn misnamed(binary: &Path, or_else: &str) -> Failure {
+    let reason = format!("the binary's file name must be {NAME}, or {or_else}");
+    refuse_binary(binary, &reason)
 }
 
 fn agent_command(binary: &Path, agent: &Agent) -> Result<String, Failure> {

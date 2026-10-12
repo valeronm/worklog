@@ -3,6 +3,7 @@ use std::cell::Cell;
 use crate::app::heads::read_or_skip;
 use crate::app::lookup::{Lookup, Stored};
 use crate::app::rows::{Reference, Row};
+use crate::app::usage::CommandCount;
 use crate::app::{Deps, Failure};
 use crate::domain::document::Document;
 use crate::domain::document::State;
@@ -11,7 +12,7 @@ use crate::domain::ports::{Clock, Ids, Store, StoreError};
 use crate::domain::schema::address::Found;
 use crate::domain::schema::{KindOf, Record};
 use crate::domain::testing::{
-    FixedClock, FixedHost, MemoryDrafts, MemoryStore, SequenceIds, after, first_minted,
+    FixedClock, FixedHost, MemoryDrafts, MemoryStore, MemoryUsage, SequenceIds, after, first_minted,
 };
 use crate::domain::version::{Envelope, Fields, Kind, Links, Stamp, Version};
 
@@ -23,6 +24,7 @@ pub struct World {
     pub ids: SequenceIds,
     pub clock: FixedClock,
     pub host: FixedHost,
+    pub usage: MemoryUsage,
 }
 
 impl World {
@@ -33,6 +35,7 @@ impl World {
             ids: SequenceIds::default(),
             clock: FixedClock::at(NOW),
             host: FixedHost::new(Some(first_minted()), None),
+            usage: MemoryUsage::default(),
         }
     }
 
@@ -43,6 +46,7 @@ impl World {
             ids: &self.ids,
             clock: &self.clock,
             host: &self.host,
+            usage: &self.usage,
         }
     }
 
@@ -57,6 +61,7 @@ impl World {
             ids: self.ids,
             clock: self.clock,
             host: self.host,
+            usage: self.usage,
         }
     }
 
@@ -111,6 +116,8 @@ impl World {
 pub const TOPIC: &str = "created = 2026-09-04\nsummary = \"s\"\n";
 pub const ENDED: &str = "ended = \"retired\"\nended_on = 2026-10-09\nnote = \"n\"\n";
 pub const ENDED_FACT: &str = "ended = \"false\"\nended_on = 2026-10-09\nnote = \"n\"\n";
+pub const REMOVED: &str = "ended = \"removed\"\nended_on = 2026-10-09\nnote = \"n\"\n";
+pub const DONE: &str = "ended = \"done\"\nended_on = 2026-10-09\nnote = \"n\"\n";
 
 pub fn topic_fields(name: &str, rest: &str) -> String {
     format!("name = \"{name}\"\n{TOPIC}{rest}")
@@ -240,6 +247,15 @@ pub fn written_at(
     version
 }
 
+pub fn counted(counts: &[(&str, usize)]) -> Vec<CommandCount> {
+    (counts.iter())
+        .map(|(command, run_count)| CommandCount {
+            command: (*command).to_owned(),
+            run_count: *run_count,
+        })
+        .collect()
+}
+
 pub fn to(document: &DocumentId, label: &str) -> Reference {
     Reference::to(document, label.to_owned())
 }
@@ -341,6 +357,7 @@ pub struct Counted {
     ids: SequenceIds,
     clock: FixedClock,
     host: FixedHost,
+    usage: MemoryUsage,
 }
 
 impl Counted {
@@ -351,6 +368,7 @@ impl Counted {
             ids: &self.ids,
             clock: &self.clock,
             host: &self.host,
+            usage: &self.usage,
         }
     }
 }

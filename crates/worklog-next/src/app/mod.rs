@@ -5,7 +5,7 @@ use serde::Serialize;
 use toml::Value;
 
 use crate::domain::id::{DocumentId, VersionId};
-use crate::domain::ports::{Clock, Drafts, Host, Ids, StoreError};
+use crate::domain::ports::{Clock, Drafts, Host, Ids, StoreError, Usage};
 use crate::domain::schema::{Date, Directory, KindOf, SchemaError};
 use crate::domain::version::Kind;
 
@@ -22,6 +22,8 @@ mod index;
 pub mod list;
 mod live;
 mod lookup;
+pub mod offer;
+pub mod record;
 mod rows;
 mod rules;
 pub mod save;
@@ -30,6 +32,8 @@ pub mod setup;
 pub mod show;
 #[cfg(test)]
 pub(crate) mod testing;
+pub mod upgrade;
+pub mod usage;
 
 pub use lookup::Stored;
 pub use rows::{FollowupRow, Reference, Row, TriggerShown};
@@ -41,6 +45,7 @@ pub struct Deps<'a> {
     pub ids: &'a dyn Ids,
     pub clock: &'a dyn Clock,
     pub host: &'a dyn Host,
+    pub usage: &'a dyn Usage,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -160,7 +165,7 @@ impl Deps<'_> {
 mod tests {
     use super::*;
     use crate::domain::testing::{
-        FixedClock, FixedHost, MemoryDrafts, MemoryStore, SequenceIds, atlas,
+        FixedClock, FixedHost, MemoryDrafts, MemoryStore, MemoryUsage, SequenceIds, atlas,
     };
 
     #[test]
@@ -191,6 +196,7 @@ mod tests {
         let store = MemoryStore::default();
         let drafts = MemoryDrafts::default();
         let ids = SequenceIds::default();
+        let usage = MemoryUsage::default();
         let clock = FixedClock::at("2026-10-09T18:22:41.118204+01:00");
         let mut host = FixedHost::new(Some(atlas()), Some("/home/desk".to_owned()));
         host.link("/home/desk", "/atlas/desk");
@@ -202,6 +208,7 @@ mod tests {
             ids: &ids,
             clock: &clock,
             host: &host,
+            usage: &usage,
         };
         for (given, held) in [
             ("/home/desk/projects/lantern", "~/projects/lantern"),
@@ -225,6 +232,7 @@ mod tests {
         let store = MemoryStore::default();
         let drafts = MemoryDrafts::default();
         let ids = SequenceIds::default();
+        let usage = MemoryUsage::default();
         let clock = FixedClock::at("2026-10-09T18:22:41.118204+01:00");
         let bare = FixedHost::new(None, None);
         let set_up = FixedHost::new(Some(atlas()), None);
@@ -234,6 +242,7 @@ mod tests {
             ids: &ids,
             clock: &clock,
             host,
+            usage: &usage,
         };
 
         assert_eq!(
