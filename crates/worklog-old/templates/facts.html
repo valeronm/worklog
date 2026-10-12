@@ -1,9 +1,0 @@
-{% extends "base.html" %}
-{% import "macros.html" as m %}
-{% block title %}Facts{% endblock %}
-{% block nav %}facts{% endblock %}
-{% block content %}
-<p class="summary">{{ facts.len() }} facts and {{ ideas.len() }} ideas, by topic</p>
-{% call m::items(facts) %}{% endcall %}
-{% call m::ideas(ideas) %}{% endcall %}
-{% endblock %}

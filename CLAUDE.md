@@ -53,8 +53,7 @@ store. A version is composed only if its bytes read back to the same
 parts, which is what holds the writer and the reader to each other.
 
 The rules of the store are applied by the one module that stores a
-version. `wiring::write_version` applies none; it exists for the
-converter, and the layer test keeps the rest of the crate from calling it.
+version.
 
 The check that keeps a usage line out of a directory holding nothing of
 the machine's topic runs on every logged run and reads that one document,
@@ -135,24 +134,13 @@ keeps one. Fixtures, examples and test expectations are invented: no text,
 name, id, path, machine name or trigger lifted from a real store, no real
 project, device or host names, and no "the author" or "my machine", since a
 sentence like that is itself the disclosure. The invented vocabulary in the
-tests, `lantern`, `atlas`, `phone`, `desk`, is the one to extend. A decision
-file for `worklog-convert` and the report of its dry run are store content
-too, since they hold a store's slugs, tags, names and summaries.
+tests, `lantern`, `atlas`, `phone`, `desk`, is the one to extend.
 
 ## Build and check
 
-`docs/release.md` has the checks CI runs. Pedantic clippy is on for each
-crate and a suppression carries a `reason`. Without `--workspace` a check
-covers the root package alone. The toolchain is pinned in `mise.toml` and
+`docs/release.md` has the checks CI runs. Pedantic clippy is on and a
+suppression carries a `reason`. The toolchain is pinned in `mise.toml` and
 CI reads the pin from there. Releases are cut by tag.
-
-`crates/worklog-old` is the library of the tool before the store was
-rebuilt, kept so the converter can read a store of that format.
-`crates/worklog-convert` converts such a store to this one, once: it
-depends on both, so a change to what either makes public is checked
-against it, and neither may depend on it. No release builds either, and
-both are removed after the one release that carries their source; the
-converter's README lists what goes with them.
 
 A benchmark or a loop never runs the installed `worklog`, since the binary
 `PATH` finds logs every run into the store's usage: time a build run by its

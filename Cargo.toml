@@ -6,9 +6,6 @@ license = "MIT"
 description = "Append-only versioned store of work done, durable facts, follow-ups and topics"
 repository = "https://github.com/valeronm/worklog"
 
-[workspace]
-members = ["crates/worklog-old", "crates/worklog-convert"]
-
 [lints.clippy]
 pedantic = { level = "warn", priority = -1 }
 

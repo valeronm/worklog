@@ -7,9 +7,8 @@ mod fs;
 mod net;
 
 use crate::app::{Deps, Failure, Stored};
-use crate::domain::ports::{Binary, Releases, Store as _};
+use crate::domain::ports::{Binary, Releases};
 use crate::domain::usage::Session;
-use crate::domain::version::Version;
 use fs::{
     Config, DirReleases, FsAgent, FsBinary, FsDrafts, FsHost, FsStore, FsUsage, Paths, RandomIds,
     SystemClock,
@@ -109,14 +108,6 @@ pub(crate) fn found_on_path(binary: &Path, name: &OsStr, path: &OsStr) -> bool {
         .find(|candidate| candidate.is_file())
         .and_then(|candidate| std::fs::canonicalize(candidate).ok())
         .is_some_and(|found| found == running)
-}
-
-/// Adds `version` to the store at `store`, which is made when it is not there, and applies no
-/// rule of the store, so the caller holds the result to `check`. A file already under the
-/// version's name is left as it is, whatever it holds, and a store with a Syncthing folder
-/// marker and no ignore file is given one.
-pub fn write_version(store: &Path, version: &Version) -> Result<(), Failure> {
-    Ok(FsStore::new(store.to_path_buf()).put(version)?)
 }
 
 pub const SKILL_DIRECTORY: &str = fs::SKILL_DIRECTORY;
@@ -277,7 +268,7 @@ mod tests {
     use std::path::Path;
 
     use super::*;
-    use crate::domain::testing::{LANTERN, first, lantern, ran};
+    use crate::domain::testing::{LANTERN, lantern, ran};
     use crate::domain::usage::Kept;
 
     fn scratch() -> (tempfile::TempDir, PathBuf) {
@@ -338,22 +329,6 @@ mod tests {
         assert!(matches!(wired(&root, None), Err(Failure::Store(_))));
         let chosen = Some(root.join("store"));
         assert!(matches!(wired(&root, chosen), Err(Failure::Store(_))));
-    }
-
-    #[test]
-    fn a_version_is_written_where_the_directory_store_reads_it() {
-        let (_kept, root) = scratch();
-        let store = root.join("store");
-        let version = first(&lantern(), "topic", "name = \"lantern\"", "A lamp.\n");
-
-        write_version(&store, &version).unwrap();
-        let held = FsStore::new(store.clone()).document(&lantern()).unwrap();
-        assert_eq!(held.history(), [&version]);
-
-        write_version(&store, &version).unwrap();
-        let held = FsStore::new(store.clone()).document(&lantern()).unwrap();
-        assert_eq!(held.history(), [&version]);
-        assert!(held.unreadable().is_empty());
     }
 
     fn bound(root: &Path) -> PathBuf {
@@ -448,18 +423,6 @@ mod tests {
             &binary,
             OsStr::new("atlas"),
             root.join("bin").as_os_str()
-        ));
-    }
-
-    #[test]
-    fn a_version_that_cannot_be_written_is_a_failure() {
-        let (_kept, root) = scratch();
-        let store = root.join("store");
-        std::fs::write(&store, "").unwrap();
-        let version = first(&lantern(), "topic", "name = \"lantern\"", "A lamp.\n");
-        assert!(matches!(
-            write_version(&store, &version),
-            Err(Failure::Store(_))
         ));
     }
 
