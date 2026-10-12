@@ -49,7 +49,7 @@ install -m 0755 "$tmp/$asset" "$prefix/worklog"
 echo "worklog $tag installed to $prefix/worklog"
 
 # Captured rather than piped so its exit status is the script's.
-finished="$("$prefix/worklog" agents refresh)"
+finished="$("$prefix/worklog" refresh)"
 if [ -n "$finished" ]; then
   printf '%s\n' "$finished" | sed 's/^/updated /'
 fi

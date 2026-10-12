@@ -106,8 +106,8 @@ files hold. `worklog agents refresh` brings a skill and a hook up to the
 binary that runs it, only where each already is: the skill describes the
 commands of the binary it shipped with, and the hook holds the binary's
 path, which an install to a new place leaves stale. `worklog refresh` does
-the same for the agents and for fish's completions, and `upgrade` runs it.
-The installer runs `agents refresh`.
+the same for the agents and for fish's completions, and the installer and
+`upgrade` run it.
 
 Codex runs a command in a sandbox that holds everything outside the
 project read-only, the store with it, so a `worklog` it ran would read the
