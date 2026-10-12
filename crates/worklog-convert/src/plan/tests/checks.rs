@@ -114,6 +114,7 @@ fn a_machine_with_no_topic_is_one_question_whoever_names_it() {
         [Question::Open(Open::Machine {
             name: "bench".to_owned(),
             versions: 4,
+            documents: vec![key(Kind::Entry, "2026-09/2026-09-04-lamp")],
         })]
     );
 }
@@ -431,6 +432,7 @@ fn a_stamp_the_file_gives_is_held_to_the_store_before_anything_takes_it() {
             Open::Machine {
                 name: "bench".to_owned(),
                 versions: 0,
+                documents: Vec::new(),
             },
             Open::Answer {
                 key: Key::Conversion(crate::key::ConversionKey::Written),
@@ -448,6 +450,7 @@ fn a_stamp_the_file_gives_is_held_to_the_store_before_anything_takes_it() {
         [Open::Machine {
             name: "bench".to_owned(),
             versions: 0,
+            documents: Vec::new(),
         }]
     );
 }

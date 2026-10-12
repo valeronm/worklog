@@ -103,8 +103,11 @@ fn ended_topic(holder: &DocumentKey, through: Through, ended: &str) -> Open {
 }
 
 fn machine(name: &str, versions: usize) -> Open {
-    let name = name.to_owned();
-    Open::Machine { name, versions }
+    Open::Machine {
+        name: name.to_owned(),
+        versions,
+        documents: Vec::new(),
+    }
 }
 
 fn machine_among(name: &str, topics: &[String]) -> Open {
@@ -363,6 +366,7 @@ fn an_empty_file_hands_each_question_back() {
         Err(Open::Machine {
             name: "desk-old".to_owned(),
             versions: 3,
+            documents: Vec::new(),
         })
     );
     assert_eq!(
@@ -778,6 +782,11 @@ fn text_that_must_be_one_line_is_refused_empty_blank_or_broken() {
             "[documents.\"fact/a/b\"]",
             "recheck_summary",
             "documents.\"fact/a/b\".recheck_summary",
+        ),
+        (
+            "[documents.\"entry/a\"]",
+            "machine",
+            "documents.\"entry/a\".machine",
         ),
     ];
     for (table, key, path) in keys {
@@ -1382,5 +1391,37 @@ fn the_example_of_the_readme_is_a_decision_file_with_a_line_for_every_table() {
         tag(&decisions, &port, "lantern"),
         Ok(TagAnswer::Topic("lantern"))
     );
+    let own = decisions.unasked(Unasked::Machine(&lamp)).pop();
+    assert_eq!(own.and_then(|own| own.text()), Some("desk"));
     assert_eq!(unused(&decisions), [""; 0]);
+}
+
+#[test]
+fn a_document_holds_the_topic_of_its_own_machine() {
+    let file = "[documents.\"entry/a\"]\nmachine = \"desk\"\n\
+                [documents.\"entry/b\"]\nmachine = \"?\"\n";
+    let decisions = Decisions::parse(file);
+    assert_eq!(decisions.as_ref().err(), None);
+    let decisions = decisions.unwrap();
+    let (a, b) = (entry("a"), entry("b"));
+    let own = |document| {
+        let read = decisions.unasked(Unasked::Machine(document)).pop();
+        read.and_then(|answer| Some((answer.key().to_string(), answer.text()?)))
+    };
+
+    assert_eq!(
+        unused(&decisions),
+        ["documents.\"entry/a\".machine", "documents.\"entry/b\""]
+    );
+    assert_eq!(
+        own(&a),
+        Some(("documents.\"entry/a\".machine".to_owned(), "desk"))
+    );
+    assert_eq!(own(&b), None);
+    assert_eq!(unused(&decisions), [""; 0]);
+    let unanswered: Vec<String> = (decisions.unanswered().iter())
+        .map(Key::to_string)
+        .collect();
+    assert_eq!(unanswered, ["documents.\"entry/b\".machine"]);
+    assert_eq!(decisions.placeholders(), decisions.unanswered());
 }

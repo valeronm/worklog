@@ -9,7 +9,7 @@ use std::mem::discriminant;
 use crate::key::{DocumentKey, Folded, Key};
 use crate::old::Kind;
 use crate::question::{
-    Authored, Blocked, Open, Overridden, Question, Through, Unfiled, Unjoined, reasons,
+    Authored, Blocked, Open, Overridden, Question, Through, Unfiled, Unjoined, examples, reasons,
 };
 use crate::text::{counted, cut, first_line};
 
@@ -170,8 +170,8 @@ const TOPIC_SUMMARY: Head = head(
 );
 const MACHINE: Head = head(
     "Machines with no topic",
-    "Under `[machines]`: the name of the machine's topic.",
-    &["machine", "versions"],
+    "Under `[machines]`: the name of the machine's topic; or `machine` under a document's table, for that document alone.",
+    &["machine", "versions", "among them"],
 );
 const MACHINE_TOPICS: Head = head(
     "Machines of several topics",
@@ -442,18 +442,23 @@ fn names_a_topic(missing: bool, ended: bool, unread: bool) -> &'static str {
     }
 }
 
+fn machine_row(name: &str, versions: usize, documents: &[DocumentKey]) -> Row {
+    let among = examples(documents).join(", ");
+    let cells = vec![name.to_owned(), versions.to_string(), among];
+    row(&MACHINE, cells)
+}
+
 fn open_cells(open: &Open, topics: &BTreeSet<Folded>) -> Row {
     let of = DocumentKey::to_string;
     let text = Folded::to_string;
     match open {
         Open::Conversion { versions } => row(&CONVERSION, vec![versions.to_string()]),
         Open::Tag { tag, carriers } => {
-            let examples: Vec<String> = carriers.iter().take(3).map(of).collect();
             let named = if topics.contains(tag) { "yes" } else { "" };
             let cells = vec![
                 text(tag),
                 carriers.len().to_string(),
-                examples.join(", "),
+                examples(carriers).join(", "),
                 named.to_owned(),
             ];
             row(&TAG, cells)
@@ -469,7 +474,11 @@ fn open_cells(open: &Open, topics: &BTreeSet<Folded>) -> Row {
             row(&INCLUDE, vec![text(topic), text(item), names.to_owned()])
         }
         Open::TopicSummary { topic } => row(&TOPIC_SUMMARY, vec![text(topic)]),
-        Open::Machine { name, versions } => row(&MACHINE, vec![name.clone(), versions.to_string()]),
+        Open::Machine {
+            name,
+            versions,
+            documents,
+        } => machine_row(name, *versions, documents),
         Open::MachineTopics { name, topics } => {
             row(&MACHINE_TOPICS, vec![name.clone(), topics.join(", ")])
         }

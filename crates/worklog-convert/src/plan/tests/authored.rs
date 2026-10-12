@@ -197,6 +197,7 @@ fn what_the_conversion_authors_with_no_stamp_is_one_question() {
         [Question::Open(Open::Machine {
             name: "bench".to_owned(),
             versions: 2,
+            documents: Vec::new(),
         })]
     );
     let created = &by_id(&planned, &created_topic_id("firmware")).versions[0];

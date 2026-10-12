@@ -719,6 +719,7 @@ fn a_machine_with_no_topic_is_asked_about_and_the_file_answers() {
     let machine = |name: &str, versions| Open::Machine {
         name: name.to_owned(),
         versions,
+        documents: Vec::new(),
     };
     assert_eq!(opens(&asked), [machine("phone", 2), machine("tablet", 1)]);
     let versions = &of(&asked, Kind::Topic, "lantern").versions;
@@ -2620,6 +2621,7 @@ mod entries;
 mod followups;
 mod joined;
 mod links;
+mod machines;
 mod placeholders;
 mod rechecks;
 mod whole;

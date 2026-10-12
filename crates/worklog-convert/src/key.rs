@@ -95,6 +95,7 @@ pub(crate) enum DocumentField {
     Touching,
     Ended,
     EndedBy,
+    Machine,
 }
 
 /// The list of a topic's table an item of the topic's `includes` goes in.
@@ -239,6 +240,7 @@ impl Key {
                 DocumentField::Touching => "touching".to_owned(),
                 DocumentField::Ended => "ended".to_owned(),
                 DocumentField::EndedBy => "ended_by".to_owned(),
+                DocumentField::Machine => "machine".to_owned(),
             },
         };
         Some(line)

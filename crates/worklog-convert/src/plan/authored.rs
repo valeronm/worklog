@@ -9,7 +9,7 @@ use super::fact::{self, Refiled};
 use super::id::created_topic_id;
 use super::name::{Naming, naming};
 use super::resolve::{Named, Resolved};
-use super::stamp::{Written, written};
+use super::stamp::{NamedBy, Written, written};
 use super::walk::{Asked, Step, Walked, list, push_once, refuses};
 use super::{AUTHORED, BODY, Document, Frame, Origin, Version};
 use crate::decisions::{Answer, Unasked};
@@ -433,7 +433,8 @@ impl Authoring {
             }
             read
         });
-        let machine = machine.and_then(|(_, machine)| frame.machine_of(machine, versions));
+        let machine =
+            machine.and_then(|(_, machine)| frame.machine_of(machine, NamedBy::Authored(versions)));
         (read, machine)
     }
 

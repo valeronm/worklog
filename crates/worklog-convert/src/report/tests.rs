@@ -188,6 +188,7 @@ samples! {
     Machine => Open::Machine {
         name: text("desk-old"),
         versions: 12,
+        documents: Vec::new(),
     },
     MachineTopics => Open::MachineTopics {
         name: text("phone"),
@@ -757,11 +758,11 @@ Under `[topics.<topic>]`: `summary`, one line; a topic not meant to be created i
 
 ### Machines with no topic
 
-Under `[machines]`: the name of the machine's topic.
+Under `[machines]`: the name of the machine's topic; or `machine` under a document's table, for that document alone.
 
-| machine | versions |
-| --- | --- |
-| desk-old | 12 |
+| machine | versions | among them |
+| --- | --- | --- |
+| desk-old | 12 |  |
 
 ### Machines of several topics
 
@@ -1262,8 +1263,11 @@ fn unused_decisions_alone_are_listed() {
 #[test]
 fn a_count_orders_its_table_most_used_first() {
     let machine = |name: &str, versions| {
-        let name = text(name);
-        Question::from(Open::Machine { name, versions })
+        Question::from(Open::Machine {
+            name: text(name),
+            versions,
+            documents: Vec::new(),
+        })
     };
     let questions = [
         machine("atlas", 2),
@@ -1274,7 +1278,7 @@ fn a_count_orders_its_table_most_used_first() {
     let printed = report(&questions, &[], &[], &[], &none(), read(1, 44));
 
     assert!(
-        printed.contains("| desk | 40 |\n| atlas | 2 |\n| phone | 2 |\n"),
+        printed.contains("| desk | 40 |  |\n| atlas | 2 |  |\n| phone | 2 |  |\n"),
         "{printed}"
     );
     assert!(
@@ -1607,6 +1611,34 @@ fn a_reason_is_asked_for_with_how_the_document_had_already_ended() {
             "| document | kind | already | note | reasons |\n\
              | --- | --- | --- | --- | --- |\n\
              | followup/2026-09-04-port | followup | done on 2026-09-06 | Was never ours | done, dropped |\n"
+        ),
+        "{printed}"
+    );
+}
+
+#[test]
+fn a_machine_with_no_topic_names_the_entries_that_can_answer_for_themselves() {
+    let documents = vec![entry("a"), entry("b"), entry("c"), entry("d")];
+    let questions = [Question::from(Open::Machine {
+        name: text("bench"),
+        versions: 5,
+        documents,
+    })];
+
+    let printed = report(&questions, &[], &[], &[], &none(), read(4, 5));
+
+    assert!(
+        printed.contains(
+            "\n| machine | versions | among them |\n| --- | --- | --- |\n\
+             | bench | 5 | entry/a, entry/b, entry/c |\n"
+        ),
+        "{printed}"
+    );
+    assert!(
+        printed.ends_with(
+            "\n[machines]\n\
+             bench = \"?\"  # 5 versions: the machine's topic; a document's table may hold \
+             `machine` instead: entry/a, entry/b, entry/c, …\n```\n"
         ),
         "{printed}"
     );

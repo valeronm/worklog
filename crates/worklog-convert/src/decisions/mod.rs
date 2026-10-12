@@ -134,8 +134,8 @@ impl<'a> Answer<'a> {
     }
 }
 
-/// Reading one records its key as used, since no run lists it as open, except for
-/// `Unasked::DropsTag`, which records nothing.
+/// Reading one records its key as used, except for `Unasked::DropsTag`, which records
+/// nothing.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Unasked<'k> {
     Conversion(ConversionKey),
@@ -150,9 +150,13 @@ pub(crate) enum Unasked<'k> {
     /// The answer for a tag on a document, its own or the one of `[tags]`, where a
     /// `topics` list stands in for the document's tags, which are then asked of nobody.
     DropsTag(&'k DocumentKey, &'k str),
+    /// The topic the file gives for the machine an entry was worked on, read where the
+    /// entry's `machine` names a machine no topic holds.
+    Machine(&'k DocumentKey),
 }
 
-/// An answer is reached by the question it answers or as one of `Unasked`.
+/// An answer is reached by the question it answers, as one of `Unasked`, or for a machine
+/// name by `machine`.
 #[derive(Default)]
 pub(crate) struct Decisions {
     held: BTreeMap<Key, Held>,
@@ -176,6 +180,11 @@ impl Decisions {
     pub(crate) fn answer(&self, open: &Open) -> Option<Answer<'_>> {
         let mut offers = open.offers().into_iter();
         offers.find_map(|offer| self.read(&offer.key))
+    }
+
+    /// The answer of `[machines]` for a machine name, as stored.
+    pub(crate) fn machine(&self, name: &str) -> Option<Answer<'_>> {
+        self.read(&Key::Machine(name.to_owned()))
     }
 
     pub(crate) fn answers(&self, open: &Open) -> Vec<Answer<'_>> {
@@ -219,6 +228,7 @@ impl Decisions {
                 let found = found.map(|(key, held)| Answer { key, held });
                 found.into_iter().collect()
             }
+            Unasked::Machine(document) => one(Key::document(document, DocumentField::Machine)),
         }
     }
 

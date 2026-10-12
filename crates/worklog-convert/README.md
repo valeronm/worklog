@@ -89,6 +89,7 @@ former_names = { Lantern_Atlas = "" }   # an old name the new store refuses: ano
 summary = "One line"    # where the old one is missing or not one line
 ended = "merged"        # the reason of a removed document, a word its kind has
 ended_by = "entry/2026-09/2026-09-05-atlas"   # the document that replaced it
+machine = "desk"        # this entry's answer for a machine no machine topic holds, over `[machines]`
 
 [documents."fact/lantern/desk"]
 recheck_summary = "Look again"   # the summary of the followup its recheck becomes

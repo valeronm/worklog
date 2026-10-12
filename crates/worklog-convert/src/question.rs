@@ -145,7 +145,13 @@ pub(crate) enum Open {
     TopicSummary { topic: Folded },
     /// A machine name no machine topic holds, on the versions it stamped and the entries
     /// whose `machine` it is.
-    Machine { name: String, versions: usize },
+    Machine {
+        name: String,
+        /// The versions that hold the name with no answer.
+        versions: usize,
+        /// The entries among them whose own `machine` it is, in order.
+        documents: Vec<DocumentKey>,
+    },
     /// A machine name several topics hold.
     MachineTopics { name: String, topics: Vec<String> },
     /// A name in a machine topic's `claims` or `unclaimed` that resolves to no topic.
@@ -357,15 +363,33 @@ fn conversion_offers(versions: usize) -> Vec<Offer> {
     ]
 }
 
-fn tag_evidence(carriers: &[DocumentKey]) -> String {
-    let mut shown: Vec<String> = (carriers.iter().take(3))
+/// The first documents of a list, as many as a row or a stub names.
+pub(crate) fn examples(documents: &[DocumentKey]) -> Vec<String> {
+    (documents.iter().take(3))
         .map(DocumentKey::to_string)
-        .collect();
-    if carriers.len() > shown.len() {
+        .collect()
+}
+
+fn first_few(documents: &[DocumentKey]) -> String {
+    let mut shown = examples(documents);
+    if documents.len() > shown.len() {
         shown.push("…".to_owned());
     }
+    shown.join(", ")
+}
+
+fn tag_evidence(carriers: &[DocumentKey]) -> String {
     let carried = counted(carriers.len(), "document");
-    format!("{carried}: {}; \"\" drops the tag", shown.join(", "))
+    format!("{carried}: {}; \"\" drops the tag", first_few(carriers))
+}
+
+fn machine_offers(name: &str, versions: usize, documents: &[DocumentKey]) -> Vec<Offer> {
+    let mut evidence = format!("{}: the machine's topic", counted(versions, "version"));
+    if !documents.is_empty() {
+        let among = first_few(documents);
+        evidence = format!("{evidence}; a document's table may hold `machine` instead: {among}");
+    }
+    vec![offer(Key::Machine(name.to_owned()), evidence)]
 }
 
 fn include_offers(
@@ -513,10 +537,11 @@ impl Open {
                 let evidence = "one line for the topic the file creates".to_owned();
                 vec![offer(key, evidence)]
             }
-            Open::Machine { name, versions } => {
-                let evidence = format!("{}: the machine's topic", counted(*versions, "version"));
-                vec![offer(Key::Machine(name.clone()), evidence)]
-            }
+            Open::Machine {
+                name,
+                versions,
+                documents,
+            } => machine_offers(name, *versions, documents),
             Open::MachineTopics { name, topics } => {
                 let evidence = format!("the machine of {}: one of them", topics.join(", "));
                 vec![offer(Key::Machine(name.clone()), evidence)]

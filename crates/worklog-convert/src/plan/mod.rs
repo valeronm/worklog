@@ -219,9 +219,9 @@ pub(crate) struct Frame<'a, 'd> {
     pub(crate) questions: Questions,
     // The documents carrying each tag the file does not answer.
     pub(crate) tags: RefCell<BTreeMap<Folded, BTreeSet<DocumentKey>>>,
-    // The machine names no topic and no answer holds, with the authored versions that
-    // carry each.
-    pub(crate) unknown: RefCell<BTreeMap<String, usize>>,
+    // The machine names no topic and no answer of `[machines]` holds, with what was found
+    // to carry each.
+    pub(crate) unknown: RefCell<BTreeMap<String, stamp::Unknown>>,
     pub(crate) overrides: RefCell<BTreeMap<DocumentKey, Override>>,
 }
 
@@ -280,6 +280,10 @@ fn unasked_placeholders(decisions: &Decisions, questions: &[Question]) -> Vec<Ke
         if let Open::Tag { tag, carriers } = open {
             let own = |carrier| Key::document(carrier, DocumentField::Tag(tag.clone()));
             offered.extend(carriers.iter().map(own));
+        }
+        if let Open::Machine { documents, .. } = open {
+            let own = |entry| Key::document(entry, DocumentField::Machine);
+            offered.extend(documents.iter().map(own));
         }
     }
     let unasked = (decisions.placeholders().iter()).filter(|key| !offered.contains(key));

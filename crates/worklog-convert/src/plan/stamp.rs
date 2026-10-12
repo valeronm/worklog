@@ -5,9 +5,10 @@ use worklog_next::domain::schema::Date;
 use worklog_next::domain::version::Stamp;
 
 use super::Frame;
-use super::chain::Chains;
-use super::walk::scalar;
-use crate::decisions::Answer;
+use super::chain::{Chains, Settled};
+use super::walk::{Step, scalar};
+use crate::decisions::{Answer, Unasked};
+use crate::key::DocumentKey;
 use crate::old::{Kind, Store};
 use crate::question::Open;
 
@@ -66,28 +67,53 @@ pub(crate) fn day_of(stamp: &Stamp) -> Option<Date> {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Machines {
     holders: BTreeMap<String, BTreeSet<usize>>,
-    stamped: BTreeMap<String, usize>,
 }
 
 impl Machines {
     pub(crate) fn build(store: &Store, chains: &Chains<'_>) -> Machines {
         let mut machines = Machines::default();
         for (index, document) in store.documents.iter().enumerate() {
-            for version in &document.versions {
-                let named = scalar(version, "machine");
-                let worked_on = named.filter(|_| document.kind == Kind::Entry);
-                let stamped = [version.machine.as_str()].into_iter().chain(worked_on);
-                let uses: BTreeSet<&str> = stamped.collect();
-                for name in uses {
-                    *(machines.stamped.entry(name.to_owned())).or_default() += 1;
-                }
-                if let Some(name) = named.filter(|_| document.kind == Kind::Topic) {
-                    let holders = machines.holders.entry(name.to_owned()).or_default();
-                    holders.insert(chains.of[index]);
-                }
+            let named = (document.versions.iter())
+                .filter_map(|version| scalar(version, "machine"))
+                .filter(|_| document.kind == Kind::Topic);
+            for name in named {
+                let holders = machines.holders.entry(name.to_owned()).or_default();
+                holders.insert(chains.of[index]);
             }
         }
         machines
+    }
+}
+
+/// What names a machine: the stamp of a planned version, the `machine` of an entry's
+/// planned version, or the stamp of the versions the conversion authors.
+#[derive(Clone, Copy)]
+pub(crate) enum NamedBy<'s, 'c, 'a> {
+    Stamp(Settled<'c, 'a>, &'s Step<'a>),
+    Entry(Settled<'c, 'a>, &'s Step<'a>),
+    Authored(usize),
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct Unknown {
+    authored: usize,
+    // A planned version, by the chain of its document and its key.
+    versions: BTreeSet<(usize, String)>,
+    entries: BTreeSet<DocumentKey>,
+}
+
+impl Unknown {
+    fn hold(&mut self, named: NamedBy<'_, '_, '_>) {
+        match named {
+            NamedBy::Stamp(own, step) => {
+                self.versions.insert((own.index, step.key().to_owned()));
+            }
+            NamedBy::Entry(own, step) => {
+                self.versions.insert((own.index, step.key().to_owned()));
+                self.entries.insert(own.key.clone());
+            }
+            NamedBy::Authored(versions) => self.authored += versions,
+        }
     }
 }
 
@@ -100,20 +126,13 @@ impl Machines {
 }
 
 impl Frame<'_, '_> {
-    // A machine with no topic, with the versions found to carry its name so far.
-    fn unknown_machine(&self, name: &str) -> Open {
-        let stamped = self.machines.stamped.get(name).copied().unwrap_or_default();
-        let authored = self.unknown.borrow().get(name).copied().unwrap_or_default();
-        Open::Machine {
-            name: name.to_owned(),
-            versions: stamped + authored,
-        }
-    }
-
     pub(crate) fn ask_machines(&self) {
-        let unknown: Vec<String> = self.unknown.borrow().keys().cloned().collect();
-        for name in unknown {
-            self.questions.ask(self.unknown_machine(&name));
+        for (name, unknown) in self.unknown.borrow().iter() {
+            self.questions.ask(Open::Machine {
+                name: name.clone(),
+                versions: unknown.authored + unknown.versions.len(),
+                documents: unknown.entries.iter().cloned().collect(),
+            });
         }
     }
 
@@ -139,23 +158,36 @@ impl Frame<'_, '_> {
         None
     }
 
-    pub(crate) fn machine(&self, name: &str) -> Option<DocumentId> {
-        self.machine_of(name, 0)
+    // The answer is for the machine the entry names, not for the one that stamped a version.
+    pub(crate) fn worked_on(
+        &self,
+        own: Settled<'_, '_>,
+        step: &Step<'_>,
+        name: &str,
+    ) -> Option<DocumentId> {
+        let named = NamedBy::Entry(own, step);
+        if self.machines.holders.contains_key(name) {
+            return self.machine_of(name, named);
+        }
+        match self.decisions.unasked(Unasked::Machine(own.key)).pop() {
+            Some(answer) => self.answered(name, &answer, &BTreeSet::new()),
+            None => self.machine_of(name, named),
+        }
     }
 
     // A machine with no topic is one question, whoever names it and however often, so it
-    // is asked once the whole plan is made, with the `authored` versions counted in.
-    pub(crate) fn machine_of(&self, name: &str, authored: usize) -> Option<DocumentId> {
+    // is asked once the whole plan is made, of everything found to name it.
+    pub(crate) fn machine_of(&self, name: &str, named: NamedBy<'_, '_, '_>) -> Option<DocumentId> {
         let none = BTreeSet::new();
         let holders = self.machines.holders.get(name).unwrap_or(&none);
         let asked = match (holders.first(), holders.len()) {
             (Some(only), 1) => return Some(self.chains.chains[*only].id.clone()),
             (None, _) => {
-                let answered = self.decisions.answer(&self.unknown_machine(name));
+                let answered = self.decisions.machine(name);
                 let answered = answered.filter(|at| at.text().is_some());
                 if answered.is_none() {
                     let mut unknown = self.unknown.borrow_mut();
-                    *unknown.entry(name.to_owned()).or_default() += authored;
+                    unknown.entry(name.to_owned()).or_default().hold(named);
                 }
                 answered
             }

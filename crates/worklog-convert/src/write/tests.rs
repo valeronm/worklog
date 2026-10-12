@@ -24,7 +24,7 @@ use super::{Failure, ready};
 use crate::decisions::Decisions;
 use crate::fixture::{
     BENCH, CONVERSION, DAY_1, DAY_2, DAY_3, DAY_4, DAY_5, ENDED_PHONE, FILE, OldStore, PIN, SCALE,
-    desk, in_another_order, no_host, planned_of, read, rich, tree, with_desk,
+    at, composed, desk, in_another_order, no_host, planned_of, read, rich, tree, with_desk,
 };
 use crate::old::{Kind, Store};
 use crate::plan::{Complete, Document, Origin, Outcome, Planned, document_id, generated_id, plan};
@@ -317,6 +317,50 @@ fn the_new_check_finds_no_problem_and_no_fork_in_what_was_written() {
     assert_eq!(found.problems, []);
     assert_eq!(found.fork_count, 0);
     assert_eq!(found.notices, outcome.notices);
+}
+
+#[test]
+fn two_entries_of_one_unknown_machine_are_written_under_the_machine_each_names() {
+    let old = with_desk();
+    old.machine_topic("phone", &[], &[], at(DAY_1, "phone"));
+    let (lamp, wiring) = ("2026-09/2026-09-04-lamp", "2026-09/2026-09-05-wiring");
+    for slug in [lamp, wiring] {
+        let draft = OldStore::new().entry(slug, "Drove it", &[], at(DAY_1, "bench"));
+        let first = composed(slug, desk(DAY_1), "new", &[], draft.fields, &draft.body);
+        old.write(&first);
+        old.saved(&first, "Drove it again", "\nAgain.\n", desk(DAY_2));
+    }
+    let store = read(&old);
+    let file = format!(
+        "[documents.\"entry/{lamp}\"]\nmachine = \"phone\"\n\
+         [documents.\"entry/{wiring}\"]\nmachine = \"desk\"\n"
+    );
+    let outcome = plan(&store, &Decisions::parse(&file).unwrap());
+    assert_eq!(outcome.planned().questions, []);
+    assert_eq!(outcome.planned().unused, []);
+    let Outcome::Complete(complete) = outcome else {
+        panic!("a plan with nothing open is complete");
+    };
+    let scratch = Scratch::new();
+    let outcome = write(&complete, &store, &scratch).unwrap();
+
+    let adapters = wired(&scratch);
+    let found = check(&adapters.deps()).unwrap();
+    assert_eq!(found.problems, []);
+    assert_eq!(found.fork_count, 0);
+    assert_eq!(found.notices, outcome.notices);
+    let composed = compose(&complete).unwrap();
+    let worked_on = |slug: &str| {
+        let entry = of(&composed, &document_id(Kind::Entry, slug));
+        let machine = |version: &NewVersion| {
+            let machine = version.fields.get("machine")?.as_str()?;
+            Some(machine.to_owned())
+        };
+        entry.versions.iter().map(machine).collect::<Vec<_>>()
+    };
+    let topic = |name: &str| Some(document_id(Kind::Topic, name).as_str().to_owned());
+    assert_eq!(worked_on(lamp), [topic("phone"), topic("phone")]);
+    assert_eq!(worked_on(wiring), [topic("desk"), topic("desk")]);
 }
 
 #[test]

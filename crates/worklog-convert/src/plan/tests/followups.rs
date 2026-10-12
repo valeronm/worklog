@@ -702,6 +702,7 @@ fn what_stands_before_a_followup_is_asked_as_for_any_document() {
         [Open::Machine {
             name: "phone".to_owned(),
             versions: 1,
+            documents: Vec::new(),
         }]
     );
     for version in versions_of(&planned, PORT) {

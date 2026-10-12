@@ -38,6 +38,7 @@ fn an_entry_carries_its_fields_in_every_version() {
         [Open::Machine {
             name: "phone".to_owned(),
             versions: 1,
+            documents: vec![key(Kind::Entry, LAMP_DRIVER)],
         }]
     );
     let decisions = answers(&format!("{tags}[machines]\nphone = \"atlas\"\n"));
@@ -502,6 +503,7 @@ fn what_stands_before_an_entry_is_asked_as_for_any_document() {
         [Open::Machine {
             name: "phone".to_owned(),
             versions: 2,
+            documents: vec![key(Kind::Entry, LAMP_DRIVER)],
         }]
     );
     let versions = &of(&planned, Kind::Entry, LAMP_DRIVER).versions;

@@ -362,6 +362,10 @@ impl Reading {
                 let by = text.and_then(|text| self.document_key(path, &text));
                 (DocumentField::EndedBy, by.map(Held::Document))
             }
+            "machine" => (
+                DocumentField::Machine,
+                self.line(path, value).map(Held::Text),
+            ),
             _ => return self.refuse(path, "is not a key of a document's table"),
         };
         self.hold(Key::document(document, field), held);

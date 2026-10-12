@@ -8,7 +8,7 @@ use super::chain::{Settled, key_of};
 use super::followup::reason_of;
 use super::name::{Carrier, Holder, Scope};
 use super::resolve::{Resolved, Unsettled};
-use super::stamp::{Written, written};
+use super::stamp::{NamedBy, Written, written};
 use super::{BODY, Frame, Origin, Source, Stored, Version, entry, fact, topic};
 use crate::decisions::{Answer, Unasked};
 use crate::key::{DocumentKey, Key, Placement};
@@ -606,7 +606,8 @@ impl<'a> Frame<'a, '_> {
             let written = self.written(step);
             let on = written.as_ref().map(|written| written.day);
             let dates = Dates { on, created };
-            let machine = self.machine(&step.stamped().version.machine);
+            let stamped = &step.stamped().version.machine;
+            let machine = self.machine_of(stamped, NamedBy::Stamp(own, step));
             let parents: Vec<&Mapped<M::State>> = (step.parents.iter())
                 .filter_map(|parent| done.get(parent.as_str()))
                 .collect();

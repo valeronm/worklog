@@ -35,7 +35,7 @@ impl Mapper for Entries<'_, '_> {
         if machine.is_none() {
             frame.missing(&step.source, "machine");
         }
-        let machine = machine.and_then(|name| frame.machine(name));
+        let machine = machine.and_then(|name| frame.worked_on(self.own, step, name));
         let filed = Filed {
             own: self.own,
             asked: Asked::ENTRY_TOPICS,
