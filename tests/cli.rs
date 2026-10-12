@@ -1994,10 +1994,10 @@ impl Serving {
 
 impl Host {
     fn spawned(&self, args: &[&str]) -> Spawned {
-        self.spawned_on(None, args)
+        self.spawned_on(None, Stdio::null(), args)
     }
 
-    fn spawned_on(&self, path: Option<OsString>, args: &[&str]) -> Spawned {
+    fn spawned_on(&self, path: Option<OsString>, stdin: Stdio, args: &[&str]) -> Spawned {
         let mut program = std::process::Command::new(env!("CARGO_BIN_EXE_worklog"));
         if let Some(path) = path {
             program.env("PATH", path);
@@ -2013,7 +2013,7 @@ impl Host {
             .env_remove("XDG_STATE_HOME")
             .current_dir(self.home())
             .args(args)
-            .stdin(Stdio::null())
+            .stdin(stdin)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -2022,7 +2022,10 @@ impl Host {
     }
 
     fn ends(&self, args: &[&str]) -> Ran {
-        let mut spawned = self.spawned(args);
+        Host::ended(self.spawned(args), args)
+    }
+
+    fn ended(mut spawned: Spawned, args: &[&str]) -> Ran {
         let deadline = Instant::now() + PATIENCE;
         let status = loop {
             if let Some(status) = spawned.0.try_wait().expect("a child to ask") {
@@ -2047,7 +2050,7 @@ impl Host {
 
     fn serving(&self, path: Option<OsString>, rest: &[&str]) -> Serving {
         let line = [&["serve", "--bind", "127.0.0.1:0"], rest].concat();
-        let mut spawned = self.spawned_on(path, &line);
+        let mut spawned = self.spawned_on(path, Stdio::null(), &line);
         let stdout = spawned.0.stdout.take().expect("a piped stdout");
         let (line, lines) = mpsc::channel();
         std::thread::spawn(move || {
@@ -2261,8 +2264,12 @@ impl Host {
     }
 }
 
-fn hook_command() -> String {
-    format!("\"{}\" context 2>/dev/null || true", binary().display())
+fn hook_command(home: &str) -> String {
+    let word = if home == ".codex" { "codex" } else { "claude" };
+    format!(
+        "\"{}\" context --hook {word} 2>/dev/null || true",
+        binary().display()
+    )
 }
 
 fn lines(paths: &[PathBuf]) -> String {
@@ -2315,7 +2322,7 @@ fn init_with_agents_installs_for_every_agent_present_and_prints_the_paths() {
         let command = hooks["hooks"]["SessionStart"][0]["hooks"][0]["command"]
             .as_str()
             .unwrap();
-        assert_eq!(command, hook_command());
+        assert_eq!(command, hook_command(home));
     }
 }
 
@@ -2445,7 +2452,7 @@ fn agents_refresh_rewrites_a_stale_skill_rule_and_hook_and_nothing_else() {
     let after = host.hooks_json(".codex");
     let groups = after["hooks"]["SessionStart"].as_array().unwrap();
     assert_eq!(groups[0], theirs);
-    assert_eq!(groups[1]["hooks"][0]["command"], hook_command());
+    assert_eq!(groups[1]["hooks"][0]["command"], hook_command(".codex"));
     assert_eq!(host.ok(&["agents", "refresh"]), "");
 }
 
@@ -3312,6 +3319,17 @@ fn a_command_line_the_parser_refuses_is_logged_under_the_command_it_named() {
     );
 }
 
+fn within(agent: &str, id: &str) -> (Value, Value) {
+    (Value::from(agent), Value::from(id))
+}
+
+impl Host {
+    fn sessions(&self) -> Vec<(Value, Value)> {
+        let session = |line: Value| (line["agent"].clone(), line["session"].clone());
+        self.logged().into_iter().map(session).collect()
+    }
+}
+
 #[test]
 fn a_run_inside_an_agent_s_session_is_logged_with_its_id_and_the_first_agent_s_when_nested() {
     let host = Host::stocked();
@@ -3327,19 +3345,64 @@ fn a_run_inside_an_agent_s_session_is_logged_with_its_id_and_the_first_agent_s_w
     }
     assert_eq!(host.run_as(nested, &home, &["facts"]).code, Some(0));
     host.used_ok(&["facts"]);
-    let logged = host.logged();
-    let sessions: Vec<(&Value, &Value)> = (logged.iter())
-        .map(|line| (&line["agent"], &line["session"]))
-        .collect();
-    let within = |agent: &str, id: &str| (Value::from(agent), Value::from(id));
     let expected = [
         within(SESSIONS[0].0, "s-0"),
         within(SESSIONS[1].0, "s-1"),
         within(SESSIONS[0].0, "s-nested"),
         (Value::Null, Value::Null),
     ];
-    let expected: Vec<(&Value, &Value)> = expected.iter().map(|(a, id)| (a, id)).collect();
-    assert_eq!(sessions, expected);
+    assert_eq!(host.sessions(), expected);
+}
+
+#[test]
+fn a_context_an_agent_s_hook_runs_is_logged_in_the_session_its_input_holds() {
+    let host = Host::stocked();
+    let home = host.home();
+    let plain = host.used_ok(&["context"]);
+    let hooked = |input: &str, args: &[&str], outer: bool| {
+        let mut program = found();
+        program.write_stdin(input);
+        if outer {
+            program.env(SESSIONS[0].1, "s-outer");
+        }
+        let ran = host.run_as(program, &home, args);
+        assert_eq!((ran.stdout.as_str(), ran.code), (plain.as_str(), Some(0)));
+    };
+    let given = r#"{"session_id": "s-9", "cwd": "/home/desk", "source": "startup"}"#;
+    let codex = ["context", "--hook", "codex"];
+    hooked(given, &codex, false);
+    hooked(given, &codex, true);
+    hooked("not json", &codex, false);
+    hooked(given, &["context", "--hook", "lantern"], false);
+    hooked(given, &["context"], false);
+    hooked(given, &["context"], true);
+
+    let none = (Value::Null, Value::Null);
+    let expected = [
+        none.clone(),
+        within(SESSIONS[1].0, "s-9"),
+        within(SESSIONS[1].0, "s-9"),
+        none.clone(),
+        none.clone(),
+        none,
+        within(SESSIONS[0].0, "s-outer"),
+    ];
+    assert_eq!(host.sessions(), expected);
+}
+
+#[test]
+fn a_hook_whose_input_is_never_closed_still_opens_its_session() {
+    let host = Host::stocked();
+    let plain = host.ok(&["context"]);
+    let line = ["context", "--hook", "codex"];
+    let mut held_open = host.spawned_on(None, Stdio::piped(), &line);
+    let input = held_open.0.stdin.take().expect("a piped stdin");
+    let ran = Host::ended(held_open, &line);
+    drop(input);
+    assert_eq!(
+        (ran.stdout, ran.stderr, ran.code),
+        (plain, String::new(), Some(0))
+    );
 }
 
 #[test]
@@ -3672,7 +3735,10 @@ fn upgrade_has_the_release_it_put_in_place_refresh_the_host() {
     assert_ne!(fs::read_to_string(&stale.skill).unwrap(), "old");
     assert_eq!(
         stale.hook(),
-        format!("\"{}\" context 2>/dev/null || true", released.display())
+        format!(
+            "\"{}\" context --hook claude 2>/dev/null || true",
+            released.display()
+        )
     );
     assert_eq!(
         stale.fish_line(),
@@ -3705,7 +3771,7 @@ fn upgrade_replaces_the_binary_only_with_a_newer_release_whose_checksum_matches(
     assert_eq!(fs::read(&stale.installed).unwrap(), bytes);
     assert_eq!(
         stale.hook(),
-        "\"$HOME/.local/bin/worklog\" context 2>/dev/null || true"
+        "\"$HOME/.local/bin/worklog\" context --hook claude 2>/dev/null || true"
     );
     assert_eq!(
         stale.fish_line(),
@@ -4037,7 +4103,8 @@ fn refresh_takes_the_hook_the_tool_before_the_rebuild_left_as_its_own() {
 
         let printed = host.ok(&["refresh"]);
         assert_eq!(printed, lines(&[host.hooks_of(".claude")]), "{command}");
-        let ours = serde_json::json!({"hooks": [{"type": "command", "command": hook_command()}]});
+        let ours =
+            serde_json::json!({"hooks": [{"type": "command", "command": hook_command(".claude")}]});
         assert_eq!(
             host.hooks_json(".claude")["hooks"]["SessionStart"],
             serde_json::json!([theirs, ours]),

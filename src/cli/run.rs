@@ -208,7 +208,7 @@ fn read(
             };
             output(&search::search(deps, &query)?, json)
         }
-        ReadCommand::Context { dir } => {
+        ReadCommand::Context { dir, .. } => {
             let directory = directory(environment, dir.as_deref())?;
             output(&context::context(deps, &directory)?, json)
         }

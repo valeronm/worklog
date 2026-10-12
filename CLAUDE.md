@@ -132,10 +132,13 @@ an agent holding the skill or the hook, since a host set up before the
 rule existed is upgraded and not installed again.
 
 A usage line gets its session from the environment variable an agent sets
-for a command it runs. Nothing checks the name the agent table holds
-against the agent, so a rename on the agent's side leaves the session out
-without failing a test. The first agent in the table whose variable is set
-is the one logged when one agent runs inside another.
+for a command it runs, and for a session hook from the hook's input, which
+the hook's command asks `context` to read by naming the agent. Nothing
+checks the names the agent table holds against the agent, so a rename on
+the agent's side leaves the session out without failing a test. The first
+agent in the table whose variable is set is the one logged when one agent
+runs inside another, and a hook whose input holds a session is logged
+under its own agent whatever it runs inside.
 
 ## What stays out of the repo
 

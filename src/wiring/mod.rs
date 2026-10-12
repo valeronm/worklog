@@ -43,6 +43,27 @@ impl Adapters {
     pub fn settle(&self) -> Result<(), Failure> {
         Ok(self.store.settle()?)
     }
+
+    /// Puts these adapters in the session of the agent whose hook's command holds `word`, under
+    /// the id `given` returns for the key that agent's hook input holds it under. That session
+    /// replaces the one a variable gave. `given` is not called for a word no agent's hook
+    /// holds, and an id that is missing or empty changes nothing.
+    #[must_use]
+    pub fn run_by_hook(mut self, word: &str, given: &dyn Fn(&str) -> Option<String>) -> Adapters {
+        if let Some(session) = hook_session(word, given) {
+            self.host = self.host.in_session(session);
+        }
+        self
+    }
+}
+
+fn hook_session(word: &str, given: &dyn Fn(&str) -> Option<String>) -> Option<Session> {
+    let known = AGENTS.iter().find(|known| known.hook.word == word)?;
+    let id = given(known.hook.session)?;
+    (!id.is_empty()).then(|| Session {
+        agent: known.name.to_owned(),
+        id,
+    })
 }
 
 /// The adapters over the store this host's config holds, or over `chosen`, the store a host
@@ -123,7 +144,16 @@ struct Known {
     hooks: &'static str,
     /// The variable the agent sets to its session's id for a command it runs.
     session: &'static str,
+    hook: Hook,
     rule: Option<Rule>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct Hook {
+    /// Names the agent in its hook's command.
+    word: &'static str,
+    /// The key the session's id is under in what the agent gives a hook on its input.
+    session: &'static str,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -151,6 +181,10 @@ static AGENTS: [Known; 2] = [
         home: ".claude",
         hooks: "settings.json",
         session: "CLAUDE_CODE_SESSION_ID",
+        hook: Hook {
+            word: "claude",
+            session: "session_id",
+        },
         rule: None,
     },
     Known {
@@ -158,6 +192,10 @@ static AGENTS: [Known; 2] = [
         home: ".codex",
         hooks: "hooks.json",
         session: "CODEX_THREAD_ID",
+        hook: Hook {
+            word: "codex",
+            session: "session_id",
+        },
         rule: Some(CODEX_RULE),
     },
 ];
@@ -179,6 +217,11 @@ impl Agent {
     #[must_use]
     pub fn hooks(&self) -> &Path {
         self.files.hooks()
+    }
+
+    #[must_use]
+    pub fn hook_word(&self) -> &'static str {
+        self.known.hook.word
     }
 
     #[must_use]
@@ -413,6 +456,33 @@ mod tests {
 
         let chosen = wired(&root, Some(root.join("elsewhere"))).unwrap().unwrap();
         assert_eq!(chosen.deps().usage.read(&all).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_hook_s_session_is_its_agent_s_and_comes_before_a_variable() {
+        let (_kept, root) = scratch();
+        bound(&root);
+        let variable = |name: &str| match name {
+            "WORKLOG_HOME" => Some(root.join("next").into_os_string()),
+            "CLAUDE_CODE_SESSION_ID" => Some(OsString::from("s-1")),
+            _ => None,
+        };
+        let run_by = |word: &str, given: &dyn Fn(&str) -> Option<String>| {
+            let adapters = wire(&variable, None).unwrap().unwrap();
+            let session = adapters.run_by_hook(word, given).deps().host.session();
+            session.map(|session| (session.agent, session.id)).unwrap()
+        };
+        let session = |agent: &str, id: &str| (agent.to_owned(), id.to_owned());
+        let under = |key: &str| (key == "session_id").then(|| "s-9".to_owned());
+        assert_eq!(run_by("codex", &under), session("Codex", "s-9"));
+        for found in [None, Some(String::new())] {
+            let outer = run_by("codex", &|_| found.clone());
+            assert_eq!(outer, session("Claude Code", "s-1"), "{found:?}");
+        }
+        for word in ["lantern", "Codex"] {
+            let unasked = run_by(word, &|_| panic!("{word}: its input was asked for"));
+            assert_eq!(unasked, session("Claude Code", "s-1"));
+        }
     }
 
     #[test]

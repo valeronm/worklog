@@ -16,9 +16,11 @@ mod upgrade;
 
 use std::cell::RefCell;
 use std::ffi::OsString;
-use std::io::{BufRead, ErrorKind, IsTerminal as _, Write};
+use std::io::{BufRead, ErrorKind, IsTerminal as _, Read as _, Write};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc;
+use std::time::Duration;
 
 use crate::app::record::Outcome;
 use crate::app::{Failure, setup};
@@ -31,6 +33,12 @@ use render::{Output, Stopped};
 
 const NAME: &str = "worklog";
 
+// An agent gives a hook a few hundred bytes.
+const HOOK_INPUT: u64 = 64 * 1024;
+
+// An agent that never closes a hook's input must not keep its session from opening.
+const HOOK_WAIT: Duration = Duration::from_secs(1);
+
 struct Environment<'a> {
     cwd: Option<PathBuf>,
     binary: Option<PathBuf>,
@@ -40,6 +48,9 @@ struct Environment<'a> {
     binary_at: &'a dyn Fn(&Path) -> Box<dyn Binary>,
     /// `None` unless both the input and stderr are a terminal.
     terminal: Option<&'a RefCell<dyn BufRead + 'a>>,
+    /// `None` on a terminal and where the input is not closed within `HOOK_WAIT`; otherwise at
+    /// most `HOOK_INPUT` bytes of it.
+    hook_input: &'a dyn Fn() -> Option<String>,
 }
 
 impl Environment<'_> {
@@ -72,13 +83,32 @@ impl Environment<'_> {
     }
 }
 
+fn piped_input() -> Option<String> {
+    if std::io::stdin().is_terminal() {
+        return None;
+    }
+    let (given, read) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut text = String::new();
+        if (std::io::stdin().take(HOOK_INPUT))
+            .read_to_string(&mut text)
+            .is_ok()
+        {
+            let _ = given.send(text);
+        }
+    });
+    read.recv_timeout(HOOK_WAIT).ok()
+}
+
 /// Runs the process's own command line and returns its exit code.
 #[must_use]
 pub fn main() -> i32 {
     let variable = |name: &str| std::env::var_os(name);
     let stdin = std::io::stdin();
-    let typed = RefCell::new(stdin.lock());
-    let answers: &RefCell<dyn BufRead> = &typed;
+    let prompts = stdin.is_terminal() && std::io::stderr().is_terminal();
+    // A lock held on an input that is not a terminal would keep the thread that reads a hook's
+    // input waiting for it.
+    let typed = prompts.then(|| RefCell::new(stdin.lock()));
     let environment = Environment {
         cwd: std::env::current_dir().ok(),
         binary: std::env::current_exe().ok(),
@@ -86,7 +116,8 @@ pub fn main() -> i32 {
         version: release::current(),
         releases: &|| wiring::releases(&variable),
         binary_at: &|path| wiring::binary(path, NAME),
-        terminal: (stdin.is_terminal() && std::io::stderr().is_terminal()).then_some(answers),
+        terminal: (typed.as_ref()).map(|typed| -> &RefCell<dyn BufRead> { typed }),
+        hook_input: &piped_input,
     };
     let args: Vec<OsString> = std::env::args_os().collect();
     let cwd = environment.cwd.as_deref();
@@ -118,7 +149,16 @@ fn adapters_for(
         } => Some(environment.placed(store)?),
         _ => None,
     };
-    wiring::wire(environment.variable, chosen)
+    let adapters = wiring::wire(environment.variable, chosen)?;
+    Ok(match command {
+        Command::Read(ReadCommand::Context {
+            hook: Some(word), ..
+        }) => adapters.map(|adapters| {
+            let given = |key: &str| hook::text_under(&(environment.hook_input)()?, key);
+            adapters.run_by_hook(word, &given)
+        }),
+        _ => adapters,
+    })
 }
 
 fn unbound(command: &Command, json: bool) -> Result<Output, Failure> {
@@ -373,6 +413,7 @@ mod tests {
             releases: &UNPUBLISHED,
             binary_at: &IN_MEMORY,
             terminal: None,
+            hook_input: &|| None,
         }
     }
 
@@ -444,6 +485,7 @@ mod tests {
                 releases: self.releases,
                 binary_at: self.binary_at,
                 terminal: answers,
+                hook_input: &|| None,
             };
             let mut args = vec![self.invoked.clone()];
             args.extend(line.iter().map(OsString::from));

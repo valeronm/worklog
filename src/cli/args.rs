@@ -357,6 +357,9 @@ pub enum ReadCommand {
         /// The working directory when not given
         #[arg(value_hint = ValueHint::DirPath)]
         dir: Option<PathBuf>,
+        /// The agent whose session hook runs this, its input holding the session
+        #[arg(long, value_name = "AGENT", hide = true)]
+        hook: Option<String>,
     },
     /// The followups that are due for a session in a directory
     Due {

@@ -44,8 +44,9 @@ pub(super) fn quoted(binary: &Path, homes: &[&Path]) -> Result<String, Failure> 
 
 /// The command the hook runs for `binary`, quoted as `quoted` does; refuses also a path whose
 /// command `runs_context` does not match.
-pub(super) fn command(binary: &Path, homes: &[&Path]) -> Result<String, Failure> {
-    let command = format!("{} context 2>/dev/null || true", quoted(binary, homes)?);
+pub(super) fn command(binary: &Path, homes: &[&Path], hook_word: &str) -> Result<String, Failure> {
+    let quoted = quoted(binary, homes)?;
+    let command = format!("{quoted} context --hook {hook_word} 2>/dev/null || true");
     if !runs_context(&command) {
         return Err(misnamed(binary, "its hook is not found again"));
     }
@@ -58,7 +59,14 @@ pub(super) fn misnamed(binary: &Path, or_else: &str) -> Failure {
 }
 
 fn agent_command(binary: &Path, agent: &Agent) -> Result<String, Failure> {
-    command(binary, &agent.homes())
+    command(binary, &agent.homes(), agent.hook_word())
+}
+
+/// `None` where `input`, what an agent gave its session hook, is not JSON or holds no text
+/// under `key`.
+pub(super) fn text_under(input: &str, key: &str) -> Option<String> {
+    let given: Value = serde_json::from_str(input).ok()?;
+    given[key].as_str().map(str::to_owned)
 }
 
 fn entry(command: &str) -> Value {
@@ -250,7 +258,18 @@ mod tests {
     use super::*;
 
     fn made(binary: &str) -> String {
-        command(Path::new(binary), &[Path::new("/home/desk")]).unwrap()
+        command(Path::new(binary), &[Path::new("/home/desk")], "lantern").unwrap()
+    }
+
+    #[test]
+    fn a_hook_s_input_gives_the_text_under_a_key_and_nothing_where_it_holds_none() {
+        let given = r#"{"session_id": "s-1", "cwd": "/home/desk", "turn": 4}"#;
+        assert_eq!(text_under(given, "session_id"), Some("s-1".to_owned()));
+        assert_eq!(text_under(given, "turn"), None);
+        assert_eq!(text_under(given, "source"), None);
+        for input in ["", "not json", "[]"] {
+            assert_eq!(text_under(input, "session_id"), None, "{input}");
+        }
     }
 
     fn probe() -> Value {
@@ -282,20 +301,20 @@ mod tests {
     fn the_command_spells_a_binary_under_home_with_the_variable() {
         assert_eq!(
             made("/home/desk/.local/bin/worklog"),
-            "\"$HOME/.local/bin/worklog\" context 2>/dev/null || true"
+            "\"$HOME/.local/bin/worklog\" context --hook lantern 2>/dev/null || true"
         );
         assert_eq!(
             made("/opt/bin/worklog"),
-            "\"/opt/bin/worklog\" context 2>/dev/null || true"
+            "\"/opt/bin/worklog\" context --hook lantern 2>/dev/null || true"
         );
         assert_eq!(
             made("/home/deskette/worklog"),
-            "\"/home/deskette/worklog\" context 2>/dev/null || true"
+            "\"/home/deskette/worklog\" context --hook lantern 2>/dev/null || true"
         );
         let linked = [Path::new("/home/link"), Path::new("/real/home")];
         assert_eq!(
-            command(Path::new("/real/home/bin/worklog"), &linked).unwrap(),
-            "\"$HOME/bin/worklog\" context 2>/dev/null || true"
+            command(Path::new("/real/home/bin/worklog"), &linked, "lantern").unwrap(),
+            "\"$HOME/bin/worklog\" context --hook lantern 2>/dev/null || true"
         );
     }
 
@@ -312,7 +331,7 @@ mod tests {
             "/home/desk/my tools/it's (x)/worklog",
             "/real/desk/bin/worklog",
         ] {
-            let command = command(Path::new(binary), &homes).unwrap();
+            let command = command(Path::new(binary), &homes, "lantern").unwrap();
             assert!(runs_context(&command), "{binary}: {command}");
             let root = merged(json!({}), entry(&command)).unwrap();
             assert_eq!(merged(root.clone(), entry(&command)), None);
@@ -349,14 +368,14 @@ mod tests {
                 "the binary's file name must be worklog",
             ),
         ] {
-            let Err(Failure::Refused(why)) = command(Path::new(binary), &homes) else {
+            let Err(Failure::Refused(why)) = command(Path::new(binary), &homes, "lantern") else {
                 panic!("{binary} must be refused");
             };
             assert!(why.starts_with(&format!("{binary}: ")), "{why}");
             assert!(why.contains(reason), "{why}");
         }
         let odd = Path::new(std::ffi::OsStr::from_bytes(b"/opt/\xff/worklog"));
-        let Err(Failure::Refused(why)) = command(odd, &homes) else {
+        let Err(Failure::Refused(why)) = command(odd, &homes, "lantern") else {
             panic!("a path that is not UTF-8 must be refused");
         };
         assert!(why.ends_with("is not UTF-8"), "{why}");
@@ -380,7 +399,7 @@ mod tests {
             )
             .unwrap();
             fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
-            let command = command(&script, &[home.as_path()]).unwrap();
+            let command = command(&script, &[home.as_path()], "lantern").unwrap();
             assert_eq!(command.contains("$HOME/"), spelled_with_home, "{command}");
             let status = std::process::Command::new("sh")
                 .arg("-c")
@@ -610,7 +629,7 @@ mod tests {
                 concat!(
                     "{\n  \"hooks\": {\n    \"SessionStart\": [\n      {\n        \"hooks\": [\n",
                     "          {\n            \"type\": \"command\",\n",
-                    "            \"command\": \"\\\"$HOME/.local/bin/worklog\\\" context 2>/dev/null || true\"\n",
+                    "            \"command\": \"\\\"$HOME/.local/bin/worklog\\\" context --hook claude 2>/dev/null || true\"\n",
                     "          }\n        ]\n      }\n    ]\n  }\n}\n"
                 )
             );

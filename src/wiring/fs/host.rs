@@ -49,6 +49,12 @@ impl FsHost {
             session,
         }
     }
+
+    #[must_use]
+    pub fn in_session(mut self, session: Session) -> FsHost {
+        self.session = Some(session);
+        self
+    }
 }
 
 fn on_disk(path: &Path) -> PathBuf {
