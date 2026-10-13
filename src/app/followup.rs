@@ -20,6 +20,8 @@ pub enum TriggerArg<'a> {
 pub struct NewFollowup<'a> {
     pub topics: &'a [&'a str],
     pub summary: Option<&'a str>,
+    /// Taken only beside `summary`.
+    pub body: Option<&'a str>,
     pub entry: Option<&'a str>,
     pub about: Option<&'a str>,
     pub trigger: Option<TriggerArg<'a>>,
@@ -70,6 +72,11 @@ fn touched(lookup: &Lookup, address: &str, topics: &[DocumentId]) -> Result<Stri
 pub fn new_followup(deps: &Deps, what: &NewFollowup) -> Result<Made, Failure> {
     if what.topics.is_empty() {
         return Err(Failure::Usage("a followup names a topic".to_owned()));
+    }
+    if what.body.is_some() && what.summary.is_none() {
+        return Err(Failure::Usage(
+            "a body is given with a summary; without one it is written in the draft".to_owned(),
+        ));
     }
     let lookup = Lookup::new(deps.store);
     let topics = what
@@ -125,7 +132,11 @@ pub fn new_followup(deps: &Deps, what: &NewFollowup) -> Result<Made, Failure> {
             location,
         }));
     }
-    let admitted = stepped(deps, &lookup, &id, &kind, &fields, "\n", "new")?;
+    let body = match what.body.map(str::trim) {
+        Some(body) if !body.is_empty() => format!("\n{body}\n"),
+        _ => "\n".to_owned(),
+    };
+    let admitted = stepped(deps, &lookup, &id, &kind, &fields, &body, "new")?;
     Ok(Made::Written(admitted.store(deps)?))
 }
 
@@ -183,6 +194,7 @@ mod tests {
         NewFollowup {
             topics,
             summary: Some(summary),
+            body: None,
             entry: None,
             about: None,
             trigger: None,
@@ -202,6 +214,28 @@ mod tests {
         assert_eq!(stored.summary, "Check the driver");
         assert_eq!(head(&world, &made.document).envelope.change, "new");
         assert_eq!(head(&world, &made.document).body, "\n");
+    }
+
+    #[test]
+    fn a_followup_given_a_body_stores_it_with_its_links_and_only_beside_a_summary() {
+        let (world, _, atlas) = world_with_atlas();
+        let deps = world.deps();
+        let mut what = plain(&["lantern"], "Check the driver");
+        what.body = Some("It overheats; see [[atlas]].\n\n");
+        let made = written(new_followup(&deps, &what));
+        let stored = head(&world, &made.document);
+        assert_eq!(stored.body, "\nIt overheats; see [[atlas]].\n");
+        assert_eq!(stored.links.0.get("atlas"), Some(&Some(atlas)));
+
+        what.body = Some(" \n");
+        let made = written(new_followup(&deps, &what));
+        assert_eq!(head(&world, &made.document).body, "\n");
+
+        what.summary = None;
+        let Err(Failure::Usage(text)) = new_followup(&deps, &what) else {
+            panic!("expected a usage failure");
+        };
+        assert!(text.contains("a body is given with a summary"), "{text}");
     }
 
     #[test]

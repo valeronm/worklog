@@ -137,9 +137,10 @@ stderr with exit 1; a usage error exits 2.
    when every item has its answer, since an item done now is part of it.
    A recorded item goes where
    the triage under Open work puts it: a followup, one each, `worklog
-   new followup --topics <topic> --summary "<what is open>" --entry
-   <date>-<name> --look-again <date> --why "<what to look for>"`, or
-   `--touching <topic>` in place of the date and its why; or an idea,
+   new followup --topics <topic> --summary "<what is open>" --body
+   "<the rest of it>" --entry <date>-<name> --look-again <date> --why
+   "<what to look for>"`, or `--touching <topic>` in place of the date
+   and its why; or an idea,
    `worklog new idea <topic>/<name>`, which the entry links.
 4. Reconcile: `worklog followups <topic>` for the topics this work
    touched; `done` what it completed with a note naming what dissolved it,
@@ -189,8 +190,8 @@ A followup's trigger says when it comes up again:
 
 `new followup` takes several `--topics` separated by commas, and `--about
 <document>` for the document the followup is about. With `--summary` it
-is stored at once and its id printed; without, a draft opens, saved by
-the id `worklog drafts` shows.
+is stored at once and its id printed, with what `--body` holds as its
+body; without, a draft opens, saved by the id `worklog drafts` shows.
 
 ## Facts and topics
 

@@ -646,6 +646,32 @@ fn a_followup_is_stored_at_once_triggered_done_and_dropped() {
 }
 
 #[test]
+fn a_followup_stored_at_once_takes_a_body_only_beside_a_summary() {
+    let host = Host::set_up("desk");
+    host.topic("lantern");
+    let id = host.followup_with(
+        "Check the driver",
+        &["--body", "It runs hot; see [[lantern]]."],
+    );
+    let shown = host.ok(&["show", &id]);
+    assert!(
+        shown.ends_with("+++\n\nIt runs hot; see [[lantern]].\n"),
+        "{shown}"
+    );
+
+    let bare = host.run(&[
+        "new",
+        "followup",
+        "--topics",
+        "lantern",
+        "--body",
+        "The rest.",
+    ]);
+    assert_eq!(bare.stdout, "");
+    assert_eq!(bare.code, Some(2), "{}", bare.stderr);
+}
+
+#[test]
 fn a_claim_with_no_directory_takes_the_working_directory() {
     let host = Host::set_up("desk");
     host.topic("lantern");

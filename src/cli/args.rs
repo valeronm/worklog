@@ -205,6 +205,9 @@ pub enum NewWhat {
         /// What is open, in one line; given, the followup is stored at once
         #[arg(long)]
         summary: Option<String>,
+        /// The rest of it, stored as the body beside --summary
+        #[arg(long, requires = "summary")]
+        body: Option<String>,
         /// The day to look at it again, `YYYY-MM-DD`
         #[arg(long, requires = "why", conflicts_with = "touching")]
         look_again: Option<String>,

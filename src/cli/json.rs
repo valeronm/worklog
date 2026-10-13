@@ -410,6 +410,7 @@ mod tests {
         let mut what = NewFollowup {
             topics: &["lantern"],
             summary: Some("Order a fuse"),
+            body: None,
             entry: None,
             about: None,
             trigger: None,

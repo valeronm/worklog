@@ -91,6 +91,7 @@ fn new(deps: &Deps, json: bool, what: &NewWhat) -> Result<Output, Failure> {
         NewWhat::Followup {
             topics,
             summary,
+            body,
             look_again,
             why,
             touching,
@@ -106,6 +107,7 @@ fn new(deps: &Deps, json: bool, what: &NewWhat) -> Result<Output, Failure> {
             let what = NewFollowup {
                 topics: &topics,
                 summary: summary.as_deref(),
+                body: body.as_deref(),
                 entry: entry.as_deref(),
                 about: about.as_deref(),
                 trigger,
