@@ -133,3 +133,8 @@ command-line scenarios, each over a scratch store. `WORKLOG_HOME=<dir>`
 moves the host's config and drafts under `<dir>`, which is how the
 scenarios keep clear of a real store.
 `CLAUDE.md` holds the constraints worth knowing before changing anything.
+
+`packaging/install-build.sh` installs a build of the checkout in the place
+of the released binary and refreshes what the host has of it. The build is
+named after its commit, `worklog --version` shows the name, and `worklog
+upgrade` leaves it in place until a release of a higher number exists.

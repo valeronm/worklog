@@ -34,6 +34,8 @@ and dots is a build made on top of a release. It reports `X.Y.Z+<name>`,
 and `upgrade` counts it as newer than the release `X.Y.Z`, so only a
 release of a higher number takes its place. The workflow compiles a
 release with the variable empty, which reads as unset.
+`packaging/install-build.sh` installs such a build, named after the commit
+it was made from.
 
 ## A change to what is stored
 
