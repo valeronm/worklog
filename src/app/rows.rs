@@ -65,16 +65,14 @@ pub(super) fn row<'d>(topics: &Topics, document: &'d Document) -> Option<Shown<'
     let (head, record) = row_head(document)?;
     let id = document.id().clone();
     let labels = |ids: &[DocumentId]| topics.references(ids);
-    let (summary, shown) = match &record.content {
-        Content::Topic(topic) => (topic.summary.clone(), Vec::new()),
-        Content::Fact(fact) => (
-            fact.summary.clone(),
-            labels(std::slice::from_ref(&fact.topic)),
-        ),
-        Content::Entry(entry) => (entry.summary.clone(), labels(&entry.topics)),
-        Content::Followup(followup) => (followup.summary.clone(), labels(&followup.topics)),
-        Content::Claim(claim) => (String::new(), labels(std::slice::from_ref(&claim.topic))),
+    let shown = match &record.content {
+        Content::Topic(_) => Vec::new(),
+        Content::Fact(fact) => labels(std::slice::from_ref(&fact.topic)),
+        Content::Entry(entry) => labels(&entry.topics),
+        Content::Followup(followup) => labels(&followup.topics),
+        Content::Claim(claim) => labels(std::slice::from_ref(&claim.topic)),
     };
+    let summary = record.content.summary().unwrap_or_default().to_owned();
     let topic_name = labeling_topic(&record.content).and_then(|topic| topics.name(topic));
     let row = Row {
         kind: record.content.kind(),

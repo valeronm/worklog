@@ -67,11 +67,13 @@ what happens next, the triage under Open work; never the text of a record.
    is the document's fields between two `+++` lines, then its body. The
    fields are TOML: text in quotes, a date bare as `2026-11-01`, a list as
    `["lantern", "atlas"]`. A field that holds another document holds its
-   name. `summary` is one line and never empty. A field the kind does not
-   have is refused. A fact's draft holds `topic` and `confirmed`, and an
-   idea's `idea = true` besides. A followup's holds `topics`, its trigger
-   as `look_again` with `why` or as `touching`, and `entry` and `about`,
-   which never change once stored.
+   name. `summary` is the claim alone: one line of at most 100
+   characters, never empty and with no link in it, and the why goes in the
+   body. One that is longer or holds a link is refused when it is new or
+   changed. A field the kind does not have is refused. A fact's draft
+   holds `topic` and `confirmed`, and an idea's `idea = true` besides. A
+   followup's holds `topics`, its trigger as `look_again` with `why` or as
+   `touching`, and `entry` and `about`, which never change once stored.
 3. `worklog diff <target>` shows the draft against what it started
    from; read it once to check the edit landed as meant.
 4. `worklog save <target>` checks the draft and stores it as the
@@ -195,7 +197,7 @@ body; without, a draft opens, saved by the id `worklog drafts` shows.
 
 ## Facts and topics
 
-A fact has a `summary` that is the fact itself, then a body: the fact as
+A fact has a `summary` that is its claim alone, then a body: the fact as
 it holds now, **Why**, and **How to apply**. It is rewritten (checkout,
 save) when it changes and ended when it stops being true: `false` when it
 was wrong, `moved` when another store now holds it, `superseded` when

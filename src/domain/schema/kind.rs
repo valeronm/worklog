@@ -254,6 +254,19 @@ pub enum Content {
     Claim(Claim),
 }
 
+impl Content {
+    #[must_use]
+    pub fn summary(&self) -> Option<&str> {
+        match self {
+            Content::Topic(topic) => Some(&topic.summary),
+            Content::Fact(fact) => Some(&fact.summary),
+            Content::Entry(entry) => Some(&entry.summary),
+            Content::Followup(followup) => Some(&followup.summary),
+            Content::Claim(_) => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Record {
     pub content: Content,

@@ -52,7 +52,9 @@ A field `if set` is left out when it is empty, false or absent. A field
 the kind does not have is refused.
 
 Two fields are left out of the tables. Every kind but a claim has a
-`summary`, one line and not empty, which every listing shows. A kind with
+`summary`, one line and not empty, which every listing shows. A summary
+that is new or changed is refused past 100 characters or with a link in
+it; one a document already holds is kept as it is. A kind with
 a name has `former_names`, the names the document had, left out while it
 has none. A date is a TOML date, written bare as `2026-09-04`.
 

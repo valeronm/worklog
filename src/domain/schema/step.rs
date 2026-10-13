@@ -5,6 +5,7 @@ use super::ending::Ending;
 use super::error::SchemaError;
 use super::field::Date;
 use super::kind::{Content, KindOf, Record};
+use super::links::links;
 use crate::domain::version::{Fields, Kind};
 
 /// The fields the tool writes that every version of a document carries.
@@ -55,7 +56,9 @@ fn filled(
 /// name kept on a rename, and a fact's `confirmed` moved to `today`
 /// when its summary or body changed and the draft left the date alone.
 /// Refuses a draft carrying a field only the tool writes, a change to
-/// a field that never changes, and any step from an ended parent.
+/// a field that never changes, any step from an ended parent, and a
+/// summary the parent does not hold that runs past `SUMMARY_LIMIT`
+/// characters or holds a link.
 pub fn next(
     kind: &Kind,
     draft: &Fields,
@@ -71,6 +74,7 @@ pub fn next(
         return Err(SchemaError::Ended);
     }
     let mut next = Record::read(kind, &filled(draft, parent, kind_of, today)?)?;
+    refuse_summary(was.as_ref().map(|was| &was.content), &next.content)?;
     let Some(was) = was else {
         return Ok(next);
     };
@@ -94,6 +98,31 @@ pub fn next(
         is.confirmed = today;
     }
     Ok(next)
+}
+
+const SUMMARY_LIMIT: usize = 100;
+
+fn refuse_summary(was: Option<&Content>, is: &Content) -> Result<(), SchemaError> {
+    let Some(summary) = is.summary() else {
+        return Ok(());
+    };
+    if was.and_then(Content::summary) == Some(summary) {
+        return Ok(());
+    }
+    let length = summary.chars().count();
+    if length > SUMMARY_LIMIT {
+        return Err(SchemaError::field(
+            "summary",
+            format!("is {length} characters long; at most {SUMMARY_LIMIT} are stored"),
+        ));
+    }
+    if !links(summary).is_empty() {
+        return Err(SchemaError::field(
+            "summary",
+            "holds a link; a link goes in the body",
+        ));
+    }
+    Ok(())
 }
 
 fn keep_names(content: &mut Content, held: &[Record]) {
@@ -160,6 +189,36 @@ mod tests {
         fields(&format!(
             "name = \"{name}\"\ntopic = \"{LANTERN}\"\nconfirmed = {confirmed}\nsummary = \"{summary}\"\n"
         ))
+    }
+
+    #[test]
+    fn a_summary_the_parent_does_not_hold_is_refused_past_the_limit_or_with_a_link() {
+        let refused = |result: Result<Record, SchemaError>| result.unwrap_err().to_string();
+        let first = |summary: &str| {
+            let draft = fact_draft("relay", summary, "2026-09-04");
+            next(&kind("fact"), &draft, None, true, today())
+        };
+        let fits = "é".repeat(SUMMARY_LIMIT);
+        let long = format!("{fits}é");
+        let too_long = "`summary` is 101 characters long; at most 100 are stored";
+        let linked = "`summary` holds a link; a link goes in the body";
+        assert!(first(&fits).is_ok());
+        assert!(first("Quotes `[[atlas]]`").is_ok());
+        assert_eq!(refused(first(&long)), too_long);
+        assert_eq!(refused(first("See [[atlas]]")), linked);
+
+        for held in [long.as_str(), "See [[atlas]]"] {
+            let parent = fields(&format!(
+                "name = \"relay\"\ntopic = \"{LANTERN}\"\ncreated = 2026-09-04\n\
+                 confirmed = 2026-09-04\nsummary = \"{held}\"\n"
+            ));
+            let step =
+                |summary: &str| after(&parent, &fact_draft("relay", summary, "2026-09-04"), true);
+            assert_eq!(step(held).unwrap().content.summary(), Some(held));
+            assert!(step("The relay pin is fixed").is_ok());
+            assert_eq!(refused(step(&"a".repeat(SUMMARY_LIMIT + 1))), too_long);
+            assert_eq!(refused(step("Now see [[atlas]]")), linked);
+        }
     }
 
     fn stored_fact() -> (Fields, Fields) {
@@ -346,6 +405,24 @@ mod tests {
         fields(&format!(
             "name = \"{name}\"\nformer_names = [{former}]\ncreated = 2026-09-04\nsummary = \"s\"\n"
         ))
+    }
+
+    #[test]
+    fn a_join_holds_only_the_summary_of_the_head_it_steps_from() {
+        let kind = kind("topic");
+        let long = "a".repeat(SUMMARY_LIMIT + 1);
+        let held = |summary: &str| {
+            fields(&format!(
+                "name = \"lantern\"\ncreated = 2026-09-04\nsummary = \"{summary}\"\n"
+            ))
+        };
+        let draft = fields(&format!("name = \"lantern\"\nsummary = \"{long}\"\n"));
+        let join = |speaking: &str, other: &str| {
+            let others = [Record::read(&kind, &held(other)).unwrap()];
+            joined(&kind, &draft, &held(speaking), &others, false, today())
+        };
+        assert!(join(&long, "s").is_ok());
+        assert!(join("s", &long).is_err());
     }
 
     fn former_after(base: &Fields, others: &[&Fields], saved: &str) -> Vec<String> {

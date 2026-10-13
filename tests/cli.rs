@@ -672,6 +672,18 @@ fn a_followup_stored_at_once_takes_a_body_only_beside_a_summary() {
 }
 
 #[test]
+fn a_new_summary_past_the_limit_is_refused() {
+    let host = Host::set_up("desk");
+    host.topic("lantern");
+    let long = "a".repeat(101);
+    assert_refused(
+        &host.run(&["new", "followup", "--topics", "lantern", "--summary", &long]),
+        1,
+        "worklog: new followup: `summary` is 101 characters long; at most 100 are stored\n",
+    );
+}
+
+#[test]
 fn a_claim_with_no_directory_takes_the_working_directory() {
     let host = Host::set_up("desk");
     host.topic("lantern");

@@ -789,11 +789,12 @@ mod tests {
     }
 
     #[test]
-    fn the_links_of_the_summary_and_the_body_are_stored_resolved_or_not() {
+    fn the_links_of_a_summary_left_as_it_was_and_of_the_body_are_stored_resolved_or_not() {
         let (world, lantern) = world();
         let relay = fact(&world, &lantern, "relay-pin", "");
-        let phone = new_topic(&world, "phone");
-        set(&world, &phone, "summary", "Follows [[lantern/relay-pin]]");
+        let linking = TOPIC.replace("\"s\"", "\"Follows [[lantern/relay-pin]]\"");
+        let phone = world.put("topic", &format!("name = \"phone\"\n{linking}"), "\n");
+        draft::checkout(&world.deps(), "phone").unwrap();
         edit(&world, &phone, |draft| {
             "Again [[lantern/relay-pin]], and [[unknown]] and [[Not A Name]].\n"
                 .clone_into(&mut draft.body);
