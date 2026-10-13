@@ -133,7 +133,9 @@ stderr with exit 1; a usage error exits 2.
    recorded; **record it**; **drop it**, and if the drop was a decision its
    why goes in the entry's Notes. Never withhold an item because it seemed
    not worth asking, and never ask the same item twice. A silently recorded
-   item is a delay decision the user never made. A recorded item goes where
+   item is a delay decision the user never made. The work is done only
+   when every item has its answer, since an item done now is part of it.
+   A recorded item goes where
    the triage under Open work puts it: a followup, one each, `worklog
    new followup --topics <topic> --summary "<what is open>" --entry
    <date>-<name> --look-again <date> --why "<what to look for>"`, or
