@@ -2,7 +2,7 @@
 
 use crate::app::lookup::Lookup;
 use crate::app::{Deps, Failure};
-use crate::domain::release::ReleaseVersion;
+use crate::domain::release::Built;
 use crate::domain::usage::Invocation;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -13,7 +13,7 @@ pub struct Outcome {
 }
 
 pub struct Run<'a> {
-    pub version: ReleaseVersion,
+    pub version: Built,
     pub command: &'a str,
     pub arguments: &'a [String],
     /// The working directory, as an absolute path.
@@ -56,7 +56,7 @@ mod tests {
 
     fn run<'a>(command: &'a str, directory: &'a str) -> Run<'a> {
         Run {
-            version: version("1.2.3"),
+            version: version("1.2.3").into(),
             command,
             arguments: &[],
             directory,
@@ -78,7 +78,7 @@ mod tests {
         };
         let arguments = vec!["lantern/relay".to_owned(), "--json".to_owned()];
         let run = Run {
-            version: version("1.2.3"),
+            version: version("1.2.3").into(),
             command: "show",
             arguments: &arguments,
             directory: "/home/desk/link/case",

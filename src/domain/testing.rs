@@ -11,7 +11,7 @@ use super::id::{DocumentId, VersionId};
 use super::ports::{
     Binary, Clock, Drafts, Host, Ids, Refreshed, Releases, Store, StoreError, Usage,
 };
-use super::release::{ReleaseVersion, sha256_hex};
+use super::release::{Built, ReleaseVersion, sha256_hex};
 use super::usage::{Invocation, Kept, Session};
 use super::version::{Envelope, Fields, Kind, Links, ReadError, Stamp, Version};
 
@@ -380,6 +380,21 @@ impl<B: Binary + ?Sized> Binary for Rc<B> {
 #[must_use]
 pub fn version(text: &str) -> ReleaseVersion {
     ReleaseVersion::parse(text).expect("a version")
+}
+
+pub const BUILD: &str = "3f2a1c9";
+
+/// A build named `BUILD` made on top of the release `text`.
+///
+/// # Panics
+///
+/// When `text` is not a version.
+#[must_use]
+pub fn build(text: &str) -> Built {
+    Built {
+        release: version(text),
+        build: Some(BUILD),
+    }
 }
 
 #[must_use]

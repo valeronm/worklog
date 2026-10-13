@@ -4,18 +4,19 @@ use serde::Serialize;
 
 use super::Failure;
 use crate::domain::ports::{Binary, Refreshed, Releases};
-use crate::domain::release::{ReleaseVersion, verify};
+use crate::domain::release::{Built, ReleaseVersion, verify};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Checked {
-    pub current: ReleaseVersion,
+    pub current: Built,
     pub latest: ReleaseVersion,
     pub newer: bool,
 }
 
-fn outcome(current: ReleaseVersion, latest: ReleaseVersion) -> Outcome {
-    match latest.cmp(&current) {
+fn outcome(current: Built, latest: ReleaseVersion) -> Outcome {
+    match latest.cmp(&current.release) {
         Ordering::Greater => Outcome::Upgraded,
+        Ordering::Equal if current.build.is_some() => Outcome::Ahead,
         Ordering::Equal => Outcome::Current,
         Ordering::Less => Outcome::Ahead,
     }
@@ -48,7 +49,7 @@ pub enum Outcome {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Upgrade {
-    pub current: ReleaseVersion,
+    pub current: Built,
     pub latest: ReleaseVersion,
     pub outcome: Outcome,
     pub written: Vec<String>,
@@ -56,10 +57,7 @@ pub struct Upgrade {
 
 /// The latest release beside the version running, with the tag that release's assets are
 /// asked for under.
-pub fn check(
-    releases: &dyn Releases,
-    current: ReleaseVersion,
-) -> Result<(Checked, String), Failure> {
+pub fn check(releases: &dyn Releases, current: Built) -> Result<(Checked, String), Failure> {
     let tag = releases.latest()?;
     let latest = ReleaseVersion::parse(&tag).map_err(Failure::Refused)?;
     let checked = Checked {
@@ -116,10 +114,12 @@ mod tests {
     use super::*;
     use crate::app::testing::refused;
     use crate::domain::ports::StoreError;
-    use crate::domain::testing::{ASSET, BINARY, MemoryBinary, REFRESHED, published, version};
+    use crate::domain::testing::{
+        ASSET, BINARY, MemoryBinary, REFRESHED, build, published, version,
+    };
 
     fn tag(releases: &dyn Releases, current: &str) -> String {
-        check(releases, version(current)).unwrap().1
+        check(releases, version(current).into()).unwrap().1
     }
 
     #[test]
@@ -204,6 +204,20 @@ mod tests {
     }
 
     #[test]
+    fn a_build_is_replaced_only_by_a_release_of_a_higher_number_than_its_own() {
+        let releases = published("v0.10.0", ASSET, b"", b"");
+        for (current, newer, outcome) in [
+            ("0.9.0", true, Outcome::Upgraded),
+            ("0.10.0", false, Outcome::Ahead),
+            ("0.11.0", false, Outcome::Ahead),
+        ] {
+            let (checked, _) = check(&releases, build(current)).unwrap();
+            assert_eq!(checked.newer, newer, "{current}");
+            assert_eq!(checked.outcome(), outcome, "{current}");
+        }
+    }
+
+    #[test]
     fn a_check_gives_the_latest_release_beside_the_version_running() {
         let releases = published("v0.10.0", ASSET, b"", b"");
         for (current, newer, outcome) in [
@@ -211,11 +225,11 @@ mod tests {
             ("0.10.0", false, Outcome::Current),
             ("0.11.0", false, Outcome::Ahead),
         ] {
-            let (checked, tag) = check(&releases, version(current)).unwrap();
+            let (checked, tag) = check(&releases, version(current).into()).unwrap();
             assert_eq!(
                 checked,
                 Checked {
-                    current: version(current),
+                    current: version(current).into(),
                     latest: version("0.10.0"),
                     newer,
                 }
@@ -225,7 +239,7 @@ mod tests {
             assert_eq!(
                 checked.upgrade(vec![BINARY.to_owned()]),
                 Upgrade {
-                    current: version(current),
+                    current: version(current).into(),
                     latest: version("0.10.0"),
                     outcome,
                     written: vec![BINARY.to_owned()],
@@ -234,7 +248,7 @@ mod tests {
         }
         let untagged = published("nightly", ASSET, b"", b"");
         assert_eq!(
-            refused(check(&untagged, version("0.2.1"))),
+            refused(check(&untagged, version("0.2.1").into())),
             "`nightly` is not a version of the form X.Y.Z"
         );
     }

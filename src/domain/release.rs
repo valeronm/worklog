@@ -40,14 +40,73 @@ impl Serialize for ReleaseVersion {
     }
 }
 
+/// The version of a binary: a release, or a build made on top of one and named apart from it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Built {
+    pub release: ReleaseVersion,
+    pub build: Option<&'static str>,
+}
+
+impl From<ReleaseVersion> for Built {
+    fn from(release: ReleaseVersion) -> Built {
+        Built {
+            release,
+            build: None,
+        }
+    }
+}
+
+impl fmt::Display for Built {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.build {
+            Some(build) => write!(f, "{}+{build}", self.release),
+            None => self.release.fmt(f),
+        }
+    }
+}
+
+impl Serialize for Built {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
+    }
+}
+
+const fn names_a_build(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    let mut at = 0;
+    while at < bytes.len() {
+        if !(bytes[at].is_ascii_alphanumeric() || bytes[at] == b'.') {
+            return false;
+        }
+        at += 1;
+    }
+    true
+}
+
+/// A release is compiled without `WORKLOG_BUILD`.
+const BUILD: Option<&str> = match option_env!("WORKLOG_BUILD") {
+    Some(name) if !name.is_empty() => {
+        assert!(
+            names_a_build(name),
+            "WORKLOG_BUILD holds letters, digits and dots"
+        );
+        Some(name)
+    }
+    _ => None,
+};
+
 /// The version this binary was built as.
 ///
 /// # Panics
 ///
 /// On a manifest version that is not `X.Y.Z`, which is a fact of the build and of no run.
 #[must_use]
-pub fn current() -> ReleaseVersion {
-    ReleaseVersion::parse(env!("CARGO_PKG_VERSION")).expect("the manifest version is X.Y.Z")
+pub fn current() -> Built {
+    Built {
+        release: ReleaseVersion::parse(env!("CARGO_PKG_VERSION"))
+            .expect("the manifest version is X.Y.Z"),
+        build: BUILD,
+    }
 }
 
 /// The release asset of the binary `name` built for the target this one was compiled for, or
@@ -110,7 +169,22 @@ mod tests {
                 Err(format!("`{bad}` is not a version of the form X.Y.Z")),
             );
         }
-        assert_eq!(current().to_string(), env!("CARGO_PKG_VERSION"));
+        assert_eq!(current().release.to_string(), env!("CARGO_PKG_VERSION"));
+    }
+
+    #[test]
+    fn a_build_is_named_after_its_release_and_only_by_letters_digits_and_dots() {
+        let release = ReleaseVersion::parse("0.2.10").unwrap();
+        assert_eq!(Built::from(release).to_string(), "0.2.10");
+        let build = Built {
+            release,
+            build: Some("3f2a1c9.dirty"),
+        };
+        assert_eq!(build.to_string(), "0.2.10+3f2a1c9.dirty");
+        assert!(names_a_build("3f2a1c9.dirty"));
+        for bad in ["3f2a-1c9", "a b", "a+b", "é"] {
+            assert!(!names_a_build(bad), "{bad}");
+        }
     }
 
     #[test]

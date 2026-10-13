@@ -182,7 +182,7 @@ A line is one JSON object ending in a newline, with every key present and
 | --- | --- |
 | `written` | when the command ran, as a version's `written` is given |
 | `machine` | the id of the machine topic of the host that ran it |
-| `version` | the release of the binary that ran |
+| `version` | the version of the binary that ran, `X.Y.Z` for a release and `X.Y.Z+<name>` for a build made on top of one |
 | `agent`, `session` | the coding agent the command ran under and the id of its session; a line with one of them alone reads as having neither |
 | `command` | the command's path, `new entry` for a command with a subcommand, and empty where the words reach no command |
 | `exit` | the exit code |

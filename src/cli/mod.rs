@@ -25,7 +25,7 @@ use std::time::Duration;
 use crate::app::record::Outcome;
 use crate::app::{Failure, setup};
 use crate::domain::ports::{Binary, Releases, StoreError};
-use crate::domain::release::{self, ReleaseVersion};
+use crate::domain::release::{self, Built};
 use crate::domain::schema::Directory;
 use crate::{web, wiring};
 use args::{Cli, Command, Invoked, ReadCommand};
@@ -43,7 +43,7 @@ struct Environment<'a> {
     cwd: Option<PathBuf>,
     binary: Option<PathBuf>,
     variable: &'a dyn Fn(&str) -> Option<OsString>,
-    version: ReleaseVersion,
+    version: Built,
     releases: &'a dyn Fn() -> Box<dyn Releases>,
     binary_at: &'a dyn Fn(&Path) -> Box<dyn Binary>,
     /// `None` unless both the input and stderr are a terminal.
@@ -424,7 +424,7 @@ mod tests {
         pub(super) binary: Option<PathBuf>,
         pub(super) path: Option<OsString>,
         pub(super) cwd: Option<PathBuf>,
-        pub(super) version: ReleaseVersion,
+        pub(super) version: Built,
         pub(super) releases: &'a dyn Fn() -> Box<dyn Releases>,
         pub(super) binary_at: &'a dyn Fn(&Path) -> Box<dyn Binary>,
         pub(super) typed: Option<String>,
@@ -741,7 +741,7 @@ mod tests {
         found.run(&["init", "desk", "--store", "kept", "--summary", "s"]);
         let home = found.root.join("home");
         let ahead = Process {
-            version: version("0.4.0"),
+            version: version("0.4.0").into(),
             ..found.how("bin", &["bin"], Some(&home))
         };
         assert_eq!(ahead.run(&["topics"]).code, 0);

@@ -63,7 +63,7 @@ mod tests {
     use crate::domain::ports::Usage as _;
     use crate::domain::schema::{Date, Directory, KindOf, Name};
     use crate::domain::testing::{
-        ASSET, BINARY, LANTERN, REFRESHED, atlas, first, published, ran, version as release,
+        ASSET, BINARY, LANTERN, REFRESHED, atlas, build, first, published, ran, version as release,
     };
     use crate::domain::version::{Kind, ReadError, Stamp};
 
@@ -1279,14 +1279,17 @@ mod tests {
     fn checked() -> Vec<(Checked, Value)> {
         let releases = published("v0.10.0", ASSET, b"", b"");
         let found = |current: &str, newer: bool| {
-            let (checked, _) = upgrade::check(&releases, release(current)).unwrap();
+            let (checked, _) = upgrade::check(&releases, release(current).into()).unwrap();
             let expected = json!({"current": current, "latest": "0.10.0", "newer": newer});
             (checked, expected)
         };
+        let (kept, _) = upgrade::check(&releases, build("0.10.0")).unwrap();
+        let named = json!({"current": "0.10.0+3f2a1c9", "latest": "0.10.0", "newer": false});
         vec![
             found("0.9.0", true),
             found("0.10.0", false),
             found("0.11.0", false),
+            (kept, named),
         ]
     }
 
@@ -1294,7 +1297,7 @@ mod tests {
         let releases = published("v0.3.0", ASSET, b"new", b"new");
         let own = "/home/desk/.claude/settings.json";
         let ran = |current: &str, written: &[&str]| {
-            let (checked, _) = upgrade::check(&releases, release(current)).unwrap();
+            let (checked, _) = upgrade::check(&releases, release(current).into()).unwrap();
             checked.upgrade(written.iter().map(|path| (*path).to_owned()).collect())
         };
         let stayed = |current: &str, outcome: &str| json!({"current": current, "latest": "0.3.0", "outcome": outcome, "written": [own]});

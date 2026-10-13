@@ -29,6 +29,12 @@ shape. Nothing checks that the tag matches `Cargo.toml`. A binary reports
 the manifest's version, so a tag ahead of the manifest has `upgrade`
 install the same release again on every run.
 
+A binary compiled with `WORKLOG_BUILD` set to a name of letters, digits
+and dots is a build made on top of a release. It reports `X.Y.Z+<name>`,
+and `upgrade` counts it as newer than the release `X.Y.Z`, so only a
+release of a higher number takes its place. The workflow compiles a
+release with the variable empty, which reads as unset.
+
 ## A change to what is stored
 
 Machines sharing a store run whatever binary each has, so a release that

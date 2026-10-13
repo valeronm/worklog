@@ -1,5 +1,6 @@
 use std::fmt::Write as _;
 use std::path::PathBuf;
+use std::sync::LazyLock;
 
 use std::net::SocketAddr;
 
@@ -7,6 +8,7 @@ use clap::error::ErrorKind;
 use clap::{CommandFactory as _, FromArgMatches as _, Parser, Subcommand, ValueEnum, ValueHint};
 
 use super::{NAME, complete};
+use crate::domain::release;
 use crate::domain::schema::{KindOf, Reason};
 use crate::web::Server;
 
@@ -29,10 +31,12 @@ pub enum Shell {
     Zsh,
 }
 
+static VERSION: LazyLock<String> = LazyLock::new(|| release::current().to_string());
+
 #[derive(Parser)]
 #[command(
     name = NAME,
-    version,
+    version = VERSION.as_str(),
     about = "A store of work done, durable facts, follow-ups and topics",
     long_about = "Every document is a chain of immutable versions; a write is a new version and \
                   nothing is edited in place. A document is given by its name, a former name or \

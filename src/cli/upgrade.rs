@@ -64,14 +64,14 @@ mod tests {
     use super::*;
     use crate::domain::ports::{Binary, Releases, StoreError};
     use crate::domain::testing::{
-        ASSET, BINARY, MemoryBinary, MemoryReleases, REFRESHED, published, version,
+        ASSET, BINARY, MemoryBinary, MemoryReleases, REFRESHED, build, published, version,
     };
     use crate::wiring::SKILL_DIRECTORY;
 
     #[test]
     fn a_check_prints_both_versions_and_exits_zero_whichever_is_newer() {
         let checked = |current: &str, latest: &str| Checked {
-            current: version(current),
+            current: version(current).into(),
             latest: version(latest),
             newer: version(latest) > version(current),
         };
@@ -87,7 +87,7 @@ mod tests {
     #[test]
     fn an_upgrade_prints_what_was_written_and_notes_what_became_of_the_binary() {
         let done = |outcome: Outcome, written: &[&str]| Upgrade {
-            current: version("0.2.1"),
+            current: version("0.2.1").into(),
             latest: version("0.3.0"),
             outcome,
             written: written.iter().map(|path| (*path).to_owned()).collect(),
@@ -96,6 +96,14 @@ mod tests {
         assert_eq!(upgraded.text(), "/desk/bin/lantern\n/desk/skill\n");
         assert_eq!(upgraded.notes(), ["upgraded 0.2.1 to 0.3.0"]);
         assert_eq!(upgraded.exit(), 0);
+        let kept = Upgrade {
+            current: build("0.3.0"),
+            ..done(Outcome::Ahead, &[])
+        };
+        assert_eq!(
+            kept.notes(),
+            ["0.3.0+3f2a1c9 is newer than the latest release 0.3.0"]
+        );
         let current = done(Outcome::Current, &[]);
         assert_eq!(current.text(), "");
         assert_eq!(current.notes(), ["already at 0.2.1"]);
@@ -210,7 +218,7 @@ mod tests {
             let process = Process {
                 home: Some(self.root.join("home")),
                 binary: binary.map(Path::to_path_buf),
-                version: version(given.running),
+                version: version(given.running).into(),
                 releases: &source,
                 binary_at: &memory,
                 ..Process::nowhere()
