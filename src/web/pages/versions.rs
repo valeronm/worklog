@@ -207,8 +207,38 @@ impl VersionPage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::show::ShownVersion;
+    use crate::app::testing::history_row;
     use crate::domain::id::{DocumentId, VersionId};
     use crate::web::pages::testing::version;
+
+    #[test]
+    fn a_row_shows_a_change_up_to_its_colon_and_keeps_the_whole_as_a_title() {
+        let row = |seed: &[u8], change: &str| {
+            history_row(ShownVersion {
+                change: change.to_owned(),
+                ..version(seed)
+            })
+        };
+        let history = History {
+            document: DocumentId::from_bytes([3; 16]),
+            label: "lantern".to_owned(),
+            ended: None,
+            versions: vec![
+                row(b"back", "reopen: lit again: by the desk"),
+                row(b"first", "new"),
+            ],
+            unreadable: Vec::new(),
+        };
+        let html = HistoryPage::new(&history).render().expect("a page");
+        assert!(
+            html.contains(
+                "<td class=\"mono\" title=\"reopen: lit again: by the desk\">reopen</td>"
+            ),
+            "{html}"
+        );
+        assert!(html.contains("<td class=\"mono\">new</td>"), "{html}");
+    }
 
     fn side(against: Option<&[u8]>, held: bool, before: &str) -> Side {
         Side {

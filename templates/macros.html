@@ -52,4 +52,4 @@
 {%- if !t.uses.is_empty() %} <span class="muted">uses {% for used in t.uses %}{% if !loop.first %}, {% endif %}{% call link(used) %}{% endcall %}{% endfor %}</span>{% endif -%}
 {% endmacro %}
 
-{% macro version_row(s) %}<td class="mono"><a href="{{ s.version.href }}">{{ s.version.text }}</a>{% if s.head %} <span class="label">head</span>{% endif %}</td><td class="mono" title="{{ s.written_full }}">{{ s.written }}</td><td class="mono">{% call link(s.machine) %}{% endcall %}</td><td class="mono">{% if let Some(change) = s.change %}{{ change }}{% endif %}</td>{% endmacro %}
+{% macro version_row(s) %}<td class="mono"><a href="{{ s.version.href }}">{{ s.version.text }}</a>{% if s.head %} <span class="label">head</span>{% endif %}</td><td class="mono" title="{{ s.written_full }}">{{ s.written }}</td><td class="mono">{% call link(s.machine) %}{% endcall %}</td><td class="mono"{% if let Some((word, whole)) = s.change_cut() %} title="{{ whole }}">{{ word }}{% else %}>{% if let Some(change) = s.change %}{{ change }}{% endif %}{% endif %}</td>{% endmacro %}

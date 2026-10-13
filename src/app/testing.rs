@@ -3,6 +3,7 @@ use std::cell::Cell;
 use crate::app::heads::read_or_skip;
 use crate::app::lookup::{Lookup, Stored};
 use crate::app::rows::{Reference, Row};
+use crate::app::show::{HistoryRow, ShownVersion};
 use crate::app::usage::CommandCount;
 use crate::app::{Deps, Failure};
 use crate::domain::document::Document;
@@ -274,6 +275,18 @@ pub fn row(id: &DocumentId, label: &str, summary: &str) -> Row {
         topics: Vec::new(),
         forked: false,
         ended: None,
+    }
+}
+
+pub fn history_row(version: ShownVersion) -> HistoryRow {
+    HistoryRow {
+        version: version.version,
+        written: version.written,
+        machine: version.machine,
+        change: version.change,
+        parents: version.parents,
+        head: version.head,
+        ended: version.ended,
     }
 }
 

@@ -132,7 +132,8 @@ impl Render for Diff {
 mod tests {
     use super::super::testing::{WRITTEN, stamp, to, to_ended};
     use super::*;
-    use crate::app::show::{Compared, HistoryRow, Linked, ShownDocument, ShownVersion, Side};
+    use crate::app::show::{Compared, Linked, ShownDocument, ShownVersion, Side};
+    use crate::app::testing::history_row;
     use crate::domain::document::Unreadable;
     use crate::domain::id::VersionId;
     use crate::domain::testing::lantern;
@@ -167,18 +168,6 @@ mod tests {
             ended: None,
             heads,
             unreadable: Vec::new(),
-        }
-    }
-
-    fn row(version: ShownVersion) -> HistoryRow {
-        HistoryRow {
-            version: version.version,
-            written: version.written,
-            machine: version.machine,
-            change: version.change,
-            parents: version.parents,
-            head: version.head,
-            ended: version.ended,
         }
     }
 
@@ -311,7 +300,7 @@ mod tests {
             document: lantern(),
             label: "lantern".to_owned(),
             ended: None,
-            versions: held.heads.into_iter().map(row).collect(),
+            versions: held.heads.into_iter().map(history_row).collect(),
             unreadable: held.unreadable,
         };
         assert_eq!(history.notes(), notes);
@@ -339,7 +328,7 @@ mod tests {
             document: lantern(),
             label: "lantern".to_owned(),
             ended: None,
-            versions: vec![row(version(b"left", "")), row(first)],
+            versions: vec![history_row(version(b"left", "")), history_row(first)],
             unreadable: Vec::new(),
         };
         assert_eq!(
@@ -355,7 +344,7 @@ mod tests {
         ended.ended = Some("false".to_owned());
         ended.change = "end".to_owned();
         let closed = History {
-            versions: vec![row(ended)],
+            versions: vec![history_row(ended)],
             ..history.clone()
         };
         assert_eq!(

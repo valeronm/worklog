@@ -251,6 +251,13 @@ impl Stamped {
             ended: None,
         }
     }
+
+    /// A reopening writes its reason into the change after a colon.
+    pub fn change_cut(&self) -> Option<(&str, &str)> {
+        let whole = self.change.as_deref()?;
+        let (word, _) = whole.split_once(':')?;
+        Some((word, whole))
+    }
 }
 
 #[derive(Template)]
