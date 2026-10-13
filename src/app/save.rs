@@ -396,10 +396,20 @@ impl<'a, 'b> Target<'a, 'b> {
             .unwrap_or_default();
         let mut resolved = BTreeMap::new();
         for target in links::links(summary).into_iter().chain(links::links(body)) {
-            let found = self.lookup.linked(&target)?;
+            let held = self.held_link(&target);
+            let found = self.lookup.linked_now(&target, held.as_ref())?;
             resolved.insert(target, found);
         }
         Ok(Links(resolved))
+    }
+
+    // The heads of a fork can hold one text with different documents, and none of them is the
+    // one to keep.
+    fn held_link(&self, target: &str) -> Option<DocumentId> {
+        let mut held = (self.document.heads().into_iter())
+            .filter_map(|head| head.links.0.get(target).cloned().flatten());
+        let first = held.next()?;
+        held.all(|other| other == first).then_some(first)
     }
 
     fn composed(
@@ -449,7 +459,8 @@ mod tests {
     use super::*;
     use crate::app::draft::{self, New};
     use crate::app::testing::{
-        ENDED, ENDED_FACT, TOPIC, World, entry, fact, fork, head, record, refused, topic, world,
+        ENDED, ENDED_FACT, TOPIC, World, entry, fact, fact_fields, fork, head, record, refused,
+        topic, topic_fields, world,
     };
     use crate::domain::draft::Draft;
     use crate::domain::ports::{Drafts, Ids, Store};
@@ -807,6 +818,87 @@ mod tests {
                 ("Not A Name".to_owned(), None),
                 ("lantern/relay-pin".to_owned(), Some(relay)),
                 ("unknown".to_owned(), None),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_link_the_parent_holds_resolved_keeps_its_document_and_any_other_is_looked_up() {
+        let (world, lantern) = world();
+        let deps = world.deps();
+        let atlas = topic(&world, "atlas", "");
+        let relay = fact(&world, &lantern, "relay-pin", "");
+        let phone = topic(&world, "phone", "");
+        world.amend_linking(
+            &phone,
+            &topic_fields("phone", ""),
+            "See [[lantern/relay-pin]] and [[lantern/spare]].\n",
+            &[("lantern/relay-pin", Some(&relay)), ("lantern/spare", None)],
+        );
+        world.amend(
+            &relay,
+            &fact_fields(&atlas, "relay-pin", "s", ""),
+            "The relay.\n",
+        );
+        let spare = fact(&world, &lantern, "spare", "");
+        assert_eq!(world.lookup().linked("lantern/relay-pin").unwrap(), None);
+
+        draft::checkout(&deps, "phone").unwrap();
+        edit(&world, &phone, |draft| {
+            draft.body.push_str("And [[lantern/unknown]].\n");
+        });
+        save(&deps, "phone").unwrap();
+        let links = head(&world, &phone).links.0;
+        assert_eq!(
+            links.into_iter().collect::<Vec<_>>(),
+            vec![
+                ("lantern/relay-pin".to_owned(), Some(relay)),
+                ("lantern/spare".to_owned(), Some(spare)),
+                ("lantern/unknown".to_owned(), None),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_fork_keeps_a_link_its_heads_agree_on_and_looks_up_one_they_do_not() {
+        let (world, lantern) = world();
+        let deps = world.deps();
+        let atlas = topic(&world, "atlas", "");
+        let relay = fact(&world, &lantern, "relay-pin", "");
+        let spare = fact(&world, &lantern, "spare", "");
+        let phone = topic(&world, "phone", "");
+        let root = head(&world, &phone);
+        let body = "See [[lantern/relay-pin]], [[lantern/gone]] and [[lantern/once]].\n";
+        for links in [
+            [Some(&spare), Some(&spare), Some(&spare)],
+            [Some(&atlas), Some(&spare), None],
+        ] {
+            let envelope = Envelope::following(
+                &[&root],
+                root.envelope.written.clone(),
+                root.envelope.machine.clone(),
+                "save",
+            )
+            .unwrap();
+            let links = ["lantern/relay-pin", "lantern/gone", "lantern/once"]
+                .into_iter()
+                .zip(links)
+                .map(|(text, target)| (text.to_owned(), target.cloned()))
+                .collect();
+            let fields = topic_fields("phone", "").parse().unwrap();
+            let version =
+                Version::compose(envelope, fields, Links(links), body.to_owned()).unwrap();
+            world.store.put(&version).unwrap();
+        }
+        crate::app::fork::resolve(&deps, "phone").unwrap();
+        save(&deps, "phone").unwrap();
+        let links = head(&world, &phone).links.0;
+        assert_eq!(
+            links.into_iter().collect::<Vec<_>>(),
+            vec![
+                ("lantern/gone".to_owned(), Some(spare.clone())),
+                ("lantern/once".to_owned(), Some(spare)),
+                ("lantern/relay-pin".to_owned(), Some(relay)),
             ]
         );
     }

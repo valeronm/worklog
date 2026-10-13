@@ -182,8 +182,13 @@ and `about`, which may lead to an ended one.
 `[[address]]` in a body or a summary is a link. It is resolved when the
 version is saved and stored with it as the target's id, so it follows its
 target through a rename. One that resolved to nothing is stored as such
-and tried again by its text whenever it is read. A link inside a code span
-or a fenced block is quoted, not made.
+and tried again by its text whenever it is read. A later version keeps
+the id a link has in the version it follows and resolves only a link that
+has none there, so a link holds after its text stops naming the target,
+as it does when a fact is moved to another topic. Where the heads of a
+fork hold one text with different ids, the version that closes the fork
+resolves it again. A link inside a code span or a fenced block is quoted,
+not made.
 
 `check` reads the links of each topic, fact and followup that is not
 ended, and gives a notice for one that leads nowhere or to an ended
