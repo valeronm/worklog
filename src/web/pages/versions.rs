@@ -233,11 +233,30 @@ mod tests {
         let html = HistoryPage::new(&history).render().expect("a page");
         assert!(
             html.contains(
-                "<td class=\"mono\" title=\"reopen: lit again: by the desk\">reopen</td>"
+                "<td class=\"mono\"><span title=\"reopen: lit again: by the desk\">reopen</span></td>"
             ),
             "{html}"
         );
         assert!(html.contains("<td class=\"mono\">new</td>"), "{html}");
+    }
+
+    #[test]
+    fn a_version_s_stamp_shows_a_change_up_to_its_colon() {
+        let compared = Compared {
+            document: DocumentId::from_bytes([3; 16]),
+            label: "lantern".to_owned(),
+            document_ended: None,
+            version: ShownVersion {
+                change: "reopen: lit again".to_owned(),
+                ..version(b"back")
+            },
+            sides: Vec::new(),
+        };
+        let html = VersionPage::new(&compared).render().expect("a page");
+        assert!(
+            html.contains("</a> · <span title=\"reopen: lit again\">reopen</span> on <a"),
+            "{html}"
+        );
     }
 
     fn side(against: Option<&[u8]>, held: bool, before: &str) -> Side {

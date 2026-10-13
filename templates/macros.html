@@ -10,7 +10,9 @@
 
 {% macro line(l) %}{% call open("title", l.title.href, l.title.mark) %}{% endcall %}{{ l.title.text }}</a> <span class="what">{{ l.summary }}</span>{% for count in l.counts %} <span class="label">{{ count }}</span>{% endfor %}{% call marks(l.marks) %}{% endcall %}{% endmacro %}
 
-{% macro stamp(s) %}<a href="{{ s.version.href }}">{{ s.version.text }}</a>{% if let Some(change) = s.change %} · {{ change }}{% endif %} on {% call link(s.machine) %}{% endcall %} · <span title="{{ s.written_full }}">{{ s.written }}</span>{% endmacro %}
+{% macro change(s) %}{% if let Some((word, whole)) = s.change_cut() %}<span title="{{ whole }}">{{ word }}</span>{% else if let Some(change) = s.change %}{{ change }}{% endif %}{% endmacro %}
+
+{% macro stamp(s) %}<a href="{{ s.version.href }}">{{ s.version.text }}</a>{% if s.change.is_some() %} · {% call change(s) %}{% endcall %}{% endif %} on {% call link(s.machine) %}{% endcall %} · <span title="{{ s.written_full }}">{{ s.written }}</span>{% endmacro %}
 
 {% macro head(h, heading) %}
 <article class="head">
@@ -52,4 +54,4 @@
 {%- if !t.uses.is_empty() %} <span class="muted">uses {% for used in t.uses %}{% if !loop.first %}, {% endif %}{% call link(used) %}{% endcall %}{% endfor %}</span>{% endif -%}
 {% endmacro %}
 
-{% macro version_row(s) %}<td class="mono"><a href="{{ s.version.href }}">{{ s.version.text }}</a>{% if s.head %} <span class="label">head</span>{% endif %}</td><td class="mono" title="{{ s.written_full }}">{{ s.written }}</td><td class="mono">{% call link(s.machine) %}{% endcall %}</td><td class="mono"{% if let Some((word, whole)) = s.change_cut() %} title="{{ whole }}">{{ word }}{% else %}>{% if let Some(change) = s.change %}{{ change }}{% endif %}{% endif %}</td>{% endmacro %}
+{% macro version_row(s) %}<td class="mono"><a href="{{ s.version.href }}">{{ s.version.text }}</a>{% if s.head %} <span class="label">head</span>{% endif %}</td><td class="mono" title="{{ s.written_full }}">{{ s.written }}</td><td class="mono">{% call link(s.machine) %}{% endcall %}</td><td class="mono">{% call change(s) %}{% endcall %}</td>{% endmacro %}
