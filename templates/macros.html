@@ -44,7 +44,7 @@
   <li{% if row.due %} class="due"{% endif %}><span class="label">{% call words(row.lead) %}{% endcall %}</span> {% call line(row.line) %}{% endcall %}
 {%- if !row.topics.is_empty() %} <span class="chips">{% for chip in row.topics %}{% call link(chip) %}{% endcall %}{% endfor %}</span>{% endif -%}
 {%- if !row.details.is_empty() %}<span class="details">{% for detail in row.details %}{% if !loop.first %} · {% endif %}{% call words(detail) %}{% endcall %}{% endfor %}</span>{% endif -%}
-{%- for line in row.lines %}<span class="details">{{ line }}</span>{% endfor -%}
+{%- for line in row.lines %}<span class="details">{% if let Some(summary) = line.summary() %}{{ summary }}{% else %}{{ line.text() }}{% endif %}</span>{% endfor -%}
 </li>
 {% endfor %}
 </ul>

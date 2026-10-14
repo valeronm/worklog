@@ -12,13 +12,35 @@ use crate::app::search::{Hit, Query};
 use crate::app::show::Shown;
 use crate::app::{FollowupRow, Reference, Row, TriggerShown, counted};
 use crate::render::{check_summary, hit_lines, trigger_state};
+use crate::web::markdown::{Markup, summary_html};
+
+pub enum HitLine {
+    Summary(Markup),
+    Text(String),
+}
+
+impl HitLine {
+    pub fn summary(&self) -> Option<&Markup> {
+        match self {
+            HitLine::Summary(summary) => Some(summary),
+            HitLine::Text(_) => None,
+        }
+    }
+
+    pub fn text(&self) -> &str {
+        match self {
+            HitLine::Text(text) => text,
+            HitLine::Summary(_) => "",
+        }
+    }
+}
 
 pub struct Item {
     pub line: Line,
     pub lead: Vec<Text>,
     pub topics: Vec<Link>,
     pub details: Vec<Vec<Text>>,
-    pub lines: Vec<String>,
+    pub lines: Vec<HitLine>,
     pub due: bool,
 }
 
@@ -168,9 +190,20 @@ impl<'q> SearchPage<'q> {
     }
 
     pub fn found(asked: &'q Query<'q>, hits: &[Hit]) -> SearchPage<'q> {
-        let rows = hits.iter().map(|hit| Item {
-            lines: hit_lines(&hit.lines),
-            ..Item::new(&hit.row, hit.row.kind.word())
+        let rows = hits.iter().map(|hit| {
+            let summary = hit.row.summary.trim();
+            Item {
+                lines: (hit_lines(&hit.lines).into_iter())
+                    .map(|line| {
+                        if line == summary {
+                            HitLine::Summary(summary_html(&hit.row.summary, None))
+                        } else {
+                            HitLine::Text(line)
+                        }
+                    })
+                    .collect(),
+                ..Item::new(&hit.row, hit.row.kind.word())
+            }
         });
         SearchPage {
             count: Some(counted(hits.len(), "document matches", "documents match")),

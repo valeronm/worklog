@@ -125,6 +125,27 @@ fn a_search_shows_each_hit_s_row_over_the_lines_that_matched() {
 }
 
 #[test]
+fn a_hit_s_summary_line_is_rendered_as_its_row_is_and_its_body_lines_are_text() {
+    let (world, lantern) = world();
+    let pin = world.put(
+        "fact",
+        &fact_fields(&lantern, "pin", "  The `relay` <b> [[lantern]]", ""),
+        "a `relay` line\n",
+    );
+    let html = ok(&world, "/search?q=relay");
+    has(
+        &html,
+        &format!(
+            "<a class=\"title\" href=\"/doc/{pin}\">lantern/pin</a> \
+             <span class=\"what\">The <code>relay</code> &lt;b&gt; [[lantern]]</span> \
+             <span class=\"chips\"><a href=\"/doc/{lantern}\">lantern</a></span>\
+             <span class=\"details\">The <code>relay</code> &lt;b&gt; [[lantern]]</span>\
+             <span class=\"details\">a `relay` line</span></li>"
+        ),
+    );
+}
+
+#[test]
 fn a_search_the_use_case_fails_keeps_its_form_under_the_failure_s_status() {
     let (world, lantern) = world();
     fact(&world, &lantern, "relay-pin", "");
