@@ -48,31 +48,79 @@ const OPTIONS: Options = Options::ENABLE_TABLES
 
 type Linking<'l> = (&'l [Linked], fn(&DocumentId) -> String);
 
+// What a run of text is given: its `[[text]]` made links, or byte ranges of the source
+// marked, in order and apart.
+#[derive(Clone, Copy)]
+enum Runs<'l> {
+    Linked(Linking<'l>),
+    Marked(&'l [Range<usize>]),
+}
+
+impl<'l> Runs<'l> {
+    fn spans(self) -> &'l [Range<usize>] {
+        match self {
+            Runs::Marked(spans) => spans,
+            Runs::Linked(_) => &[],
+        }
+    }
+}
+
+// Where a piece starts in the text holding it and, when it is the source as written, in the
+// source.
+type Piece = (usize, Option<usize>);
+
 struct Rendering<'b, 'l> {
-    linking: Option<Linking<'l>>,
+    source: &'b str,
+    runs: Runs<'l>,
     out: Vec<Event<'b>>,
     // The parser hands one run of text over in pieces, a bracket at a time.
     pending: String,
+    pieces: Vec<Piece>,
     in_code: bool,
     // Whether each link or image that is open was written as a link.
     open: Vec<bool>,
 }
 
 impl<'b> Rendering<'b, '_> {
-    fn text(&mut self, text: &str) {
-        if !text.is_empty() {
-            self.out.push(Event::Text(CowStr::from(text.to_owned())));
+    fn markup(&mut self, html: &'static str) {
+        self.out.push(Event::InlineHtml(CowStr::Borrowed(html)));
+    }
+
+    // A span is marked only when it falls whole within one piece of `text`.
+    fn text(&mut self, text: &str, pieces: &[Piece]) {
+        let spans = self.runs.spans();
+        let mut marks = Vec::new();
+        for (next, &(start, written)) in pieces.iter().enumerate().map(|(at, p)| (at + 1, p)) {
+            let Some(written) = written else { continue };
+            let end = pieces.get(next).map_or(text.len(), |piece| piece.0);
+            let within =
+                |span: &&Range<usize>| written <= span.start && span.end <= written + end - start;
+            let shifted =
+                |span: &Range<usize>| span.start + start - written..span.end + start - written;
+            marks.extend(spans.iter().filter(within).map(shifted));
+        }
+        let piece = |range: Range<usize>| Event::Text(CowStr::from(text[range].to_owned()));
+        let mut from = 0;
+        for mark in marks {
+            if from < mark.start {
+                self.out.push(piece(from..mark.start));
+            }
+            self.markup("<mark>");
+            self.out.push(piece(mark.clone()));
+            self.markup("</mark>");
+            from = mark.end;
+        }
+        if from < text.len() {
+            self.out.push(piece(from..text.len()));
         }
     }
 
     fn link(&mut self, (links, href): Linking, bracketed: &str, target: &str) {
         let held = links.iter().find(|link| link.text == target);
         let Some(reference) = held.and_then(|link| link.target.as_ref()) else {
-            let open = CowStr::Borrowed("<span class=\"unresolved\">");
-            self.out.push(Event::InlineHtml(open));
-            self.text(bracketed);
-            self.out
-                .push(Event::InlineHtml(CowStr::Borrowed("</span>")));
+            self.markup("<span class=\"unresolved\">");
+            self.text(bracketed, &[]);
+            self.markup("</span>");
             return;
         };
         let mark = EndedMark::of(reference.ended());
@@ -94,24 +142,23 @@ impl<'b> Rendering<'b, '_> {
             }
             None => self.out.push(start),
         }
-        self.text(&reference.label);
+        self.text(&reference.label, &[]);
         self.out.push(Event::End(TagEnd::Link));
     }
 
     fn flush(&mut self) {
         let pending = std::mem::take(&mut self.pending);
-        let Some(linking) = self.linking else {
-            if !pending.is_empty() {
-                self.out.push(Event::Text(CowStr::from(pending)));
-            }
-            return;
+        let pieces = std::mem::take(&mut self.pieces);
+        let linking = match self.runs {
+            Runs::Linked(linking) => linking,
+            Runs::Marked(_) => return self.text(&pending, &pieces),
         };
         let mut rest = pending.as_str();
         let mut from = 0;
         while let Some(at) = rest[from..].find("[[").map(|at| at + from) {
             match link_at(&rest[at..]) {
                 Ok((target, taken)) => {
-                    self.text(&rest[..at]);
+                    self.text(&rest[..at], &[]);
                     self.link(linking, &rest[at..at + taken], target);
                     rest = &rest[at + taken..];
                     from = 0;
@@ -119,7 +166,7 @@ impl<'b> Rendering<'b, '_> {
                 Err(passed) => from = at + passed,
             }
         }
-        self.text(rest);
+        self.text(rest, &[]);
     }
 
     fn opened(&mut self, address: &str) -> bool {
@@ -128,12 +175,26 @@ impl<'b> Rendering<'b, '_> {
         linked
     }
 
-    fn take(&mut self, event: Event<'b>) {
+    // Where `text`, read from `range`, starts in `source` when it reads as written there.
+    fn written_at(&self, text: &str, range: Range<usize>) -> Option<usize> {
+        let start = range.start;
+        (self.source.get(range) == Some(text)).then_some(start)
+    }
+
+    fn take(&mut self, event: Event<'b>, range: Range<usize>) {
         match event {
             Event::Text(text) | Event::Html(text) | Event::InlineHtml(text) => {
+                let at = self.written_at(&text, range);
                 if self.in_code || !self.open.is_empty() {
-                    self.out.push(Event::Text(text));
+                    self.text(&text, &[(0, at)]);
                 } else {
+                    let length = self.pending.len();
+                    let follows = self.pieces.last().is_some_and(|&(start, written)| {
+                        at.is_some() && written.map(|written| written + length - start) == at
+                    });
+                    if !follows {
+                        self.pieces.push((length, at));
+                    }
                     self.pending.push_str(&text);
                 }
                 return;
@@ -141,6 +202,18 @@ impl<'b> Rendering<'b, '_> {
             _ => self.flush(),
         }
         match event {
+            Event::Code(code) => {
+                // A code span's text starts past its backticks and the one space that may pad it.
+                let written = self.source.get(range.clone()).unwrap_or_default();
+                let ticks = written.len() - written.trim_start_matches('`').len();
+                let at = [0, 1]
+                    .map(|pad| range.start + ticks + pad)
+                    .into_iter()
+                    .find_map(|start| self.written_at(&code, start..start + code.len()));
+                self.markup("<code>");
+                self.text(&code, &[(0, at)]);
+                self.markup("</code>");
+            }
             Event::Start(Tag::CodeBlock(kind)) => {
                 self.in_code = true;
                 // The writer makes a class of the info string up to its first space alone.
@@ -184,158 +257,54 @@ impl<'b> Rendering<'b, '_> {
     }
 }
 
-fn rendering<'b>(linking: Option<Linking<'_>>) -> Rendering<'b, '_> {
-    Rendering {
-        linking,
+fn rendered<'b>(
+    source: &'b str,
+    events: impl Iterator<Item = (Event<'b>, Range<usize>)>,
+    runs: Runs,
+) -> Markup {
+    let mut rendering = Rendering {
+        source,
+        runs,
         out: Vec::new(),
         pending: String::new(),
+        pieces: Vec::new(),
         in_code: false,
         open: Vec::new(),
+    };
+    for (event, range) in events {
+        rendering.take(event, range);
     }
-}
-
-fn finished(mut rendering: Rendering<'_, '_>, source: &str) -> Markup {
     rendering.flush();
     let mut out = String::with_capacity(source.len() * 2);
     html::push_html(&mut out, rendering.out.into_iter());
     Markup(out)
 }
 
-fn rendered<'b>(
-    events: impl Iterator<Item = Event<'b>>,
-    linking: Option<Linking>,
-    source: &str,
-) -> Markup {
-    let mut rendering = rendering(linking);
-    for event in events {
-        rendering.take(event);
-    }
-    finished(rendering, source)
-}
-
-// `spans` are byte ranges of `text`; one reaching past `text` marks nothing.
-fn marked_events(text: &str, spans: &[Range<usize>]) -> Vec<Event<'static>> {
-    let piece = |range: Range<usize>| Event::Text(CowStr::from(text[range].to_owned()));
-    let mut events = Vec::new();
-    let mut from = 0;
-    for span in spans.iter().filter(|span| span.end <= text.len()) {
-        if from < span.start {
-            events.push(piece(from..span.start));
-        }
-        events.push(Event::InlineHtml(CowStr::Borrowed("<mark>")));
-        events.push(piece(span.clone()));
-        events.push(Event::InlineHtml(CowStr::Borrowed("</mark>")));
-        from = span.end;
-    }
-    if from < text.len() {
-        events.push(piece(from..text.len()));
-    }
-    events
-}
-
 /// `text` as HTML, with each of `spans`, byte ranges of it in order and apart, marked.
 pub fn marked(text: &str, spans: &[Range<usize>]) -> Markup {
-    let mut rendering = rendering(None);
-    rendering.take_marked(text, spans);
-    finished(rendering, text)
-}
-
-// The spans that fall whole within `within`, as ranges of it.
-fn spans_in(spans: &[Range<usize>], within: &Range<usize>) -> Vec<Range<usize>> {
-    (spans.iter())
-        .filter(|span| within.start <= span.start && span.end <= within.end)
-        .map(|span| span.start - within.start..span.end - within.start)
-        .collect()
-}
-
-impl Rendering<'_, '_> {
-    // A mark goes straight out, since `take` shows inline HTML as its text.
-    fn take_marked(&mut self, text: &str, spans: &[Range<usize>]) {
-        for event in marked_events(text, spans) {
-            if let Event::Text(_) = event {
-                self.take(event);
-            } else {
-                self.flush();
-                self.out.push(event);
-            }
-        }
-    }
-
-    fn code_marked(&mut self, code: &str, spans: &[Range<usize>]) {
-        self.flush();
-        self.out.push(Event::InlineHtml(CowStr::Borrowed("<code>")));
-        self.out.extend(marked_events(code, spans));
-        self.out
-            .push(Event::InlineHtml(CowStr::Borrowed("</code>")));
-    }
+    let whole = std::iter::once((Event::Text(CowStr::Borrowed(text)), 0..text.len()));
+    rendered(text, whole, Runs::Marked(spans))
 }
 
 pub fn to_html(body: &str, links: &[Linked], href: fn(&DocumentId) -> String) -> Markup {
-    rendered(Parser::new_ext(body, OPTIONS), Some((links, href)), body)
+    let events = Parser::new_ext(body, OPTIONS).into_offset_iter();
+    rendered(body, events, Runs::Linked((links, href)))
 }
 
 /// A summary as HTML with no block around it: the inline Markdown of the one paragraph it
 /// reads as, and its text as written where it reads as anything else. Without `linking` each
 /// `[[text]]` stays text.
 pub fn summary_html(summary: &str, linking: Option<Linking>) -> Markup {
-    if let Some(inline) = inline_of(summary) {
-        rendered(inline.into_iter().map(|(event, _)| event), linking, summary)
-    } else {
-        let text = Event::Text(CowStr::Borrowed(summary));
-        rendered(std::iter::once(text), None, summary)
-    }
+    summary_rendered(summary, linking.map_or(Runs::Marked(&[]), Runs::Linked))
 }
 
 /// A summary as `summary_html` gives it with no `linking`, with each of `spans`, byte ranges
 /// of it in order and apart, marked where it falls within one run of text or one code span.
 pub fn summary_marked(summary: &str, spans: &[Range<usize>]) -> Markup {
-    let Some(inline) = inline_of(summary) else {
-        return marked(summary, spans);
-    };
-    let mut rendering = rendering(None);
-    // The parser hands one run of text over in pieces, and a span may cross them.
-    let mut run: Option<Range<usize>> = None;
-    for (event, range) in inline {
-        let text_as_written = match &event {
-            Event::Text(text) | Event::Html(text) | Event::InlineHtml(text) => {
-                **text == summary[range.clone()]
-            }
-            _ => false,
-        };
-        match &mut run {
-            Some(open) if text_as_written && open.end == range.start => {
-                open.end = range.end;
-                continue;
-            }
-            _ => {}
-        }
-        if let Some(closed) = run.take() {
-            rendering.take_marked(&summary[closed.clone()], &spans_in(spans, &closed));
-        }
-        if text_as_written {
-            run = Some(range);
-            continue;
-        }
-        match event {
-            Event::Code(code) => match summary[range.clone()].find(&*code) {
-                Some(at) => {
-                    let start = range.start + at;
-                    let within = spans_in(spans, &(start..start + code.len()));
-                    rendering.code_marked(&code, &within);
-                }
-                None => rendering.take(Event::Code(code)),
-            },
-            other => rendering.take(other),
-        }
-    }
-    if let Some(closed) = run {
-        rendering.take_marked(&summary[closed.clone()], &spans_in(spans, &closed));
-    }
-    finished(rendering, summary)
+    summary_rendered(summary, Runs::Marked(spans))
 }
 
-// The events inside the one paragraph a summary reads as, each with where it was written.
-fn inline_of(summary: &str) -> Option<Vec<(Event<'_>, Range<usize>)>> {
+fn summary_rendered(summary: &str, runs: Runs) -> Markup {
     let mut events: Vec<(Event, Range<usize>)> = Parser::new_ext(summary, OPTIONS)
         .into_offset_iter()
         .collect();
@@ -344,11 +313,12 @@ fn inline_of(summary: &str) -> Option<Vec<(Event<'_>, Range<usize>)>> {
         [(Event::Start(Tag::Paragraph), _), inline @ .., (Event::End(TagEnd::Paragraph), _)]
             if !inline.iter().any(|(event, _)| *event == Event::End(TagEnd::Paragraph))
     );
-    one_paragraph.then(|| {
-        events.pop();
-        events.remove(0);
-        events
-    })
+    if one_paragraph {
+        let inline = 1..events.len() - 1;
+        rendered(summary, events.drain(inline), runs)
+    } else {
+        marked(summary, runs.spans())
+    }
 }
 
 #[cfg(test)]
@@ -912,6 +882,17 @@ mod tests {
                 "pin",
                 "<mark>pin</mark> and <mark>pin</mark>",
             ),
+            (
+                "relay \\* relay",
+                "relay",
+                "<mark>relay</mark> * <mark>relay</mark>",
+            ),
+            (
+                "a ` relay ` b",
+                "relay",
+                "a <code><mark>relay</mark></code> b",
+            ),
+            ("a `` ` `` b", "`", "a <code><mark>`</mark></code> b"),
         ] {
             assert_eq!(marked_at(summary, term), shown, "{summary}");
         }
