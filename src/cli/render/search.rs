@@ -9,8 +9,9 @@ impl Render for Vec<Hit> {
         let mut text = String::new();
         for hit in self {
             row_line(&mut text, &hit.row);
-            for shown in hit_lines(&hit.lines) {
-                let _ = writeln!(text, "{INDENT}{shown}");
+            let (shown, more) = hit_lines(&hit.lines);
+            for line in shown.iter().map(|line| &line.text).chain(&more) {
+                let _ = writeln!(text, "{INDENT}{line}");
             }
         }
         text
@@ -43,6 +44,7 @@ mod tests {
     use super::super::output;
     use super::super::testing::{WRITTEN, row, stamp, to};
     use super::*;
+    use crate::app::search::Matched;
     use crate::domain::id::VersionId;
     use crate::domain::testing::{atlas, lantern};
 
@@ -50,7 +52,13 @@ mod tests {
     fn a_hit_is_its_row_over_at_most_three_of_its_lines() {
         let hit = |id, label: &str, lines: &[&str]| Hit {
             row: row(id, label, "Pin four"),
-            lines: lines.iter().map(ToString::to_string).collect(),
+            lines: (lines.iter())
+                .map(|text| Matched {
+                    text: (*text).to_owned(),
+                    spans: Vec::new(),
+                })
+                .collect(),
+            label_spans: Vec::new(),
         };
         let hits = vec![
             hit(&lantern(), "lantern/relay", &["Pin four", "The relay."]),
@@ -82,6 +90,7 @@ mod tests {
         let hit = Hit {
             row: row(&lantern(), "lantern/relay", "Pin four"),
             lines: Vec::new(),
+            label_spans: Vec::new(),
         };
         let hits = vec![hit.clone(), hit];
         for json in [false, true] {

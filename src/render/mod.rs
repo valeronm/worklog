@@ -3,6 +3,7 @@
 pub mod diff;
 
 use crate::app::check::Check;
+use crate::app::search::Matched;
 use crate::app::show::{Side, Unread};
 use crate::app::{FollowupRow, Reference, TriggerShown, counted};
 use crate::domain::id::VersionId;
@@ -51,14 +52,12 @@ pub fn filed_counts(fact_count: usize, idea_count: usize, open_count: usize) -> 
     .collect()
 }
 
-/// The first of a hit's matching lines, then a line counting the rest when there are more.
+/// The first of a hit's matching lines, and a line counting the rest when there are more.
 #[must_use]
-pub fn hit_lines(lines: &[String]) -> Vec<String> {
-    let mut shown: Vec<String> = lines.iter().take(HIT_LINES).cloned().collect();
-    if lines.len() > HIT_LINES {
-        shown.push(format!("… {} more", lines.len() - HIT_LINES));
-    }
-    shown
+pub fn hit_lines(lines: &[Matched]) -> (&[Matched], Option<String>) {
+    let shown = &lines[..lines.len().min(HIT_LINES)];
+    let more = (lines.len() > HIT_LINES).then(|| format!("… {} more", lines.len() - HIT_LINES));
+    (shown, more)
 }
 
 #[must_use]

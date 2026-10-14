@@ -68,10 +68,10 @@ fn a_search_shows_each_hit_s_row_over_the_lines_that_matched() {
         &html,
         &format!(
             "<li><span class=\"label\">fact</span> \
-             <a class=\"title\" href=\"/doc/{relay}\">lantern/relay-pin</a> \
+             <a class=\"title\" href=\"/doc/{relay}\">lantern/<mark>relay</mark>-pin</a> \
              <span class=\"chips\"><a href=\"/doc/{lantern}\">lantern</a></span>\
              <div class=\"what\">s</div>\
-             <span class=\"details\">The relay.</span></li>"
+             <div class=\"found\"><div>The <mark>relay</mark>.</div></div></li>"
         ),
     );
     has(
@@ -80,17 +80,17 @@ fn a_search_shows_each_hit_s_row_over_the_lines_that_matched() {
             "<a class=\"title\" href=\"/doc/{coil}\">atlas/coil</a> \
              <span class=\"chips\"><a href=\"/doc/{atlas}\">atlas</a></span>\
              <div class=\"what\">Wound by hand</div>\
-             <span class=\"details\">relay one</span>\
-             <span class=\"details\">relay &#60;two&#62;</span>\
-             <span class=\"details\">relay 3</span>\
-             <span class=\"details\">… 4 more</span></li>"
+             <div class=\"found\"><div><mark>relay</mark> one</div>\
+             <div><mark>relay</mark> &lt;two&gt;</div>\
+             <div><mark>relay</mark> 3</div>\
+             <div>… 4 more</div></div></li>"
         ),
     );
     has(
         &html,
         &format!(
             "<li><span class=\"label\">topic</span> \
-             <a class=\"title\" href=\"/doc/{named}\">relay</a>\
+             <a class=\"title\" href=\"/doc/{named}\"><mark>relay</mark></a>\
              <div class=\"what\">s</div></li>"
         ),
     );
@@ -101,7 +101,7 @@ fn a_search_shows_each_hit_s_row_over_the_lines_that_matched() {
     has(&narrowed, "<p class=\"summary\">2 documents match</p>");
     has(
         &narrowed,
-        "atlas/old-relay</a> \
+        "atlas/old-<mark>relay</mark></a> \
          <span class=\"mark\">ended false</span><div class=\"what\">s</div>",
     );
     lacks(&narrowed, "lantern/relay-pin");
@@ -116,7 +116,8 @@ fn a_search_shows_each_hit_s_row_over_the_lines_that_matched() {
     has(&pattern, "<p class=\"summary\">1 document matches</p>");
     has(
         &pattern,
-        "<span class=\"details\">relay 3</span><span class=\"details\">relay 6</span></li>",
+        "<div class=\"found\"><div><mark>relay 3</mark></div>\
+         <div><mark>relay 6</mark></div></div></li>",
     );
 
     let none = ok(&world, "/search?q=%3Cb%3E%22");
@@ -141,8 +142,8 @@ fn a_hit_s_summary_line_is_rendered_as_its_row_is_and_its_body_lines_are_text() 
             "<a class=\"title\" href=\"/doc/{pin}\">lantern/pin</a> \
              <span class=\"chips\"><a href=\"/doc/{lantern}\">lantern</a></span>\
              <div class=\"what\">The <code>relay</code> &lt;b&gt; [[lantern]]</div>\
-             <span class=\"details\">The <code>relay</code> &lt;b&gt; [[lantern]]</span>\
-             <span class=\"details\">a `relay` line</span></li>"
+             <div class=\"found\"><div>The <code><mark>relay</mark></code> &lt;b&gt; [[lantern]]</div>\
+             <div>a `<mark>relay</mark>` line</div></div></li>"
         ),
     );
 }

@@ -10,7 +10,7 @@ use crate::app::show::{Compared, History, Side};
 use crate::app::{Row, counted};
 use crate::render::diff::{Hunk, Mark, UNTERMINATED, hunks};
 use crate::render::{against, change_or_ending, ended, unread_notes};
-use crate::web::markdown::summary_html;
+use crate::web::markdown::{marked, summary_html};
 
 #[derive(Template)]
 #[template(path = "history.html")]
@@ -100,6 +100,7 @@ impl From<&ForkRow> for Fork {
         Fork {
             line: Line {
                 title: Link::to(&fork.document, &fork.label, ended_of(row)),
+                label: marked(&fork.label, &[]),
                 summary: summary_html(row.map_or("", |row| &row.summary), None),
                 counts: Vec::new(),
                 marks: marks(false, ended_of(row)),

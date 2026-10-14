@@ -112,7 +112,7 @@ fn a_listing_marks_each_link_to_a_document_that_ended() {
     let search = ok(&world, "/search?q=fuse&ended=1");
     has(
         &search,
-        &anchor("title ended", &fuse, "false", "atlas/fuse"),
+        &anchor("title ended", &fuse, "false", "atlas/<mark>fuse</mark>"),
     );
 
     let log = ok(&world, "/log");

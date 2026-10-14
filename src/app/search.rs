@@ -1,5 +1,6 @@
 use std::cmp::Reverse;
 use std::collections::BTreeMap;
+use std::ops::Range;
 
 use regex::{Regex, RegexBuilder};
 use serde::Serialize;
@@ -24,7 +25,16 @@ pub struct Query<'a> {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Hit {
     pub row: Row,
-    pub lines: Vec<String>,
+    pub lines: Vec<Matched>,
+    /// Where the term matched `row.label`.
+    pub label_spans: Vec<Range<usize>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Matched {
+    pub text: String,
+    /// The byte ranges of `text` the term matched, in order, apart and none of them empty.
+    pub spans: Vec<Range<usize>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -45,9 +55,10 @@ pub struct Logged {
 ///
 /// A document matches by its label, its summary or a body line; the term ignores case and,
 /// unless `regex`, is matched as plain text. `lines` are the matching summary and body
-/// lines as written, trimmed. An empty term and a pattern that does not compile are usage
-/// failures; an address that is not one topic is refused. A claim is never searched, and a
-/// forked document is searched in its row head only.
+/// lines as written, trimmed, each with where the term matched it. An empty term and a
+/// pattern that does not compile are usage failures; an address that is not one topic is
+/// refused. A claim is never searched, and a forked document is searched in its row head
+/// only.
 pub fn search(deps: &Deps, query: &Query) -> Result<Vec<Hit>, Failure> {
     let matcher = matcher(query)?;
     let (lookup, topics, topic) = reading(deps, query.topic)?;
@@ -62,19 +73,49 @@ pub fn search(deps: &Deps, query: &Query) -> Result<Vec<Hit>, Failure> {
         };
         for shown in shown(&topics, &documents, query.ended) {
             let row = shown.row;
-            let lines: Vec<String> = std::iter::once(row.summary.as_str())
+            let lines: Vec<Matched> = std::iter::once(row.summary.as_str())
                 .chain(shown.head.body.lines())
-                .filter(|line| matcher.is_match(line))
-                .map(|line| line.trim().to_owned())
+                .filter_map(|line| {
+                    let found: Vec<Range<usize>> =
+                        matcher.find_iter(line).map(|found| found.range()).collect();
+                    (!found.is_empty()).then(|| trimmed(line, &found))
+                })
                 .collect();
             if !lines.is_empty() || matcher.is_match(&row.label) {
-                found.push(Hit { row, lines });
+                let label_spans = spans(&matcher, &row.label);
+                found.push(Hit {
+                    row,
+                    lines,
+                    label_spans,
+                });
             }
         }
         by_label(&mut found, |hit| &hit.row);
         hits.extend(found);
     }
     Ok(hits)
+}
+
+// A pattern can match an empty stretch, which marks nothing.
+fn spans(matcher: &Regex, text: &str) -> Vec<Range<usize>> {
+    (matcher.find_iter(text))
+        .map(|found| found.range())
+        .filter(|span| !span.is_empty())
+        .collect()
+}
+
+// A line is matched as written, so an anchored pattern holds at the line's own edges.
+fn trimmed(line: &str, spans: &[Range<usize>]) -> Matched {
+    let text = line.trim();
+    let start = line.len() - line.trim_start().len();
+    let end = start + text.len();
+    Matched {
+        text: text.to_owned(),
+        spans: (spans.iter())
+            .map(|span| span.start.clamp(start, end) - start..span.end.clamp(start, end) - start)
+            .filter(|span| span.start < span.end)
+            .collect(),
+    }
 }
 
 fn matcher(query: &Query) -> Result<Regex, Failure> {
@@ -163,6 +204,14 @@ mod tests {
         .unwrap()
     }
 
+    fn texts(hit: &Hit) -> Vec<&str> {
+        hit.lines.iter().map(|line| line.text.as_str()).collect()
+    }
+
+    fn bounds(spans: &[Range<usize>]) -> Vec<(usize, usize)> {
+        spans.iter().map(|span| (span.start, span.end)).collect()
+    }
+
     fn fact_with(
         world: &World,
         topic: &DocumentId,
@@ -195,7 +244,7 @@ mod tests {
         let hits = find(&world, "pin");
         assert_eq!(labels(&hits, |hit| &hit.row), ["lantern/driver"]);
         assert_eq!(
-            hits[0].lines,
+            texts(&hits[0]),
             ["The Pin is fixed", "the pin moved", "indented PIN"]
         );
     }
@@ -421,7 +470,7 @@ mod tests {
         assert!(hits[0].row.forked);
         assert_eq!(hits[0].lines.len(), 1);
         let shown = head_body(&world, &relay);
-        assert_eq!(hits[0].lines[0], shown);
+        assert_eq!(hits[0].lines[0].text, shown);
     }
 
     fn head_body(world: &World, id: &DocumentId) -> String {
@@ -559,7 +608,28 @@ mod tests {
         fact_with(&world, &lantern, "driver", "s", "  pin moved\n");
         let hits = find(&world, " pin");
         assert_eq!(hits.len(), 1);
-        assert_eq!(hits[0].lines, ["pin moved"]);
+        assert_eq!(texts(&hits[0]), ["pin moved"]);
+        assert_eq!(bounds(&hits[0].lines[0].spans), [(0, 3)]);
+    }
+
+    #[test]
+    fn a_hit_holds_where_the_term_matched_its_label_and_each_line() {
+        let (world, lantern) = world();
+        fact_with(&world, &lantern, "pin", "Pin and PIN", "  a pin\nnothing\n");
+        let hits = find(&world, "pin");
+        assert_eq!(bounds(&hits[0].label_spans), [(8, 11)]);
+        let spans: Vec<_> = (hits[0].lines.iter())
+            .map(|line| bounds(&line.spans))
+            .collect();
+        assert_eq!(spans, [vec![(0, 3), (8, 11)], vec![(2, 5)]]);
+    }
+
+    #[test]
+    fn a_pattern_marks_none_of_its_empty_matches() {
+        let (world, lantern) = world();
+        fact_with(&world, &lantern, "driver", "s", "a pin\n");
+        let hits = query(&world, "pin|x*", true, None, false);
+        assert_eq!(bounds(&hits[0].lines.last().unwrap().spans), [(2, 5)]);
     }
 
     #[test]
@@ -591,7 +661,7 @@ mod tests {
             .unwrap();
         let hits = find(&world, "side");
         assert_eq!(hits.len(), 1);
-        assert_eq!(hits[0].lines, ["open side"]);
+        assert_eq!(texts(&hits[0]), ["open side"]);
         assert!(hits[0].row.forked);
         assert!(find(&world, "ended side").is_empty());
     }

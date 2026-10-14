@@ -12,35 +12,15 @@ use crate::app::search::{Hit, Query};
 use crate::app::show::Shown;
 use crate::app::{FollowupRow, Reference, Row, TriggerShown, counted};
 use crate::render::{check_summary, hit_lines, trigger_state};
-use crate::web::markdown::{Markup, summary_html};
-
-pub enum HitLine {
-    Summary(Markup),
-    Text(String),
-}
-
-impl HitLine {
-    pub fn summary(&self) -> Option<&Markup> {
-        match self {
-            HitLine::Summary(summary) => Some(summary),
-            HitLine::Text(_) => None,
-        }
-    }
-
-    pub fn text(&self) -> &str {
-        match self {
-            HitLine::Text(text) => text,
-            HitLine::Summary(_) => "",
-        }
-    }
-}
+use crate::web::markdown::{Markup, marked, summary_marked};
 
 pub struct Item {
     pub line: Line,
     pub lead: Vec<Text>,
     pub topics: Vec<Link>,
     pub details: Vec<Vec<Text>>,
-    pub lines: Vec<HitLine>,
+    pub lines: Vec<Markup>,
+    pub more: Option<String>,
     pub due: bool,
 }
 
@@ -52,6 +32,7 @@ impl Item {
             topics: doc_links(&row.topics),
             details: Vec::new(),
             lines: Vec::new(),
+            more: None,
             due: false,
         }
     }
@@ -206,17 +187,22 @@ impl<'q> SearchPage<'q> {
     pub fn found(asked: &'q Query<'q>, hits: &[Hit], under: Option<&str>) -> SearchPage<'q> {
         let rows = hits.iter().map(|hit| {
             let summary = hit.row.summary.trim();
+            let (shown, more) = hit_lines(&hit.lines);
+            let lines = (shown.iter())
+                .map(|line| {
+                    if line.text == summary {
+                        summary_marked(&line.text, &line.spans)
+                    } else {
+                        marked(&line.text, &line.spans)
+                    }
+                })
+                .collect();
+            let mut item = Item::new(&hit.row, hit.row.kind.word());
+            item.line.label = marked(&hit.row.label, &hit.label_spans);
             Item {
-                lines: (hit_lines(&hit.lines).into_iter())
-                    .map(|line| {
-                        if line == summary {
-                            HitLine::Summary(summary_html(&hit.row.summary, None))
-                        } else {
-                            HitLine::Text(line)
-                        }
-                    })
-                    .collect(),
-                ..Item::new(&hit.row, hit.row.kind.word())
+                lines,
+                more,
+                ..item
             }
         });
         let mut rows: Vec<Item> = rows.collect();

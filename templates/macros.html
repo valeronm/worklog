@@ -8,7 +8,7 @@
 
 {% macro marks(ms) %}{% for mark in ms.iter() %} <span class="mark">{{ mark }}</span>{% endfor %}{% endmacro %}
 
-{% macro line(l) %}{% call open("title", l.title.href, l.title.mark) %}{% endcall %}{{ l.title.text }}</a>{% for count in l.counts %} <span class="label">{{ count }}</span>{% endfor %}{% call marks(l.marks) %}{% endcall %}{{ caller() }}<div class="what">{{ l.summary }}</div>{% endmacro %}
+{% macro line(l) %}{% call open("title", l.title.href, l.title.mark) %}{% endcall %}{{ l.label }}</a>{% for count in l.counts %} <span class="label">{{ count }}</span>{% endfor %}{% call marks(l.marks) %}{% endcall %}{{ caller() }}<div class="what">{{ l.summary }}</div>{% endmacro %}
 
 {% macro change(s) %}{% if let Some((word, whole)) = s.change_cut() %}<span title="{{ whole }}">{{ word }}</span>{% else if let Some(change) = s.change %}{{ change }}{% endif %}{% endmacro %}
 
@@ -45,7 +45,7 @@
 {%- if !row.topics.is_empty() %} <span class="chips">{% for chip in row.topics %}{% call link(chip) %}{% endcall %}{% endfor %}</span>{% endif -%}
 {% endcall -%}
 {%- if !row.details.is_empty() %}<span class="details">{% for detail in row.details %}{% if !loop.first %} · {% endif %}{% call words(detail) %}{% endcall %}{% endfor %}</span>{% endif -%}
-{%- for line in row.lines %}<span class="details">{% if let Some(summary) = line.summary() %}{{ summary }}{% else %}{{ line.text() }}{% endif %}</span>{% endfor -%}
+{%- if !row.lines.is_empty() %}<div class="found">{% for line in row.lines %}<div>{{ line }}</div>{% endfor %}{% if let Some(more) = row.more %}<div>{{ more }}</div>{% endif %}</div>{% endif -%}
 </li>
 {% endfor %}
 </ul>

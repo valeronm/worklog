@@ -696,7 +696,8 @@ mod tests {
         };
         let expected = json!([{
             "row": row(&relay, "fact", "lantern/relay", &[to(&lantern, "lantern")]),
-            "lines": ["The relay."],
+            "lines": [{"text": "The relay.", "spans": [{"start": 0, "end": 9}]}],
+            "label_spans": [],
         }]);
         vec![(search::search(&world.deps(), &query).unwrap(), expected)]
     }

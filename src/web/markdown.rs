@@ -2,6 +2,7 @@
 //! each `[[text]]` as a link to the document the version's links hold for it.
 
 use std::fmt;
+use std::ops::Range;
 
 use pulldown_cmark::{CodeBlockKind, CowStr, Event, LinkType, Options, Parser, Tag, TagEnd, html};
 
@@ -183,25 +184,90 @@ impl<'b> Rendering<'b, '_> {
     }
 }
 
-fn rendered<'b>(
-    events: impl Iterator<Item = Event<'b>>,
-    linking: Option<Linking>,
-    source: &str,
-) -> Markup {
-    let mut rendering = Rendering {
+fn rendering<'b>(linking: Option<Linking<'_>>) -> Rendering<'b, '_> {
+    Rendering {
         linking,
         out: Vec::new(),
         pending: String::new(),
         in_code: false,
         open: Vec::new(),
-    };
-    for event in events {
-        rendering.take(event);
     }
+}
+
+fn finished(mut rendering: Rendering<'_, '_>, source: &str) -> Markup {
     rendering.flush();
     let mut out = String::with_capacity(source.len() * 2);
     html::push_html(&mut out, rendering.out.into_iter());
     Markup(out)
+}
+
+fn rendered<'b>(
+    events: impl Iterator<Item = Event<'b>>,
+    linking: Option<Linking>,
+    source: &str,
+) -> Markup {
+    let mut rendering = rendering(linking);
+    for event in events {
+        rendering.take(event);
+    }
+    finished(rendering, source)
+}
+
+// `spans` are byte ranges of `text`; one reaching past `text` marks nothing.
+fn marked_events(text: &str, spans: &[Range<usize>]) -> Vec<Event<'static>> {
+    let piece = |range: Range<usize>| Event::Text(CowStr::from(text[range].to_owned()));
+    let mut events = Vec::new();
+    let mut from = 0;
+    for span in spans.iter().filter(|span| span.end <= text.len()) {
+        if from < span.start {
+            events.push(piece(from..span.start));
+        }
+        events.push(Event::InlineHtml(CowStr::Borrowed("<mark>")));
+        events.push(piece(span.clone()));
+        events.push(Event::InlineHtml(CowStr::Borrowed("</mark>")));
+        from = span.end;
+    }
+    if from < text.len() {
+        events.push(piece(from..text.len()));
+    }
+    events
+}
+
+/// `text` as HTML, with each of `spans`, byte ranges of it in order and apart, marked.
+pub fn marked(text: &str, spans: &[Range<usize>]) -> Markup {
+    let mut rendering = rendering(None);
+    rendering.take_marked(text, spans);
+    finished(rendering, text)
+}
+
+// The spans that fall whole within `within`, as ranges of it.
+fn spans_in(spans: &[Range<usize>], within: &Range<usize>) -> Vec<Range<usize>> {
+    (spans.iter())
+        .filter(|span| within.start <= span.start && span.end <= within.end)
+        .map(|span| span.start - within.start..span.end - within.start)
+        .collect()
+}
+
+impl Rendering<'_, '_> {
+    // A mark goes straight out, since `take` shows inline HTML as its text.
+    fn take_marked(&mut self, text: &str, spans: &[Range<usize>]) {
+        for event in marked_events(text, spans) {
+            if let Event::Text(_) = event {
+                self.take(event);
+            } else {
+                self.flush();
+                self.out.push(event);
+            }
+        }
+    }
+
+    fn code_marked(&mut self, code: &str, spans: &[Range<usize>]) {
+        self.flush();
+        self.out.push(Event::InlineHtml(CowStr::Borrowed("<code>")));
+        self.out.extend(marked_events(code, spans));
+        self.out
+            .push(Event::InlineHtml(CowStr::Borrowed("</code>")));
+    }
 }
 
 pub fn to_html(body: &str, links: &[Linked], href: fn(&DocumentId) -> String) -> Markup {
@@ -212,19 +278,77 @@ pub fn to_html(body: &str, links: &[Linked], href: fn(&DocumentId) -> String) ->
 /// reads as, and its text as written where it reads as anything else. Without `linking` each
 /// `[[text]]` stays text.
 pub fn summary_html(summary: &str, linking: Option<Linking>) -> Markup {
-    let mut events: Vec<Event> = Parser::new_ext(summary, OPTIONS).collect();
-    let one_paragraph = matches!(
-        events.as_slice(),
-        [Event::Start(Tag::Paragraph), inline @ .., Event::End(TagEnd::Paragraph)]
-            if !inline.contains(&Event::End(TagEnd::Paragraph))
-    );
-    if one_paragraph {
-        let inline = 1..events.len() - 1;
-        rendered(events.drain(inline), linking, summary)
+    if let Some(inline) = inline_of(summary) {
+        rendered(inline.into_iter().map(|(event, _)| event), linking, summary)
     } else {
         let text = Event::Text(CowStr::Borrowed(summary));
         rendered(std::iter::once(text), None, summary)
     }
+}
+
+/// A summary as `summary_html` gives it with no `linking`, with each of `spans`, byte ranges
+/// of it in order and apart, marked where it falls within one run of text or one code span.
+pub fn summary_marked(summary: &str, spans: &[Range<usize>]) -> Markup {
+    let Some(inline) = inline_of(summary) else {
+        return marked(summary, spans);
+    };
+    let mut rendering = rendering(None);
+    // The parser hands one run of text over in pieces, and a span may cross them.
+    let mut run: Option<Range<usize>> = None;
+    for (event, range) in inline {
+        let text_as_written = match &event {
+            Event::Text(text) | Event::Html(text) | Event::InlineHtml(text) => {
+                **text == summary[range.clone()]
+            }
+            _ => false,
+        };
+        match &mut run {
+            Some(open) if text_as_written && open.end == range.start => {
+                open.end = range.end;
+                continue;
+            }
+            _ => {}
+        }
+        if let Some(closed) = run.take() {
+            rendering.take_marked(&summary[closed.clone()], &spans_in(spans, &closed));
+        }
+        if text_as_written {
+            run = Some(range);
+            continue;
+        }
+        match event {
+            Event::Code(code) => match summary[range.clone()].find(&*code) {
+                Some(at) => {
+                    let start = range.start + at;
+                    let within = spans_in(spans, &(start..start + code.len()));
+                    rendering.code_marked(&code, &within);
+                }
+                None => rendering.take(Event::Code(code)),
+            },
+            other => rendering.take(other),
+        }
+    }
+    if let Some(closed) = run {
+        rendering.take_marked(&summary[closed.clone()], &spans_in(spans, &closed));
+    }
+    finished(rendering, summary)
+}
+
+// The events inside the one paragraph a summary reads as, each with where it was written.
+fn inline_of(summary: &str) -> Option<Vec<(Event<'_>, Range<usize>)>> {
+    let mut events: Vec<(Event, Range<usize>)> = Parser::new_ext(summary, OPTIONS)
+        .into_offset_iter()
+        .collect();
+    let one_paragraph = matches!(
+        events.as_slice(),
+        [(Event::Start(Tag::Paragraph), _), inline @ .., (Event::End(TagEnd::Paragraph), _)]
+            if !inline.iter().any(|(event, _)| *event == Event::End(TagEnd::Paragraph))
+    );
+    one_paragraph.then(|| {
+        events.pop();
+        events.remove(0);
+        events
+    })
 }
 
 #[cfg(test)]
@@ -758,5 +882,58 @@ mod tests {
             html("[![lamp](https://example.org/lamp.png)](javascript:alert(1))\n"),
             "<p><a href=\"https://example.org/lamp.png\">lamp</a></p>\n"
         );
+    }
+
+    fn marked_at(summary: &str, term: &str) -> String {
+        let spans: Vec<Range<usize>> = (summary.match_indices(term))
+            .map(|(at, found)| at..at + found.len())
+            .collect();
+        summary_marked(summary, &spans).to_string()
+    }
+
+    #[test]
+    fn a_summary_marks_a_span_within_one_run_of_text_or_one_code_span() {
+        for (summary, term, shown) in [
+            (
+                "A **bold** relay",
+                "relay",
+                "A <strong>bold</strong> <mark>relay</mark>",
+            ),
+            ("a [b c] d", "a [b c", "<mark>a [b c</mark>] d"),
+            (
+                "The `relay` pin",
+                "relay",
+                "The <code><mark>relay</mark></code> pin",
+            ),
+            ("x <b> y", "<b>", "x <mark>&lt;b&gt;</mark> y"),
+            ("# a relay", "relay", "# a <mark>relay</mark>"),
+            (
+                "pin and pin",
+                "pin",
+                "<mark>pin</mark> and <mark>pin</mark>",
+            ),
+        ] {
+            assert_eq!(marked_at(summary, term), shown, "{summary}");
+        }
+    }
+
+    #[test]
+    fn a_summary_marks_nothing_of_a_span_that_crosses_its_markup() {
+        for (summary, term) in [
+            ("a **b** c", "a **b"),
+            ("The `relay` pin", "`relay`"),
+            ("a \\* b", "a \\* b"),
+        ] {
+            assert!(!marked_at(summary, term).contains("<mark>"), "{summary}");
+        }
+    }
+
+    #[test]
+    fn text_marks_its_spans_and_escapes_the_rest() {
+        assert_eq!(
+            marked("a<b>c&", &[1..4, 5..6]).to_string(),
+            "a<mark>&lt;b&gt;</mark>c<mark>&amp;</mark>"
+        );
+        assert_eq!(marked("a&b", &[]).to_string(), "a&amp;b");
     }
 }
