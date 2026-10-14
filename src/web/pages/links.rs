@@ -9,6 +9,7 @@ use crate::domain::id::{DocumentId, VersionId};
 use crate::domain::version::Stamp;
 use crate::render::{ended, written};
 use crate::web::mark::EndedMark;
+use crate::web::markdown::{Markup, summary_html};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Place {
@@ -213,7 +214,7 @@ pub(super) fn marks(forked: bool, ended_for: Option<&str>) -> Vec<String> {
 
 pub struct Line {
     pub title: Link,
-    pub summary: String,
+    pub summary: Markup,
     pub counts: Vec<String>,
     pub marks: Vec<String>,
 }
@@ -222,7 +223,7 @@ impl From<&Row> for Line {
     fn from(row: &Row) -> Line {
         Line {
             title: Link::to(&row.document, &row.label, row.ended.as_deref()),
-            summary: row.summary.clone(),
+            summary: summary_html(&row.summary, None),
             counts: Vec::new(),
             marks: marks(row.forked, row.ended.as_deref()),
         }

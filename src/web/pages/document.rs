@@ -7,24 +7,52 @@ use super::links::{Nav, Place, Stamped, Text, doc_href, history_href, marks};
 use super::listing::{Item, entry_items, fact_items, followup_items};
 use crate::app::FollowupRow;
 use crate::app::list::{EntryRow, FactRow, TopicRow};
-use crate::app::show::{FieldItem, ShownDocument, ShownField, ShownVersion};
+use crate::app::show::{FieldItem, Linked, ShownDocument, ShownField, ShownVersion};
 use crate::render::{ended, unread_notes};
-use crate::web::markdown::{Markup, to_html};
+use crate::web::markdown::{Markup, summary_html, to_html};
+
+enum Shown {
+    Values(Vec<Text>),
+    Summary(Markup),
+}
 
 pub struct Field {
     pub name: String,
-    pub values: Vec<Text>,
+    shown: Shown,
 }
 
-impl From<&ShownField> for Field {
-    fn from(field: &ShownField) -> Field {
-        let values = (field.values.iter()).map(|item| match item {
-            FieldItem::Text { text } => Text::plain(text),
-            FieldItem::Reference { reference } => Text::naming(reference),
-        });
+impl Field {
+    fn of(field: &ShownField, links: &[Linked]) -> Field {
+        let shown = match field.values.as_slice() {
+            [FieldItem::Text { text }] if field.name == "summary" => {
+                Shown::Summary(summary_html(text, Some((links, doc_href))))
+            }
+            values => Shown::Values(
+                (values.iter())
+                    .map(|item| match item {
+                        FieldItem::Text { text } => Text::plain(text),
+                        FieldItem::Reference { reference } => Text::naming(reference),
+                    })
+                    .collect(),
+            ),
+        };
         Field {
             name: field.name.clone(),
-            values: values.collect(),
+            shown,
+        }
+    }
+
+    pub fn summary(&self) -> Option<&Markup> {
+        match &self.shown {
+            Shown::Summary(summary) => Some(summary),
+            Shown::Values(_) => None,
+        }
+    }
+
+    pub fn values(&self) -> &[Text] {
+        match &self.shown {
+            Shown::Values(values) => values,
+            Shown::Summary(_) => &[],
         }
     }
 }
@@ -43,7 +71,9 @@ impl From<&ShownVersion> for Head {
                 ended: version.ended.as_deref().map(ended),
                 ..Stamped::new(&version.version, &version.written, &version.machine)
             },
-            fields: version.fields.iter().map(Field::from).collect(),
+            fields: (version.fields.iter())
+                .map(|field| Field::of(field, &version.links))
+                .collect(),
             body: to_html(&version.body, &version.links, doc_href),
         }
     }
@@ -226,7 +256,7 @@ mod tests {
         assert_eq!(stamp.written_full, NOW);
         let values: Vec<Vec<(&str, Option<&str>)>> = (head.fields.iter())
             .map(|field| {
-                (field.values.iter())
+                (field.values().iter())
                     .map(|value| (value.words(), value.link().map(|link| link.href.as_str())))
                     .collect()
             })

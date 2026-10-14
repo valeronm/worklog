@@ -118,13 +118,21 @@ fn a_listing_marks_each_link_to_a_document_that_ended() {
 }
 
 #[test]
-fn a_link_in_a_summary_is_the_text_it_is_on_a_row_and_on_its_document_s_page() {
-    let Ended { world, relay, .. } = ended();
-    let summary = "Fed by [[atlas/fuse]] &#38; &#60;b&#62;";
+fn a_link_in_a_summary_is_the_text_it_is_on_a_row_and_a_link_on_its_document_s_page() {
+    let Ended {
+        world, relay, fuse, ..
+    } = ended();
     let facts = ok(&world, "/facts");
-    has(&facts, &format!("<span class=\"what\">{summary}</span>"));
+    has(
+        &facts,
+        "<span class=\"what\">Fed by [[atlas/fuse]] &amp; &lt;b&gt;</span>",
+    );
     let page = ok(&world, &format!("/doc/{relay}"));
-    has(&page, &format!("<dt>summary</dt><dd>{summary}</dd>"));
+    let to_fuse = anchor("ended", &fuse, "false", "atlas/fuse");
+    has(
+        &page,
+        &format!("<dt>summary</dt><dd>Fed by {to_fuse} &amp; &lt;b&gt;</dd>"),
+    );
 }
 
 #[test]
@@ -249,21 +257,14 @@ fn a_page_of_documents_none_of_which_ended_marks_no_link() {
     ] {
         let html = ok(&world, &target);
         let main = main_of(&html);
-        for mark in [
-            "class=\"ended\"",
-            " ended\"",
-            "title=\"ended",
-            "unresolved",
-            "&lt;",
-            "&amp;",
-        ] {
+        for mark in ["class=\"ended\"", " ended\"", "title=\"ended", "unresolved"] {
             lacks(main, mark);
         }
     }
     let (marked, plain) = document_links(&ok(&world, "/facts"));
     assert_eq!(marked, 0);
     assert!(!plain.is_empty());
-    let summary = "Pin &#60;four&#62; &#38; &#34;five&#34; &#39;six&#39;";
+    let summary = "Pin &lt;four&gt; &amp; \"five\" 'six'";
     has(
         &ok(&world, "/facts"),
         &format!(

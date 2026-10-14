@@ -1,5 +1,5 @@
-//! A body as HTML: Markdown with the raw HTML in it shown as the text it is, and each
-//! `[[text]]` as a link to the document the version's links hold for it.
+//! A body and a summary as HTML: Markdown with the raw HTML in it shown as the text it is, and
+//! each `[[text]]` as a link to the document the version's links hold for it.
 
 use std::fmt;
 
@@ -10,7 +10,7 @@ use crate::app::show::Linked;
 use crate::domain::id::DocumentId;
 use crate::domain::schema::links::link_at;
 
-// Holds only what `to_html` made: a template writes it without escaping it.
+// Holds only what this module made: a template writes it without escaping it.
 pub struct Markup(String);
 
 impl fmt::Display for Markup {
@@ -41,9 +41,14 @@ fn followable(address: &str) -> bool {
     }
 }
 
+const OPTIONS: Options = Options::ENABLE_TABLES
+    .union(Options::ENABLE_STRIKETHROUGH)
+    .union(Options::ENABLE_TASKLISTS);
+
+type Linking<'l> = (&'l [Linked], fn(&DocumentId) -> String);
+
 struct Rendering<'b, 'l> {
-    links: &'l [Linked],
-    href: fn(&DocumentId) -> String,
+    linking: Option<Linking<'l>>,
     out: Vec<Event<'b>>,
     // The parser hands one run of text over in pieces, a bracket at a time.
     pending: String,
@@ -59,8 +64,8 @@ impl<'b> Rendering<'b, '_> {
         }
     }
 
-    fn link(&mut self, bracketed: &str, target: &str) {
-        let held = self.links.iter().find(|link| link.text == target);
+    fn link(&mut self, (links, href): Linking, bracketed: &str, target: &str) {
+        let held = links.iter().find(|link| link.text == target);
         let Some(reference) = held.and_then(|link| link.target.as_ref()) else {
             let open = CowStr::Borrowed("<span class=\"unresolved\">");
             self.out.push(Event::InlineHtml(open));
@@ -73,7 +78,7 @@ impl<'b> Rendering<'b, '_> {
         let title = mark.as_ref().map(|mark| mark.title().to_owned());
         let start = Event::Start(Tag::Link {
             link_type: LinkType::Inline,
-            dest_url: CowStr::from((self.href)(&reference.document)),
+            dest_url: CowStr::from(href(&reference.document)),
             title: CowStr::from(title.unwrap_or_default()),
             id: CowStr::Borrowed(""),
         });
@@ -94,13 +99,19 @@ impl<'b> Rendering<'b, '_> {
 
     fn flush(&mut self) {
         let pending = std::mem::take(&mut self.pending);
+        let Some(linking) = self.linking else {
+            if !pending.is_empty() {
+                self.out.push(Event::Text(CowStr::from(pending)));
+            }
+            return;
+        };
         let mut rest = pending.as_str();
         let mut from = 0;
         while let Some(at) = rest[from..].find("[[").map(|at| at + from) {
             match link_at(&rest[at..]) {
                 Ok((target, taken)) => {
                     self.text(&rest[..at]);
-                    self.link(&rest[at..at + taken], target);
+                    self.link(linking, &rest[at..at + taken], target);
                     rest = &rest[at + taken..];
                     from = 0;
                 }
@@ -172,24 +183,48 @@ impl<'b> Rendering<'b, '_> {
     }
 }
 
-pub fn to_html(body: &str, links: &[Linked], href: fn(&DocumentId) -> String) -> Markup {
-    let options =
-        Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
+fn rendered<'b>(
+    events: impl Iterator<Item = Event<'b>>,
+    linking: Option<Linking>,
+    source: &str,
+) -> Markup {
     let mut rendering = Rendering {
-        links,
-        href,
+        linking,
         out: Vec::new(),
         pending: String::new(),
         in_code: false,
         open: Vec::new(),
     };
-    for event in Parser::new_ext(body, options) {
+    for event in events {
         rendering.take(event);
     }
     rendering.flush();
-    let mut out = String::with_capacity(body.len() * 2);
+    let mut out = String::with_capacity(source.len() * 2);
     html::push_html(&mut out, rendering.out.into_iter());
     Markup(out)
+}
+
+pub fn to_html(body: &str, links: &[Linked], href: fn(&DocumentId) -> String) -> Markup {
+    rendered(Parser::new_ext(body, OPTIONS), Some((links, href)), body)
+}
+
+/// A summary as HTML with no block around it: the inline Markdown of the one paragraph it
+/// reads as, and its text as written where it reads as anything else. Without `linking` each
+/// `[[text]]` stays text.
+pub fn summary_html(summary: &str, linking: Option<Linking>) -> Markup {
+    let mut events: Vec<Event> = Parser::new_ext(summary, OPTIONS).collect();
+    let one_paragraph = matches!(
+        events.as_slice(),
+        [Event::Start(Tag::Paragraph), inline @ .., Event::End(TagEnd::Paragraph)]
+            if !inline.contains(&Event::End(TagEnd::Paragraph))
+    );
+    if one_paragraph {
+        let inline = 1..events.len() - 1;
+        rendered(events.drain(inline), linking, summary)
+    } else {
+        let text = Event::Text(CowStr::Borrowed(summary));
+        rendered(std::iter::once(text), None, summary)
+    }
 }
 
 #[cfg(test)]
@@ -244,6 +279,46 @@ mod tests {
             assert!(!html.contains(markup), "{body}: `{markup}` in {html}");
         }
         html
+    }
+
+    fn summary(text: &str) -> String {
+        summary_html(text, Some((&links(), doc))).to_string()
+    }
+
+    #[test]
+    fn a_summary_is_its_inline_markdown_with_no_block_around_it() {
+        assert_eq!(
+            summary("Pin `GPIO 5` is **fixed**, ~~not~~ *free*"),
+            "Pin <code>GPIO 5</code> is <strong>fixed</strong>, <del>not</del> <em>free</em>"
+        );
+        assert_eq!(summary("See [[atlas]]"), format!("See {ATLAS}"));
+        assert_eq!(
+            summary("A <b>lamp</b> & co"),
+            "A &lt;b&gt;lamp&lt;/b&gt; &amp; co"
+        );
+        assert_eq!(summary(""), "");
+    }
+
+    #[test]
+    fn a_summary_given_no_links_keeps_each_link_in_brackets_as_text() {
+        let row = summary_html("See [[atlas]] and `x`", None).to_string();
+        assert_eq!(row, "See [[atlas]] and <code>x</code>");
+    }
+
+    #[test]
+    fn a_summary_that_reads_as_anything_but_one_paragraph_is_its_text() {
+        for text in [
+            "# Why",
+            "- one",
+            "1. one",
+            "> said",
+            "one\n\ntwo",
+            "| a |\n| - |\n| b |",
+        ] {
+            let html = summary(text);
+            assert!(!html.contains('<'), "{text}: {html}");
+        }
+        assert_eq!(summary("# [[atlas]] & <b>"), "# [[atlas]] &amp; &lt;b&gt;");
     }
 
     #[test]

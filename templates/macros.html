@@ -20,7 +20,7 @@
 {% if !h.fields.is_empty() -%}
 <dl class="fields">
 {% for field in h.fields -%}
-<dt>{{ field.name }}</dt><dd>{% for value in field.values %}{% if !loop.first %}, {% endif %}{% call text(value, "") %}{% endcall %}{% endfor %}</dd>
+<dt>{{ field.name }}</dt><dd>{% if let Some(summary) = field.summary() %}{{ summary }}{% else %}{% for value in field.values() %}{% if !loop.first %}, {% endif %}{% call text(value, "") %}{% endcall %}{% endfor %}{% endif %}</dd>
 {% endfor -%}
 </dl>
 {% endif -%}

@@ -20,13 +20,10 @@ fn what_a_page_prints_from_the_store_is_escaped() {
     );
     let html = ok(&world, "/facts");
     lacks(&html, "<script>");
-    has(
-        &html,
-        "&#60;script&#62;alert(1)&#60;/script&#62; &#38; &#39;more&#39;",
-    );
+    has(&html, "&lt;script&gt;alert(1)&lt;/script&gt; &amp; 'more'");
     let home = ok(&world, "/");
     lacks(&home, "<b>");
-    has(&home, "&#60;b&#62;A lamp&#60;/b&#62;");
+    has(&home, "&lt;b&gt;A lamp&lt;/b&gt;");
 }
 
 #[test]

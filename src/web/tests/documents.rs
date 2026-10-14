@@ -49,7 +49,7 @@ fn a_document_is_its_label_its_marks_and_its_head_with_fields_and_a_rendered_bod
              <dt>topic</dt><dd><a href=\"/doc/{lantern}\">lantern</a></dd>\n\
              <dt>created</dt><dd>2026-09-04</dd>\n\
              <dt>confirmed</dt><dd>2026-09-04</dd>\n\
-             <dt>summary</dt><dd>Pin &#60;four&#62;</dd>\n\
+             <dt>summary</dt><dd>Pin &lt;four&gt;</dd>\n\
              <dt>former_names</dt><dd>relay, coil</dd>\n\
              </dl>"
         ),
