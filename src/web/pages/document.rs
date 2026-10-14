@@ -4,7 +4,7 @@ use askama::Template;
 
 use super::home::TopicLine;
 use super::links::{Nav, Place, Stamped, Text, doc_href, history_href, marks};
-use super::listing::{Item, entry_items, fact_items, followup_items};
+use super::listing::{Item, entry_items, fact_items, followup_items, leave_out};
 use crate::app::FollowupRow;
 use crate::app::list::{EntryRow, FactRow, TopicRow};
 use crate::app::show::{FieldItem, Linked, ShownDocument, ShownField, ShownVersion};
@@ -201,7 +201,7 @@ pub struct TopicPage {
 
 impl TopicPage {
     pub fn new(document: &ShownDocument, held: &Held, section: Section) -> TopicPage {
-        let (parts, rows) = match section {
+        let (parts, mut rows) = match section {
             Section::Parts => (held.parts.iter().map(TopicLine::from).collect(), Vec::new()),
             Section::Facts => (Vec::new(), fact_items(held.facts)),
             Section::Ideas => (Vec::new(), fact_items(held.ideas)),
@@ -209,6 +209,7 @@ impl TopicPage {
             Section::Entries => (Vec::new(), entry_items(held.entries)),
         };
         let here = doc_href(&document.document);
+        leave_out(&mut rows, &here);
         let tabs = Section::ALL.into_iter().map(|tab| Tab {
             name: tab.name(),
             href: if tab == Section::FIRST {

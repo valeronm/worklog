@@ -105,6 +105,8 @@ fn a_search_shows_each_hit_s_row_over_the_lines_that_matched() {
          <span class=\"mark\">ended false</span>",
     );
     lacks(&narrowed, "lantern/relay-pin");
+    has(&narrowed, &format!("href=\"/doc/{coil}\">atlas/coil</a>"));
+    lacks(&narrowed, "<span class=\"chips\">");
 
     let pattern = ok(&world, "/search?q=%5Erelay+%5B36%5D%24&regex=1");
     has(&pattern, &form("^relay [36]$", "", true, false));

@@ -162,7 +162,15 @@ fn searched(deps: &Deps, query: &Query) -> Result<Page, Problem> {
         return Ok(Page::ok(SearchPage::form(&asked).render()?));
     }
     match search::search(deps, &asked).map_err(Problem::from) {
-        Ok(hits) => Ok(Page::ok(SearchPage::found(&asked, &hits).render()?)),
+        Ok(hits) => {
+            let under = (asked.topic)
+                .map(|target| show::show(deps, target))
+                .transpose()?;
+            let under = under.as_ref().map(|shown| shown_link(shown).href);
+            Ok(Page::ok(
+                SearchPage::found(&asked, &hits, under.as_deref()).render()?,
+            ))
+        }
         Err(broken @ Problem::Broken(_)) => Err(broken),
         Err(problem) => {
             let (status, why) = problem.said();

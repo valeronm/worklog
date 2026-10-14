@@ -69,8 +69,11 @@ fn a_listing_marks_each_link_to_a_document_that_ended() {
     let to_atlas = anchor("ended", &atlas, "retired", "atlas");
     let to_fuse = anchor("ended", &fuse, "false", "atlas/fuse");
 
-    let facts = ok(&world, "/facts?topic=atlas&ended=1");
-    has(&facts, &format!("1 fact under {to_atlas} · "));
+    has(
+        &ok(&world, "/facts?topic=atlas&ended=1"),
+        &format!("1 fact under {to_atlas} · "),
+    );
+    let facts = ok(&world, "/facts?ended=1");
     has(
         &facts,
         &format!(

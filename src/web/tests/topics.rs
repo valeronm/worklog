@@ -122,13 +122,18 @@ fn a_topic_is_its_document_over_one_of_its_sections_with_a_count_for_each() {
         &format!(
             "<li><span class=\"label\">confirmed 2026-09-04</span> \
              <a class=\"title\" href=\"/doc/{relay}\">lantern/relay-pin</a> \
-             <span class=\"what\">s</span> \
-             <span class=\"chips\"><a href=\"/doc/{lantern}\">lantern</a></span></li>"
+             <span class=\"what\">s</span></li>"
         ),
     );
-    has(
-        &html,
-        &format!("<a class=\"title\" href=\"/doc/{map}\">atlas/map</a>"),
+    let of_part = format!(
+        "<a class=\"title\" href=\"/doc/{map}\">atlas/map</a> <span class=\"what\">s</span> \
+         <span class=\"chips\"><a href=\"/doc/{atlas}\">atlas</a></span></li>"
+    );
+    has(&html, &of_part);
+    has(&listed, &of_part);
+    lacks(
+        &listed,
+        &format!("<a href=\"/doc/{lantern}\">lantern</a></span>"),
     );
     for absent in ["lantern/wick", "atlas/dimmer", "desk/chair", "globe"] {
         lacks(&html, absent);
@@ -198,9 +203,15 @@ fn a_topic_shows_the_section_asked_for_under_the_same_counts() {
             "<li><span class=\"label\">no trigger</span> \
              <a class=\"title\" href=\"/doc/{open}\">{}</a> \
              <span class=\"what\">Order a fuse</span> \
-             <span class=\"chips\"><a href=\"/doc/{lantern}\">lantern</a>\
-             <a href=\"/doc/{atlas}\">atlas</a></span></li>",
+             <span class=\"chips\"><a href=\"/doc/{atlas}\">atlas</a></span></li>",
             open.short()
+        ),
+    );
+    has(
+        &listed,
+        &format!(
+            "<span class=\"what\">Order a fuse</span> \
+             <span class=\"chips\"><a href=\"/doc/{atlas}\">atlas</a></span></li>"
         ),
     );
 

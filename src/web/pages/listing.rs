@@ -78,6 +78,12 @@ impl From<&FollowupRow> for Item {
     }
 }
 
+pub(super) fn leave_out(rows: &mut [Item], href: &str) {
+    for row in rows {
+        row.topics.retain(|chip| chip.href != href);
+    }
+}
+
 pub(super) fn fact_items(rows: &[FactRow]) -> Vec<Item> {
     (rows.iter())
         .map(|fact| Item::new(&fact.row, &format!("confirmed {}", fact.confirmed)))
@@ -124,7 +130,15 @@ pub struct Listing {
 }
 
 impl Listing {
-    fn new(place: Place, (one, several): (&str, &str), scope: Scope, rows: Vec<Item>) -> Listing {
+    fn new(
+        place: Place,
+        (one, several): (&str, &str),
+        scope: Scope,
+        mut rows: Vec<Item>,
+    ) -> Listing {
+        if let Some(under) = &scope.under {
+            leave_out(&mut rows, &under.href);
+        }
         let mut href = place.route().to_owned();
         let mut sign = '?';
         if let Some(topic) = scope.topic {
@@ -189,7 +203,7 @@ impl<'q> SearchPage<'q> {
         }
     }
 
-    pub fn found(asked: &'q Query<'q>, hits: &[Hit]) -> SearchPage<'q> {
+    pub fn found(asked: &'q Query<'q>, hits: &[Hit], under: Option<&str>) -> SearchPage<'q> {
         let rows = hits.iter().map(|hit| {
             let summary = hit.row.summary.trim();
             Item {
@@ -205,9 +219,13 @@ impl<'q> SearchPage<'q> {
                 ..Item::new(&hit.row, hit.row.kind.word())
             }
         });
+        let mut rows: Vec<Item> = rows.collect();
+        if let Some(under) = under {
+            leave_out(&mut rows, under);
+        }
         SearchPage {
             count: Some(counted(hits.len(), "document matches", "documents match")),
-            rows: rows.collect(),
+            rows,
             ..SearchPage::form(asked)
         }
     }
