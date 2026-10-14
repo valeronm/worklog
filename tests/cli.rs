@@ -2116,15 +2116,15 @@ fn serve_answers_the_home_a_topic_and_a_document_from_the_store() {
     let mut serving = host.serve(&[]);
 
     let home = serving.page("/");
-    let lantern = ">lantern</a> <span class=\"what\">A thing</span> \
-                   <span class=\"label\">2 facts</span> <span class=\"label\">1 idea</span>";
+    let lantern = ">lantern</a> <span class=\"label\">2 facts</span> \
+                   <span class=\"label\">1 idea</span><span class=\"what\">A thing</span>";
     assert!(home.contains(lantern), "{home}");
     assert!(home.contains(">desk</a>"), "{home}");
 
     let topic = serving.page("/doc/lantern");
     assert!(topic.contains("<h1>lantern</h1>"), "{topic}");
     let row =
-        format!("href=\"/doc/{relay}\">lantern/relay</a> <span class=\"what\">Pin four</span>");
+        format!("href=\"/doc/{relay}\">lantern/relay</a><span class=\"what\">Pin four</span>");
     assert!(topic.contains(&row), "{topic}");
 
     let document = serving.page("/doc/lantern/relay");

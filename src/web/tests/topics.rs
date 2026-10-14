@@ -121,13 +121,13 @@ fn a_topic_is_its_document_over_one_of_its_sections_with_a_count_for_each() {
         &html,
         &format!(
             "<li><span class=\"label\">confirmed 2026-09-04</span> \
-             <a class=\"title\" href=\"/doc/{relay}\">lantern/relay-pin</a> \
+             <a class=\"title\" href=\"/doc/{relay}\">lantern/relay-pin</a>\
              <span class=\"what\">s</span></li>"
         ),
     );
     let of_part = format!(
-        "<a class=\"title\" href=\"/doc/{map}\">atlas/map</a> <span class=\"what\">s</span> \
-         <span class=\"chips\"><a href=\"/doc/{atlas}\">atlas</a></span></li>"
+        "<a class=\"title\" href=\"/doc/{map}\">atlas/map</a> \
+         <span class=\"chips\"><a href=\"/doc/{atlas}\">atlas</a></span><span class=\"what\">s</span></li>"
     );
     has(&html, &of_part);
     has(&listed, &of_part);
@@ -170,8 +170,9 @@ fn a_topic_shows_the_section_asked_for_under_the_same_counts() {
         &format!(
             "<h2>Parts</h2>\n<ul class=\"topics\">\
              <li><a class=\"title\" href=\"/doc/{atlas}\">atlas</a> \
-             <span class=\"what\">s</span> <span class=\"label\">1 fact</span> \
-             <span class=\"label\">1 idea</span> <span class=\"label\">1 open</span></li>\
+             <span class=\"label\">1 fact</span> \
+             <span class=\"label\">1 idea</span> <span class=\"label\">1 open</span>\
+             <span class=\"what\">s</span></li>\
              </ul>"
         ),
     );
@@ -202,16 +203,16 @@ fn a_topic_shows_the_section_asked_for_under_the_same_counts() {
         &format!(
             "<li><span class=\"label\">no trigger</span> \
              <a class=\"title\" href=\"/doc/{open}\">{}</a> \
-             <span class=\"what\">Order a fuse</span> \
-             <span class=\"chips\"><a href=\"/doc/{atlas}\">atlas</a></span></li>",
+             <span class=\"chips\"><a href=\"/doc/{atlas}\">atlas</a></span>\
+             <span class=\"what\">Order a fuse</span></li>",
             open.short()
         ),
     );
     has(
         &listed,
         &format!(
-            "<span class=\"what\">Order a fuse</span> \
-             <span class=\"chips\"><a href=\"/doc/{atlas}\">atlas</a></span></li>"
+            "<span class=\"chips\"><a href=\"/doc/{atlas}\">atlas</a></span>\
+             <span class=\"what\">Order a fuse</span></li>"
         ),
     );
 
@@ -365,7 +366,7 @@ fn a_part_that_is_forked_is_marked_in_the_parts_of_its_topic() {
         &ok(&world, "/doc/lantern?show=parts"),
         &format!(
             "<li><a class=\"title\" href=\"/doc/{atlas}\">atlas</a> \
-             <span class=\"what\">s</span> <span class=\"mark\">forked</span></li>"
+             <span class=\"mark\">forked</span><span class=\"what\">s</span></li>"
         ),
     );
 }

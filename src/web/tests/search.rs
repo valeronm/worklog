@@ -69,8 +69,8 @@ fn a_search_shows_each_hit_s_row_over_the_lines_that_matched() {
         &format!(
             "<li><span class=\"label\">fact</span> \
              <a class=\"title\" href=\"/doc/{relay}\">lantern/relay-pin</a> \
-             <span class=\"what\">s</span> \
              <span class=\"chips\"><a href=\"/doc/{lantern}\">lantern</a></span>\
+             <span class=\"what\">s</span>\
              <span class=\"details\">The relay.</span></li>"
         ),
     );
@@ -78,8 +78,8 @@ fn a_search_shows_each_hit_s_row_over_the_lines_that_matched() {
         &html,
         &format!(
             "<a class=\"title\" href=\"/doc/{coil}\">atlas/coil</a> \
-             <span class=\"what\">Wound by hand</span> \
              <span class=\"chips\"><a href=\"/doc/{atlas}\">atlas</a></span>\
+             <span class=\"what\">Wound by hand</span>\
              <span class=\"details\">relay one</span>\
              <span class=\"details\">relay &#60;two&#62;</span>\
              <span class=\"details\">relay 3</span>\
@@ -90,7 +90,7 @@ fn a_search_shows_each_hit_s_row_over_the_lines_that_matched() {
         &html,
         &format!(
             "<li><span class=\"label\">topic</span> \
-             <a class=\"title\" href=\"/doc/{named}\">relay</a> \
+             <a class=\"title\" href=\"/doc/{named}\">relay</a>\
              <span class=\"what\">s</span></li>"
         ),
     );
@@ -101,8 +101,8 @@ fn a_search_shows_each_hit_s_row_over_the_lines_that_matched() {
     has(&narrowed, "<p class=\"summary\">2 documents match</p>");
     has(
         &narrowed,
-        "atlas/old-relay</a> <span class=\"what\">s</span> \
-         <span class=\"mark\">ended false</span>",
+        "atlas/old-relay</a> \
+         <span class=\"mark\">ended false</span><span class=\"what\">s</span>",
     );
     lacks(&narrowed, "lantern/relay-pin");
     has(&narrowed, &format!("href=\"/doc/{coil}\">atlas/coil</a>"));
@@ -139,8 +139,8 @@ fn a_hit_s_summary_line_is_rendered_as_its_row_is_and_its_body_lines_are_text() 
         &html,
         &format!(
             "<a class=\"title\" href=\"/doc/{pin}\">lantern/pin</a> \
-             <span class=\"what\">The <code>relay</code> &lt;b&gt; [[lantern]]</span> \
              <span class=\"chips\"><a href=\"/doc/{lantern}\">lantern</a></span>\
+             <span class=\"what\">The <code>relay</code> &lt;b&gt; [[lantern]]</span>\
              <span class=\"details\">The <code>relay</code> &lt;b&gt; [[lantern]]</span>\
              <span class=\"details\">a `relay` line</span></li>"
         ),

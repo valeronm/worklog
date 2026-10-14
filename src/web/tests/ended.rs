@@ -77,8 +77,8 @@ fn a_listing_marks_each_link_to_a_document_that_ended() {
     has(
         &facts,
         &format!(
-            "{} <span class=\"what\">s</span> <span class=\"mark\">ended false</span> \
-             <span class=\"chips\">{to_atlas}</span>",
+            "{} <span class=\"mark\">ended false</span> \
+             <span class=\"chips\">{to_atlas}</span><span class=\"what\">s</span>",
             anchor("title ended", &fuse, "false", "atlas/fuse")
         ),
     );
@@ -88,7 +88,7 @@ fn a_listing_marks_each_link_to_a_document_that_ended() {
         &followups,
         &format!(
             "<span class=\"chips\"><a href=\"/doc/{lantern}\">lantern</a>{to_atlas}</span>\
-             <span class=\"details\">in "
+             <span class=\"what\">Paint the case</span><span class=\"details\">in "
         ),
     );
     has(&followups, &format!(" · about {to_fuse}</span>"));
@@ -241,7 +241,7 @@ fn a_page_of_documents_none_of_which_ended_marks_no_link() {
     );
     has(
         &ok(&world, "/forks"),
-        &format!("<li><a class=\"title\" href=\"/doc/{atlas}\">atlas</a> "),
+        &format!("<li><a class=\"title\" href=\"/doc/{atlas}\">atlas</a><span class=\"what\">"),
     );
     for target in [
         "/".to_owned(),
@@ -272,6 +272,7 @@ fn a_page_of_documents_none_of_which_ended_marks_no_link() {
         &ok(&world, "/facts"),
         &format!(
             "<a class=\"title\" href=\"/doc/{relay}\">lantern/relay-pin</a> \
+             <span class=\"chips\"><a href=\"/doc/{lantern}\">lantern</a></span>\
              <span class=\"what\">{summary}</span>"
         ),
     );

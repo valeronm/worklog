@@ -31,15 +31,15 @@ fn home_nests_the_unended_topics_under_what_they_are_part_of_with_their_counts()
         main,
         &format!(
             "<li><a class=\"title\" href=\"/doc/{lantern}\">lantern</a> \
-             <span class=\"what\">A lamp that dims</span> \
              <span class=\"label\">2 facts</span> <span class=\"label\">1 idea</span> \
              <span class=\"label\">1 open</span>\
+             <span class=\"what\">A lamp that dims</span>\
              <ul class=\"topics\">\
-             <li><a class=\"title\" href=\"/doc/{atlas}\">atlas</a> \
+             <li><a class=\"title\" href=\"/doc/{atlas}\">atlas</a>\
              <span class=\"what\">s</span>\
              <ul class=\"topics\">\
              <li><a class=\"title\" href=\"/doc/{relay}\">relay</a> \
-             <span class=\"what\">s</span> <span class=\"label\">1 fact</span></li>\
+             <span class=\"label\">1 fact</span><span class=\"what\">s</span></li>\
              </ul>\
              </li>\
              <li><a href=\"/doc/{relay}\">relay</a> \
@@ -93,7 +93,7 @@ fn home_has_one_full_line_for_a_topic_however_many_topics_it_is_part_of() {
     assert_eq!(main.matches("<li>").count(), 48);
     for layer in ["a", "g", "l"] {
         for side in ["left", "right"] {
-            let line = format!(">tier-{layer}-{side}</a> <span class=\"what\">");
+            let line = format!(">tier-{layer}-{side}</a><span class=\"what\">");
             assert_eq!(main.matches(&line).count(), 1, "{line}");
         }
     }
@@ -110,10 +110,10 @@ fn home_shows_a_ring_of_topics_with_each_member_once() {
     has(
         &html,
         &format!(
-            "<li><a class=\"title\" href=\"/doc/{atlas}\">atlas</a> \
+            "<li><a class=\"title\" href=\"/doc/{atlas}\">atlas</a>\
              <span class=\"what\">s</span>\
              <ul class=\"topics\">\
-             <li><a class=\"title\" href=\"/doc/{phone}\">phone</a> \
+             <li><a class=\"title\" href=\"/doc/{phone}\">phone</a>\
              <span class=\"what\">s</span>\
              <ul class=\"topics\">\
              <li><a href=\"/doc/{atlas}\">atlas</a> \
@@ -136,8 +136,9 @@ fn home_marks_a_forked_topic_and_shows_what_a_topic_uses() {
         &html,
         &format!(
             "<li><a class=\"title\" href=\"/doc/{atlas}\">atlas</a> \
-             <span class=\"what\">s</span> <span class=\"mark\">forked</span> \
-             <span class=\"muted\">uses <a href=\"/doc/{lantern}\">lantern</a></span></li>"
+             <span class=\"mark\">forked</span> \
+             <span class=\"muted\">uses <a href=\"/doc/{lantern}\">lantern</a></span>\
+             <span class=\"what\">s</span></li>"
         ),
     );
 }

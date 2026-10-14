@@ -30,15 +30,15 @@ fn facts_are_listed_with_their_links_and_marks() {
         &format!(
             "<li><span class=\"label\">confirmed 2026-09-04</span> \
              <a class=\"title\" href=\"/doc/{relay}\">lantern/relay-pin</a> \
-             <span class=\"what\">Pin four</span> \
-             <span class=\"chips\"><a href=\"/doc/{lantern}\">lantern</a></span></li>"
+             <span class=\"chips\"><a href=\"/doc/{lantern}\">lantern</a></span>\
+             <span class=\"what\">Pin four</span></li>"
         ),
     );
     has(
         &html,
         &format!(
             "<a class=\"title\" href=\"/doc/{fuse}\">lantern/fuse</a> \
-             <span class=\"what\">s</span> <span class=\"mark\">forked</span>"
+             <span class=\"mark\">forked</span>"
         ),
     );
     has(&html, "atlas/map");
@@ -54,7 +54,7 @@ fn facts_are_listed_with_their_links_and_marks() {
         &html,
         &format!(
             "<a class=\"title ended\" href=\"/doc/{wick}\" title=\"ended false\">lantern/wick</a> \
-             <span class=\"what\">s</span> <span class=\"mark\">ended false</span>"
+             <span class=\"mark\">ended false</span>"
         ),
     );
 
@@ -141,9 +141,8 @@ fn entries_are_listed_newest_first_with_their_day_and_topics() {
         &format!(
             "<li><span class=\"label\">2026-10-08</span> \
              <a class=\"title\" href=\"/doc/{driver}\">2026-10-08-lamp-driver</a> \
-             <span class=\"what\">s</span> \
              <span class=\"chips\"><a href=\"/doc/{lantern}\">lantern</a>\
-             <a href=\"/doc/{atlas}\">atlas</a></span></li>"
+             <a href=\"/doc/{atlas}\">atlas</a></span><span class=\"what\">s</span></li>"
         ),
     );
     let newest = html.find("2026-10-09-wiring").expect("the newest entry");
@@ -208,8 +207,8 @@ fn followups_lead_with_the_state_of_their_trigger() {
         &format!(
             "<li class=\"due\"><span class=\"label\">due 2026-10-01</span> \
              <a class=\"title\" href=\"/doc/{due}\">{}</a> \
-             <span class=\"what\">Order a fuse</span> \
              <span class=\"chips\"><a href=\"/doc/{lantern}\">lantern</a></span>\
+             <span class=\"what\">Order a fuse</span>\
              <span class=\"details\">the shop reopens</span></li>",
             due.short()
         ),
