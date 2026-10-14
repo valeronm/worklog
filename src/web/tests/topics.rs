@@ -122,12 +122,12 @@ fn a_topic_is_its_document_over_one_of_its_sections_with_a_count_for_each() {
         &format!(
             "<li><span class=\"label\">confirmed 2026-09-04</span> \
              <a class=\"title\" href=\"/doc/{relay}\">lantern/relay-pin</a>\
-             <span class=\"what\">s</span></li>"
+             <div class=\"what\">s</div></li>"
         ),
     );
     let of_part = format!(
         "<a class=\"title\" href=\"/doc/{map}\">atlas/map</a> \
-         <span class=\"chips\"><a href=\"/doc/{atlas}\">atlas</a></span><span class=\"what\">s</span></li>"
+         <span class=\"chips\"><a href=\"/doc/{atlas}\">atlas</a></span><div class=\"what\">s</div></li>"
     );
     has(&html, &of_part);
     has(&listed, &of_part);
@@ -172,7 +172,7 @@ fn a_topic_shows_the_section_asked_for_under_the_same_counts() {
              <li><a class=\"title\" href=\"/doc/{atlas}\">atlas</a> \
              <span class=\"label\">1 fact</span> \
              <span class=\"label\">1 idea</span> <span class=\"label\">1 open</span>\
-             <span class=\"what\">s</span></li>\
+             <div class=\"what\">s</div></li>\
              </ul>"
         ),
     );
@@ -204,7 +204,7 @@ fn a_topic_shows_the_section_asked_for_under_the_same_counts() {
             "<li><span class=\"label\">no trigger</span> \
              <a class=\"title\" href=\"/doc/{open}\">{}</a> \
              <span class=\"chips\"><a href=\"/doc/{atlas}\">atlas</a></span>\
-             <span class=\"what\">Order a fuse</span></li>",
+             <div class=\"what\">Order a fuse</div></li>",
             open.short()
         ),
     );
@@ -212,7 +212,7 @@ fn a_topic_shows_the_section_asked_for_under_the_same_counts() {
         &listed,
         &format!(
             "<span class=\"chips\"><a href=\"/doc/{atlas}\">atlas</a></span>\
-             <span class=\"what\">Order a fuse</span></li>"
+             <div class=\"what\">Order a fuse</div></li>"
         ),
     );
 
@@ -366,7 +366,7 @@ fn a_part_that_is_forked_is_marked_in_the_parts_of_its_topic() {
         &ok(&world, "/doc/lantern?show=parts"),
         &format!(
             "<li><a class=\"title\" href=\"/doc/{atlas}\">atlas</a> \
-             <span class=\"mark\">forked</span><span class=\"what\">s</span></li>"
+             <span class=\"mark\">forked</span><div class=\"what\">s</div></li>"
         ),
     );
 }

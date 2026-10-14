@@ -8,7 +8,7 @@
 
 {% macro marks(ms) %}{% for mark in ms.iter() %} <span class="mark">{{ mark }}</span>{% endfor %}{% endmacro %}
 
-{% macro line(l) %}{% call open("title", l.title.href, l.title.mark) %}{% endcall %}{{ l.title.text }}</a>{% for count in l.counts %} <span class="label">{{ count }}</span>{% endfor %}{% call marks(l.marks) %}{% endcall %}{{ caller() }}<span class="what">{{ l.summary }}</span>{% endmacro %}
+{% macro line(l) %}{% call open("title", l.title.href, l.title.mark) %}{% endcall %}{{ l.title.text }}</a>{% for count in l.counts %} <span class="label">{{ count }}</span>{% endfor %}{% call marks(l.marks) %}{% endcall %}{{ caller() }}<div class="what">{{ l.summary }}</div>{% endmacro %}
 
 {% macro change(s) %}{% if let Some((word, whole)) = s.change_cut() %}<span title="{{ whole }}">{{ word }}</span>{% else if let Some(change) = s.change %}{{ change }}{% endif %}{% endmacro %}
 

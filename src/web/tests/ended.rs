@@ -78,7 +78,7 @@ fn a_listing_marks_each_link_to_a_document_that_ended() {
         &facts,
         &format!(
             "{} <span class=\"mark\">ended false</span> \
-             <span class=\"chips\">{to_atlas}</span><span class=\"what\">s</span>",
+             <span class=\"chips\">{to_atlas}</span><div class=\"what\">s</div>",
             anchor("title ended", &fuse, "false", "atlas/fuse")
         ),
     );
@@ -88,7 +88,7 @@ fn a_listing_marks_each_link_to_a_document_that_ended() {
         &followups,
         &format!(
             "<span class=\"chips\"><a href=\"/doc/{lantern}\">lantern</a>{to_atlas}</span>\
-             <span class=\"what\">Paint the case</span><span class=\"details\">in "
+             <div class=\"what\">Paint the case</div><span class=\"details\">in "
         ),
     );
     has(&followups, &format!(" · about {to_fuse}</span>"));
@@ -128,7 +128,7 @@ fn a_link_in_a_summary_is_the_text_it_is_on_a_row_and_a_link_on_its_document_s_p
     let facts = ok(&world, "/facts");
     has(
         &facts,
-        "<span class=\"what\">Fed by [[atlas/fuse]] &amp; &lt;b&gt;</span>",
+        "<div class=\"what\">Fed by [[atlas/fuse]] &amp; &lt;b&gt;</div>",
     );
     let page = ok(&world, &format!("/doc/{relay}"));
     let to_fuse = anchor("ended", &fuse, "false", "atlas/fuse");
@@ -241,7 +241,7 @@ fn a_page_of_documents_none_of_which_ended_marks_no_link() {
     );
     has(
         &ok(&world, "/forks"),
-        &format!("<li><a class=\"title\" href=\"/doc/{atlas}\">atlas</a><span class=\"what\">"),
+        &format!("<li><a class=\"title\" href=\"/doc/{atlas}\">atlas</a><div class=\"what\">"),
     );
     for target in [
         "/".to_owned(),
@@ -273,7 +273,7 @@ fn a_page_of_documents_none_of_which_ended_marks_no_link() {
         &format!(
             "<a class=\"title\" href=\"/doc/{relay}\">lantern/relay-pin</a> \
              <span class=\"chips\"><a href=\"/doc/{lantern}\">lantern</a></span>\
-             <span class=\"what\">{summary}</span>"
+             <div class=\"what\">{summary}</div>"
         ),
     );
     has(

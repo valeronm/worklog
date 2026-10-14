@@ -31,7 +31,7 @@ fn facts_are_listed_with_their_links_and_marks() {
             "<li><span class=\"label\">confirmed 2026-09-04</span> \
              <a class=\"title\" href=\"/doc/{relay}\">lantern/relay-pin</a> \
              <span class=\"chips\"><a href=\"/doc/{lantern}\">lantern</a></span>\
-             <span class=\"what\">Pin four</span></li>"
+             <div class=\"what\">Pin four</div></li>"
         ),
     );
     has(
@@ -142,7 +142,7 @@ fn entries_are_listed_newest_first_with_their_day_and_topics() {
             "<li><span class=\"label\">2026-10-08</span> \
              <a class=\"title\" href=\"/doc/{driver}\">2026-10-08-lamp-driver</a> \
              <span class=\"chips\"><a href=\"/doc/{lantern}\">lantern</a>\
-             <a href=\"/doc/{atlas}\">atlas</a></span><span class=\"what\">s</span></li>"
+             <a href=\"/doc/{atlas}\">atlas</a></span><div class=\"what\">s</div></li>"
         ),
     );
     let newest = html.find("2026-10-09-wiring").expect("the newest entry");
@@ -208,7 +208,7 @@ fn followups_lead_with_the_state_of_their_trigger() {
             "<li class=\"due\"><span class=\"label\">due 2026-10-01</span> \
              <a class=\"title\" href=\"/doc/{due}\">{}</a> \
              <span class=\"chips\"><a href=\"/doc/{lantern}\">lantern</a></span>\
-             <span class=\"what\">Order a fuse</span>\
+             <div class=\"what\">Order a fuse</div>\
              <span class=\"details\">the shop reopens</span></li>",
             due.short()
         ),

@@ -70,7 +70,7 @@ fn a_search_shows_each_hit_s_row_over_the_lines_that_matched() {
             "<li><span class=\"label\">fact</span> \
              <a class=\"title\" href=\"/doc/{relay}\">lantern/relay-pin</a> \
              <span class=\"chips\"><a href=\"/doc/{lantern}\">lantern</a></span>\
-             <span class=\"what\">s</span>\
+             <div class=\"what\">s</div>\
              <span class=\"details\">The relay.</span></li>"
         ),
     );
@@ -79,7 +79,7 @@ fn a_search_shows_each_hit_s_row_over_the_lines_that_matched() {
         &format!(
             "<a class=\"title\" href=\"/doc/{coil}\">atlas/coil</a> \
              <span class=\"chips\"><a href=\"/doc/{atlas}\">atlas</a></span>\
-             <span class=\"what\">Wound by hand</span>\
+             <div class=\"what\">Wound by hand</div>\
              <span class=\"details\">relay one</span>\
              <span class=\"details\">relay &#60;two&#62;</span>\
              <span class=\"details\">relay 3</span>\
@@ -91,7 +91,7 @@ fn a_search_shows_each_hit_s_row_over_the_lines_that_matched() {
         &format!(
             "<li><span class=\"label\">topic</span> \
              <a class=\"title\" href=\"/doc/{named}\">relay</a>\
-             <span class=\"what\">s</span></li>"
+             <div class=\"what\">s</div></li>"
         ),
     );
     lacks(&html, "old-relay");
@@ -102,7 +102,7 @@ fn a_search_shows_each_hit_s_row_over_the_lines_that_matched() {
     has(
         &narrowed,
         "atlas/old-relay</a> \
-         <span class=\"mark\">ended false</span><span class=\"what\">s</span>",
+         <span class=\"mark\">ended false</span><div class=\"what\">s</div>",
     );
     lacks(&narrowed, "lantern/relay-pin");
     has(&narrowed, &format!("href=\"/doc/{coil}\">atlas/coil</a>"));
@@ -140,7 +140,7 @@ fn a_hit_s_summary_line_is_rendered_as_its_row_is_and_its_body_lines_are_text() 
         &format!(
             "<a class=\"title\" href=\"/doc/{pin}\">lantern/pin</a> \
              <span class=\"chips\"><a href=\"/doc/{lantern}\">lantern</a></span>\
-             <span class=\"what\">The <code>relay</code> &lt;b&gt; [[lantern]]</span>\
+             <div class=\"what\">The <code>relay</code> &lt;b&gt; [[lantern]]</div>\
              <span class=\"details\">The <code>relay</code> &lt;b&gt; [[lantern]]</span>\
              <span class=\"details\">a `relay` line</span></li>"
         ),

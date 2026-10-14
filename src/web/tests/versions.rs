@@ -316,7 +316,7 @@ fn the_forks_are_each_forked_document_over_its_heads() {
         &html,
         &format!(
             "<li><a class=\"title\" href=\"/doc/{relay}\">lantern/relay-pin</a>\
-             <span class=\"what\">s</span>{}{}</li>",
+             <div class=\"what\">s</div>{}{}</li>",
             line(&heads[0], unheld, "2026-09-04T10:00:00+01:00", ""),
             line(&heads[1], unheld, "2026-09-04T10:00:00+01:00", ""),
         ),
@@ -325,7 +325,7 @@ fn the_forks_are_each_forked_document_over_its_heads() {
         &html,
         &format!(
             "<li><a class=\"title\" href=\"/doc/{atlas}\">atlas</a>\
-             <span class=\"what\">s</span>"
+             <div class=\"what\">s</div>"
         ),
     );
     has(&html, &line(&open, &desk, "2026-10-09T10:00:00+01:00", ""));
@@ -354,7 +354,7 @@ fn a_fork_that_is_ended_is_marked_and_one_no_head_of_which_reads_is_linked_as_a_
         &html,
         &format!(
             "<li><a class=\"title ended\" href=\"/doc/{atlas}\" title=\"ended retired\">atlas</a> \
-             <span class=\"mark\">ended retired</span><span class=\"what\">s</span>\
+             <span class=\"mark\">ended retired</span><div class=\"what\">s</div>\
              <span class=\"details\">"
         ),
     );
@@ -363,7 +363,7 @@ fn a_fork_that_is_ended_is_marked_and_one_no_head_of_which_reads_is_linked_as_a_
         &html,
         &format!(
             "<li><a class=\"title\" href=\"/doc/{unread}\">{}</a>\
-             <span class=\"what\"></span><span class=\"details\">",
+             <div class=\"what\"></div><span class=\"details\">",
             unread.short()
         ),
     );
