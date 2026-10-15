@@ -39,7 +39,8 @@ curl -fsSL https://raw.githubusercontent.com/valeronm/worklog/main/packaging/get
 Downloads the release for this machine's operating system and architecture
 into `~/.local/bin`, or into `$PREFIX`, after verifying the checksum
 published beside it. Or build from source with the Rust toolchain
-`mise.toml` pins: `cargo install --path .`.
+`mise.toml` pins: `packaging/install-build.sh` installs a build of the
+checkout in the same place.
 
 From then on `worklog upgrade` does the same from the binary itself when a
 newer release exists, verified the same way, and `worklog upgrade --check`
