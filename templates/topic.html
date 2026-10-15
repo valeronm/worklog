@@ -5,13 +5,16 @@
 {% call m::sheet(document) %}{% endcall %}
 <p class="tabs">{% for tab in tabs %}<a href="{{ tab.href }}"{% if tab.current %} aria-current="page"{% endif %}>{{ tab.name }} <span class="label">{{ tab.count }}</span></a>{% endfor %}</p>
 <h2>{% if let Some(href) = listing %}<a href="{{ href }}">{{ section }}</a>{% else %}{{ section }}{% endif %}</h2>
-{% if !parts.is_empty() -%}
-<ul class="topics">{% for t in parts %}<li>{% call m::topic(t) %}{% endcall %}</li>{% endfor %}</ul>
-{%- else if !claims.is_empty() -%}
-<ul class="items">{% for c in claims %}<li>{% call m::text(c.topic, "title") %}{% endcall %}{% for p in c.places %}<span class="details">{% call m::link(p.directory) %}{% endcall %}{% call m::marks(p.marks) %}{% endcall %}</span>{% endfor %}</li>{% endfor %}</ul>
-{%- else if !rows.is_empty() -%}
-{% call m::items(rows) %}{% endcall %}
-{%- else -%}
+{% if body.is_empty() -%}
 <p class="muted">None.</p>
+{%- else -%}
+{% match body -%}
+{%- when Body::Parts(parts) -%}
+<ul class="topics">{% for t in parts %}<li>{% call m::topic(t) %}{% endcall %}</li>{% endfor %}</ul>
+{%- when Body::Claims(claims) -%}
+<ul class="items">{% for c in claims %}<li>{% call m::text(c.topic, "title") %}{% endcall %}{% for p in c.places %}<span class="details">{% call m::link(p.directory) %}{% endcall %}{% call m::marks(p.marks) %}{% endcall %}</span>{% endfor %}</li>{% endfor %}</ul>
+{%- when Body::Rows(rows) -%}
+{% call m::items(rows) %}{% endcall %}
+{%- endmatch %}
 {%- endif %}
 {% endblock %}

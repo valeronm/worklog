@@ -224,6 +224,22 @@ fn claim_lines(claims: &[ClaimRow]) -> Vec<ClaimLine> {
         .collect()
 }
 
+pub enum Body {
+    Parts(Vec<TopicLine>),
+    Claims(Vec<ClaimLine>),
+    Rows(Vec<Item>),
+}
+
+impl Body {
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Body::Parts(parts) => parts.is_empty(),
+            Body::Claims(claims) => claims.is_empty(),
+            Body::Rows(rows) => rows.is_empty(),
+        }
+    }
+}
+
 pub struct Tab {
     pub name: &'static str,
     pub href: String,
@@ -240,28 +256,25 @@ pub struct TopicPage {
     pub section: &'static str,
     // None for the parts and the claims, which no listing page shows.
     pub listing: Option<String>,
-    pub parts: Vec<TopicLine>,
-    pub claims: Vec<ClaimLine>,
-    pub rows: Vec<Item>,
+    pub body: Body,
 }
 
 impl TopicPage {
     pub fn new(document: &ShownDocument, held: &Held, section: Section) -> TopicPage {
-        let (parts, claims, mut rows) = match section {
-            Section::Parts => (
-                held.parts.iter().map(TopicLine::from).collect(),
-                Vec::new(),
-                Vec::new(),
-            ),
-            Section::Claims => (Vec::new(), claim_lines(held.claims), Vec::new()),
-            Section::Facts => (Vec::new(), Vec::new(), fact_items(held.facts)),
-            Section::Ideas => (Vec::new(), Vec::new(), fact_items(held.ideas)),
-            Section::Followups => (Vec::new(), Vec::new(), followup_items(held.followups)),
-            Section::Entries => (Vec::new(), Vec::new(), entry_items(held.entries)),
+        let here = doc_href(&document.document);
+        let rows = |mut rows: Vec<Item>| {
+            leave_out(&mut rows, &here);
+            Body::Rows(rows)
+        };
+        let body = match section {
+            Section::Parts => Body::Parts(held.parts.iter().map(TopicLine::from).collect()),
+            Section::Claims => Body::Claims(claim_lines(held.claims)),
+            Section::Facts => rows(fact_items(held.facts)),
+            Section::Ideas => rows(fact_items(held.ideas)),
+            Section::Followups => rows(followup_items(held.followups)),
+            Section::Entries => rows(entry_items(held.entries)),
         };
         let claimed = by_topic(held.claims).count();
-        let here = doc_href(&document.document);
-        leave_out(&mut rows, &here);
         // Only a machine topic holds claims.
         let shown = |tab: &Section| *tab != Section::Claims || claimed > 0 || *tab == section;
         let tabs = Section::ALL.into_iter().filter(shown).map(|tab| Tab {
@@ -288,9 +301,7 @@ impl TopicPage {
             section: section.name(),
             listing: (section.listing())
                 .map(|listing| format!("{}?topic={}", listing.route(), document.document)),
-            parts,
-            claims,
-            rows,
+            body,
         }
     }
 }
