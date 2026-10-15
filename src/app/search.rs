@@ -13,7 +13,7 @@ use crate::domain::id::{DocumentId, VersionId};
 use crate::domain::schema::KindOf;
 use crate::domain::version::{Stamp, Version};
 
-const SEARCHED: [KindOf; 4] = [KindOf::Fact, KindOf::Topic, KindOf::Entry, KindOf::Followup];
+const SEARCHED: [KindOf; 4] = [KindOf::Topic, KindOf::Fact, KindOf::Entry, KindOf::Followup];
 
 pub struct Query<'a> {
     pub term: &'a str,
@@ -51,7 +51,8 @@ pub struct Logged {
     pub row: Option<Row>,
 }
 
-/// Facts and ideas first, then topics, entries, followups; within a kind by label.
+/// Topics first, then facts and ideas, entries, followups; within a kind newest row head
+/// first, ties by label.
 ///
 /// A document matches by its label, its summary or a body line; the term ignores case and,
 /// unless `regex`, is matched as plain text. `lines` are the matching summary and body
@@ -83,15 +84,20 @@ pub fn search(deps: &Deps, query: &Query) -> Result<Vec<Hit>, Failure> {
                 .collect();
             if !lines.is_empty() || matcher.is_match(&row.label) {
                 let label_spans = spans(&matcher, &row.label);
-                found.push(Hit {
-                    row,
-                    lines,
-                    label_spans,
-                });
+                let written = shown.head.envelope.written.instant();
+                found.push((
+                    written,
+                    Hit {
+                        row,
+                        lines,
+                        label_spans,
+                    },
+                ));
             }
         }
-        by_label(&mut found, |hit| &hit.row);
-        hits.extend(found);
+        by_label(&mut found, |(_, hit)| &hit.row);
+        found.sort_by_key(|(written, _)| Reverse(*written));
+        hits.extend(found.into_iter().map(|(_, hit)| hit));
     }
     Ok(hits)
 }
@@ -331,7 +337,7 @@ mod tests {
     }
 
     #[test]
-    fn hits_come_facts_first_then_topics_entries_followups_each_by_label() {
+    fn hits_come_topics_first_then_facts_entries_followups_ties_by_label() {
         let world = World::new();
         topic(&world, "desk", "");
         let lantern = world.put(
@@ -371,13 +377,31 @@ mod tests {
         assert_eq!(
             labels(&hits, |hit| &hit.row),
             [
-                "atlas/a-idea",
-                "lantern/b-fact",
                 "atlas",
                 "lantern",
+                "atlas/a-idea",
+                "lantern/b-fact",
                 "2026-10-08-lamp-driver",
                 followup.short()
             ]
+        );
+    }
+
+    #[test]
+    fn hits_of_a_kind_come_newest_row_head_first() {
+        let (world, lantern) = world();
+        let relay = fact(&world, &lantern, "relay-pin", "");
+        fact(&world, &lantern, "lamp-pin", "");
+        rewritten(
+            &world,
+            &relay,
+            "2026-10-11T09:00:00+00:00",
+            &world.machine(),
+        );
+        let hits = find(&world, "pin");
+        assert_eq!(
+            labels(&hits, |hit| &hit.row),
+            ["lantern/relay-pin", "lantern/lamp-pin"]
         );
     }
 
@@ -409,10 +433,10 @@ mod tests {
         let hits = query(&world, ".", true, Some("lantern"), false);
         assert_eq!(
             labels(&hits, |hit| &hit.row),
-            ["atlas/part", "lantern/own", "atlas", "lantern"]
+            ["atlas", "lantern", "atlas/part", "lantern/own"]
         );
         let hits = query(&world, ".", true, Some("atlas"), false);
-        assert_eq!(labels(&hits, |hit| &hit.row), ["atlas/part", "atlas"]);
+        assert_eq!(labels(&hits, |hit| &hit.row), ["atlas", "atlas/part"]);
     }
 
     #[test]
@@ -629,7 +653,11 @@ mod tests {
         let (world, lantern) = world();
         fact_with(&world, &lantern, "driver", "s", "a pin\n");
         let hits = query(&world, "pin|x*", true, None, false);
-        assert_eq!(bounds(&hits[0].lines.last().unwrap().spans), [(2, 5)]);
+        let driver = hits
+            .iter()
+            .find(|hit| hit.row.kind == KindOf::Fact)
+            .unwrap();
+        assert_eq!(bounds(&driver.lines.last().unwrap().spans), [(2, 5)]);
     }
 
     #[test]

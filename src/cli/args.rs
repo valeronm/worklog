@@ -346,7 +346,7 @@ pub enum ReadCommand {
         #[arg(long, add = complete::topics())]
         machine: Option<String>,
     },
-    /// Documents whose name, summary or text holds the term, facts first
+    /// Documents whose name, summary or text holds the term, topics first
     Search {
         term: String,
         /// Read the term as a regular expression

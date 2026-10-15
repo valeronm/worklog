@@ -295,7 +295,7 @@ already decided about it:
 
 1. When the work names what is about to change, a component, a file, an
    identifier, `worklog search <term> --topic <topic>` returns the
-   facts and ideas, then the topics, entries and followups, of that topic
+   topics, then the facts and ideas, entries and followups, of that topic
    and its parts whose name, summary or body holds the term. The term is
    matched as written, whatever its case, so try the other words the
    thing goes by before reading an empty result as nothing decided.
