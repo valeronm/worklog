@@ -130,8 +130,9 @@ is not maintained afterward.
 | `look_again`, `why` | if set | a day to look at it again, and what to look for then |
 | `touching` | if set | one of its own topics, to raise it when a session touches that topic |
 
-A followup has one trigger or none: `look_again` with `why`, or
-`touching`. One with no trigger is never due and is found by listing.
+An open followup carries one trigger: `look_again` with `why`, or
+`touching`. One whose document already has a head with neither may keep
+none; it is never due and is found by listing.
 
 ## Claim
 

@@ -187,8 +187,6 @@ A followup's trigger says when it comes up again:
   session that only claims what that topic is part of does not bring it
   up. In a session outside every claimed directory, the machine topic and
   the topics claimed `--anywhere` count as claimed there.
-- `worklog trigger <followup> none` clears the trigger. A followup
-  with none is never due and is found only by listing.
 
 `new followup` takes several `--topics` separated by commas, and `--about
 <document>` for the document the followup is about. With `--summary` it

@@ -140,12 +140,7 @@ pub fn new_followup(deps: &Deps, what: &NewFollowup) -> Result<Made, Failure> {
     Ok(Made::Written(admitted.store(deps)?))
 }
 
-/// `None` clears the trigger.
-pub fn set_trigger(
-    deps: &Deps,
-    address: &str,
-    trigger: Option<&TriggerArg>,
-) -> Result<Written, Failure> {
+pub fn set_trigger(deps: &Deps, address: &str, trigger: &TriggerArg) -> Result<Written, Failure> {
     let lookup = Lookup::new(deps.store);
     let target = open(deps, &lookup, address)?;
     let Content::Followup(followup) = &target.record.content else {
@@ -156,11 +151,9 @@ pub fn set_trigger(
     for key in TRIGGER_KEYS {
         fields.remove(key);
     }
-    if let Some(trigger) = trigger {
-        let touching = |address: &str| touched(&lookup, address, &followup.topics);
-        for (key, value) in trigger_fields(trigger, touching)? {
-            fields.insert(key.to_owned(), value);
-        }
+    let touching = |address: &str| touched(&lookup, address, &followup.topics);
+    for (key, value) in trigger_fields(trigger, touching)? {
+        fields.insert(key.to_owned(), value);
     }
     target.store(deps, &lookup, &fields, "trigger")
 }
@@ -197,7 +190,10 @@ mod tests {
             body: None,
             entry: None,
             about: None,
-            trigger: None,
+            trigger: Some(TriggerArg::LookAgain {
+                on: "2026-11-01",
+                why: "later",
+            }),
         }
     }
 
@@ -362,7 +358,7 @@ mod tests {
     }
 
     #[test]
-    fn a_trigger_is_set_replaced_and_cleared() {
+    fn a_trigger_is_set_and_replaced() {
         let (world, lantern, _) = world_with_atlas();
         let deps = world.deps();
         let id = written(new_followup(&deps, &plain(&["lantern", "atlas"], "Check"))).document;
@@ -370,10 +366,10 @@ mod tests {
         set_trigger(
             &deps,
             at,
-            Some(&TriggerArg::LookAgain {
-                on: "2026-11-01",
-                why: "later",
-            }),
+            &TriggerArg::LookAgain {
+                on: "2026-12-01",
+                why: "later still",
+            },
         )
         .unwrap();
         assert!(matches!(
@@ -381,24 +377,75 @@ mod tests {
             Some(Trigger::LookAgain { .. })
         ));
         assert_eq!(head(&world, &id).envelope.change, "trigger");
-        set_trigger(&deps, at, Some(&TriggerArg::Touching("lantern"))).unwrap();
+        set_trigger(&deps, at, &TriggerArg::Touching("lantern")).unwrap();
         assert_eq!(
             followup(&world, &id).trigger,
             Some(Trigger::Touching(lantern))
         );
-        set_trigger(&deps, at, None).unwrap();
-        assert_eq!(followup(&world, &id).trigger, None);
         assert!(matches!(
             set_trigger(
                 &deps,
                 at,
-                Some(&TriggerArg::LookAgain {
+                &TriggerArg::LookAgain {
                     on: "soon",
                     why: "x"
-                })
+                }
             ),
             Err(Failure::Usage(_))
         ));
+    }
+
+    #[test]
+    fn an_open_followup_is_stored_without_a_trigger_only_where_a_head_has_none() {
+        let (world, lantern, _) = world_with_atlas();
+        let deps = world.deps();
+        let fill = |id: &DocumentId, edit: &dyn Fn(&mut Fields)| {
+            let mut draft = world.drafts.read(id).unwrap().unwrap();
+            edit(&mut draft.fields);
+            world.drafts.write(&draft).unwrap();
+            save(&deps, id.as_str())
+        };
+        let mut what = plain(&["lantern"], "Check");
+        what.trigger = None;
+        let text = refused(new_followup(&deps, &what));
+        assert!(
+            text.contains("an open followup carries a trigger"),
+            "{text}"
+        );
+
+        what.summary = None;
+        let Ok(Made::Draft(opened)) = new_followup(&deps, &what) else {
+            panic!("a draft");
+        };
+        let text = refused(fill(&opened.document, &|fields| {
+            fields.insert("summary".to_owned(), "Check".into());
+        }));
+        assert!(
+            text.contains("an open followup carries a trigger"),
+            "{text}"
+        );
+
+        let triggered = written(new_followup(&deps, &plain(&["lantern"], "Check"))).document;
+        crate::app::draft::checkout(&deps, triggered.as_str()).unwrap();
+        let text = refused(fill(&triggered, &|fields| {
+            fields.remove("look_again");
+            fields.remove("why");
+        }));
+        assert!(
+            text.contains("an open followup carries a trigger"),
+            "{text}"
+        );
+
+        let held = crate::app::testing::followup(&world, &[&lantern], "Old", "");
+        crate::app::draft::checkout(&deps, held.as_str()).unwrap();
+        fill(&held, &|fields| {
+            fields.insert("summary".to_owned(), "Older".into());
+        })
+        .unwrap();
+        assert_eq!(followup(&world, &held).trigger, None);
+        crate::app::amend::end(&deps, held.as_str(), "done", "", None).unwrap();
+        crate::app::amend::reopen(&deps, held.as_str(), "ended by mistake").unwrap();
+        assert_eq!(followup(&world, &held).trigger, None);
     }
 
     #[test]
@@ -413,14 +460,18 @@ mod tests {
             ),
             "\n",
         );
-        let text = refused(set_trigger(&deps, "lantern/relay", None));
+        let text = refused(set_trigger(
+            &deps,
+            "lantern/relay",
+            &TriggerArg::Touching("lantern"),
+        ));
         assert!(text.contains("is not a followup"), "{text}");
         let id = written(new_followup(&deps, &plain(&["lantern"], "Check"))).document;
         crate::app::amend::end(&deps, id.as_str(), "done", "", None).unwrap();
         let text = refused(set_trigger(
             &deps,
             id.as_str(),
-            Some(&TriggerArg::Touching("lantern")),
+            &TriggerArg::Touching("lantern"),
         ));
         assert!(text.contains("is ended; reopen it first"), "{text}");
     }
@@ -433,7 +484,7 @@ mod tests {
         let text = refused(set_trigger(
             &deps,
             id.as_str(),
-            Some(&TriggerArg::Touching("atlas")),
+            &TriggerArg::Touching("atlas"),
         ));
         assert!(text.contains("not one of the followup's topics"), "{text}");
     }
@@ -444,7 +495,11 @@ mod tests {
         let deps = world.deps();
         let id = written(new_followup(&deps, &plain(&["lantern"], "Check"))).document;
         crate::app::draft::checkout(&deps, id.as_str()).unwrap();
-        let text = refused(set_trigger(&deps, id.as_str(), None));
+        let text = refused(set_trigger(
+            &deps,
+            id.as_str(),
+            &TriggerArg::Touching("lantern"),
+        ));
         assert!(text.contains("is open"), "{text}");
     }
 

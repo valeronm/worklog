@@ -32,15 +32,16 @@ fn claimed(
     directory(environment, dir).map(Some)
 }
 
-fn trigger<'a>(when: &'a str, what: Option<&'a str>) -> Result<Option<TriggerArg<'a>>, Failure> {
-    match (when, what) {
-        ("none", None) => Ok(None),
-        ("touching", Some(topic)) => Ok(Some(TriggerArg::Touching(topic))),
-        (on, Some(why)) if on != "none" => Ok(Some(TriggerArg::LookAgain { on, why })),
-        _ => Err(Failure::Usage(
-            "a trigger is `<date> <why>`, `touching <topic>` or `none`".to_owned(),
-        )),
-    }
+fn trigger<'a>(when: &'a str, what: Option<&'a str>) -> Result<TriggerArg<'a>, Failure> {
+    let Some(what) = what else {
+        return Err(Failure::Usage(
+            "a trigger is `<date> <why>` or `touching <topic>`".to_owned(),
+        ));
+    };
+    Ok(match when {
+        "touching" => TriggerArg::Touching(what),
+        on => TriggerArg::LookAgain { on, why: what },
+    })
 }
 
 fn initialized(
@@ -160,7 +161,7 @@ fn changed(
             followup,
             when,
             what,
-        } => followup::set_trigger(deps, followup, trigger(when, what.as_deref())?.as_ref())?,
+        } => followup::set_trigger(deps, followup, &trigger(when, what.as_deref())?)?,
         ChangeCommand::Claim {
             topic,
             dir,
@@ -382,7 +383,7 @@ mod tests {
     }
 
     #[test]
-    fn a_trigger_is_a_date_with_a_why_a_topic_after_touching_or_none() {
+    fn a_trigger_is_a_date_with_a_why_or_a_topic_after_touching() {
         let fixture = Fixture::new();
         let id = fixture.followup("");
         let shown = || fixture.text(&["show", &id]);
@@ -391,8 +392,6 @@ mod tests {
         assert!(shown().contains("look_again = 2026-11-01"), "{}", shown());
         fixture.stored(&["trigger", &id, "touching", "lantern"], &id);
         assert!(shown().contains("touching = "), "{}", shown());
-        fixture.stored(&["trigger", &id, "none"], &id);
-        assert!(!shown().contains("touching"), "{}", shown());
         assert!(!shown().contains("look_again"), "{}", shown());
 
         assert_eq!(
@@ -402,11 +401,11 @@ mod tests {
         for line in [
             &["trigger", &id, "2026-11-01"][..],
             &["trigger", &id, "touching"],
-            &["trigger", &id, "none", "lantern"],
+            &["trigger", &id, "none"],
         ] {
             assert_eq!(
                 usage(fixture.run(line)),
-                "a trigger is `<date> <why>`, `touching <topic>` or `none`",
+                "a trigger is `<date> <why>` or `touching <topic>`",
                 "{line:?}"
             );
         }

@@ -112,10 +112,7 @@ fn reason_words() -> Vec<CompletionCandidate> {
 }
 
 fn trigger_words() -> Vec<CompletionCandidate> {
-    vec![
-        described("touching", "then a topic"),
-        described("none", "no trigger"),
-    ]
+    vec![described("touching", "then a topic")]
 }
 
 // A shell that asks has nowhere to show a refusal.
@@ -347,7 +344,7 @@ mod tests {
         );
         assert_eq!(
             words(trigger_words()),
-            worded(&[("touching", "then a topic"), ("none", "no trigger")])
+            worded(&[("touching", "then a topic")])
         );
     }
 

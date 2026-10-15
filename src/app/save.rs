@@ -5,7 +5,9 @@ use std::rc::Rc;
 use toml::Value;
 
 use crate::app::draft::{draft_for, names, spelled};
-use crate::app::heads::{heads_not_ended, read_or_skip, row_head, texts, topic_edges};
+use crate::app::heads::{
+    Read, heads_not_ended, read_or_skip, readable_heads, row_head, texts, topic_edges,
+};
 use crate::app::lookup::{Lookup, forked, no_head_reads, unreadable, with_article};
 use crate::app::rules::{closing_edge, fits, holds_topic_open, name_is_free_as};
 use crate::app::{Deps, Failed, Failure, Written, counted, kind_named};
@@ -45,8 +47,9 @@ pub fn save(deps: &Deps, address: &str) -> Result<Written, Failure> {
 }
 
 /// Stores `next` as the document's next version, or its first, once it passes the checks
-/// its step calls for: the references no head that is not ended held, the name in its scope
-/// and a topic's cycle, or for an ended topic what still depends on it. Refuses a forked or
+/// its step calls for: the references no head that is not ended held, the name in its scope,
+/// a topic's cycle and an open followup's trigger, or for an ended topic what still depends
+/// on it. Refuses a forked or
 /// unreadable document, one of another kind, and a version equal to the only head.
 pub(super) fn admit(
     deps: &Deps,
@@ -288,6 +291,7 @@ impl<'a, 'b> Target<'a, 'b> {
             self.references(next.content.kind(), &fields)?;
             name_is_free_as(self.lookup, self.document.id(), &self.what, &next.content)?;
             self.closes_no_cycle(&next.content)?;
+            self.keeps_a_trigger(&next.content)?;
         }
         if fork == Fork::Refused
             && let [head] = self.document.heads().as_slice()
@@ -304,6 +308,19 @@ impl<'a, 'b> Target<'a, 'b> {
             label: self.lookup.label_of(&next.content, id)?,
             version: self.composed(deps, fields, body, label)?,
         })
+    }
+
+    // A followup with no trigger is never due; only one already held that way may stay so.
+    fn keeps_a_trigger(&self, content: &Content) -> Result<(), Failure> {
+        let Content::Followup(followup) = content else {
+            return Ok(());
+        };
+        let untriggered = |(_, record): &Read| matches!(&record.content, Content::Followup(held) if held.trigger.is_none());
+        if followup.trigger.is_some() || readable_heads(&self.document).iter().any(untriggered) {
+            return Ok(());
+        }
+        Err(self
+            .refusal("an open followup carries a trigger: `look_again` with `why`, or `touching`"))
     }
 
     fn dependents(&self) -> Result<(), Failure> {
@@ -1272,7 +1289,7 @@ mod tests {
         end(&world, &atlas, "atlas");
         let fields = |topics: &DocumentId, about: Option<&DocumentId>| -> Fields {
             let about = about.map_or(String::new(), |id| format!("about = \"{id}\"\n"));
-            format!("topics = [\"{topics}\"]\n{about}summary = \"s\"\n")
+            format!("topics = [\"{topics}\"]\n{about}touching = \"{topics}\"\nsummary = \"s\"\n")
                 .parse()
                 .unwrap()
         };

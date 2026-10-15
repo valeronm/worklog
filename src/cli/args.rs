@@ -290,7 +290,7 @@ pub enum ChangeCommand {
     Trigger {
         #[arg(add = complete::followups())]
         followup: String,
-        /// A day, `YYYY-MM-DD`, the word `touching`, or `none` to clear the trigger
+        /// A day, `YYYY-MM-DD`, or the word `touching`
         #[arg(add = complete::triggers())]
         when: String,
         /// Why on that day, or the topic

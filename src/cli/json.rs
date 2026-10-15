@@ -44,7 +44,7 @@ mod tests {
     use crate::app::check::Check;
     use crate::app::context::Context;
     use crate::app::draft::DraftRow;
-    use crate::app::followup::{Made, NewFollowup};
+    use crate::app::followup::{Made, NewFollowup, TriggerArg};
     use crate::app::list::{ClaimRow, EntryRow, FactRow, ForkRow, TopicRow};
     use crate::app::machines::PLACEHOLDER;
     use crate::app::search::{Hit, Logged, Query};
@@ -413,7 +413,7 @@ mod tests {
             body: None,
             entry: None,
             about: None,
-            trigger: None,
+            trigger: Some(TriggerArg::Touching("lantern")),
         };
         let stored = followups::new_followup(&deps, &what).unwrap();
         let Made::Written(written) = &stored else {

@@ -228,7 +228,13 @@ impl Host {
             "--summary",
             summary,
         ];
-        let stored = self.ok(&[&line[..], rest].concat());
+        let triggered = (rest.iter()).any(|arg| ["--look-again", "--touching"].contains(arg));
+        let trigger: &[&str] = if triggered {
+            &[]
+        } else {
+            &["--look-again", "2999-12-31", "--why", "Later"]
+        };
+        let stored = self.ok(&[&line[..], trigger, rest].concat());
         let (id, version) = halves(&stored);
         assert!(is_hex(id, 8), "{stored}");
         assert!(is_hex(version, 12), "{stored}");
@@ -525,7 +531,17 @@ fn each_kind_of_new_document_is_stored_from_its_draft() {
         &host.ok(&["save", "2026-10-09-wiring"]),
         "2026-10-09-wiring",
     );
-    let open = host.drafted(&["new", "followup", "--topics", "lantern"], &[summary]);
+    let open = host.drafted(
+        &[
+            "new",
+            "followup",
+            "--topics",
+            "lantern",
+            "--touching",
+            "lantern",
+        ],
+        &[summary],
+    );
     let id = open.file_stem().unwrap().to_str().unwrap();
     assert_stored(&host.ok(&["save", id]), &id[..8]);
 
@@ -552,7 +568,7 @@ fn each_kind_of_new_document_is_stored_from_its_draft() {
     );
     assert_eq!(
         host.ok(&["followups"]),
-        format!("no trigger  {}  Pin four\n", &id[..8])
+        format!("touching lantern  {}  Pin four\n", &id[..8])
     );
 }
 
@@ -1086,7 +1102,14 @@ fn a_command_that_opens_lists_or_drops_a_draft_prints_one_json_value() {
         "2026-10-09-wiring",
     );
 
-    let drafted = host.json(&["new", "followup", "--topics", "lantern"]);
+    let drafted = host.json(&[
+        "new",
+        "followup",
+        "--topics",
+        "lantern",
+        "--touching",
+        "lantern",
+    ]);
     let keys: Vec<&String> = drafted.as_object().expect("an object").keys().collect();
     assert_eq!(keys, ["document", "path"], "{drafted}");
     fill(&drafted, &[SUMMARY]);
@@ -1099,6 +1122,8 @@ fn a_command_that_opens_lists_or_drops_a_draft_prints_one_json_value() {
         "lantern",
         "--summary",
         "Check the driver",
+        "--touching",
+        "lantern",
     ]);
     let label = stored["label"].as_str().expect("a label").to_owned();
     assert!(is_hex(&label, 8), "{stored}");
@@ -1511,8 +1536,8 @@ fn a_listing_is_a_line_a_document_from_its_short_id() {
         format!(
             "due 2020-01-05  {late}  Fit the lens\n\
              by 2999-01-05  {later}  Paint the case\n\
-             touching lantern  {waiting}  Order a fuse\n\
-             no trigger  {open}  Check the driver\n"
+             by 2999-12-31  {open}  Check the driver\n\
+             touching lantern  {waiting}  Order a fuse\n"
         )
     );
 
@@ -2972,7 +2997,7 @@ fn each_argument_is_completed_from_the_list_its_command_takes_and_a_tab_writes_n
         Source::Ended => "lantern/fuse\tPin four\n".to_owned(),
         Source::Drafts => "phone\ttopic\n".to_owned(),
         Source::Reasons => REASONS.to_owned(),
-        Source::Triggers => "touching\tthen a topic\nnone\tno trigger\n".to_owned(),
+        Source::Triggers => "touching\tthen a topic\n".to_owned(),
     };
     let mut sources: Vec<Source> = SOURCED.iter().map(|(_, _, source)| *source).collect();
     sources.sort_unstable();
