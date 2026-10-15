@@ -134,7 +134,7 @@ fn a_link_in_a_summary_is_the_text_it_is_on_a_row_and_a_link_on_its_document_s_p
     let to_fuse = anchor("ended", &fuse, "false", "atlas/fuse");
     has(
         &page,
-        &format!("<dt>summary</dt><dd>Fed by {to_fuse} &amp; &lt;b&gt;</dd>"),
+        &format!("<p class=\"lead\">Fed by {to_fuse} &amp; &lt;b&gt;</p>"),
     );
 }
 
@@ -278,7 +278,7 @@ fn a_page_of_documents_none_of_which_ended_marks_no_link() {
     );
     has(
         &ok(&world, &format!("/doc/{relay}")),
-        &format!("<dt>summary</dt><dd>{summary}</dd>"),
+        &format!("<p class=\"lead\">{summary}</p>"),
     );
 }
 

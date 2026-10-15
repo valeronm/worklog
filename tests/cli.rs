@@ -2129,7 +2129,7 @@ fn serve_answers_the_home_a_topic_and_a_document_from_the_store() {
     let document = serving.page("/doc/lantern/relay");
     assert!(document.contains("<h1>lantern/relay</h1>"), "{document}");
     assert!(
-        document.contains("<dt>summary</dt><dd>Pin four</dd>"),
+        document.contains("<p class=\"lead\">Pin four</p>"),
         "{document}"
     );
     assert_eq!(serving.page(&format!("/doc/{relay}")), document);

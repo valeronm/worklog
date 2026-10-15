@@ -39,7 +39,11 @@ fn a_document_is_its_label_its_marks_and_its_head_with_fields_and_a_rendered_bod
     );
     has(
         &html,
-        &format!("<p class=\"stamp\">{}</p>", stamp(&world, &saved, "save")),
+        &format!(
+            "<article class=\"head\">\n<p class=\"lead\">Pin &lt;four&gt;</p>\n\
+             <p class=\"stamp\">{}</p>",
+            stamp(&world, &saved, "save")
+        ),
     );
     has(
         &html,
@@ -49,7 +53,6 @@ fn a_document_is_its_label_its_marks_and_its_head_with_fields_and_a_rendered_bod
              <dt>topic</dt><dd><a href=\"/doc/{lantern}\">lantern</a></dd>\n\
              <dt>created</dt><dd>2026-09-04</dd>\n\
              <dt>confirmed</dt><dd>2026-09-04</dd>\n\
-             <dt>summary</dt><dd>Pin &lt;four&gt;</dd>\n\
              <dt>former_names</dt><dd>relay, coil</dd>\n\
              </dl>"
         ),

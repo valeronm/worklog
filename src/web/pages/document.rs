@@ -7,73 +7,56 @@ use super::links::{Link, Nav, Place, Stamped, Text, doc_href, history_href, mark
 use super::listing::{Item, entry_items, fact_items, followup_items, leave_out};
 use crate::app::FollowupRow;
 use crate::app::list::{ClaimRow, EntryRow, FactRow, TopicRow};
-use crate::app::show::{FieldItem, Linked, ShownDocument, ShownField, ShownVersion};
+use crate::app::show::{FieldItem, ShownDocument, ShownField, ShownVersion};
 use crate::render::{ended, unread_notes};
 use crate::web::markdown::{Markup, summary_html, to_html};
 
-enum Shown {
-    Values(Vec<Text>),
-    Summary(Markup),
-}
-
 pub struct Field {
     pub name: String,
-    shown: Shown,
+    pub values: Vec<Text>,
 }
 
-impl Field {
-    fn of(field: &ShownField, links: &[Linked]) -> Field {
-        let shown = match field.values.as_slice() {
-            [FieldItem::Text { text }] if field.name == "summary" => {
-                Shown::Summary(summary_html(text, Some((links, doc_href))))
-            }
-            values => Shown::Values(
-                (values.iter())
-                    .map(|item| match item {
-                        FieldItem::Text { text } => Text::plain(text),
-                        FieldItem::Reference { reference } => Text::naming(reference),
-                    })
-                    .collect(),
-            ),
-        };
+impl From<&ShownField> for Field {
+    fn from(field: &ShownField) -> Field {
         Field {
             name: field.name.clone(),
-            shown,
-        }
-    }
-
-    pub fn summary(&self) -> Option<&Markup> {
-        match &self.shown {
-            Shown::Summary(summary) => Some(summary),
-            Shown::Values(_) => None,
-        }
-    }
-
-    pub fn values(&self) -> &[Text] {
-        match &self.shown {
-            Shown::Values(values) => values,
-            Shown::Summary(_) => &[],
+            values: (field.values.iter())
+                .map(|item| match item {
+                    FieldItem::Text { text } => Text::plain(text),
+                    FieldItem::Reference { reference } => Text::naming(reference),
+                })
+                .collect(),
         }
     }
 }
 
 pub struct Head {
     pub stamp: Stamped,
+    pub summary: Option<Markup>,
     pub fields: Vec<Field>,
     pub body: Markup,
 }
 
 impl From<&ShownVersion> for Head {
     fn from(version: &ShownVersion) -> Head {
+        let mut summary = None;
+        let mut fields = Vec::new();
+        for field in &version.fields {
+            match field.values.as_slice() {
+                [FieldItem::Text { text }] if field.name == "summary" => {
+                    summary = Some(summary_html(text, Some((&version.links, doc_href))));
+                }
+                _ => fields.push(Field::from(field)),
+            }
+        }
         Head {
             stamp: Stamped {
                 change: Some(version.change.clone()),
                 ended: version.ended.as_deref().map(ended),
                 ..Stamped::new(&version.version, &version.written, &version.machine)
             },
-            fields: (version.fields.iter())
-                .map(|field| Field::of(field, &version.links))
-                .collect(),
+            summary,
+            fields,
             body: to_html(&version.body, &version.links, doc_href),
         }
     }
@@ -324,7 +307,7 @@ mod tests {
         assert_eq!(stamp.written_full, NOW);
         let values: Vec<Vec<(&str, Option<&str>)>> = (head.fields.iter())
             .map(|field| {
-                (field.values().iter())
+                (field.values.iter())
                     .map(|value| (value.words(), value.link().map(|link| link.href.as_str())))
                     .collect()
             })

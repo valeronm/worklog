@@ -16,11 +16,13 @@
 
 {% macro head(h, heading) %}
 <article class="head">
+{% if let Some(summary) = h.summary %}<p class="lead">{{ summary }}</p>
+{% endif -%}
 {% if heading %}<h2 class="stamp">{% else %}<p class="stamp">{% endif %}{% call stamp(h.stamp) %}{% endcall %}{% if let Some(ended) = h.stamp.ended %} <span class="mark">{{ ended }}</span>{% endif %}{% if heading %}</h2>{% else %}</p>{% endif %}
 {% if !h.fields.is_empty() -%}
 <dl class="fields">
 {% for field in h.fields -%}
-<dt>{{ field.name }}</dt><dd>{% if let Some(summary) = field.summary() %}{{ summary }}{% else %}{% for value in field.values() %}{% if !loop.first %}, {% endif %}{% call text(value, "") %}{% endcall %}{% endfor %}{% endif %}</dd>
+<dt>{{ field.name }}</dt><dd>{% for value in field.values %}{% if !loop.first %}, {% endif %}{% call text(value, "") %}{% endcall %}{% endfor %}</dd>
 {% endfor -%}
 </dl>
 {% endif -%}
