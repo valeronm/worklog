@@ -1,7 +1,7 @@
 use super::{has, lacks, main_of, ok, page, stamp};
 use crate::app::testing::{
-    ENDED, ENDED_FACT, World, entry, fact, followup, fork, head, part_of, topic, topic_fields,
-    uses, world,
+    ENDED, ENDED_FACT, REMOVED, World, claim_fields, entry, fact, followup, fork, head, part_of,
+    topic, topic_fields, uses, world,
 };
 use crate::domain::id::{DocumentId, VersionId};
 use crate::web::respond;
@@ -353,6 +353,45 @@ fn a_tab_s_count_is_the_length_of_the_listing_its_section_links_to() {
 }
 
 #[test]
+fn a_machine_topic_lists_its_claims_by_topic_under_a_tab_of_its_own() {
+    let (world, lantern) = world();
+    let desk = world.machine();
+    let atlas = topic(&world, "atlas", "");
+    let anywhere = world.put("claim", &claim_fields(&desk, &atlas, ""), "\n");
+    let here = world.put("claim", &claim_fields(&desk, &lantern, "~/lantern"), "\n");
+    let lamp = world.put("claim", &claim_fields(&desk, &lantern, "~/lamp"), "\n");
+    let removed = format!("{}{REMOVED}", claim_fields(&desk, &lantern, "~/old"));
+    world.put("claim", &removed, "\n");
+
+    let claims = ok(&world, &format!("/doc/{desk}?show=claims"));
+    has(
+        &claims,
+        &format!(
+            "<a href=\"/doc/{desk}?show=claims\" aria-current=\"page\">Claims \
+             <span class=\"label\">2</span></a></p>"
+        ),
+    );
+    has(
+        &claims,
+        &format!(
+            "<h2>Claims</h2>\n<ul class=\"items\">\
+             <li><a class=\"title\" href=\"/doc/{atlas}\">atlas</a>\
+             <span class=\"details\"><a href=\"/doc/{anywhere}\">anywhere</a></span></li>\
+             <li><a class=\"title\" href=\"/doc/{lantern}\">lantern</a>\
+             <span class=\"details\"><a href=\"/doc/{lamp}\">~/lamp</a></span>\
+             <span class=\"details\"><a href=\"/doc/{here}\">~/lantern</a></span></li></ul>"
+        ),
+    );
+    has(&ok(&world, &format!("/doc/{desk}")), "Claims <span");
+
+    lacks(&ok(&world, &format!("/doc/{lantern}")), "Claims");
+    has(
+        &ok(&world, &format!("/doc/{lantern}?show=claims")),
+        "<h2>Claims</h2>\n<p class=\"muted\">None.</p>",
+    );
+}
+
+#[test]
 fn a_part_that_is_forked_is_marked_in_the_parts_of_its_topic() {
     let Lit {
         world,
@@ -433,7 +472,7 @@ fn topic_page_scans(size: usize) -> usize {
 
 #[test]
 fn a_topic_page_scans_the_store_the_same_whatever_the_topic_holds() {
-    let a_request = 17;
+    let a_request = 18;
     assert_eq!(topic_page_scans(1), 5 * a_request);
     assert_eq!(topic_page_scans(7), 5 * a_request);
 }

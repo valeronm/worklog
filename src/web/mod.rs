@@ -137,6 +137,7 @@ fn topic_page(deps: &Deps, document: &ShownDocument, query: &Query) -> Result<St
         ideas: &list::ideas(deps, topic, false)?,
         followups: &list::followups(deps, topic, false)?,
         entries: &list::entries(deps, topic, None, false)?,
+        claims: &list::claims_on(deps, &document.document)?,
     };
     Ok(TopicPage::new(document, &held, section).render()?)
 }

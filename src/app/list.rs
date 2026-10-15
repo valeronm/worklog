@@ -228,23 +228,38 @@ pub fn where_(
     machine: Option<&str>,
 ) -> Result<Vec<ClaimRow>, Failure> {
     let lookup = Lookup::new(deps.store);
-    let topics = Topics::load(&lookup)?;
     let machine = match machine {
         Some(address) => lookup.one_topic(address)?,
         None => deps.machine()?,
     };
     let topic = topic.map(|address| lookup.one_topic(address)).transpose()?;
-    let rows = claims_of(&lookup, &machine)?
-        .into_iter()
-        .filter(|(_, claim)| topic.as_ref().is_none_or(|topic| *topic == claim.topic))
-        .map(|(document, claim)| ClaimRow {
+    claim_rows(&lookup, &machine, topic.as_ref())
+}
+
+/// The unended claims of `machine`, ordered as `where_` orders them; none when it is no
+/// machine topic.
+pub fn claims_on(deps: &Deps, machine: &DocumentId) -> Result<Vec<ClaimRow>, Failure> {
+    claim_rows(&Lookup::new(deps.store), machine, None)
+}
+
+fn claim_rows(
+    lookup: &Lookup,
+    machine: &DocumentId,
+    topic: Option<&DocumentId>,
+) -> Result<Vec<ClaimRow>, Failure> {
+    let mut rows = Vec::new();
+    for (document, claim) in claims_of(lookup, machine)? {
+        if topic.is_some_and(|topic| *topic != claim.topic) {
+            continue;
+        }
+        rows.push(ClaimRow {
             document: document.id().clone(),
-            machine: topics.reference(&claim.machine),
-            topic: topics.reference(&claim.topic),
+            machine: lookup.topic_reference(&claim.machine)?,
+            topic: lookup.topic_reference(&claim.topic)?,
             directory: claim.directory.map(|directory| directory.to_string()),
             forked: is_forked(&document),
         });
-    let mut rows: Vec<ClaimRow> = rows.collect();
+    }
     rows.sort_by(|a, b| {
         (&a.topic.label, &a.directory, &a.document).cmp(&(
             &b.topic.label,
