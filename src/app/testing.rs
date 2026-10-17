@@ -9,7 +9,7 @@ use crate::app::{Deps, Failure};
 use crate::domain::document::Document;
 use crate::domain::document::State;
 use crate::domain::id::{DocumentId, VersionId};
-use crate::domain::ports::{Clock, Ids, Store, StoreError};
+use crate::domain::ports::{Clock, Ids, Store, StoreError, StoreRead};
 use crate::domain::schema::address::Found;
 use crate::domain::schema::{KindOf, Record};
 use crate::domain::testing::{
@@ -41,14 +41,14 @@ impl World {
     }
 
     pub fn deps(&self) -> Deps<'_> {
-        Deps {
-            store: Stored::new(&self.store),
-            drafts: &self.drafts,
-            ids: &self.ids,
-            clock: &self.clock,
-            host: &self.host,
-            usage: &self.usage,
-        }
+        Deps::new(
+            &self.store,
+            &self.drafts,
+            &self.ids,
+            &self.clock,
+            &self.host,
+            &self.usage,
+        )
     }
 
     pub(in crate::app) fn lookup(&self) -> Lookup<'_> {
@@ -379,25 +379,21 @@ pub struct Counted {
 
 impl Counted {
     pub fn deps(&self) -> Deps<'_> {
-        Deps {
-            store: Stored::new(&self.store),
-            drafts: &self.drafts,
-            ids: &self.ids,
-            clock: &self.clock,
-            host: &self.host,
-            usage: &self.usage,
-        }
+        Deps::new(
+            &self.store,
+            &self.drafts,
+            &self.ids,
+            &self.clock,
+            &self.host,
+            &self.usage,
+        )
     }
 }
 
-impl Store for Counting {
+impl StoreRead for Counting {
     fn document(&self, id: &DocumentId) -> Result<Document, StoreError> {
         self.documents.set(self.documents.get() + 1);
         self.inner.document(id)
-    }
-
-    fn put(&self, version: &Version) -> Result<(), StoreError> {
-        self.inner.put(version)
     }
 
     fn of_kind(&self, kind: &Kind) -> Result<Vec<Document>, StoreError> {
@@ -433,5 +429,11 @@ impl Store for Counting {
     fn versions_under(&self, prefix: &str) -> Result<Vec<(DocumentId, VersionId)>, StoreError> {
         self.prefixes.set(self.prefixes.get() + 1);
         self.inner.versions_under(prefix)
+    }
+}
+
+impl Store for Counting {
+    fn put(&self, version: &Version) -> Result<(), StoreError> {
+        self.inner.put(version)
     }
 }

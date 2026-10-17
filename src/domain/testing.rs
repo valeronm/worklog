@@ -9,7 +9,8 @@ use super::document::{Document, State, Unreadable};
 use super::draft::Draft;
 use super::id::{DocumentId, VersionId};
 use super::ports::{
-    Binary, Clock, Drafts, Host, Ids, Refreshed, Releases, Store, StoreError, Usage,
+    Binary, Clock, Drafts, DraftsRead, Host, HostRead, Ids, Refreshed, Releases, Store, StoreError,
+    StoreRead, Usage, UsageRead,
 };
 use super::release::{Built, ReleaseVersion, sha256_hex};
 use super::usage::{Invocation, Kept, Session};
@@ -23,12 +24,8 @@ impl FailingStore {
     }
 }
 
-impl Store for FailingStore {
+impl StoreRead for FailingStore {
     fn document(&self, _: &DocumentId) -> Result<Document, StoreError> {
-        FailingStore::gone()
-    }
-
-    fn put(&self, _: &Version) -> Result<(), StoreError> {
         FailingStore::gone()
     }
 
@@ -57,6 +54,12 @@ impl Store for FailingStore {
     }
 
     fn versions_under(&self, _: &str) -> Result<Vec<(DocumentId, VersionId)>, StoreError> {
+        FailingStore::gone()
+    }
+}
+
+impl Store for FailingStore {
+    fn put(&self, _: &Version) -> Result<(), StoreError> {
         FailingStore::gone()
     }
 }
@@ -103,18 +106,9 @@ impl MemoryStore {
     }
 }
 
-impl Store for MemoryStore {
+impl StoreRead for MemoryStore {
     fn document(&self, id: &DocumentId) -> Result<Document, StoreError> {
         Ok(self.held(id))
-    }
-
-    fn put(&self, version: &Version) -> Result<(), StoreError> {
-        let mut all = self.versions.borrow_mut();
-        let versions = all.entry(version.envelope.document.clone()).or_default();
-        if !versions.iter().any(|held| held.id == version.id) {
-            versions.push(version.clone());
-        }
-        Ok(())
     }
 
     fn of_kind(&self, kind: &Kind) -> Result<Vec<Document>, StoreError> {
@@ -186,16 +180,37 @@ impl Store for MemoryStore {
     }
 }
 
+impl Store for MemoryStore {
+    fn put(&self, version: &Version) -> Result<(), StoreError> {
+        let mut all = self.versions.borrow_mut();
+        let versions = all.entry(version.envelope.document.clone()).or_default();
+        if !versions.iter().any(|held| held.id == version.id) {
+            versions.push(version.clone());
+        }
+        Ok(())
+    }
+}
+
 #[derive(Default)]
 pub struct MemoryDrafts {
     drafts: RefCell<BTreeMap<DocumentId, Draft>>,
 }
 
-impl Drafts for MemoryDrafts {
+impl DraftsRead for MemoryDrafts {
     fn read(&self, document: &DocumentId) -> Result<Option<Draft>, StoreError> {
         Ok(self.drafts.borrow().get(document).cloned())
     }
 
+    fn list(&self) -> Result<Vec<Draft>, StoreError> {
+        Ok(self.drafts.borrow().values().cloned().collect())
+    }
+
+    fn location(&self, document: &DocumentId) -> String {
+        format!("memory:{document}")
+    }
+}
+
+impl Drafts for MemoryDrafts {
     fn write(&self, draft: &Draft) -> Result<String, StoreError> {
         self.drafts
             .borrow_mut()
@@ -206,14 +221,6 @@ impl Drafts for MemoryDrafts {
     fn delete(&self, document: &DocumentId) -> Result<(), StoreError> {
         self.drafts.borrow_mut().remove(document);
         Ok(())
-    }
-
-    fn list(&self) -> Result<Vec<Draft>, StoreError> {
-        Ok(self.drafts.borrow().values().cloned().collect())
-    }
-
-    fn location(&self, document: &DocumentId) -> String {
-        format!("memory:{document}")
     }
 }
 
@@ -260,15 +267,17 @@ pub struct MemoryUsage {
     runs: RefCell<Vec<Invocation>>,
 }
 
+impl UsageRead for MemoryUsage {
+    fn read(&self, kept: &Kept) -> Result<Vec<Invocation>, StoreError> {
+        let runs = self.runs.borrow();
+        Ok(runs.iter().filter(|run| kept.keeps(run)).cloned().collect())
+    }
+}
+
 impl Usage for MemoryUsage {
     fn record(&self, invocation: &Invocation) -> Result<(), StoreError> {
         self.runs.borrow_mut().push(invocation.clone());
         Ok(())
-    }
-
-    fn read(&self, kept: &Kept) -> Result<Vec<Invocation>, StoreError> {
-        let runs = self.runs.borrow();
-        Ok(runs.iter().filter(|run| kept.keeps(run)).cloned().collect())
     }
 }
 
@@ -481,24 +490,13 @@ impl FixedHost {
     }
 }
 
-impl Host for FixedHost {
+impl HostRead for FixedHost {
     fn machine(&self) -> Result<Option<DocumentId>, StoreError> {
         Ok(self.bound())
     }
 
     fn home(&self) -> Result<Option<String>, StoreError> {
         Ok(self.home.clone())
-    }
-
-    fn bind(&self, machine: &DocumentId) -> Result<(), StoreError> {
-        if !self.binds {
-            return Err(StoreError::io(FIXED_HOST, "does not bind"));
-        }
-        if self.bound().is_some() {
-            return Err(StoreError::io(FIXED_HOST, "is already bound"));
-        }
-        self.machine.replace(Some(machine.clone()));
-        Ok(())
     }
 
     fn resolve(&self, absolute: &str) -> Result<String, StoreError> {
@@ -515,6 +513,19 @@ impl Host for FixedHost {
 
     fn name(&self) -> Option<String> {
         self.name.clone()
+    }
+}
+
+impl Host for FixedHost {
+    fn bind(&self, machine: &DocumentId) -> Result<(), StoreError> {
+        if !self.binds {
+            return Err(StoreError::io(FIXED_HOST, "does not bind"));
+        }
+        if self.bound().is_some() {
+            return Err(StoreError::io(FIXED_HOST, "is already bound"));
+        }
+        self.machine.replace(Some(machine.clone()));
+        Ok(())
     }
 }
 

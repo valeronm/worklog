@@ -4,7 +4,7 @@ use crate::app::machines::{PLACEHOLDER, topic_named};
 use crate::app::save::stepped;
 use crate::app::{Deps, Failure, kind_named, text};
 use crate::domain::id::DocumentId;
-use crate::domain::ports::{Host, StoreError};
+use crate::domain::ports::{Host, HostRead, StoreError};
 use crate::domain::schema::{KindOf, Name};
 use crate::domain::usage::Session;
 use crate::domain::version::Fields;
@@ -24,17 +24,13 @@ struct Becoming<'a> {
     machine: &'a DocumentId,
 }
 
-impl Host for Becoming<'_> {
+impl HostRead for Becoming<'_> {
     fn machine(&self) -> Result<Option<DocumentId>, StoreError> {
         Ok(Some(self.machine.clone()))
     }
 
     fn home(&self) -> Result<Option<String>, StoreError> {
         self.host.home()
-    }
-
-    fn bind(&self, machine: &DocumentId) -> Result<(), StoreError> {
-        self.host.bind(machine)
     }
 
     fn resolve(&self, absolute: &str) -> Result<String, StoreError> {
@@ -50,12 +46,18 @@ impl Host for Becoming<'_> {
     }
 }
 
+impl Host for Becoming<'_> {
+    fn bind(&self, machine: &DocumentId) -> Result<(), StoreError> {
+        self.host.bind(machine)
+    }
+}
+
 /// Refuses a host that has a machine topic.
 pub fn refuse_bound(deps: &Deps) -> Result<(), Failure> {
     match deps.host.machine()? {
         Some(machine) => Err(Failure::Refused(format!(
             "this host is already set up as {}",
-            Lookup::new(deps.store).label(&machine)?
+            Lookup::new(deps.read().store).label(&machine)?
         ))),
         None => Ok(()),
     }
@@ -66,7 +68,7 @@ pub fn refuse_bound(deps: &Deps) -> Result<(), Failure> {
 /// malformed name, or a topic to make without a summary, is a usage failure.
 pub fn init(deps: &Deps, name: &str, summary: Option<&str>) -> Result<Bound, Failure> {
     refuse_bound(deps)?;
-    let lookup = Lookup::new(deps.store);
+    let lookup = Lookup::new(deps.read().store);
     let name = Name::parse(name).map_err(usage)?;
     if let Some(machine) = topic_named(&lookup, &name)? {
         let label = lookup.label(&machine)?;
@@ -88,11 +90,12 @@ pub fn init(deps: &Deps, name: &str, summary: Option<&str>) -> Result<Bound, Fai
     fields.insert("summary".to_owned(), text(summary));
     // A first version carries the machine topic of its writer, and this writer has none
     // until the version is stored.
+    let host = Becoming {
+        host: deps.host,
+        machine: &machine,
+    };
     let as_itself = Deps {
-        host: &Becoming {
-            host: deps.host,
-            machine: &machine,
-        },
+        host: &host,
         ..*deps
     };
     let kind = kind_named(KindOf::Topic);
@@ -116,7 +119,7 @@ mod tests {
     use crate::app::testing::{
         ENDED, World, fork, found, head, refused, topic, topic_fields, world,
     };
-    use crate::domain::ports::Store;
+    use crate::domain::ports::{Store, StoreRead};
     use crate::domain::schema::SchemaError;
     use crate::domain::schema::address::Found;
     use crate::domain::testing::{first, first_minted, lantern};

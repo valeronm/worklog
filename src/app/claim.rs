@@ -11,10 +11,12 @@ use crate::domain::version::Fields;
 /// directory no claim could carry is a usage failure. Refuses a claim this machine already
 /// holds for the same topic and directory.
 pub fn claim(deps: &Deps, topic: &str, directory: Option<&str>) -> Result<Written, Failure> {
-    let lookup = Lookup::new(deps.store);
+    let lookup = Lookup::new(deps.read().store);
     let topic_id = lookup.one(topic)?;
-    let machine = deps.machine()?;
-    let directory = directory.map(|given| deps.directory(given)).transpose()?;
+    let machine = deps.read().machine()?;
+    let directory = directory
+        .map(|given| deps.read().directory(given))
+        .transpose()?;
     let directory = directory.as_ref();
     let place = place(topic, directory);
     let mut fields = Fields::new();
@@ -34,10 +36,12 @@ pub fn claim(deps: &Deps, topic: &str, directory: Option<&str>) -> Result<Writte
 /// Ends the claim this machine holds for the topic and the directory, the directory read as
 /// `claim` stores it and a usage failure where `claim` gives one; refuses when there is none.
 pub fn unclaim(deps: &Deps, topic: &str, directory: Option<&str>) -> Result<Written, Failure> {
-    let lookup = Lookup::new(deps.store);
+    let lookup = Lookup::new(deps.read().store);
     let topic_id = lookup.one(topic)?;
-    let machine = deps.machine()?;
-    let directory = directory.map(|given| deps.directory(given)).transpose()?;
+    let machine = deps.read().machine()?;
+    let directory = directory
+        .map(|given| deps.read().directory(given))
+        .transpose()?;
     let directory = directory.as_ref();
     let place = place(topic, directory);
     let Some(id) = held(&lookup, &machine, &topic_id, directory)? else {
@@ -46,7 +50,7 @@ pub fn unclaim(deps: &Deps, topic: &str, directory: Option<&str>) -> Result<Writ
     let (head, record) = lookup.only_head(&id, &lookup.label(&id)?)?;
     let ending = Ending {
         reason: Reason::Removed,
-        on: deps.today()?,
+        on: deps.read().today()?,
         by: None,
         note: "unclaimed".to_owned(),
     };
@@ -73,7 +77,7 @@ mod tests {
     use super::*;
     use crate::app::heads::read_or_skip;
     use crate::app::testing::{ENDED, TOPIC, World, claim_fields, fork, refused, topic};
-    use crate::domain::ports::Store;
+    use crate::domain::ports::StoreRead;
     use crate::domain::schema::Content;
     use crate::domain::version::{Kind, Version};
 
@@ -289,7 +293,8 @@ mod tests {
         world.host.set_home(Some("/".to_owned()));
         let text = usage(claim(&world.deps(), "lantern", Some("")));
         assert!(text.contains("absolute path"), "{text}");
-        let Err(Failure::Usage(text)) = crate::app::context::context(&world.deps(), "") else {
+        let Err(Failure::Usage(text)) = crate::app::context::context(&world.deps().read(), "")
+        else {
             panic!("an empty directory must be a usage failure");
         };
         assert!(text.contains("absolute path"), "{text}");
@@ -304,7 +309,10 @@ mod tests {
             let claimed = usage(claim(&deps, "lantern", Some(bad)));
             assert!(claimed.contains("absolute path"), "{claimed}");
             assert_eq!(usage(unclaim(&deps, "lantern", Some(bad))), claimed);
-            assert_eq!(usage(crate::app::context::context(&deps, bad)), claimed);
+            assert_eq!(
+                usage(crate::app::context::context(&deps.read(), bad)),
+                claimed
+            );
         }
     }
 

@@ -265,7 +265,7 @@ mod tests {
             let (world, lantern) = world();
             fact(&world, &lantern, "relay-pin", "");
             server.run(Some(4), &|method, target| {
-                respond(&world.deps(), method, target)
+                respond(&world.deps().read(), method, target)
             })
         });
         let address = serving.address.clone();
@@ -301,7 +301,7 @@ mod tests {
             let (world, _) = world();
             server.run(Some(2), &|method, target| {
                 assert_ne!(target, "/facts", "the relay pin is secret");
-                respond(&world.deps(), method, target)
+                respond(&world.deps().read(), method, target)
             })
         });
         let address = serving.address.clone();
@@ -330,7 +330,7 @@ mod tests {
                 "\n",
             );
             server.run(Some(2), &|method, target| {
-                respond(&world.deps(), method, target)
+                respond(&world.deps().read(), method, target)
             })
         });
         let address = serving.address.clone();
@@ -442,7 +442,7 @@ mod tests {
         let serving = Serving::start(&["desk.local".to_owned()], move |server| {
             let (world, _) = world();
             server.run(Some(6), &|method, target| {
-                respond(&world.deps(), method, target)
+                respond(&world.deps().read(), method, target)
             })
         });
         let address = serving.address.clone();
@@ -497,7 +497,7 @@ mod tests {
         let serving = Serving::start(&[], move |server| {
             let (world, _) = with_a_large_page();
             server.run(Some(2), &|method, target| {
-                let page = respond(&world.deps(), method, target);
+                let page = respond(&world.deps().read(), method, target);
                 asked.send(page.html.len()).expect("a test still listening");
                 page
             })
@@ -522,7 +522,7 @@ mod tests {
         let (asked, answers) = std::sync::mpsc::channel();
         let serving = Serving::start(&[], move |server| {
             let (world, _) = with_a_large_page();
-            let large = respond(&world.deps(), "GET", "/facts?topic=atlas").html;
+            let large = respond(&world.deps().read(), "GET", "/facts?topic=atlas").html;
             server.run(Some(WRITERS + 1), &|_, _| {
                 asked.send(()).expect("a test still listening");
                 Page {

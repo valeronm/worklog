@@ -386,7 +386,7 @@ mod tests {
     fn drafts() -> Vec<(Vec<DraftRow>, Value)> {
         let (world, lantern) = world();
         let deps = world.deps();
-        let none = draft::drafts(&deps).unwrap();
+        let none = draft::drafts(&deps.read()).unwrap();
         draft::checkout(&deps, "lantern").unwrap();
         let expected = json!([{
             "document": lantern,
@@ -394,7 +394,10 @@ mod tests {
             "label": "lantern",
             "path": format!("memory:{lantern}"),
         }]);
-        vec![(draft::drafts(&deps).unwrap(), expected), (none, json!([]))]
+        vec![
+            (draft::drafts(&deps.read()).unwrap(), expected),
+            (none, json!([])),
+        ]
     }
 
     fn discarded() -> Vec<((), Value)> {
@@ -514,13 +517,13 @@ mod tests {
         ]);
         let deps = world.deps();
         vec![
-            (list::topics(&deps, None, false).unwrap(), expected),
+            (list::topics(&deps.read(), None, false).unwrap(), expected),
             (
-                list::topics(&deps, Some("lantern"), false).unwrap(),
+                list::topics(&deps.read(), Some("lantern"), false).unwrap(),
                 json!([part]),
             ),
             (
-                list::topics(&deps, Some("phone"), false).unwrap(),
+                list::topics(&deps.read(), Some("phone"), false).unwrap(),
                 json!([]),
             ),
         ]
@@ -541,14 +544,14 @@ mod tests {
         );
         vec![
             (
-                list::facts(&deps, None, true).unwrap(),
+                list::facts(&deps.read(), None, true).unwrap(),
                 json!([
                     {"row": ended, "confirmed": "2026-09-04"},
                     filed(&relay, "lantern/relay"),
                 ]),
             ),
             (
-                list::ideas(&deps, None, false).unwrap(),
+                list::ideas(&deps.read(), None, false).unwrap(),
                 json!([filed(&dimmer, "lantern/dimmer")]),
             ),
         ]
@@ -561,7 +564,7 @@ mod tests {
             "row": row(&wiring, "entry", "2026-10-08-wiring", &[to(&lantern, "lantern")]),
             "date": "2026-10-08",
         }]);
-        let listed = list::entries(&world.deps(), None, None, false).unwrap();
+        let listed = list::entries(&world.deps().read(), None, None, false).unwrap();
         vec![(listed, expected)]
     }
 
@@ -609,14 +612,14 @@ mod tests {
                 "about": null,
             },
         ]);
-        let listed = list::followups(&world.deps(), None, false).unwrap();
+        let listed = list::followups(&world.deps().read(), None, false).unwrap();
 
         world.put("claim", &claim_fields(&world.machine(), &lantern, ""), "\n");
         let mut due_here = expected.clone();
         let rows = due_here.as_array_mut().expect("the rows");
         rows.truncate(2);
         rows[1]["due"] = json!(true);
-        let here = context::due(&world.deps(), "/srv/lantern").unwrap();
+        let here = context::due(&world.deps().read(), "/srv/lantern").unwrap();
         vec![(listed, expected), (here, due_here)]
     }
 
@@ -642,7 +645,7 @@ mod tests {
                 "forked": false,
             },
         ]);
-        let listed = list::where_(&world.deps(), None, None).unwrap();
+        let listed = list::where_(&world.deps().read(), None, None).unwrap();
         vec![(listed, expected)]
     }
 
@@ -682,7 +685,7 @@ mod tests {
             },
             {"document": lantern, "label": "lantern", "row": forked, "heads": read},
         ]);
-        vec![(list::forks(&world.deps()).unwrap(), expected)]
+        vec![(list::forks(&world.deps().read()).unwrap(), expected)]
     }
 
     fn hits() -> Vec<(Vec<Hit>, Value)> {
@@ -699,7 +702,10 @@ mod tests {
             "lines": [{"text": "The relay.", "spans": [{"start": 0, "end": 9}]}],
             "label_spans": [],
         }]);
-        vec![(search::search(&world.deps(), &query).unwrap(), expected)]
+        vec![(
+            search::search(&world.deps().read(), &query).unwrap(),
+            expected,
+        )]
     }
 
     fn logged() -> Vec<(Vec<Logged>, Value)> {
@@ -744,14 +750,17 @@ mod tests {
             ending,
             first(&gadget, Value::Null),
         ]);
-        vec![(search::log(&world.deps(), 4, None).unwrap(), expected)]
+        vec![(
+            search::log(&world.deps().read(), 4, None).unwrap(),
+            expected,
+        )]
     }
 
     fn forked(world: &World) -> (Shown, Value) {
         let phone = topic(world, "phone", "");
         let root = head(world, &phone).id;
         let heads = fork(world, &phone, &topic_fields("phone", ""));
-        let of_forked = show::show(&world.deps(), "phone").unwrap();
+        let of_forked = show::show(&world.deps().read(), "phone").unwrap();
         let bodies: Vec<&str> = match &of_forked {
             Shown::Document(document) => (document.heads.iter())
                 .map(|head| head.text.rsplit("+++\n").next().unwrap_or_default())
@@ -838,7 +847,7 @@ mod tests {
                 "before": "+++\nname = \"compass\"\ncreated = 2026-09-04\nsummary = \"s\"\n+++\n\n",
             }],
         });
-        let of_linking = show::show(&world.deps(), linking.as_str()).unwrap();
+        let of_linking = show::show(&world.deps().read(), linking.as_str()).unwrap();
         (of_linking, linked)
     }
 
@@ -885,12 +894,12 @@ mod tests {
             }],
             "unreadable": [],
         });
-        let of_referring = show::show(&world.deps(), driver.as_str()).unwrap();
+        let of_referring = show::show(&world.deps().read(), driver.as_str()).unwrap();
         (of_referring, expected)
     }
 
     fn old_version(world: &World, lantern: &DocumentId, root: &VersionId) -> (Shown, Value) {
-        let of_old = show::show(&world.deps(), root.short()).unwrap();
+        let of_old = show::show(&world.deps().read(), root.short()).unwrap();
         let old = json!({
             "type": "version",
             "document": lantern,
@@ -933,7 +942,7 @@ mod tests {
             "heads": [version(&world, &gadget)],
             "unreadable": unreadable,
         });
-        let of_unknown = show::show(&deps, label).unwrap();
+        let of_unknown = show::show(&deps.read(), label).unwrap();
 
         let hash = head(&world, &gadget).id;
         let mut one = json!({
@@ -946,7 +955,7 @@ mod tests {
         let fields = rest.as_object().expect("an object").clone();
         one.as_object_mut().expect("an object").extend(fields);
         one["sides"] = json!([{"against": null, "held": true, "before": ""}]);
-        let of_version = show::show(&deps, hash.short()).unwrap();
+        let of_version = show::show(&deps.read(), hash.short()).unwrap();
 
         let root = head(&world, &lantern).id;
         let retired = world.amend(&lantern, &topic_fields("lantern", RETIRED), "\n");
@@ -982,7 +991,7 @@ mod tests {
             }],
             "unreadable": [],
         });
-        let of_ended = show::show(&deps, "lantern").unwrap();
+        let of_ended = show::show(&deps.read(), "lantern").unwrap();
 
         let lost = VersionId::of(b"lost");
         world
@@ -1003,7 +1012,7 @@ mod tests {
                 "why": {"type": "corrupt", "text": "the bytes do not hash to the file's name"},
             }],
         });
-        let of_unread = show::show(&deps, atlas().short()).unwrap();
+        let of_unread = show::show(&deps.read(), atlas().short()).unwrap();
 
         vec![
             old_version(&world, &lantern, &root),
@@ -1040,7 +1049,7 @@ mod tests {
             }],
             "unreadable": unreadable,
         });
-        let of_gadget = show::history(&world.deps(), label).unwrap();
+        let of_gadget = show::history(&world.deps().read(), label).unwrap();
         let desk = world.machine();
         let made = head(&world, &desk).id;
         let retired = world.amend(&desk, &topic_fields("desk", RETIRED), "\n");
@@ -1067,7 +1076,10 @@ mod tests {
         });
         vec![
             (of_gadget, expected),
-            (show::history(&world.deps(), "desk").unwrap(), of_ended),
+            (
+                show::history(&world.deps().read(), "desk").unwrap(),
+                of_ended,
+            ),
         ]
     }
 
@@ -1082,14 +1094,14 @@ mod tests {
             "sides": [{"against": root, "held": true, "before": text}],
             "after": text,
         });
-        let of_draft = show::diff(&deps, "lantern", None).unwrap();
+        let of_draft = show::diff(&deps.read(), "lantern", None).unwrap();
 
         let made = json!({
             "label": "lantern",
             "sides": [{"against": null, "held": true, "before": ""}],
             "after": "+++\nname = \"lantern\"\ncreated = 2026-09-04\nsummary = \"s\"\n+++\n\n",
         });
-        let of_first = show::diff(&deps, root.short(), None).unwrap();
+        let of_first = show::diff(&deps.read(), root.short(), None).unwrap();
 
         let fields = topic_fields("atlas", "");
         let lost = first(&atlas(), "topic", &fields, "\n");
@@ -1099,7 +1111,7 @@ mod tests {
             "sides": [{"against": lost.id, "held": false, "before": ""}],
             "after": "+++\nname = \"atlas\"\ncreated = 2026-09-04\nsummary = \"s\"\n+++\n\n",
         });
-        let of_unheld = show::diff(&deps, kept.id.short(), None).unwrap();
+        let of_unheld = show::diff(&deps.read(), kept.id.short(), None).unwrap();
         vec![(of_draft, drafted), (of_first, made), (of_unheld, unheld)]
     }
 
@@ -1173,7 +1185,8 @@ mod tests {
             "draft_count": 0,
             "machine_needs_summary": false,
         });
-        let here = context::context(&world.deps(), "/home/desk/projects/lantern/case").unwrap();
+        let here =
+            context::context(&world.deps().read(), "/home/desk/projects/lantern/case").unwrap();
         vec![(here, expected)]
     }
 
@@ -1182,7 +1195,7 @@ mod tests {
         let (world, _) = world();
         let held = topic_fields("desk", "").replace("\"s\"", &format!("{PLACEHOLDER:?}"));
         world.amend(&world.machine(), &held, "\n");
-        let text = parsed(&context::context(&world.deps(), "/srv").unwrap());
+        let text = parsed(&context::context(&world.deps().read(), "/srv").unwrap());
         assert_eq!(text["machine_needs_summary"], json!(true));
     }
 
@@ -1190,7 +1203,7 @@ mod tests {
     fn a_claim_on_no_directory_loads_its_topic_with_null_for_the_directory() {
         let (world, _, atlas) = world_with_atlas();
         world.put("claim", &claim_fields(&world.machine(), &atlas, ""), "\n");
-        let nowhere = parsed(&context::context(&world.deps(), "/srv").unwrap());
+        let nowhere = parsed(&context::context(&world.deps().read(), "/srv").unwrap());
         assert_eq!(
             nowhere["topics"][0]["via"],
             json!({"type": "claim", "directory": null, "closest": true})
@@ -1239,7 +1252,7 @@ mod tests {
             ],
             "fork_count": 0,
         });
-        vec![(check::check(&world.deps()).unwrap(), expected)]
+        vec![(check::check(&world.deps().read()).unwrap(), expected)]
     }
 
     fn usages() -> Vec<(Vec<MachineUsage>, Value)> {
@@ -1270,9 +1283,9 @@ mod tests {
             },
         ]);
         let deps = world.deps();
-        let none = usage::usage(&deps, None, Some("2099-01-01")).unwrap();
+        let none = usage::usage(&deps.read(), None, Some("2099-01-01")).unwrap();
         vec![
-            (usage::usage(&deps, None, None).unwrap(), expected),
+            (usage::usage(&deps.read(), None, None).unwrap(), expected),
             (none, json!([])),
         ]
     }
@@ -1318,7 +1331,7 @@ mod tests {
     #[test]
     fn a_check_keeps_its_exit_code_under_json() {
         let Damaged { world, .. } = damaged();
-        let found = check::check(&world.deps()).unwrap();
+        let found = check::check(&world.deps().read()).unwrap();
         assert_eq!(output(&found, true).exit, 1);
         assert_eq!(output(&Check::default(), true).exit, 0);
     }

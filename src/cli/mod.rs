@@ -295,7 +295,7 @@ fn serve(
         Ok(adapters)
     };
     let ended = server.run(None, &|method, target| match settled() {
-        Ok(adapters) => web::respond(&adapters.deps(), method, target),
+        Ok(adapters) => web::respond(&adapters.deps().read(), method, target),
         Err(Failure::Refused(why)) => web::failed(Failure::Store(StoreError::io("serve", why))),
         Err(failure) => web::failed(failure),
     });

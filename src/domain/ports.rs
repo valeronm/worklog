@@ -32,11 +32,9 @@ impl fmt::Display for StoreError {
 }
 
 /// Every version of every document; no call returns the whole store.
-pub trait Store {
+pub trait StoreRead {
     /// The versions held of the document; none for one never stored.
     fn document(&self, id: &DocumentId) -> Result<Document, StoreError>;
-    /// Adds a version; a version already present is not an error.
-    fn put(&self, version: &Version) -> Result<(), StoreError>;
     /// The documents of the kind, by id.
     fn of_kind(&self, kind: &Kind) -> Result<Vec<Document>, StoreError>;
     /// The documents a head of which carries `key` as one of `values`, or as a
@@ -58,29 +56,40 @@ pub trait Store {
     fn versions_under(&self, prefix: &str) -> Result<Vec<(DocumentId, VersionId)>, StoreError>;
 }
 
+pub trait Store: StoreRead {
+    /// Adds a version; a version already present is not an error.
+    fn put(&self, version: &Version) -> Result<(), StoreError>;
+}
+
 /// Where a new document's id comes from.
 pub trait Ids {
     fn mint(&self) -> Result<DocumentId, StoreError>;
 }
 
 /// Drafts being edited on this machine, never synced.
-pub trait Drafts {
+pub trait DraftsRead {
     fn read(&self, document: &DocumentId) -> Result<Option<Draft>, StoreError>;
-    /// Writes the draft and returns where a person or an editor finds it.
-    fn write(&self, draft: &Draft) -> Result<String, StoreError>;
-    fn delete(&self, document: &DocumentId) -> Result<(), StoreError>;
     /// Every draft, by its document's id.
     fn list(&self) -> Result<Vec<Draft>, StoreError>;
     /// Where the draft of the document is or would be.
     fn location(&self, document: &DocumentId) -> String;
 }
 
+pub trait Drafts: DraftsRead {
+    /// Writes the draft and returns where a person or an editor finds it.
+    fn write(&self, draft: &Draft) -> Result<String, StoreError>;
+    fn delete(&self, document: &DocumentId) -> Result<(), StoreError>;
+}
+
 /// The runs every machine logged.
-pub trait Usage {
-    fn record(&self, invocation: &Invocation) -> Result<(), StoreError>;
+pub trait UsageRead {
     /// The lines that read and that `kept` keeps; a line filed under another machine or
     /// month than its own may be left out.
     fn read(&self, kept: &Kept) -> Result<Vec<Invocation>, StoreError>;
+}
+
+pub trait Usage: UsageRead {
+    fn record(&self, invocation: &Invocation) -> Result<(), StoreError>;
 }
 
 /// Where releases of this binary are published.
@@ -116,13 +125,11 @@ pub trait Clock {
     fn now(&self) -> Stamp;
 }
 
-pub trait Host {
+pub trait HostRead {
     /// The id of this machine's topic; `None` before the host is set up.
     fn machine(&self) -> Result<Option<DocumentId>, StoreError>;
     /// The home directory as an absolute path; `None` for a host with none.
     fn home(&self) -> Result<Option<String>, StoreError>;
-    /// Makes `machine` this host's machine topic, refusing a host that already has one.
-    fn bind(&self, machine: &DocumentId) -> Result<(), StoreError>;
     /// `absolute` with the links followed through the longest part of it that exists on this
     /// host's file system, the rest kept as given.
     fn resolve(&self, absolute: &str) -> Result<String, StoreError>;
@@ -131,4 +138,9 @@ pub trait Host {
     /// The name the operating system has for this host, as it gives it; `None` for one that
     /// does not read as text.
     fn name(&self) -> Option<String>;
+}
+
+pub trait Host: HostRead {
+    /// Makes `machine` this host's machine topic, refusing a host that already has one.
+    fn bind(&self, machine: &DocumentId) -> Result<(), StoreError>;
 }

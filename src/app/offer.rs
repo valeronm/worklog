@@ -7,7 +7,7 @@ use crate::app::heads::kind_of;
 use crate::app::index::Topics;
 use crate::app::lookup::{Lookup, Names};
 use crate::app::rows::{Shown, row, urgency};
-use crate::app::{Deps, Failure};
+use crate::app::{Failure, ReadDeps};
 use crate::domain::document::Document;
 use crate::domain::id::DocumentId;
 use crate::domain::schema::{Content, Date, KindOf};
@@ -33,7 +33,7 @@ pub struct Offered {
 /// The documents of `kinds` that are as `wanted`, each with an address its command resolves
 /// to it and to no other document. The live ones come kind by kind in the order of `kinds`,
 /// each kind as its listing orders it; the ended and the forked by label.
-pub fn offered(deps: &Deps, kinds: &[KindOf], wanted: Wanted) -> Result<Vec<Offered>, Failure> {
+pub fn offered(deps: &ReadDeps, kinds: &[KindOf], wanted: Wanted) -> Result<Vec<Offered>, Failure> {
     let lookup = Lookup::new(deps.store);
     let topics = Topics::load(&lookup)?;
     let names = Names::of(&lookup);
@@ -122,7 +122,7 @@ mod tests {
     const NAMED: [KindOf; 4] = [KindOf::Topic, KindOf::Fact, KindOf::Entry, KindOf::Followup];
 
     fn addressed(world: &World, kinds: &[KindOf], wanted: Wanted) -> Vec<(DocumentId, String)> {
-        let offered = offered(&world.deps(), kinds, wanted).unwrap();
+        let offered = offered(&world.deps().read(), kinds, wanted).unwrap();
         let mut rows: Vec<(DocumentId, String)> = (offered.into_iter())
             .map(|offered| (offered.document, offered.address))
             .collect();
@@ -171,7 +171,7 @@ mod tests {
             by_name(&case, "phone/case"),
         ];
         assert_eq!(ended(&world), sorted(named));
-        let listed = offered(&world.deps(), &NAMED, Wanted::Ended).unwrap();
+        let listed = offered(&world.deps().read(), &NAMED, Wanted::Ended).unwrap();
         let addresses: Vec<&str> = (listed.iter().map(|ended| ended.address.as_str())).collect();
         assert_eq!(addresses[1..], ["lantern/fuse", "phone", "phone/case"]);
         assert_eq!(listed[0].summary, "Order a fuse");
@@ -284,7 +284,7 @@ mod tests {
             addressed(&world, &KindOf::ALL, Wanted::Forked),
             sorted(forked)
         );
-        let listed = offered(&world.deps(), &KindOf::ALL, Wanted::Forked).unwrap();
+        let listed = offered(&world.deps().read(), &KindOf::ALL, Wanted::Forked).unwrap();
         let summary = |id: &DocumentId| {
             let of = listed.iter().find(|offered| offered.document == *id);
             of.expect("a forked document").summary.as_str()
@@ -339,7 +339,7 @@ mod tests {
             "look_again = 2026-10-01\nwhy = \"w\"\n",
         );
         let kinds = [KindOf::Entry, KindOf::Followup, KindOf::Fact, KindOf::Topic];
-        let listed = offered(&world.deps(), &kinds, Wanted::Live).unwrap();
+        let listed = offered(&world.deps().read(), &kinds, Wanted::Live).unwrap();
         let addresses: Vec<&str> =
             (listed.iter().map(|offered| offered.address.as_str())).collect();
         assert_eq!(
@@ -368,7 +368,7 @@ mod tests {
             followup(&world, &[&lantern], "s", DONE);
         }
         let world = world.counted();
-        let offered = offered(&world.deps(), &NAMED, Wanted::Ended).unwrap();
+        let offered = offered(&world.deps().read(), &NAMED, Wanted::Ended).unwrap();
         assert_eq!(offered.len(), ended);
         let store = &world.store;
         assert_eq!((store.holdings.get(), store.documents.get()), (0, 0));
@@ -384,7 +384,7 @@ mod tests {
         let world = world.counted();
         let asked = |kinds: &[KindOf], wanted: Wanted| {
             let before = (world.store.kinds.get(), world.store.scans());
-            offered(&world.deps(), kinds, wanted).unwrap();
+            offered(&world.deps().read(), kinds, wanted).unwrap();
             let store = &world.store;
             (store.kinds.get() - before.0, store.scans() - before.1)
         };

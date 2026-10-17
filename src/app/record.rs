@@ -23,10 +23,10 @@ pub struct Run<'a> {
 /// Appends the run to this machine's log where the store holds the machine's topic. Refuses on
 /// a host bound to no machine topic.
 pub fn record(deps: &Deps, run: &Run, outcome: Outcome) -> Result<(), Failure> {
-    let machine = deps.machine()?;
+    let machine = deps.read().machine()?;
     // A directory that has not synced or mounted holds no file of the machine's topic, and a
     // line appended there creates files at the path the store belongs at.
-    let held = Lookup::new(deps.store).document(&machine)?;
+    let held = Lookup::new(deps.read().store).document(&machine)?;
     if held.history().is_empty() && held.unreadable().is_empty() {
         return Ok(());
     }
@@ -39,7 +39,7 @@ pub fn record(deps: &Deps, run: &Run, outcome: Outcome) -> Result<(), Failure> {
         exit: outcome.exit,
         refusal: outcome.refusal,
         hits: outcome.hits,
-        directory: deps.directory(run.directory)?.to_string(),
+        directory: deps.read().directory(run.directory)?.to_string(),
         arguments: run.arguments.to_vec(),
     })?)
 }
@@ -49,7 +49,7 @@ mod tests {
     use super::*;
     use crate::app::testing::{NOW, World, refused, topic};
     use crate::domain::id::VersionId;
-    use crate::domain::ports::Usage as _;
+    use crate::domain::ports::UsageRead as _;
     use crate::domain::testing::{lamp_session, version};
     use crate::domain::usage::Kept;
     use crate::domain::version::{ReadError, Stamp};

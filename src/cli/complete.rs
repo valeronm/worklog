@@ -8,7 +8,7 @@ use super::args::{Cli, Shell};
 use super::render::Output;
 use super::{Environment, NAME, hook};
 use crate::app::offer::{self, Offered, Wanted};
-use crate::app::{Deps, Failure, draft};
+use crate::app::{Failure, ReadDeps, draft};
 use crate::domain::schema::{KindOf, Reason};
 use crate::wiring;
 
@@ -85,13 +85,13 @@ const TOPICS_AND_ENTRIES: Source = (&[TOPIC, ENTRY], Wanted::Live);
 const FORKED: Source = (&KindOf::ALL, Wanted::Forked);
 const ENDED: Source = (&[TOPIC, FACT, ENTRY, FOLLOWUP], Wanted::Ended);
 
-fn addresses(deps: &Deps, (kinds, wanted): Source) -> Listed {
+fn addresses(deps: &ReadDeps, (kinds, wanted): Source) -> Listed {
     let candidate = |offered: &Offered| described(&offered.address, &offered.summary);
     let offered = offer::offered(deps, kinds, wanted)?;
     Ok(offered.iter().map(candidate).collect())
 }
 
-fn draft_names(deps: &Deps) -> Listed {
+fn draft_names(deps: &ReadDeps) -> Listed {
     let candidate = |row: &draft::DraftRow| described(&row.label, &row.kind);
     Ok(draft::drafts(deps)?.iter().map(candidate).collect())
 }
@@ -118,16 +118,16 @@ fn trigger_words() -> Vec<CompletionCandidate> {
 // A shell that asks has nowhere to show a refusal.
 fn offered(
     variable: &dyn Fn(&str) -> Option<OsString>,
-    list: &dyn Fn(&Deps) -> Listed,
+    list: &dyn Fn(&ReadDeps) -> Listed,
 ) -> Vec<CompletionCandidate> {
     let Ok(Some(adapters)) = wiring::wire(variable, None) else {
         return Vec::new();
     };
-    list(&adapters.deps()).unwrap_or_default()
+    list(&adapters.deps().read()).unwrap_or_default()
 }
 
 // clap asks a source with no arguments.
-fn from_store(list: impl Fn(&Deps) -> Listed + Send + Sync + 'static) -> ArgValueCandidates {
+fn from_store(list: impl Fn(&ReadDeps) -> Listed + Send + Sync + 'static) -> ArgValueCandidates {
     ArgValueCandidates::new(move || offered(&|name| std::env::var_os(name), &list))
 }
 
@@ -295,25 +295,25 @@ mod tests {
         let facts = ["lantern/relay", "lantern/dimmer"].map(summarized);
         let entries = [summarized("2026-10-08-wiring")];
         let followups = [(open.short().to_owned(), "Check the driver".to_owned())];
-        assert_eq!(pairs(addresses(&deps, TOPICS)), topics);
-        assert_eq!(pairs(addresses(&deps, FACTS)), facts);
-        assert_eq!(pairs(addresses(&deps, ENTRIES)), entries);
-        assert_eq!(pairs(addresses(&deps, FOLLOWUPS)), followups);
+        assert_eq!(pairs(addresses(&deps.read(), TOPICS)), topics);
+        assert_eq!(pairs(addresses(&deps.read(), FACTS)), facts);
+        assert_eq!(pairs(addresses(&deps.read(), ENTRIES)), entries);
+        assert_eq!(pairs(addresses(&deps.read(), FOLLOWUPS)), followups);
         let of = |lists: &[&[(String, String)]]| lists.concat();
         assert_eq!(
-            pairs(addresses(&deps, DOCUMENTS)),
+            pairs(addresses(&deps.read(), DOCUMENTS)),
             of(&[&topics, &facts, &entries, &followups])
         );
         assert_eq!(
-            pairs(addresses(&deps, RENAMABLE)),
+            pairs(addresses(&deps.read(), RENAMABLE)),
             of(&[&topics, &facts, &entries])
         );
         assert_eq!(
-            pairs(addresses(&deps, MOVABLE)),
+            pairs(addresses(&deps.read(), MOVABLE)),
             of(&[&facts, &entries, &followups])
         );
         assert_eq!(
-            pairs(addresses(&deps, TOPICS_AND_ENTRIES)),
+            pairs(addresses(&deps.read(), TOPICS_AND_ENTRIES)),
             of(&[&topics, &entries])
         );
     }
@@ -352,14 +352,14 @@ mod tests {
     fn a_draft_is_offered_by_its_label_with_its_kind() {
         let (world, _) = world();
         let deps = world.deps();
-        assert_eq!(pairs(draft_names(&deps)), []);
+        assert_eq!(pairs(draft_names(&deps.read())), []);
         draft::checkout(&deps, "lantern").unwrap();
         let relay = draft::New::Fact {
             address: "lantern/relay",
             idea: false,
         };
         draft::new(&deps, &relay).unwrap();
-        let mut offered = pairs(draft_names(&deps));
+        let mut offered = pairs(draft_names(&deps.read()));
         offered.sort();
         assert_eq!(
             offered,
@@ -368,7 +368,7 @@ mod tests {
                 ("lantern/relay".to_owned(), "fact".to_owned())
             ]
         );
-        assert_eq!(pairs(addresses(&deps, TOPICS)).len(), 2);
+        assert_eq!(pairs(addresses(&deps.read(), TOPICS)).len(), 2);
     }
 
     #[test]
@@ -376,12 +376,12 @@ mod tests {
         let kept = tempfile::tempdir().unwrap();
         let root = std::fs::canonicalize(kept.path()).unwrap();
         let process = Process::under(&root);
-        let values = |list: &dyn Fn(&Deps) -> Listed| -> Vec<String> {
+        let values = |list: &dyn Fn(&ReadDeps) -> Listed| -> Vec<String> {
             let offered = offered(&|name| process.variable(name), list);
             offered.iter().map(|candidate| pair(candidate).0).collect()
         };
-        let topic_names = |deps: &Deps| addresses(deps, TOPICS);
-        let document_names = |deps: &Deps| addresses(deps, DOCUMENTS);
+        let topic_names = |deps: &ReadDeps| addresses(deps, TOPICS);
+        let document_names = |deps: &ReadDeps| addresses(deps, DOCUMENTS);
         assert_eq!(values(&topic_names), [""; 0]);
 
         let init = ["init", "desk", "--store", "kept", "--summary", "s"];

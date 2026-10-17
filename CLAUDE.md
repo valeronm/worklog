@@ -6,9 +6,10 @@ constraints that are not visible from the code or those docs.
 
 ## Layers
 
-`tests/layers.rs` reads the sources and holds the boundaries below, since
-a convention nothing checks is one a routine edit falsifies. The one it
-does not hold is that `app` prints nothing.
+`tests/layers.rs` checks source spellings for the boundaries below; it does
+not prove the absence of every forbidden dependency. The compiler holds
+capability and visibility restrictions. Neither checks that `app` prints
+nothing.
 
 `domain` holds the model and its rules and reaches nothing outside memory:
 no file, clock, environment, process or random source. The boundary is
@@ -20,9 +21,13 @@ lets a store keep documents of a kind this binary does not know.
 `app` is one use case per command over the ports. It prints nothing, uses
 no renderer and reaches the host only through a port, so a use case that
 wants something new from outside adds it to a port, not to a parameter.
-One module puts a version in the store and one appends to the usage log. A
-module of `app` is held to the rules of a read, which decides no ending
-and writes nothing, unless the test lists it as a write or as shared.
+The layer test rejects the write dependency type in read modules; the
+compiler rejects mutations through their read capabilities. A write builds
+its read view from its handles, since retaining both views would let them
+disagree. The raw version writer is private to a child module whose write
+method accepts only an admitted version; validation belongs to its parent.
+One module appends to the usage log. A module of `app` decides no ending
+unless the layer test lists it as a write or as shared.
 
 `wiring` builds the adapters and keeps them to itself: `fs` implements the
 ports on a directory tree and `net` the one port that reaches the network,

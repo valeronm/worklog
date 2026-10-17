@@ -183,7 +183,7 @@ pub(super) fn claims_of(
 mod tests {
     use super::*;
     use crate::app::testing::{ENDED, World, entry, topic, topic_fields};
-    use crate::domain::ports::Store;
+    use crate::domain::ports::{Store, StoreRead};
     use crate::domain::testing::after;
 
     #[test]

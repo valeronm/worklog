@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 use crate::app::draft::usage;
 use crate::app::heads::{kind_of, unended_heads};
 use crate::app::lookup::{Lookup, held_by_several};
-use crate::app::{Deps, Failure};
+use crate::app::{Failure, ReadDeps};
 use crate::domain::id::DocumentId;
 use crate::domain::schema::{Content, KindOf, Name};
 
@@ -40,12 +40,12 @@ pub(super) fn topic_named(lookup: &Lookup, name: &Name) -> Result<Option<Documen
 
 /// Whether a topic that is not ended is named `name`. Refuses a name several such topics
 /// hold; a malformed name is a usage failure.
-pub fn held(deps: &Deps, name: &str) -> Result<bool, Failure> {
+pub fn held(deps: &ReadDeps, name: &str) -> Result<bool, Failure> {
     let name = Name::parse(name).map_err(usage)?;
     Ok(topic_named(&Lookup::new(deps.store), &name)?.is_some())
 }
 
-pub fn host_name(deps: &Deps) -> Result<HostName, Failure> {
+pub fn host_name(deps: &ReadDeps) -> Result<HostName, Failure> {
     let given = deps.host.name().unwrap_or_default();
     let cut = given.split('.').next().unwrap_or_default().to_lowercase();
     let Ok(name) = Name::parse(&cut) else {
@@ -61,7 +61,7 @@ pub fn host_name(deps: &Deps) -> Result<HostName, Failure> {
 
 /// The names of the topics that are not ended and that a stored version carries as its
 /// machine, sorted. Reads every version of the store.
-pub fn machines(deps: &Deps) -> Result<Vec<String>, Failure> {
+pub fn machines(deps: &ReadDeps) -> Result<Vec<String>, Failure> {
     let lookup = Lookup::new(deps.store);
     let mut documents = lookup.everything()?;
     for unknown in lookup.unknown()? {
@@ -88,7 +88,7 @@ pub fn machines(deps: &Deps) -> Result<Vec<String>, Failure> {
 
 /// Whether the store holds no document, of a kind this worklog knows or not, that reads or
 /// not.
-pub fn holds_nothing(deps: &Deps) -> Result<bool, Failure> {
+pub fn holds_nothing(deps: &ReadDeps) -> Result<bool, Failure> {
     let lookup = Lookup::new(deps.store);
     Ok(lookup.everything()?.is_empty()
         && lookup.unknown()?.is_empty()
@@ -106,7 +106,7 @@ mod tests {
 
     fn named(world: &mut World, name: Option<&str>) -> HostName {
         world.host.set_name(name.map(str::to_owned));
-        host_name(&world.deps()).unwrap()
+        host_name(&world.deps().read()).unwrap()
     }
 
     #[test]
@@ -174,19 +174,19 @@ mod tests {
         let (world, _) = world();
         topic(&world, "phone", ENDED);
         let deps = world.deps();
-        assert_eq!(held(&deps, "lantern"), Ok(true));
-        assert_eq!(held(&deps, "atlas"), Ok(false));
-        assert_eq!(held(&deps, "phone"), Ok(false));
-        assert!(matches!(held(&deps, "Desk"), Err(Failure::Usage(_))));
+        assert_eq!(held(&deps.read(), "lantern"), Ok(true));
+        assert_eq!(held(&deps.read(), "atlas"), Ok(false));
+        assert_eq!(held(&deps.read(), "phone"), Ok(false));
+        assert!(matches!(held(&deps.read(), "Desk"), Err(Failure::Usage(_))));
         topic(&world, "lantern", "");
-        let text = refused(held(&world.deps(), "lantern"));
+        let text = refused(held(&world.deps().read(), "lantern"));
         assert!(text.contains("is held by several documents"), "{text}");
     }
 
     #[test]
     fn the_machines_are_the_topics_not_ended_that_a_version_was_written_on() {
         let (world, lantern_topic) = world();
-        assert_eq!(machines(&world.deps()), Ok(vec!["desk".to_owned()]));
+        assert_eq!(machines(&world.deps().read()), Ok(vec!["desk".to_owned()]));
 
         let phone = topic(&world, "phone", "");
         let atlas = topic(&world, "atlas", "");
@@ -202,7 +202,7 @@ mod tests {
             written_at(&world, &root, &fields, stamp, "The relay.\n", Some(machine));
         }
         assert_eq!(
-            machines(&world.deps()),
+            machines(&world.deps().read()),
             Ok(vec!["desk".to_owned(), "phone".to_owned()])
         );
 
@@ -211,7 +211,7 @@ mod tests {
         let stamp = "2026-10-09T22:00:00+01:00";
         written_at(&world, &phone_head, &renamed, stamp, "\n", Some(&atlas));
         assert_eq!(
-            machines(&world.deps()),
+            machines(&world.deps().read()),
             Ok(vec![
                 "atlas".to_owned(),
                 "desk".to_owned(),
@@ -223,12 +223,12 @@ mod tests {
     #[test]
     fn a_store_holds_nothing_until_a_document_is_in_it() {
         let (stocked, _) = world();
-        assert_eq!(holds_nothing(&stocked.deps()), Ok(false));
+        assert_eq!(holds_nothing(&stocked.deps().read()), Ok(false));
 
         let bare = World::new();
-        assert_eq!(holds_nothing(&bare.deps()), Ok(true));
+        assert_eq!(holds_nothing(&bare.deps().read()), Ok(true));
         let sketch = first(&lantern(), "sketch", "name = \"lantern\"", "\n");
         bare.store.put(&sketch).unwrap();
-        assert_eq!(holds_nothing(&bare.deps()), Ok(false));
+        assert_eq!(holds_nothing(&bare.deps().read()), Ok(false));
     }
 }

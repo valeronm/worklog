@@ -4,7 +4,7 @@ use toml::Value;
 use crate::app::heads::label_or_short;
 use crate::app::lookup::{Lookup, refuse_ended};
 use crate::app::rules::{name_is_free, referencable};
-use crate::app::{Deps, DraftRef, Failed, Failure, kind_named, text};
+use crate::app::{Deps, DraftRef, Failed, Failure, ReadDeps, kind_named, text};
 use crate::domain::draft::Draft;
 use crate::domain::id::{DocumentId, is_id_prefix};
 use crate::domain::schema::address::{Address, Found};
@@ -41,8 +41,8 @@ pub(super) fn named(lookup: &Lookup, id: &DocumentId) -> Result<String, Failure>
 /// Refuses a name taken in its scope and an address that already has a draft; a malformed
 /// name or date is a usage failure.
 pub fn new(deps: &Deps, what: &New) -> Result<DraftRef, Failure> {
-    let lookup = Lookup::new(deps.store);
-    let today = deps.today()?;
+    let lookup = Lookup::new(deps.read().store);
+    let today = deps.read().today()?;
     let mut fields = Fields::new();
     let (content, address, body) = match what {
         New::Topic { name } => {
@@ -91,7 +91,7 @@ pub fn new(deps: &Deps, what: &New) -> Result<DraftRef, Failure> {
                 Some(date) => Date::parse(date).map_err(usage)?,
                 None => today,
             };
-            let machine = deps.machine()?;
+            let machine = deps.read().machine()?;
             let machine_name = named(&lookup, &machine)?;
             fields.insert("name".to_owned(), text(name.as_str()));
             fields.insert("date".to_owned(), date.value());
@@ -129,7 +129,7 @@ fn draft_open(what: &str) -> Failure {
     Failure::Refused(format!("a draft of {what} is open"))
 }
 
-pub(super) fn refuse_open(deps: &Deps, id: &DocumentId, label: &str) -> Result<(), Failure> {
+pub(super) fn refuse_open(deps: &ReadDeps, id: &DocumentId, label: &str) -> Result<(), Failure> {
     if deps.drafts.read(id)?.is_some() {
         return Err(draft_open(label));
     }
@@ -138,10 +138,10 @@ pub(super) fn refuse_open(deps: &Deps, id: &DocumentId, label: &str) -> Result<(
 
 /// Refuses a claim, an ended, forked or unreadable document, and one that has a draft open.
 pub fn checkout(deps: &Deps, address: &str) -> Result<DraftRef, Failure> {
-    let lookup = Lookup::new(deps.store);
+    let lookup = Lookup::new(deps.read().store);
     let id = lookup.one(address)?;
     let label = lookup.label(&id)?;
-    refuse_open(deps, &id, &label)?;
+    refuse_open(&deps.read(), &id, &label)?;
     let (head, record) = lookup.writable(&id, &label)?;
     let kind = KindOf::of(&head.envelope.kind)?;
     if kind == KindOf::Claim {
@@ -183,8 +183,8 @@ pub(super) fn shown_as(
 }
 
 pub fn discard(deps: &Deps, address: &str) -> Result<(), Failure> {
-    let lookup = Lookup::new(deps.store);
-    let draft = draft_for(deps, &lookup, address)?;
+    let lookup = Lookup::new(deps.read().store);
+    let draft = draft_for(&deps.read(), &lookup, address)?;
     deps.drafts.delete(&draft.document)?;
     Ok(())
 }
@@ -198,7 +198,7 @@ pub struct DraftRow {
     pub location: String,
 }
 
-pub fn drafts(deps: &Deps) -> Result<Vec<DraftRow>, Failure> {
+pub fn drafts(deps: &ReadDeps) -> Result<Vec<DraftRow>, Failure> {
     let mut open = deps.drafts.list()?;
     open.sort_by(|a, b| a.document.cmp(&b.document));
     Ok(open
@@ -214,7 +214,7 @@ pub fn drafts(deps: &Deps) -> Result<Vec<DraftRow>, Failure> {
 
 // The draft of a stored document the address finds is tried before a draft whose document's
 // id starts with the address or whose fields spell it.
-pub(super) fn draft_for(deps: &Deps, lookup: &Lookup, address: &str) -> Result<Draft, Failure> {
+pub(super) fn draft_for(deps: &ReadDeps, lookup: &Lookup, address: &str) -> Result<Draft, Failure> {
     match lookup.find(address) {
         Ok(Found::One(id)) => {
             if let Some(draft) = deps.drafts.read(&id)? {
@@ -265,7 +265,7 @@ pub(super) fn spelled(kind: &Kind, fields: &Fields) -> Option<String> {
 mod tests {
     use super::*;
     use crate::app::testing::{ENDED, ENDED_FACT, TOPIC, World, fact, refused, topic, world};
-    use crate::domain::ports::{Drafts, Store};
+    use crate::domain::ports::{Drafts, DraftsRead, Store, StoreRead};
     use crate::domain::version::{Kind, ReadError};
 
     fn stored(world: &World, id: &DocumentId) -> Draft {
@@ -514,7 +514,7 @@ mod tests {
         checkout(&deps, "lantern/relay-pin").unwrap();
         let fresh = new(&deps, &New::Topic { name: "phone" }).unwrap();
 
-        let by_address = draft_for(&deps, &lookup, "lantern/relay-pin").unwrap();
+        let by_address = draft_for(&deps.read(), &lookup, "lantern/relay-pin").unwrap();
         assert_eq!(by_address.document, relay);
         let remote = Draft::first(
             DocumentId::from_bytes([0xab; 16]),
@@ -523,12 +523,12 @@ mod tests {
             String::new(),
         );
         world.drafts.write(&remote).unwrap();
-        let by_id = draft_for(&deps, &lookup, remote.document.short()).unwrap();
+        let by_id = draft_for(&deps.read(), &lookup, remote.document.short()).unwrap();
         assert_eq!(by_id.document, remote.document);
-        let by_spelling = draft_for(&deps, &lookup, "phone").unwrap();
+        let by_spelling = draft_for(&deps.read(), &lookup, "phone").unwrap();
         assert_eq!(by_spelling.document, fresh.document);
 
-        let text = refused(draft_for(&deps, &lookup, "unknown"));
+        let text = refused(draft_for(&deps.read(), &lookup, "unknown"));
         assert!(text.contains("no draft"), "{text}");
         let other = Draft::first(
             DocumentId::from_bytes([0x77; 16]),
@@ -537,7 +537,7 @@ mod tests {
             String::new(),
         );
         world.drafts.write(&other).unwrap();
-        let text = refused(draft_for(&deps, &lookup, "phone"));
+        let text = refused(draft_for(&deps.read(), &lookup, "phone"));
         assert!(text.contains("several drafts"), "{text}");
     }
 
@@ -547,7 +547,7 @@ mod tests {
         topic(&world, "lantern", "");
         let deps = world.deps();
         let lookup = world.lookup();
-        let text = refused(draft_for(&deps, &lookup, "lantern"));
+        let text = refused(draft_for(&deps.read(), &lookup, "lantern"));
         assert!(text.contains("several documents"), "{text}");
     }
 
@@ -556,7 +556,7 @@ mod tests {
         let (world, _) = world();
         let deps = world.deps();
         let lookup = world.lookup();
-        let text = refused(draft_for(&deps, &lookup, "lantern"));
+        let text = refused(draft_for(&deps.read(), &lookup, "lantern"));
         assert!(text.contains("no draft"), "{text}");
     }
 
@@ -585,7 +585,7 @@ mod tests {
             String::new(),
         );
         world.drafts.write(&nameless).unwrap();
-        let rows = drafts(&deps).unwrap();
+        let rows = drafts(&deps.read()).unwrap();
         let mut expected = vec![
             (phone.document.clone(), "topic", "phone".to_owned()),
             (
@@ -664,7 +664,7 @@ mod tests {
         );
         let opened = new(&deps, &New::Topic { name: "lantern" }).unwrap();
         let lookup = world.lookup();
-        let draft = draft_for(&deps, &lookup, "lantern").unwrap();
+        let draft = draft_for(&deps.read(), &lookup, "lantern").unwrap();
         assert_eq!(draft.document, opened.document);
         discard(&deps, "lantern").unwrap();
         assert_eq!(world.drafts.read(&opened.document).unwrap(), None);

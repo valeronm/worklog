@@ -7,7 +7,7 @@ use super::agents::{self, Placing, initialized};
 use super::render::Output;
 use super::{Environment, NAME};
 use crate::app::machines::{self, HostName};
-use crate::app::{Deps, Failure, setup};
+use crate::app::{Deps, Failure, ReadDeps, setup};
 use crate::wiring;
 
 const DEFAULT_STORE: &str = "worklog";
@@ -125,7 +125,7 @@ pub(super) fn store<T>(
     }
 }
 
-fn machine(deps: &Deps, terminal: &mut Terminal) -> Result<(String, bool), Failure> {
+fn machine(deps: &ReadDeps, terminal: &mut Terminal) -> Result<(String, bool), Failure> {
     let offered = match machines::host_name(deps)? {
         HostName::Held(name) => {
             terminal.say(&format!("This machine is {name}, found in the store."));
@@ -188,7 +188,7 @@ pub(super) fn init(
     terminal: &mut Terminal,
 ) -> Result<Output, Failure> {
     setup::refuse_bound(deps)?;
-    let starting = machines::holds_nothing(deps)?;
+    let starting = machines::holds_nothing(&deps.read())?;
     if starting {
         terminal.say(&format!(
             "{} holds no documents. A store shared between machines may not have synced to \
@@ -199,7 +199,7 @@ pub(super) fn init(
             return Err(Failure::at(store.display(), "no store was started"));
         }
     }
-    let (name, held) = machine(deps, terminal)?;
+    let (name, held) = machine(&deps.read(), terminal)?;
     let placing = placing(environment, terminal)?;
     terminal.say(&format!("The store: {}", store.display()));
     let how = if held {
@@ -230,7 +230,7 @@ mod tests {
     use crate::app::testing::{World, head, topic, world, written_at};
     use crate::cli::tests::environment;
     use crate::domain::id::DocumentId;
-    use crate::domain::ports::Host as _;
+    use crate::domain::ports::HostRead as _;
 
     const STORE: &str = "/home/desk/worklog";
     const CONFIRM: &str = "The store: /home/desk/worklog\nThe machine: ";
@@ -287,7 +287,7 @@ mod tests {
     }
 
     fn topics(world: &World) -> Vec<String> {
-        let listed = list::topics(&world.deps(), None, true).unwrap();
+        let listed = list::topics(&world.deps().read(), None, true).unwrap();
         let mut names: Vec<String> = listed.into_iter().map(|topic| topic.row.label).collect();
         names.sort();
         names

@@ -8,7 +8,7 @@ use crate::app::draft::{draft_for, draft_label, opened, shown_as};
 use crate::app::heads::{ended_for, ended_of, is_forked, kind_of, row_head};
 use crate::app::lookup::{Lookup, names_no_document};
 use crate::app::rows::Reference;
-use crate::app::{Deps, Failure};
+use crate::app::{Failure, ReadDeps};
 use crate::domain::document::{Document, Unreadable};
 use crate::domain::draft::Draft;
 use crate::domain::id::{DocumentId, VersionId, is_id_prefix};
@@ -383,7 +383,7 @@ fn held<'a>(
 /// hash with or without `b3-`; a name wins over a prefix. Refuses an address that names
 /// nothing or several documents or versions, and a version whose file does not read. An ended
 /// or unreadable document is shown too.
-pub fn show(deps: &Deps, address: &str) -> Result<Shown, Failure> {
+pub fn show(deps: &ReadDeps, address: &str) -> Result<Shown, Failure> {
     let lookup = Lookup::new(deps.store);
     let resolved = resolve(&lookup, address)?;
     match resolved {
@@ -427,7 +427,7 @@ pub fn show(deps: &Deps, address: &str) -> Result<Shown, Failure> {
 }
 
 /// Takes a document only; a version's hash is a usage failure.
-pub fn history(deps: &Deps, address: &str) -> Result<History, Failure> {
+pub fn history(deps: &ReadDeps, address: &str) -> Result<History, Failure> {
     let lookup = Lookup::new(deps.store);
     let id = match resolve(&lookup, address)? {
         Resolved::Document(id) => id,
@@ -510,7 +510,12 @@ fn draft_text(lookup: &Lookup, version: &Version) -> Result<String, Failure> {
     )
 }
 
-fn diff_draft(deps: &Deps, lookup: &Lookup, address: &str, named: bool) -> Result<Diff, Failure> {
+fn diff_draft(
+    deps: &ReadDeps,
+    lookup: &Lookup,
+    address: &str,
+    named: bool,
+) -> Result<Diff, Failure> {
     let draft = match draft_for(deps, lookup, address) {
         Ok(draft) => draft,
         Err(Failure::Refused(_)) if !named => return Err(names_no_document(address)),
@@ -556,7 +561,7 @@ fn version_argument(
 /// earlier on the left whichever came first.
 /// A document as either of two arguments is a usage failure. Across two documents the label
 /// is the later side's.
-pub fn diff(deps: &Deps, first: &str, second: Option<&str>) -> Result<Diff, Failure> {
+pub fn diff(deps: &ReadDeps, first: &str, second: Option<&str>) -> Result<Diff, Failure> {
     let lookup = Lookup::new(deps.store);
     let Some(second) = second else {
         let found = match resolved(&lookup, first) {
@@ -602,12 +607,12 @@ mod tests {
     };
     use crate::domain::draft::Draft;
     use crate::domain::id::VersionId;
-    use crate::domain::ports::{Clock, Drafts, Store};
+    use crate::domain::ports::{Clock, Drafts, DraftsRead, Store, StoreRead};
     use crate::domain::testing::{after, first, lantern};
     use crate::domain::version::ReadError;
 
     fn shown_document(world: &World, address: &str) -> ShownDocument {
-        match show(&world.deps(), address).unwrap() {
+        match show(&world.deps().read(), address).unwrap() {
             Shown::Document(document) => document,
             Shown::Version(_) => panic!("expected a document"),
         }
@@ -646,7 +651,7 @@ mod tests {
         let gadget = world.put("gadget", "size = 4\n", "\n");
         let deps = world.deps();
 
-        let listed = crate::app::list::topics(&deps, None, true).unwrap();
+        let listed = crate::app::list::topics(&deps.read(), None, true).unwrap();
         for (address, id) in [("lantern", &lantern), ("atlas", &atlas)] {
             let row = (listed.iter().map(|topic| &topic.row)).find(|row| row.document == *id);
             let shown = shown_document(&world, address);
@@ -654,7 +659,7 @@ mod tests {
             assert_eq!(shown.reads_as, Some(KindOf::Topic), "{address}");
         }
 
-        let facts = crate::app::list::facts(&deps, None, false).unwrap();
+        let facts = crate::app::list::facts(&deps.read(), None, false).unwrap();
         assert_eq!(facts[0].row.document, relay);
         assert_eq!(
             shown_document(&world, "lantern/relay-pin").reads_as,
@@ -678,7 +683,7 @@ mod tests {
         let (world, lantern) = world();
         let world = world.counted();
         let deps = world.deps();
-        show(&deps, &address(&lantern)).unwrap();
+        show(&deps.read(), &address(&lantern)).unwrap();
         let lookups = world.store.prefixes.get();
         (world.store.scans() - lookups, lookups)
     }
@@ -691,7 +696,7 @@ mod tests {
     }
 
     fn compared(world: &World, address: &str) -> Compared {
-        match show(&world.deps(), address).unwrap() {
+        match show(&world.deps().read(), address).unwrap() {
             Shown::Version(compared) => *compared,
             Shown::Document(_) => panic!("expected a version"),
         }
@@ -743,7 +748,7 @@ mod tests {
             );
             assert!(head.text.contains("created = 2026-09-04"), "{}", head.text);
         }
-        let text = refused(show(&world.deps(), "unknown"));
+        let text = refused(show(&world.deps().read(), "unknown"));
         assert!(text.contains("unknown: names no document"), "{text}");
     }
 
@@ -777,7 +782,7 @@ mod tests {
             shown_document(&world, "lantern").heads[0].machine,
             to(&absent, absent.short())
         );
-        let history = history(&world.deps(), "lantern").unwrap();
+        let history = history(&world.deps().read(), "lantern").unwrap();
         let machines: Vec<&str> = history
             .versions
             .iter()
@@ -792,7 +797,10 @@ mod tests {
         let (world, lantern) = world();
         let root = head(&world, &lantern).id;
         assert_eq!(compared(&world, root.short()).document_ended, None);
-        assert_eq!(history(&world.deps(), "lantern").unwrap().ended, None);
+        assert_eq!(
+            history(&world.deps().read(), "lantern").unwrap().ended,
+            None
+        );
 
         world.amend(&lantern, &topic_fields("lantern", ENDED), "\n");
         let shown = shown_document(&world, "lantern");
@@ -801,7 +809,7 @@ mod tests {
         let old = compared(&world, root.short());
         assert_eq!(old.document_ended.as_deref(), Some("retired"));
         assert_eq!(old.version.ended, None);
-        let history = history(&world.deps(), "lantern").unwrap();
+        let history = history(&world.deps().read(), "lantern").unwrap();
         assert_eq!(history.ended.as_deref(), Some("retired"));
     }
 
@@ -817,7 +825,7 @@ mod tests {
 
         topic(&world, "phone", "");
         topic(&world, "phone", "");
-        let text = refused(show(&world.deps(), "phone"));
+        let text = refused(show(&world.deps().read(), "phone"));
         assert!(text.contains("is held by several documents"), "{text}");
     }
 
@@ -870,7 +878,7 @@ mod tests {
             .expect("two versions share a first digit");
         let shared = shared.to_string();
         assert!(world.store.documents_under(&shared).unwrap().is_empty());
-        let text = refused(show(&world.deps(), &shared));
+        let text = refused(show(&world.deps().read(), &shared));
         assert!(text.contains("is held by several versions"), "{text}");
 
         let named = ids
@@ -1105,7 +1113,7 @@ mod tests {
             &[("atlas", Some(&atlas))],
         );
         let noticed = |world: &World| -> Vec<String> {
-            let found = crate::app::check::check(&world.deps()).unwrap();
+            let found = crate::app::check::check(&world.deps().read()).unwrap();
             (found.notices.into_iter())
                 .map(|finding| finding.what)
                 .collect()
@@ -1249,7 +1257,7 @@ mod tests {
         world.amend_linking(&lantern, &topic_fields("lantern", ""), "\n", &links);
         let world = world.counted();
         let deps = world.deps();
-        show(&deps, lantern.as_str()).unwrap();
+        show(&deps.read(), lantern.as_str()).unwrap();
         (world.store.scans(), world.store.questions())
     }
 
@@ -1285,7 +1293,7 @@ mod tests {
         let (world, lantern) = world();
         let second = world.amend(&lantern, &topic_fields("lantern", ""), "second\n");
         let third = world.amend(&lantern, &topic_fields("lantern", ""), "third\n");
-        let history = history(&world.deps(), "lantern").unwrap();
+        let history = history(&world.deps().read(), "lantern").unwrap();
         assert_eq!(history.document, lantern);
         assert_eq!(history.label, "lantern");
         let ids: Vec<&VersionId> = history.versions.iter().map(|v| &v.version).collect();
@@ -1294,9 +1302,9 @@ mod tests {
         let heads: Vec<bool> = history.versions.iter().map(|v| v.head).collect();
         assert_eq!(heads, [true, false, false]);
 
-        let text = refused(super::history(&world.deps(), "nobody"));
+        let text = refused(super::history(&world.deps().read(), "nobody"));
         assert!(text.contains("names no document"), "{text}");
-        let by_version = super::history(&world.deps(), &third.as_str()[3..12]);
+        let by_version = super::history(&world.deps().read(), &third.as_str()[3..12]);
         assert!(
             matches!(by_version, Err(Failure::Usage(_))),
             "{by_version:?}"
@@ -1362,14 +1370,15 @@ mod tests {
         let heads = fork(&world, &lantern, &topic_fields("lantern", ""));
         let joined = world.amend(&lantern, &topic_fields("lantern", ""), "joined\n");
         for version in [&root.id, &heads[0], &joined] {
-            let Shown::Version(compared) = show(&world.deps(), version.as_str()).unwrap() else {
+            let Shown::Version(compared) = show(&world.deps().read(), version.as_str()).unwrap()
+            else {
                 panic!("expected a version");
             };
-            let diff = diff(&world.deps(), version.as_str(), None).unwrap();
+            let diff = diff(&world.deps().read(), version.as_str(), None).unwrap();
             assert_eq!(compared.sides, diff.sides);
             assert_eq!(compared.version.text, diff.after);
         }
-        let Shown::Version(compared) = show(&world.deps(), joined.as_str()).unwrap() else {
+        let Shown::Version(compared) = show(&world.deps().read(), joined.as_str()).unwrap() else {
             panic!("expected a version");
         };
         let against: Vec<Option<&VersionId>> = (compared.sides.iter())
@@ -1389,7 +1398,7 @@ mod tests {
         let (world, lantern) = world();
         let root = head(&world, &lantern);
         checkout(&world.deps(), "lantern").unwrap();
-        let diff = diff(&world.deps(), "lantern", None).unwrap();
+        let diff = diff(&world.deps().read(), "lantern", None).unwrap();
         assert_eq!(diff.label, "lantern");
         let side = only_side(&diff);
         assert_eq!((side.against.as_ref(), side.held), (Some(&root.id), true));
@@ -1405,7 +1414,7 @@ mod tests {
             )
             .unwrap();
         world.drafts.write(&edited).unwrap();
-        let diff = super::diff(&world.deps(), "lantern", None).unwrap();
+        let diff = super::diff(&world.deps().read(), "lantern", None).unwrap();
         assert_ne!(only_side(&diff).before, diff.after);
         assert!(diff.after.ends_with("edited\n"), "{}", diff.after);
     }
@@ -1415,7 +1424,7 @@ mod tests {
         let (world, lantern) = world();
         fact(&world, &lantern, "relay-pin", "");
         checkout(&world.deps(), "lantern/relay-pin").unwrap();
-        let diff = diff(&world.deps(), "lantern/relay-pin", None).unwrap();
+        let diff = diff(&world.deps().read(), "lantern/relay-pin", None).unwrap();
         let side = only_side(&diff);
         assert_eq!(side.before, diff.after);
         assert!(diff.after.contains("topic = \"lantern\""));
@@ -1424,9 +1433,9 @@ mod tests {
     #[test]
     fn a_first_draft_has_nothing_to_compare_to_and_no_draft_is_refused() {
         let (world, _) = world();
-        let text = refused(diff(&world.deps(), "lantern", None));
+        let text = refused(diff(&world.deps().read(), "lantern", None));
         assert!(text.contains("lantern: no draft"), "{text}");
-        let text = refused(diff(&world.deps(), "nobody", None));
+        let text = refused(diff(&world.deps().read(), "nobody", None));
         assert!(text.contains("names no document"), "{text}");
 
         crate::app::draft::new(
@@ -1434,7 +1443,7 @@ mod tests {
             &crate::app::draft::New::Topic { name: "phone" },
         )
         .unwrap();
-        let diff = diff(&world.deps(), "phone", None).unwrap();
+        let diff = diff(&world.deps().read(), "phone", None).unwrap();
         assert_eq!(diff.label, "phone");
         let side = only_side(&diff);
         assert_eq!((&side.against, side.held), (&None, true));
@@ -1452,10 +1461,10 @@ mod tests {
             .fields
             .insert("name".to_owned(), toml::Value::from("Relay Pin"));
         world.drafts.write(&draft).unwrap();
-        let listed = crate::app::draft::drafts(&deps).unwrap();
+        let listed = crate::app::draft::drafts(&deps.read()).unwrap();
         assert_eq!(listed[0].label, "Relay Pin");
 
-        let diff = diff(&deps, &listed[0].label, None).unwrap();
+        let diff = diff(&deps.read(), &listed[0].label, None).unwrap();
         assert_eq!(diff.label, "Relay Pin");
         assert!(
             only_side(&diff).before.contains("name = \"lantern\""),
@@ -1467,7 +1476,7 @@ mod tests {
             "{}",
             diff.after
         );
-        let text = refused(super::diff(&deps, "Lamp Pin", None));
+        let text = refused(super::diff(&deps.read(), "Lamp Pin", None));
         assert!(text.contains("Lamp Pin: names no document"), "{text}");
     }
 
@@ -1479,9 +1488,12 @@ mod tests {
         let mut draft = world.drafts.read(&lantern).unwrap().unwrap();
         draft.fields.remove("name");
         world.drafts.write(&draft).unwrap();
-        let listed = crate::app::draft::drafts(&deps).unwrap();
+        let listed = crate::app::draft::drafts(&deps.read()).unwrap();
         assert_eq!(listed[0].label, lantern.short());
-        assert_eq!(diff(&deps, "lantern", None).unwrap().label, lantern.short());
+        assert_eq!(
+            diff(&deps.read(), "lantern", None).unwrap().label,
+            lantern.short()
+        );
     }
 
     #[test]
@@ -1497,7 +1509,7 @@ mod tests {
         );
         world.store.put(&joined).unwrap();
 
-        let diff = diff(&world.deps(), &joined.id.as_str()[3..13], None).unwrap();
+        let diff = diff(&world.deps().read(), &joined.id.as_str()[3..13], None).unwrap();
         assert_eq!(diff.label, "lantern");
         assert_eq!(diff.sides.len(), 2);
         let mut against: Vec<&VersionId> = diff.sides.iter().flat_map(|s| &s.against).collect();
@@ -1509,7 +1521,8 @@ mod tests {
         assert!(diff.after.ends_with("joined\n"));
         assert!(diff.sides.iter().any(|s| s.before.ends_with("left\n")));
 
-        let first_version = super::diff(&world.deps(), &root.id.as_str()[3..13], None).unwrap();
+        let first_version =
+            super::diff(&world.deps().read(), &root.id.as_str()[3..13], None).unwrap();
         let side = only_side(&first_version);
         assert_eq!(side.before, "");
         assert_eq!((&side.against, side.held), (&None, true));
@@ -1522,7 +1535,7 @@ mod tests {
         let root = first(&stray, "topic", &topic_fields("lantern", ""), "root\n");
         let child = after(&[&root], &topic_fields("lantern", ""), "child\n");
         world.store.put(&child).unwrap();
-        let diff = diff(&world.deps(), &child.id.as_str()[3..13], None).unwrap();
+        let diff = diff(&world.deps().read(), &child.id.as_str()[3..13], None).unwrap();
         let side = only_side(&diff);
         assert_eq!(side.before, "");
         assert_eq!((side.against.as_ref(), side.held), (Some(&root.id), false));
@@ -1535,7 +1548,7 @@ mod tests {
         let second = world.amend(&lantern, &topic_fields("lantern", ""), "second\n");
         let (a, b) = (&root.id.as_str()[3..13], &second.as_str()[3..13]);
         for (typed_first, typed_second) in [(a, b), (b, a)] {
-            let diff = diff(&world.deps(), typed_first, Some(typed_second)).unwrap();
+            let diff = diff(&world.deps().read(), typed_first, Some(typed_second)).unwrap();
             let side = only_side(&diff);
             assert_eq!((side.against.as_ref(), side.held), (Some(&root.id), true));
             assert!(side.before.ends_with("+++\n\n"), "{}", side.before);
@@ -1544,12 +1557,12 @@ mod tests {
 
         let other = topic(&world, "atlas", "");
         let other = head(&world, &other);
-        let diff = diff(&world.deps(), &other.id.as_str()[3..13], Some(a)).unwrap();
+        let diff = diff(&world.deps().read(), &other.id.as_str()[3..13], Some(a)).unwrap();
         assert_eq!(only_side(&diff).against.as_ref(), Some(&root.id));
 
-        let usage = super::diff(&world.deps(), "lantern", Some(a));
+        let usage = super::diff(&world.deps().read(), "lantern", Some(a));
         assert!(matches!(usage, Err(Failure::Usage(_))), "{usage:?}");
-        let usage = super::diff(&world.deps(), a, Some("lantern"));
+        let usage = super::diff(&world.deps().read(), a, Some("lantern"));
         assert!(matches!(usage, Err(Failure::Usage(_))), "{usage:?}");
     }
 
@@ -1561,14 +1574,14 @@ mod tests {
             .store
             .plant_unreadable(&lantern, broken.clone(), ReadError::Corrupt);
         for address in [broken.as_str(), &broken.as_str()[3..12]] {
-            let text = refused(show(&world.deps(), address));
+            let text = refused(show(&world.deps().read(), address));
             assert!(
                 text.contains(&format!("version {} does not read", broken.short())),
                 "{text}"
             );
             assert!(text.contains(&ReadError::Corrupt.to_string()), "{text}");
         }
-        let text = refused(diff(&world.deps(), &broken.as_str()[3..12], None));
+        let text = refused(diff(&world.deps().read(), &broken.as_str()[3..12], None));
         assert!(text.contains("does not read"), "{text}");
     }
 
@@ -1585,7 +1598,7 @@ mod tests {
         }
         let world = world.counted();
         let deps = world.deps();
-        let history = history(&deps, relay.as_str()).unwrap();
+        let history = history(&deps.read(), relay.as_str()).unwrap();
         assert_eq!(history.versions.len(), versions);
         assert_eq!(history.label, "lantern/relay-pin");
         assert_eq!(history.versions[0].machine.label, "desk");
@@ -1604,7 +1617,7 @@ mod tests {
         let (world, lantern) = world();
         let root = head(&world, &lantern);
         let ended = world.amend(&lantern, &topic_fields("lantern", ENDED), "gone\n");
-        let history = history(&world.deps(), "lantern").unwrap();
+        let history = history(&world.deps().read(), "lantern").unwrap();
         assert_eq!(
             history.versions,
             [
@@ -1634,7 +1647,7 @@ mod tests {
     fn the_history_of_a_fork_and_of_an_unreadable_document() {
         let (world, lantern) = world();
         let heads = fork(&world, &lantern, &topic_fields("lantern", ""));
-        let shown = history(&world.deps(), "lantern").unwrap();
+        let shown = history(&world.deps().read(), "lantern").unwrap();
         assert_eq!(shown.versions.len(), 3);
         let flagged: Vec<&VersionId> = shown
             .versions
@@ -1650,7 +1663,7 @@ mod tests {
         world
             .store
             .plant_unreadable(&stray, version.clone(), ReadError::Corrupt);
-        let shown = history(&world.deps(), stray.as_str()).unwrap();
+        let shown = history(&world.deps().read(), stray.as_str()).unwrap();
         assert_eq!(shown.label, stray.short());
         assert!(shown.versions.is_empty());
         assert_eq!(shown.unreadable[0].version, version);
@@ -1667,7 +1680,7 @@ mod tests {
         draft.body = "resolved\n".to_owned();
         world.drafts.write(&draft).unwrap();
 
-        let diff = diff(&world.deps(), "lantern", None).unwrap();
+        let diff = diff(&world.deps().read(), "lantern", None).unwrap();
         assert_eq!(diff.sides.len(), 2);
         for (side, head) in diff.sides.iter().zip(&heads) {
             assert_eq!((side.against.as_ref(), side.held), (Some(head), true));

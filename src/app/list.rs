@@ -11,7 +11,7 @@ use crate::app::rows::{
     Filings, FollowupRow, Reference, Row, by_label, documents, followup_rows, reading, row, shown,
 };
 use crate::app::rules::claims_of;
-use crate::app::{Deps, Failure};
+use crate::app::{Failure, ReadDeps};
 use crate::domain::document::Document;
 use crate::domain::id::{DocumentId, VersionId};
 use crate::domain::schema::{Content, Date, KindOf};
@@ -80,7 +80,7 @@ pub struct ForkRow {
 /// By name; the ended ones only when `ended`. With `of`, only the topics directly part of
 /// that topic, and an address that is not one topic is refused. `ended` has no effect beside
 /// `of`, since an ended topic is part of nothing.
-pub fn topics(deps: &Deps, of: Option<&str>, ended: bool) -> Result<Vec<TopicRow>, Failure> {
+pub fn topics(deps: &ReadDeps, of: Option<&str>, ended: bool) -> Result<Vec<TopicRow>, Failure> {
     let (lookup, topics, of) = reading(deps, of)?;
     let documents = lookup.of_kind(KindOf::Topic)?;
     let mut shown = shown(&topics, &documents, true);
@@ -123,17 +123,17 @@ pub fn topics(deps: &Deps, of: Option<&str>, ended: bool) -> Result<Vec<TopicRow
 
 /// Refuses an address that is not one topic. With a topic the facts of its parts are
 /// included; by label.
-pub fn facts(deps: &Deps, topic: Option<&str>, ended: bool) -> Result<Vec<FactRow>, Failure> {
+pub fn facts(deps: &ReadDeps, topic: Option<&str>, ended: bool) -> Result<Vec<FactRow>, Failure> {
     fact_rows(deps, topic, ended, false)
 }
 
 /// Like `facts`, for the facts flagged `idea`.
-pub fn ideas(deps: &Deps, topic: Option<&str>, ended: bool) -> Result<Vec<FactRow>, Failure> {
+pub fn ideas(deps: &ReadDeps, topic: Option<&str>, ended: bool) -> Result<Vec<FactRow>, Failure> {
     fact_rows(deps, topic, ended, true)
 }
 
 fn fact_rows(
-    deps: &Deps,
+    deps: &ReadDeps,
     topic: Option<&str>,
     ended: bool,
     ideas: bool,
@@ -157,7 +157,7 @@ fn fact_rows(
 /// Newest date first, then by name; `limit` cuts after the ordering. Refuses an address that
 /// is not one topic, and includes the entries of its parts.
 pub fn entries(
-    deps: &Deps,
+    deps: &ReadDeps,
     topic: Option<&str>,
     limit: Option<usize>,
     ended: bool,
@@ -183,7 +183,7 @@ pub fn entries(
 /// name it; anything else is refused. Due ones come first by date, then the other dated ones,
 /// then those waiting on a topic, then those with no trigger.
 pub fn followups(
-    deps: &Deps,
+    deps: &ReadDeps,
     about: Option<&str>,
     ended: bool,
 ) -> Result<Vec<FollowupRow>, Failure> {
@@ -223,7 +223,7 @@ fn naming_entry(
 /// narrows to one topic with no rollup. By topic label, then directory, a claim with no
 /// directory first.
 pub fn where_(
-    deps: &Deps,
+    deps: &ReadDeps,
     topic: Option<&str>,
     machine: Option<&str>,
 ) -> Result<Vec<ClaimRow>, Failure> {
@@ -238,7 +238,7 @@ pub fn where_(
 
 /// The unended claims of `machine`, ordered as `where_` orders them; none when it is no
 /// machine topic.
-pub fn claims_on(deps: &Deps, machine: &DocumentId) -> Result<Vec<ClaimRow>, Failure> {
+pub fn claims_on(deps: &ReadDeps, machine: &DocumentId) -> Result<Vec<ClaimRow>, Failure> {
     claim_rows(&Lookup::new(deps.store), machine, None)
 }
 
@@ -272,7 +272,7 @@ fn claim_rows(
 
 /// Every document with more than one head, of any kind this worklog knows, ended ones
 /// included; by label, one with no row by its short id.
-pub fn forks(deps: &Deps) -> Result<Vec<ForkRow>, Failure> {
+pub fn forks(deps: &ReadDeps) -> Result<Vec<ForkRow>, Failure> {
     let lookup = Lookup::new(deps.store);
     let topics = Topics::load(&lookup)?;
     let mut rows = Vec::new();
@@ -309,7 +309,7 @@ mod tests {
         part_of, referred, refused, to, topic, topic_fields, world, written_at,
     };
     use crate::domain::id::VersionId;
-    use crate::domain::ports::Store;
+    use crate::domain::ports::{Store, StoreRead};
     use crate::domain::testing::first;
     use crate::domain::version::Version;
 
@@ -343,12 +343,12 @@ mod tests {
         );
         let deps = world.deps();
 
-        let shown = topics(&deps, None, false).unwrap();
+        let shown = topics(&deps.read(), None, false).unwrap();
         assert_eq!(labels(&shown, |t| &t.row), ["atlas", "desk", "lantern"]);
         assert_eq!(shown[0].part_of, [to(&lantern, "lantern")]);
         assert_eq!(shown[0].uses, []);
 
-        let all = topics(&deps, None, true).unwrap();
+        let all = topics(&deps.read(), None, true).unwrap();
         assert_eq!(
             labels(&all, |t| &t.row),
             ["atlas", "desk", "lantern", "phone"]
@@ -397,7 +397,7 @@ mod tests {
             "\n",
         );
 
-        let shown = topics(&world.deps(), None, false).unwrap();
+        let shown = topics(&world.deps().read(), None, false).unwrap();
         assert_eq!(
             counts(&shown),
             [("atlas", 1, 0, 2), ("desk", 0, 0, 0), ("lantern", 2, 1, 2)]
@@ -436,7 +436,7 @@ mod tests {
             "2026-10-09T11:00:00+01:00",
         );
 
-        let shown = topics(&world.deps(), None, false).unwrap();
+        let shown = topics(&world.deps().read(), None, false).unwrap();
         assert_eq!(
             counts(&shown),
             [
@@ -456,11 +456,11 @@ mod tests {
         world.amend(&lantern, &topic_fields("lantern", ENDED), "\n");
         let deps = world.deps();
         assert_eq!(
-            counts(&topics(&deps, None, false).unwrap()),
+            counts(&topics(&deps.read(), None, false).unwrap()),
             [("desk", 0, 0, 0)]
         );
         assert_eq!(
-            counts(&topics(&deps, None, true).unwrap()),
+            counts(&topics(&deps.read(), None, true).unwrap()),
             [("desk", 0, 0, 0), ("lantern", 1, 0, 1)]
         );
     }
@@ -480,7 +480,7 @@ mod tests {
         let atlas = topic(&world, "atlas", &part_of(&[&lantern]));
         let phone = topic(&world, "phone", &part_of(&[&atlas]));
 
-        let shown = topics(&world.deps(), None, false).unwrap();
+        let shown = topics(&world.deps().read(), None, false).unwrap();
         assert_eq!(
             tree(&shown),
             [
@@ -492,7 +492,7 @@ mod tests {
         );
         assert_eq!(shown[0].parts[0].document, phone);
         assert_eq!(
-            tree(&topics(&world.deps(), Some("lantern"), false).unwrap()),
+            tree(&topics(&world.deps().read(), Some("lantern"), false).unwrap()),
             [("atlas", false, vec!["phone"])]
         );
     }
@@ -505,7 +505,7 @@ mod tests {
         topic(&world, "relay", &part_of(&[&phone, &atlas]));
 
         assert_eq!(
-            tree(&topics(&world.deps(), None, false).unwrap()),
+            tree(&topics(&world.deps().read(), None, false).unwrap()),
             [
                 ("atlas", false, vec!["relay"]),
                 ("desk", true, vec![]),
@@ -527,7 +527,7 @@ mod tests {
         let deps = world.deps();
 
         assert_eq!(
-            tree(&topics(&deps, None, false).unwrap()),
+            tree(&topics(&deps.read(), None, false).unwrap()),
             [
                 ("atlas", true, vec!["relay"]),
                 ("compass", false, vec![]),
@@ -544,7 +544,7 @@ mod tests {
             "\n",
         );
         assert_eq!(
-            tree(&topics(&deps, None, false).unwrap()),
+            tree(&topics(&deps.read(), None, false).unwrap()),
             [
                 ("atlas", false, vec!["relay"]),
                 ("compass", false, vec![]),
@@ -573,7 +573,7 @@ mod tests {
         world.amend(&own, &topic_fields("globe", &part_of(&[&own])), "\n");
 
         assert_eq!(
-            tree(&topics(&world.deps(), None, false).unwrap()),
+            tree(&topics(&world.deps().read(), None, false).unwrap()),
             [
                 ("atlas", false, vec!["compass"]),
                 ("compass", false, vec!["atlas"]),
@@ -593,14 +593,14 @@ mod tests {
         world.amend(&lantern, &topic_fields("lantern", ENDED), "\n");
         let deps = world.deps();
 
-        let shown = topics(&deps, None, false).unwrap();
+        let shown = topics(&deps.read(), None, false).unwrap();
         assert_eq!(
             tree(&shown),
             [("atlas", true, vec![]), ("desk", true, vec![])]
         );
         assert_eq!(shown[0].part_of[0].document, lantern);
         assert_eq!(
-            tree(&topics(&deps, None, true).unwrap()),
+            tree(&topics(&deps.read(), None, true).unwrap()),
             [
                 ("atlas", true, vec![]),
                 ("desk", true, vec![]),
@@ -617,7 +617,7 @@ mod tests {
         let phone = topic(&world, "phone", &part_of(&[&second]));
         let relay = topic(&world, "relay", &part_of(&[&first]));
 
-        let shown = topics(&world.deps(), None, false).unwrap();
+        let shown = topics(&world.deps().read(), None, false).unwrap();
         assert_eq!(
             tree(&shown)[..2],
             [
@@ -654,23 +654,29 @@ mod tests {
         followup(&world, &[&relay], "open", "");
         let deps = world.deps();
 
-        let parts = topics(&deps, Some("lantern"), false).unwrap();
+        let parts = topics(&deps.read(), Some("lantern"), false).unwrap();
         assert_eq!(counts(&parts), [("atlas", 1, 0, 0), ("relay", 0, 1, 1)]);
         assert_eq!(referred(&parts[0].part_of), ["lantern"]);
         assert_eq!(referred(&parts[1].part_of), ["lantern", "atlas"]);
-        assert_eq!(topics(&deps, Some("lantern"), true).unwrap(), parts);
+        assert_eq!(topics(&deps.read(), Some("lantern"), true).unwrap(), parts);
         assert_eq!(
-            labels(&topics(&deps, Some("atlas"), false).unwrap(), |t| &t.row),
+            labels(&topics(&deps.read(), Some("atlas"), false).unwrap(), |t| &t
+                .row),
             ["phone", "relay"]
         );
-        assert_eq!(topics(&deps, Some("compass"), false).unwrap(), []);
-        assert_eq!(topics(&deps, Some(lantern.short()), false).unwrap(), parts);
+        assert_eq!(topics(&deps.read(), Some("compass"), false).unwrap(), []);
+        assert_eq!(
+            topics(&deps.read(), Some(lantern.short()), false).unwrap(),
+            parts
+        );
 
-        assert!(refused(topics(&deps, Some("nowhere"), false)).contains("names no document"));
-        let text = refused(topics(&deps, Some("atlas/map"), false));
+        assert!(
+            refused(topics(&deps.read(), Some("nowhere"), false)).contains("names no document")
+        );
+        let text = refused(topics(&deps.read(), Some("atlas/map"), false));
         assert!(text.contains("atlas/map: is not a topic"), "{text}");
         assert!(matches!(
-            topics(&deps, Some("not an address!"), false),
+            topics(&deps.read(), Some("not an address!"), false),
             Err(Failure::Usage(_))
         ));
     }
@@ -689,7 +695,7 @@ mod tests {
         }
         let world = world.counted();
         let deps = world.deps();
-        let shown = topics(&deps, None, false).unwrap();
+        let shown = topics(&deps.read(), None, false).unwrap();
         assert_eq!(shown.len(), count + 2);
         let parts: Vec<&TopicRow> = (shown.iter())
             .filter(|topic| topic.row.label.starts_with("part-"))
@@ -722,13 +728,17 @@ mod tests {
         fact(&world, &desk, "four", "");
         let deps = world.deps();
 
-        let all = facts(&deps, None, false).unwrap();
+        let all = facts(&deps.read(), None, false).unwrap();
         assert_eq!(
             labels(&all, |f| &f.row),
             ["atlas/two", "desk/four", "lantern/one", "phone/three"]
         );
         assert_eq!(all[0].confirmed, Date::parse("2026-09-04").unwrap());
-        let under = |address| labels(&facts(&deps, Some(address), false).unwrap(), |f| &f.row);
+        let under = |address| {
+            labels(&facts(&deps.read(), Some(address), false).unwrap(), |f| {
+                &f.row
+            })
+        };
         assert_eq!(
             under("lantern"),
             ["atlas/two", "lantern/one", "phone/three"]
@@ -742,14 +752,14 @@ mod tests {
         let (world, lantern) = world();
         fact(&world, &lantern, "relay-pin", "");
         let deps = world.deps();
-        assert!(refused(facts(&deps, Some("nowhere"), false)).contains("names no document"));
-        let text = refused(facts(&deps, Some("lantern/relay-pin"), false));
+        assert!(refused(facts(&deps.read(), Some("nowhere"), false)).contains("names no document"));
+        let text = refused(facts(&deps.read(), Some("lantern/relay-pin"), false));
         assert!(
             text.contains("lantern/relay-pin") && text.contains("is not a topic"),
             "{text}"
         );
         assert!(matches!(
-            facts(&deps, Some("not an address!"), false),
+            facts(&deps.read(), Some("not an address!"), false),
             Err(Failure::Usage(_))
         ));
     }
@@ -774,12 +784,16 @@ mod tests {
         );
         let deps = world.deps();
 
-        let under_atlas = facts(&deps, Some("atlas"), false).unwrap();
+        let under_atlas = facts(&deps.read(), Some("atlas"), false).unwrap();
         assert_eq!(under_atlas.len(), 1);
         assert!(under_atlas[0].row.forked);
         assert_eq!(under_atlas[0].row.label, "atlas/relay-pin");
-        assert!(facts(&deps, Some("lantern"), false).unwrap().is_empty());
-        let whole = facts(&deps, None, false).unwrap();
+        assert!(
+            facts(&deps.read(), Some("lantern"), false)
+                .unwrap()
+                .is_empty()
+        );
+        let whole = facts(&deps.read(), None, false).unwrap();
         assert_eq!(whole.len(), 1);
         assert_eq!(whole[0].row.ended, None);
     }
@@ -793,9 +807,9 @@ mod tests {
         let deps = world.deps();
 
         for topic in [None, Some("lantern")] {
-            let kept = facts(&deps, topic, false).unwrap();
+            let kept = facts(&deps.read(), topic, false).unwrap();
             assert_eq!(labels(&kept, |f| &f.row), ["lantern/kept"]);
-            let every = facts(&deps, topic, true).unwrap();
+            let every = facts(&deps.read(), topic, true).unwrap();
             assert_eq!(labels(&every, |f| &f.row), ["lantern/gone", "lantern/kept"]);
             assert_eq!(every[0].row.ended.as_deref(), Some("false"));
         }
@@ -808,15 +822,17 @@ mod tests {
         fact(&world, &lantern, "second-relay", "idea = true\n");
         let deps = world.deps();
         assert_eq!(
-            labels(&facts(&deps, None, false).unwrap(), |f| &f.row),
+            labels(&facts(&deps.read(), None, false).unwrap(), |f| &f.row),
             ["lantern/relay-pin"]
         );
         assert_eq!(
-            labels(&ideas(&deps, None, false).unwrap(), |f| &f.row),
+            labels(&ideas(&deps.read(), None, false).unwrap(), |f| &f.row),
             ["lantern/second-relay"]
         );
         assert_eq!(
-            labels(&ideas(&deps, Some("lantern"), false).unwrap(), |f| &f.row),
+            labels(&ideas(&deps.read(), Some("lantern"), false).unwrap(), |f| {
+                &f.row
+            }),
             ["lantern/second-relay"]
         );
     }
@@ -831,7 +847,7 @@ mod tests {
         entry(&world, "2026-10-09", "m-driver", &[&lantern]);
         let deps = world.deps();
 
-        let all = entries(&deps, None, None, false).unwrap();
+        let all = entries(&deps.read(), None, None, false).unwrap();
         assert_eq!(
             labels(&all, |e| &e.row),
             [
@@ -842,12 +858,12 @@ mod tests {
             ]
         );
         assert_eq!(all[0].date, Date::parse("2026-10-09").unwrap());
-        let two = entries(&deps, Some("lantern"), Some(2), false).unwrap();
+        let two = entries(&deps.read(), Some("lantern"), Some(2), false).unwrap();
         assert_eq!(
             labels(&two, |e| &e.row),
             ["2026-10-09-m-driver", "2026-10-08-a-driver"]
         );
-        let under_atlas = entries(&deps, Some("atlas"), None, false).unwrap();
+        let under_atlas = entries(&deps.read(), Some("atlas"), None, false).unwrap();
         assert_eq!(labels(&under_atlas, |e| &e.row), ["2026-10-08-a-driver"]);
     }
 
@@ -877,7 +893,7 @@ mod tests {
         );
         let deps = world.deps();
 
-        let rows = followups(&deps, None, false).unwrap();
+        let rows = followups(&deps.read(), None, false).unwrap();
         let ids: Vec<&DocumentId> = rows.iter().map(|r| &r.row.document).collect();
         assert_eq!(ids, [&early, &today, &later, &touching, &bare]);
         let due: Vec<bool> = rows.iter().map(|r| r.due).collect();
@@ -897,9 +913,14 @@ mod tests {
         );
         assert_eq!(rows[4].trigger, None);
 
-        let rollup = followups(&deps, Some("atlas"), false).unwrap();
+        let rollup = followups(&deps.read(), Some("atlas"), false).unwrap();
         assert_eq!(rollup.len(), 2);
-        assert_eq!(followups(&deps, Some("lantern"), false).unwrap().len(), 5);
+        assert_eq!(
+            followups(&deps.read(), Some("lantern"), false)
+                .unwrap()
+                .len(),
+            5
+        );
     }
 
     #[test]
@@ -916,12 +937,12 @@ mod tests {
         followup(&world, &[&lantern], "s", "");
         let deps = world.deps();
 
-        let rows = followups(&deps, Some("2026-10-08-lamp-driver"), false).unwrap();
+        let rows = followups(&deps.read(), Some("2026-10-08-lamp-driver"), false).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].row.document, named);
         assert_eq!(rows[0].entry, Some(to(&driver, "2026-10-08-lamp-driver")));
         assert_eq!(rows[0].about, Some(to(&relay, "lantern/relay-pin")));
-        let text = refused(followups(&deps, Some("lantern/relay-pin"), false));
+        let text = refused(followups(&deps.read(), Some("lantern/relay-pin"), false));
         assert!(text.contains("neither a topic nor an entry"), "{text}");
     }
 
@@ -939,10 +960,20 @@ mod tests {
             "\n",
         );
         let deps = world.deps();
-        assert_eq!(followups(&deps, None, false).unwrap().len(), 1);
-        assert_eq!(followups(&deps, None, true).unwrap().len(), 2);
-        assert_eq!(followups(&deps, Some("lantern"), false).unwrap().len(), 1);
-        assert_eq!(followups(&deps, Some("lantern"), true).unwrap().len(), 2);
+        assert_eq!(followups(&deps.read(), None, false).unwrap().len(), 1);
+        assert_eq!(followups(&deps.read(), None, true).unwrap().len(), 2);
+        assert_eq!(
+            followups(&deps.read(), Some("lantern"), false)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            followups(&deps.read(), Some("lantern"), true)
+                .unwrap()
+                .len(),
+            2
+        );
     }
 
     #[test]
@@ -966,7 +997,7 @@ mod tests {
         );
         let deps = world.deps();
 
-        let mine = where_(&deps, None, None).unwrap();
+        let mine = where_(&deps.read(), None, None).unwrap();
         let shown: Vec<(&str, Option<&str>)> = mine
             .iter()
             .map(|c| (c.topic.label.as_str(), c.directory.as_deref()))
@@ -983,18 +1014,18 @@ mod tests {
         assert_eq!(mine[0].machine, to(&world.machine(), "desk"));
         assert!(!mine[0].forked);
 
-        let narrowed = where_(&deps, Some("lantern"), None).unwrap();
+        let narrowed = where_(&deps.read(), Some("lantern"), None).unwrap();
         assert_eq!(narrowed.len(), 2);
-        let other = where_(&deps, None, Some("phone")).unwrap();
+        let other = where_(&deps.read(), None, Some("phone")).unwrap();
         assert_eq!(other.len(), 1);
         assert_eq!(other[0].machine.label, "phone");
         assert_eq!(other[0].directory.as_deref(), Some("~/p"));
         assert!(
-            where_(&deps, Some("atlas"), Some("phone"))
+            where_(&deps.read(), Some("atlas"), Some("phone"))
                 .unwrap()
                 .is_empty()
         );
-        assert!(refused(where_(&deps, None, Some("nowhere"))).contains("names no document"));
+        assert!(refused(where_(&deps.read(), None, Some("nowhere"))).contains("names no document"));
     }
 
     #[test]
@@ -1028,7 +1059,7 @@ mod tests {
         );
         let deps = world.deps();
 
-        let rows = forks(&deps).unwrap();
+        let rows = forks(&deps.read()).unwrap();
         assert_eq!(
             labels(&rows, |f| f.row.as_ref().unwrap()),
             ["atlas", "lantern/relay-pin"]
@@ -1072,7 +1103,7 @@ mod tests {
         }
         written.sort();
 
-        let rows = forks(&world.deps()).unwrap();
+        let rows = forks(&world.deps().read()).unwrap();
         assert_eq!(rows.len(), 1);
         let shown: Vec<(VersionId, &str)> = rows[0]
             .heads
@@ -1127,7 +1158,7 @@ mod tests {
         );
         let deps = world.deps();
 
-        let rows = forks(&deps).unwrap();
+        let rows = forks(&deps.read()).unwrap();
         let shown: Vec<(&DocumentId, Option<&str>)> = rows
             .iter()
             .map(|fork| {
@@ -1150,7 +1181,7 @@ mod tests {
             );
         }
         assert_eq!(
-            crate::app::check::check(&deps).unwrap().fork_count,
+            crate::app::check::check(&deps.read()).unwrap().fork_count,
             rows.len()
         );
     }
@@ -1165,7 +1196,7 @@ mod tests {
         sibling(&world, &root, &fields, "2026-10-09T11:00:00+01:00");
         let world = world.counted();
         let deps = world.deps();
-        assert_eq!(forks(&deps).unwrap().len(), 1);
+        assert_eq!(forks(&deps.read()).unwrap().len(), 1);
         assert_eq!(world.store.forks.get(), 1);
         assert_eq!(world.store.kinds.get(), 1);
         assert_eq!(world.store.scans(), 2);
@@ -1198,14 +1229,19 @@ mod tests {
         let broken = world.put("topic", "name = \"broken\"\n", "\n");
         let deps = world.deps();
 
-        let under = |address| labels(&facts(&deps, Some(address), false).unwrap(), |f| &f.row);
+        let under = |address| {
+            labels(&facts(&deps.read(), Some(address), false).unwrap(), |f| {
+                &f.row
+            })
+        };
         assert_eq!(under("lantern"), ["atlas/pin"]);
         assert_eq!(under("relay"), ["relay/pin"]);
         assert_eq!(
-            labels(&facts(&deps, Some("phone"), true).unwrap(), |f| &f.row),
+            labels(&facts(&deps.read(), Some("phone"), true).unwrap(), |f| &f
+                .row),
             ["phone/gone"]
         );
-        let text = refused(facts(&deps, Some(broken.as_str()), false));
+        let text = refused(facts(&deps.read(), Some(broken.as_str()), false));
         assert!(
             text.contains(broken.as_str()) && text.contains("is not a topic"),
             "{text}"
@@ -1224,9 +1260,9 @@ mod tests {
         sibling(&world, &root, &fields, "2026-10-09T11:00:00+01:00");
         let deps = world.deps();
 
-        let text = refused(where_(&deps, None, Some("lantern/relay-pin")));
+        let text = refused(where_(&deps.read(), None, Some("lantern/relay-pin")));
         assert!(text.contains("is not a topic"), "{text}");
-        let rows = where_(&deps, None, None).unwrap();
+        let rows = where_(&deps.read(), None, None).unwrap();
         assert_eq!(rows.len(), 1);
         assert!(rows[0].forked);
     }
@@ -1248,7 +1284,7 @@ mod tests {
         let bare = [0xc2, 0xb2, 0xa2].map(|byte| stored(byte, ""));
         let deps = world.deps();
 
-        let rows = followups(&deps, None, false).unwrap();
+        let rows = followups(&deps.read(), None, false).unwrap();
         let shorts: Vec<&str> = rows.iter().map(|r| r.row.document.short()).collect();
         assert_eq!(
             shorts,
@@ -1272,7 +1308,7 @@ mod tests {
         }
         let world = world.counted();
         let deps = world.deps();
-        let shown = facts(&deps, Some("lantern"), false).unwrap();
+        let shown = facts(&deps.read(), Some("lantern"), false).unwrap();
         assert_eq!(shown.len(), parts + 1);
         world.store.questions()
     }

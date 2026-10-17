@@ -10,14 +10,14 @@ use crate::domain::schema::{KindOf, step};
 /// document is shown from. Refuses a document that is not forked, one with a draft open, one
 /// holding an unreadable version, and a fork no head of which reads as a record.
 pub fn resolve(deps: &Deps, address: &str) -> Result<DraftRef, Failure> {
-    let lookup = Lookup::new(deps.store);
+    let lookup = Lookup::new(deps.read().store);
     let id = lookup.one(address)?;
     let label = lookup.label(&id)?;
     let document = lookup.document(&id)?;
     let State::Forked(heads) = document.state() else {
         return Err(Failure::at(&label, "is not forked"));
     };
-    refuse_open(deps, &id, &label)?;
+    refuse_open(&deps.read(), &id, &label)?;
     if !document.unreadable().is_empty() {
         return Err(unreadable(&label));
     }
@@ -43,7 +43,7 @@ mod tests {
     use crate::app::show::{Shown, show};
     use crate::app::testing::{ENDED, TOPIC, World, fork, found, head, refused, topic, world};
     use crate::domain::id::{DocumentId, VersionId};
-    use crate::domain::ports::{Drafts, Store};
+    use crate::domain::ports::{Drafts, DraftsRead, Store, StoreRead};
     use crate::domain::schema::address::Found;
     use crate::domain::testing::after;
     use crate::domain::version::ReadError;
@@ -168,11 +168,11 @@ mod tests {
             toml::to_string(&draft.fields).unwrap(),
             "name = \"lamp\"\nsummary = \"s\"\n"
         );
-        let Shown::Document(shown) = show(&deps, lantern.as_str()).unwrap() else {
+        let Shown::Document(shown) = show(&deps.read(), lantern.as_str()).unwrap() else {
             panic!("expected a document");
         };
         assert_eq!(shown.label, "lamp");
-        let listed = drafts(&deps).unwrap();
+        let listed = drafts(&deps.read()).unwrap();
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].label, shown.label);
     }
@@ -218,7 +218,7 @@ mod tests {
         );
         assert_eq!(refused(resolve(&deps, atlas.as_str())), wanted);
         assert!(world.drafts.list().unwrap().is_empty());
-        let found = crate::app::check::check(&deps).unwrap();
+        let found = crate::app::check::check(&deps.read()).unwrap();
         let on_atlas: Vec<&str> = (found.problems.iter())
             .filter(|finding| finding.label == atlas.short())
             .map(|finding| finding.what.as_str())

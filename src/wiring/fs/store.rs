@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use crate::domain::document::{Document, State, Unreadable};
 use crate::domain::id::{DocumentId, VersionId, is_hex};
-use crate::domain::ports::{Store, StoreError};
+use crate::domain::ports::{Store, StoreError, StoreRead};
 use crate::domain::version::{Kind, ReadError, Version};
 
 use super::{STAGING_PREFIX, USAGE_DIRECTORY, directories, files, io_error};
@@ -187,35 +187,13 @@ impl FsStore {
     }
 }
 
-impl Store for FsStore {
+impl StoreRead for FsStore {
     fn document(&self, id: &DocumentId) -> Result<Document, StoreError> {
         let Some(walked) = self.walked.get() else {
             return self.read(id);
         };
         let held = walked.borrow().get(id).cloned();
         Ok(held.unwrap_or_else(|| Document::new(id.clone(), Vec::new(), Vec::new())))
-    }
-
-    fn put(&self, version: &Version) -> Result<(), StoreError> {
-        let document = &version.envelope.document;
-        let dir = self.document_dir(document);
-        let target = dir.join(file_name(&version.id));
-        if !target.exists() {
-            self.keep_sync_clean()?;
-            fs::create_dir_all(&dir).map_err(|e| io_error(&dir, &e))?;
-            // Syncthing picks up a file as soon as it appears.
-            let staging = dir.join(format!("{STAGING_PREFIX}{}", version.id));
-            fs::write(&staging, version.text()).map_err(|e| io_error(&staging, &e))?;
-            fs::rename(&staging, &target).map_err(|e| io_error(&target, &e))?;
-        }
-        if let Some(walked) = self.walked.get() {
-            let mut walked = walked.borrow_mut();
-            let held = walked
-                .entry(document.clone())
-                .or_insert_with(|| Document::new(document.clone(), Vec::new(), Vec::new()));
-            *held = held.with_version(version.clone());
-        }
-        Ok(())
     }
 
     fn of_kind(&self, kind: &Kind) -> Result<Vec<Document>, StoreError> {
@@ -285,6 +263,30 @@ impl Store for FsStore {
             }
         }
         Ok(found)
+    }
+}
+
+impl Store for FsStore {
+    fn put(&self, version: &Version) -> Result<(), StoreError> {
+        let document = &version.envelope.document;
+        let dir = self.document_dir(document);
+        let target = dir.join(file_name(&version.id));
+        if !target.exists() {
+            self.keep_sync_clean()?;
+            fs::create_dir_all(&dir).map_err(|e| io_error(&dir, &e))?;
+            // Syncthing picks up a file as soon as it appears.
+            let staging = dir.join(format!("{STAGING_PREFIX}{}", version.id));
+            fs::write(&staging, version.text()).map_err(|e| io_error(&staging, &e))?;
+            fs::rename(&staging, &target).map_err(|e| io_error(&target, &e))?;
+        }
+        if let Some(walked) = self.walked.get() {
+            let mut walked = walked.borrow_mut();
+            let held = walked
+                .entry(document.clone())
+                .or_insert_with(|| Document::new(document.clone(), Vec::new(), Vec::new()));
+            *held = held.with_version(version.clone());
+        }
+        Ok(())
     }
 }
 

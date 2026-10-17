@@ -7,7 +7,7 @@ use crate::app::heads::{kind_of, texts, unended_heads, unread_heads};
 use crate::app::index::Topics;
 use crate::app::lookup::Lookup;
 use crate::app::rules::{Misfit, closing_edge, fits, holds_topic_open, other_holders};
-use crate::app::{Deps, Failure, counted};
+use crate::app::{Failure, ReadDeps, counted};
 use crate::domain::document::Document;
 use crate::domain::id::DocumentId;
 use crate::domain::schema::{Content, Directory, KindOf};
@@ -67,7 +67,7 @@ impl Fits {
 /// the kind's word, counting its documents, whose heads are not checked. A claim of this
 /// host's machine whose directory this host's home would fold is a notice; a host with no
 /// machine topic or no home has none.
-pub fn check(deps: &Deps) -> Result<Check, Failure> {
+pub fn check(deps: &ReadDeps) -> Result<Check, Failure> {
     let lookup = Lookup::new(deps.store);
     let here = deps.host.machine()?.zip(deps.home()?);
     let (problems, notices) = found(&lookup, here.as_ref())?;
@@ -270,7 +270,7 @@ mod tests {
     };
     use crate::app::{amend, draft, fork as forks};
     use crate::domain::id::{DocumentId, VersionId};
-    use crate::domain::ports::{Clock, Drafts, Ids, Store};
+    use crate::domain::ports::{Clock, Drafts, DraftsRead, Ids, Store, StoreRead};
     use crate::domain::schema::{KindOf, Record};
     use crate::domain::testing::{after, first};
     use crate::domain::version::{Envelope, Kind, Links, ReadError, Version};
@@ -285,7 +285,7 @@ mod tests {
     }
 
     fn checked(world: &World) -> Check {
-        let found = check(&world.deps()).unwrap();
+        let found = check(&world.deps().read()).unwrap();
         Check {
             problems: labeled_only(found.problems),
             notices: labeled_only(found.notices),
@@ -312,7 +312,7 @@ mod tests {
                 .plant_unreadable(topic, lost, ReadError::Corrupt);
         }
         world.amend(&atlas, &topic_fields("atlas", ENDED), "\n");
-        let found = check(&world.deps()).unwrap();
+        let found = check(&world.deps().read()).unwrap();
         let ended: Vec<(&str, Option<&str>)> = (found.problems.iter())
             .map(|found| (found.label.as_str(), found.ended.as_deref()))
             .collect();
@@ -331,7 +331,7 @@ mod tests {
             .store
             .plant_unreadable(&lantern, newer, ReadError::Newer { format: 2 });
         world.put("gadget", "size = 4\n", "\n");
-        let found = check(&world.deps()).unwrap();
+        let found = check(&world.deps().read()).unwrap();
         let documents = |findings: &[Finding]| -> Vec<(String, Option<DocumentId>)> {
             (findings.iter())
                 .map(|found| (found.label.clone(), found.document.clone()))
@@ -876,7 +876,7 @@ mod tests {
     }
 
     fn shown_links(world: &World, address: &str) -> Vec<Linked> {
-        match show(&world.deps(), address).unwrap() {
+        match show(&world.deps().read(), address).unwrap() {
             Shown::Document(mut document) => document.heads.remove(0).links,
             Shown::Version(_) => panic!("expected a document"),
         }
@@ -990,7 +990,7 @@ mod tests {
         }
         let world = world.counted();
         let deps = world.deps();
-        let found = check(&deps).unwrap();
+        let found = check(&deps.read()).unwrap();
         assert_eq!(found.problems, []);
         assert_eq!(found.notices.len(), 3 * holders, "{:?}", found.notices);
         world.store.scans() - (KindOf::ALL.len() + 3)
@@ -1058,7 +1058,7 @@ mod tests {
             .plant_unreadable(&lantern, version_id("damaged"), ReadError::Corrupt);
         let world = world.counted();
         let deps = world.deps();
-        let found = check(&deps).unwrap();
+        let found = check(&deps.read()).unwrap();
         assert_eq!(found.problems.len(), 5, "{:?}", found.problems);
         assert_eq!(found.notices.len(), 1, "{:?}", found.notices);
         assert_eq!(world.store.kinds.get(), KindOf::ALL.len());
@@ -1123,7 +1123,7 @@ mod tests {
         let unknown = |counted: &str| format!("{counted} of a kind this worklog does not know");
         let world = world.counted();
         let deps = world.deps();
-        let found = check(&deps).unwrap();
+        let found = check(&deps.read()).unwrap();
         assert_eq!(found.problems, []);
         assert_eq!(
             found.notices,

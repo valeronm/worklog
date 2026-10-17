@@ -390,7 +390,7 @@ fn every_link_to_a_document_is_marked_where_every_document_has_ended() {
     for document in documents {
         targets.push(format!("/doc/{document}"));
         targets.push(format!("/history/{document}"));
-        let history = show::history(&world.deps(), document.as_str()).unwrap();
+        let history = show::history(&world.deps().read(), document.as_str()).unwrap();
         for version in history.versions {
             targets.push(format!("/doc/{}", version.version));
         }

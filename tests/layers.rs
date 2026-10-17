@@ -266,7 +266,7 @@ fn store_port_named(text: &str) -> Vec<String> {
     let mut named = Vec::new();
     for (at, token) in tokens.iter().enumerate() {
         let variant = at >= 2 && tokens[at - 1] == "::" && tokens[at - 2] == "Failure";
-        if *token == "MemoryStore" || (*token == "Store" && !variant) {
+        if *token == "MemoryStore" || ((matches!(*token, "Store" | "StoreRead")) && !variant) {
             named.push((*token).to_owned());
         }
     }
@@ -335,6 +335,7 @@ fn a_command_line_file_that_names_the_store_is_found() {
         ("use crate::domain::ports::Store;", "Store"),
         ("use crate::domain::ports::{Host, Store as _};", "Store"),
         ("fn read(store: &dyn Store) {}", "Store"),
+        ("use crate::domain::ports::StoreRead;", "StoreRead"),
         ("let store = MemoryStore::default();", "MemoryStore"),
     ] {
         assert_eq!(store_port_named(broken), [found], "{broken}");
@@ -778,23 +779,6 @@ fn module_of(path: &str) -> String {
 }
 
 #[test]
-fn one_use_case_puts_a_version_in_the_store() {
-    let mut found = Vec::new();
-    sources(&app(), &mut found);
-    let mut writers = Vec::new();
-    for (path, text) in found {
-        let module = module_of(&path);
-        if module == TEST_SUPPORT {
-            continue;
-        }
-        for _ in outside_tests(&text).matches(".store.put(") {
-            writers.push(module.clone());
-        }
-    }
-    assert_eq!(writers, ["save"]);
-}
-
-#[test]
 fn a_reference_is_made_by_the_lookup_and_the_topic_index_alone() {
     let mut found = Vec::new();
     sources(&app(), &mut found);
@@ -859,6 +843,7 @@ fn one_use_case_appends_to_the_usage_log() {
     assert_eq!(
         reached,
         [
+            format!("app/mod.rs: {HANDS_ON}"),
             format!("app/record.rs: {APPENDS}"),
             format!("app/usage.rs: {READS}"),
             format!("app/usage.rs: {READS}"),
@@ -897,31 +882,63 @@ fn a_file_that_reaches_the_usage_log_is_found() {
     }
 }
 
+fn write_dependencies_named(text: &str) -> Vec<String> {
+    tokens(&uncommented(text))
+        .into_iter()
+        .filter(|token| *token == "Deps")
+        .map(|token| format!("names `{token}`"))
+        .collect()
+}
+
 #[test]
-fn a_read_decides_no_ending_and_writes_nothing() {
+fn a_read_takes_no_write_dependencies_and_decides_no_ending() {
     let mut found = Vec::new();
     sources(&app(), &mut found);
-    let mut forbidden: Vec<String> = ["Record::read", "drafts.write", "drafts.delete", "store.put"]
-        .map(str::to_owned)
-        .into();
+    let mut forbidden: Vec<String> = ["Record::read"].map(str::to_owned).into();
     for module in WRITES_A_READ_MAY_NOT_USE {
         forbidden.push(format!("crate::app::{module}"));
         forbidden.push(format!("super::{module}"));
     }
     let mut reads = 0;
     for (path, text) in found {
-        let module = module_of(&path);
+        let relative = Path::new(&path).strip_prefix(app()).expect("an app source");
+        let root = relative.components().next().expect("a module");
+        let module = module_of(&root.as_os_str().to_string_lossy());
         if WRITES.contains(&module.as_str()) || SHARED.contains(&module.as_str()) {
             continue;
         }
         reads += 1;
         let text = outside_tests(&text);
+        assert_eq!(write_dependencies_named(&text), [""; 0], "{path}");
         assert_eq!(ending_read(&text), [""; 0], "{path}");
         for needle in &forbidden {
             assert!(!text.contains(needle.as_str()), "{path} holds `{needle}`");
         }
     }
     assert!(reads > 0);
+}
+
+#[test]
+fn a_read_that_names_write_dependencies_is_found() {
+    for clean in [
+        "use crate::app::{ReadDeps, Failure};",
+        "fn read(deps: &ReadDeps) {}",
+        "// A write takes Deps.\nlet deps = read;",
+    ] {
+        assert_eq!(write_dependencies_named(clean), [""; 0], "{clean}");
+    }
+    for broken in [
+        "fn read(deps: &Deps) { deps.drafts.write(draft)?; }",
+        "use crate::app::{Deps as Writing, Failure};",
+        "fn read(deps: &crate::app::Deps) { deps.host.bind(machine)?; }",
+        "type Writing<'a> = crate::app::Deps<'a>;",
+    ] {
+        assert_eq!(
+            write_dependencies_named(broken),
+            ["names `Deps`"],
+            "{broken}"
+        );
+    }
 }
 
 fn word(token: &str) -> bool {
@@ -1335,8 +1352,10 @@ fn render_reach(text: &str) -> Vec<String> {
     found.extend(modules_named(text, "crate", &["web", "cli", "wiring"]));
     found.extend(modules_named(text, "domain", &["ports"]));
     // A use case takes the ports, so a module that cannot name them runs none.
-    if tokens(&uncommented(text)).contains(&"Deps") {
-        found.push("names `Deps`".to_owned());
+    for token in tokens(&uncommented(text)) {
+        if matches!(token, "Deps" | "ReadDeps") {
+            found.push(format!("names `{token}`"));
+        }
     }
     found
 }
@@ -1372,6 +1391,7 @@ fn a_shared_renderer_that_reaches_a_renderer_the_ports_or_the_host_is_found() {
             "names `std::net` as `std::net::SocketAddr`",
         ),
         ("use crate::app::{Deps, show};", "names `Deps`"),
+        ("use crate::app::{ReadDeps, show};", "names `ReadDeps`"),
         (
             "let shown = show::show(&crate::app::Deps { store }, target)?;",
             "names `Deps`",

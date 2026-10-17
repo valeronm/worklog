@@ -16,7 +16,7 @@ pub fn move_to(
     from: &str,
     to: &str,
 ) -> Result<Vec<Written>, Failure> {
-    let lookup = Lookup::new(deps.store);
+    let lookup = Lookup::new(deps.read().store);
     let from_id = referencable(&lookup, from)?;
     let to_id = referencable(&lookup, to)?;
     if from_id == to_id {

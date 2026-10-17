@@ -453,7 +453,7 @@ fn topic_page_scans(size: usize) -> usize {
         entry(&world, "2026-10-08", &format!("day-{index}"), &[&part]);
     }
     let world = world.counted();
-    let deps = world.deps();
+    let deps = world.deps().read();
     for (show, current, rows) in [
         ("", "Facts", 2 * size),
         ("?show=parts", "Parts", size),

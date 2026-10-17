@@ -7,7 +7,7 @@ use serde::Serialize;
 
 use crate::app::heads::{ended_of, label_or_short};
 use crate::app::rows::{Reference, Row, by_label, documents, reading, row, shown};
-use crate::app::{Deps, Failure};
+use crate::app::{Failure, ReadDeps};
 use crate::domain::document::Document;
 use crate::domain::id::{DocumentId, VersionId};
 use crate::domain::schema::KindOf;
@@ -60,7 +60,7 @@ pub struct Logged {
 /// pattern that does not compile are usage failures; an address that is not one topic is
 /// refused. A claim is never searched, and a forked document is searched in its row head
 /// only.
-pub fn search(deps: &Deps, query: &Query) -> Result<Vec<Hit>, Failure> {
+pub fn search(deps: &ReadDeps, query: &Query) -> Result<Vec<Hit>, Failure> {
     let matcher = matcher(query)?;
     let (lookup, topics, topic) = reading(deps, query.topic)?;
     let mut hits = Vec::new();
@@ -145,7 +145,7 @@ fn matcher(query: &Query) -> Result<Regex, Failure> {
 /// not know included; `row` is the row of the version's document as it stands now, `None`
 /// when no head of that document reads as a record. `machine` names a topic and keeps the
 /// versions written there; an address that is not one topic is refused.
-pub fn log(deps: &Deps, limit: usize, machine: Option<&str>) -> Result<Vec<Logged>, Failure> {
+pub fn log(deps: &ReadDeps, limit: usize, machine: Option<&str>) -> Result<Vec<Logged>, Failure> {
     let (lookup, topics, machine) = reading(deps, machine)?;
     let mut documents = lookup.everything()?;
     for unknown in lookup.unknown()? {
@@ -191,7 +191,7 @@ mod tests {
         ENDED, World, fact, fact_fields, fork, head, labels, to, topic, world, written_at,
     };
     use crate::domain::id::DocumentId;
-    use crate::domain::ports::Store;
+    use crate::domain::ports::{Store, StoreRead};
 
     fn find(world: &World, term: &str) -> Vec<Hit> {
         query(world, term, false, None, false)
@@ -199,7 +199,7 @@ mod tests {
 
     fn query(world: &World, term: &str, regex: bool, topic: Option<&str>, ended: bool) -> Vec<Hit> {
         search(
-            &world.deps(),
+            &world.deps().read(),
             &Query {
                 term,
                 regex,
@@ -270,7 +270,7 @@ mod tests {
     fn a_pattern_that_does_not_compile_is_a_usage_failure() {
         let (world, _) = world();
         let result = search(
-            &world.deps(),
+            &world.deps().read(),
             &Query {
                 term: "(",
                 regex: true,
@@ -283,7 +283,7 @@ mod tests {
         };
         assert!(text.contains("pattern"), "{text}");
         let literal = search(
-            &world.deps(),
+            &world.deps().read(),
             &Query {
                 term: "(",
                 regex: false,
@@ -301,7 +301,7 @@ mod tests {
         let deps = world.deps();
         let asked = |term: &str| {
             search(
-                &deps,
+                &deps.read(),
                 &Query {
                     term,
                     regex: true,
@@ -325,7 +325,7 @@ mod tests {
     fn an_empty_term_is_a_usage_failure() {
         let (world, _) = world();
         let result = search(
-            &world.deps(),
+            &world.deps().read(),
             &Query {
                 term: "  ",
                 regex: false,
@@ -443,7 +443,7 @@ mod tests {
     fn an_unknown_topic_is_refused() {
         let (world, _) = world();
         let result = search(
-            &world.deps(),
+            &world.deps().read(),
             &Query {
                 term: "x",
                 regex: false,
@@ -510,7 +510,7 @@ mod tests {
         let world = world.counted();
         let deps = world.deps();
         search(
-            &deps,
+            &deps.read(),
             &Query {
                 term: "relay",
                 regex: false,
@@ -538,7 +538,7 @@ mod tests {
     }
 
     fn logged(world: &World, limit: usize, machine: Option<&str>) -> Vec<Logged> {
-        log(&world.deps(), limit, machine).unwrap()
+        log(&world.deps().read(), limit, machine).unwrap()
     }
 
     #[test]
@@ -590,7 +590,7 @@ mod tests {
         let ids: Vec<&VersionId> = only.iter().map(|entry| &entry.version).collect();
         assert!(ids.contains(&&older));
         assert!(only.iter().all(|entry| entry.machine.label == "phone"));
-        let refused = log(&world.deps(), 5, Some("nowhere"));
+        let refused = log(&world.deps().read(), 5, Some("nowhere"));
         assert!(matches!(refused, Err(Failure::Refused(_))), "{refused:?}");
     }
 
@@ -620,7 +620,7 @@ mod tests {
         fact(&world, &lantern, "relay-pin", "");
         let world = world.counted();
         let deps = world.deps();
-        log(&deps, 10, None).unwrap();
+        log(&deps.read(), 10, None).unwrap();
         assert_eq!(world.store.kinds.get(), KindOf::ALL.len());
         assert_eq!(world.store.holdings.get(), 0);
         assert_eq!(world.store.documents.get(), 0);
@@ -754,7 +754,7 @@ mod tests {
         let second = world.amend(&sketch, "name = \"two\"\n", "\n");
         let world = world.counted();
         let deps = world.deps();
-        let all = log(&deps, usize::MAX, None).unwrap();
+        let all = log(&deps.read(), usize::MAX, None).unwrap();
         assert_eq!(all.len(), 4);
         let mine: Vec<&Logged> = all
             .iter()

@@ -1,6 +1,6 @@
 use super::{has, lacks, ok, page};
 use crate::app::testing::{fact, fact_fields, head, topic_fields, world};
-use crate::app::{Deps, Failure, Stored};
+use crate::app::{Failure, ReadDeps, Stored};
 use crate::domain::ports::StoreError;
 use crate::domain::testing::FailingStore;
 use crate::web::{failed, respond};
@@ -104,7 +104,7 @@ fn no_address_makes_a_request_fail_to_be_answered() {
 #[test]
 fn only_a_get_and_a_head_are_answered() {
     let (world, lantern) = world();
-    let deps = world.deps();
+    let deps = world.deps().read();
     for target in [
         "/".to_owned(),
         format!("/doc/{lantern}"),
@@ -172,9 +172,9 @@ fn a_target_that_names_nothing_or_the_wrong_thing_is_the_use_case_s_failure() {
 #[test]
 fn a_store_that_fails_is_a_500_page_with_the_failure_s_text() {
     let (world, lantern) = world();
-    let deps = Deps {
+    let deps = ReadDeps {
         store: Stored::new(&FailingStore),
-        ..world.deps()
+        ..world.deps().read()
     };
     for target in [
         "/".to_owned(),

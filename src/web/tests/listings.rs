@@ -2,7 +2,7 @@ use super::{has, lacks, ok};
 use crate::app::testing::{
     ENDED_FACT, entry, fact, fact_fields, followup, fork, world, world_with_atlas,
 };
-use crate::app::{Deps, list, show};
+use crate::app::{ReadDeps, list, show};
 use crate::domain::id::DocumentId;
 use crate::web::respond;
 
@@ -283,11 +283,11 @@ fn a_query_flag_is_read_as_the_use_case_s_argument() {
     }
 }
 
-fn scans_of(ask: &dyn Fn(&Deps, &DocumentId)) -> usize {
+fn scans_of(ask: &dyn Fn(&ReadDeps, &DocumentId)) -> usize {
     let (world, lantern) = world();
     fact(&world, &lantern, "relay-pin", "");
     let world = world.counted();
-    let deps = world.deps();
+    let deps = world.deps().read();
     ask(&deps, &lantern);
     world.store.scans()
 }

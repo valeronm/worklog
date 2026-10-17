@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 mod fs;
 mod net;
 
-use crate::app::{Deps, Failure, Stored};
+use crate::app::{Deps, Failure};
 use crate::domain::ports::{Binary, Releases};
 use crate::domain::usage::Session;
 use fs::{
@@ -28,14 +28,14 @@ pub struct Adapters {
 impl Adapters {
     #[must_use]
     pub fn deps(&self) -> Deps<'_> {
-        Deps {
-            store: Stored::new(&self.store),
-            drafts: &self.drafts,
-            ids: &self.ids,
-            clock: &self.clock,
-            host: &self.host,
-            usage: &self.usage,
-        }
+        Deps::new(
+            &self.store,
+            &self.drafts,
+            &self.ids,
+            &self.clock,
+            &self.host,
+            &self.usage,
+        )
     }
 
     /// Every later answer of these adapters' store comes from one reading of its tree, made
@@ -444,18 +444,20 @@ mod tests {
 
     #[test]
     fn the_usage_log_of_the_adapters_is_under_the_store_they_are_over() {
+        use crate::domain::ports::Usage as _;
+
         let (_kept, root) = scratch();
         let store = bound(&root);
         let adapters = wired(&root, None).unwrap().unwrap();
         let run = ran(&lantern(), "show", "2026-09-04");
-        adapters.deps().usage.record(&run).unwrap();
+        adapters.usage.record(&run).unwrap();
         let file = store.join(format!("usage/{LANTERN}-2026-09.jsonl"));
         assert!(file.is_file());
         let all = Kept::default();
-        assert_eq!(adapters.deps().usage.read(&all), Ok(vec![run]));
+        assert_eq!(adapters.deps().read().usage.read(&all), Ok(vec![run]));
 
         let chosen = wired(&root, Some(root.join("elsewhere"))).unwrap().unwrap();
-        assert_eq!(chosen.deps().usage.read(&all).unwrap().len(), 1);
+        assert_eq!(chosen.deps().read().usage.read(&all).unwrap().len(), 1);
     }
 
     #[test]
@@ -469,7 +471,12 @@ mod tests {
         };
         let run_by = |word: &str, given: &dyn Fn(&str) -> Option<String>| {
             let adapters = wire(&variable, None).unwrap().unwrap();
-            let session = adapters.run_by_hook(word, given).deps().host.session();
+            let session = adapters
+                .run_by_hook(word, given)
+                .deps()
+                .read()
+                .host
+                .session();
             session.map(|session| (session.agent, session.id)).unwrap()
         };
         let session = |agent: &str, id: &str| (agent.to_owned(), id.to_owned());
@@ -495,7 +502,7 @@ mod tests {
                 _ => (set.iter().find(|(key, _)| *key == name)).map(|(_, id)| OsString::from(id)),
             };
             let adapters = wire(&variable, None).unwrap().unwrap();
-            let session = adapters.deps().host.session();
+            let session = adapters.deps().read().host.session();
             session.map(|session| (session.agent, session.id))
         };
         let session = |agent: &str, id: &str| Some((agent.to_owned(), id.to_owned()));

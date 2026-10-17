@@ -4,7 +4,7 @@ use serde::Serialize;
 
 use crate::app::lookup::Lookup;
 use crate::app::rows::{Reference, reading};
-use crate::app::{Deps, Failure};
+use crate::app::{Failure, ReadDeps};
 use crate::domain::id::DocumentId;
 use crate::domain::schema::Date;
 use crate::domain::schema::address::Found;
@@ -35,7 +35,7 @@ pub struct MachineUsage {
 /// its stamp is written with, at the offset of the host that ran it; anything else is a usage
 /// failure. A command line that named no command is not counted.
 pub fn usage(
-    deps: &Deps,
+    deps: &ReadDeps,
     machine: Option<&str>,
     since: Option<&str>,
 ) -> Result<Vec<MachineUsage>, Failure> {
@@ -82,7 +82,7 @@ pub fn usage(
 type Named = (Option<DocumentId>, Option<Vec<Invocation>>);
 
 // A machine no topic answers for comes with every run of it, which is what showed it is one.
-fn machine_named(deps: &Deps, lookup: &Lookup, address: &str) -> Result<Named, Failure> {
+fn machine_named(deps: &ReadDeps, lookup: &Lookup, address: &str) -> Result<Named, Failure> {
     if let Ok(id) = DocumentId::parse(address)
         && lookup.find(address)? == Found::None
     {
@@ -108,7 +108,7 @@ mod tests {
         ENDED, World, counted, fact, refused, to, to_ended, topic, topic_fields, world_with_atlas,
     };
     use crate::domain::id::DocumentId;
-    use crate::domain::ports::{StoreError, Usage};
+    use crate::domain::ports::{StoreError, Usage, UsageRead};
     use crate::domain::testing::ran;
     use crate::domain::version::Stamp;
 
@@ -130,7 +130,7 @@ mod tests {
         let (world, _, _) = world_with_atlas();
         let phone = topic(&world, "phone", "");
         logged(&world, &phone);
-        let all = usage(&world.deps(), None, None).unwrap();
+        let all = usage(&world.deps().read(), None, None).unwrap();
         let desk = MachineUsage {
             machine: to(&world.machine(), "desk"),
             topic: Some("desk".to_owned()),
@@ -150,7 +150,7 @@ mod tests {
         let phone = topic(&world, "phone", "");
         logged(&world, &phone);
         let deps = world.deps();
-        let of = |machine, since| usage(&deps, machine, since);
+        let of = |machine, since| usage(&deps.read(), machine, since);
 
         let only = of(Some("phone"), None).unwrap();
         assert_eq!(only.len(), 1);
@@ -192,7 +192,7 @@ mod tests {
             world.usage.record(&run).unwrap();
         }
         let deps = world.deps();
-        let since = |day| usage(&deps, None, Some(day)).unwrap();
+        let since = |day| usage(&deps.read(), None, Some(day)).unwrap();
         assert_eq!(
             since("2026-09-01")[0].commands,
             counted(&[("early", 1), ("late", 1)])
@@ -212,7 +212,7 @@ mod tests {
                 .unwrap();
         }
         let deps = world.deps();
-        let of = |machine: &str| usage(&deps, Some(machine), None);
+        let of = |machine: &str| usage(&deps.read(), Some(machine), None);
         let machines = |machine: &str| -> Vec<DocumentId> {
             let counts = of(machine).unwrap();
             counts
@@ -252,7 +252,7 @@ mod tests {
             .unwrap();
         rename(&world.deps(), "desk", "bench").unwrap();
 
-        let all = usage(&world.deps(), None, None).unwrap();
+        let all = usage(&world.deps().read(), None, None).unwrap();
         let machines: Vec<(&Reference, Option<&str>)> = (all.iter())
             .map(|counts| (&counts.machine, counts.topic.as_deref()))
             .collect();
@@ -263,7 +263,7 @@ mod tests {
                 (&to(&unheld, unheld.as_str()), None)
             ]
         );
-        let renamed = usage(&world.deps(), Some("desk"), None).unwrap();
+        let renamed = usage(&world.deps().read(), Some("desk"), None).unwrap();
         assert_eq!(renamed.len(), 1);
         assert_eq!(renamed[0].machine, to(&world.machine(), "bench"));
     }
@@ -271,11 +271,7 @@ mod tests {
     #[derive(Default)]
     struct Asked(RefCell<Vec<Kept>>);
 
-    impl Usage for Asked {
-        fn record(&self, _: &Invocation) -> Result<(), StoreError> {
-            Ok(())
-        }
-
+    impl UsageRead for Asked {
         fn read(&self, kept: &Kept) -> Result<Vec<Invocation>, StoreError> {
             self.0.borrow_mut().push(kept.clone());
             Ok(Vec::new())
@@ -288,9 +284,9 @@ mod tests {
         let deps = world.deps();
         let asked = |machine, since| {
             let log = Asked::default();
-            let asking = Deps {
+            let asking = ReadDeps {
                 usage: &log,
-                ..deps
+                ..deps.read()
             };
             usage(&asking, machine, since).unwrap();
             log.0.into_inner()

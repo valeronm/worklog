@@ -5,7 +5,7 @@ use crate::app::{Deps, Failure, Written, text};
 use crate::domain::schema::{Content, Ending, Name, Reason};
 
 pub fn rename(deps: &Deps, address: &str, name: &str) -> Result<Written, Failure> {
-    let lookup = Lookup::new(deps.store);
+    let lookup = Lookup::new(deps.read().store);
     let target = open(deps, &lookup, address)?;
     if !matches!(
         target.record.content,
@@ -21,13 +21,13 @@ pub fn rename(deps: &Deps, address: &str, name: &str) -> Result<Written, Failure
 }
 
 pub fn verify(deps: &Deps, address: &str) -> Result<Written, Failure> {
-    let lookup = Lookup::new(deps.store);
+    let lookup = Lookup::new(deps.read().store);
     let target = open(deps, &lookup, address)?;
     let Content::Fact(fact) = &target.record.content else {
         return Err(Failure::at(&target.label, "is not a fact"));
     };
     target.unended()?;
-    let today = deps.today()?;
+    let today = deps.read().today()?;
     if fact.confirmed == today {
         return Err(Failure::at(&target.label, "is already confirmed today"));
     }
@@ -43,7 +43,7 @@ pub fn end(
     note: &str,
     by: Option<&str>,
 ) -> Result<Written, Failure> {
-    let lookup = Lookup::new(deps.store);
+    let lookup = Lookup::new(deps.read().store);
     let target = open(deps, &lookup, address)?;
     let by = by.map(|by| lookup.one(by)).transpose()?;
     if by.as_ref() == Some(&target.id) {
@@ -51,7 +51,7 @@ pub fn end(
     }
     let ending = Ending {
         reason: Reason::parse(reason),
-        on: deps.today()?,
+        on: deps.read().today()?,
         by,
         note: note.to_owned(),
     };
@@ -68,7 +68,7 @@ pub fn reopen(deps: &Deps, address: &str, why: &str) -> Result<Written, Failure>
     if why.is_empty() {
         return Err(Failure::Usage("a reopening says why".to_owned()));
     }
-    let lookup = Lookup::new(deps.store);
+    let lookup = Lookup::new(deps.read().store);
     let target = open(deps, &lookup, address)?;
     if let Content::Claim(_) = target.record.content {
         return Err(Failure::at(

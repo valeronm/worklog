@@ -10,7 +10,7 @@ use crate::app::rows::Reference;
 use crate::app::{Failure, kind_named};
 use crate::domain::document::{Document, State};
 use crate::domain::id::{DocumentId, VersionId};
-use crate::domain::ports::{Store, StoreError};
+use crate::domain::ports::StoreRead;
 use crate::domain::schema::address::{Address, Candidate, Found, Holds, choose, displayed, holds};
 use crate::domain::schema::{Content, Date, KindOf, Name, Record};
 use crate::domain::version::{Kind, Version};
@@ -73,18 +73,14 @@ fn read_or_refuse(head: &Version, what: &str) -> Result<Record, Failure> {
     Record::read(&head.envelope.kind, &head.fields).map_err(|error| Failure::at(what, error))
 }
 
-/// Only `put` reaches the store past a `Lookup`.
+/// A store handle with query access only.
 #[derive(Clone, Copy)]
-pub struct Stored<'a>(&'a dyn Store);
+pub struct Stored<'a>(&'a dyn StoreRead);
 
 impl<'a> Stored<'a> {
     #[must_use]
-    pub fn new(store: &'a dyn Store) -> Stored<'a> {
+    pub fn new(store: &'a dyn StoreRead) -> Stored<'a> {
         Stored(store)
-    }
-
-    pub(super) fn put(&self, version: &Version) -> Result<(), StoreError> {
-        self.0.put(version)
     }
 }
 
@@ -219,7 +215,7 @@ pub(super) struct Unknown {
 
 // One command's view of the store: each question is put to the store once.
 pub(super) struct Lookup<'a> {
-    store: &'a dyn Store,
+    store: &'a dyn StoreRead,
     documents: RefCell<BTreeMap<DocumentId, Rc<Document>>>,
     kinds: RefCell<BTreeMap<&'static str, Vec<Rc<Document>>>>,
     holding: RefCell<BTreeMap<Question, Vec<DocumentId>>>,
@@ -581,6 +577,7 @@ mod tests {
         Counting, ENDED, ENDED_FACT, TOPIC, World, claim_fields, entry, fact, fork, found, topic,
         topic_fields,
     };
+    use crate::domain::ports::Store;
     use crate::domain::testing::{after, first, lantern};
     use crate::domain::version::ReadError;
 
@@ -722,7 +719,7 @@ mod tests {
             &format!("name = \"phone\"\nformer_names = [\"lantern\"]\n{TOPIC}"),
             "\n",
         );
-        let lookup = Lookup::new(world.deps().store);
+        let lookup = Lookup::new(world.deps().read().store);
         assert_eq!(lookup.writable(&lantern, "phone").unwrap().0.id, renamed);
         assert_eq!(lookup.find("phone").unwrap(), Found::One(lantern.clone()));
         assert_eq!(lookup.find("lantern").unwrap(), Found::One(lantern));

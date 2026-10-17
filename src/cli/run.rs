@@ -6,8 +6,8 @@ use super::{Environment, agents};
 use crate::app::followup::{NewFollowup, TriggerArg};
 use crate::app::search::Query;
 use crate::app::{
-    Deps, Failure, amend, bulk, check, claim, context, draft, followup, fork, list, save, search,
-    setup, show, usage,
+    Deps, Failure, ReadDeps, amend, bulk, check, claim, context, draft, followup, fork, list, save,
+    search, setup, show, usage,
 };
 use crate::domain::schema::Reason;
 
@@ -183,7 +183,7 @@ fn changed(
 }
 
 fn read(
-    deps: &Deps,
+    deps: &ReadDeps,
     environment: &Environment,
     json: bool,
     command: &ReadCommand,
@@ -227,7 +227,7 @@ fn read(
     })
 }
 
-fn listed(deps: &Deps, json: bool, command: &ListCommand) -> Result<Output, Failure> {
+fn listed(deps: &ReadDeps, json: bool, command: &ListCommand) -> Result<Output, Failure> {
     Ok(match command {
         ListCommand::Drafts => output(&draft::drafts(deps)?, json),
         ListCommand::Topics { topic, ended } => {
@@ -278,8 +278,8 @@ pub(super) fn run(
         }
         Command::Draft(command) => drafted(deps, json, command),
         Command::Change(command) => changed(deps, environment, json, command),
-        Command::Read(command) => read(deps, environment, json, command),
-        Command::List(command) => listed(deps, json, command),
+        Command::Read(command) => read(&deps.read(), environment, json, command),
+        Command::List(command) => listed(&deps.read(), json, command),
     }
 }
 

@@ -16,7 +16,7 @@ pub(super) struct Open {
 pub(super) fn open(deps: &Deps, lookup: &Lookup, address: &str) -> Result<Open, Failure> {
     let id = lookup.one(address)?;
     let label = lookup.label(&id)?;
-    refuse_open(deps, &id, &label)?;
+    refuse_open(&deps.read(), &id, &label)?;
     let (head, record) = lookup.writable(&id, &label)?;
     Ok(Open {
         id,

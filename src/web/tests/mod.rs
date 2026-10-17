@@ -13,7 +13,7 @@ use crate::domain::id::{DocumentId, VersionId};
 use crate::web::{Page, respond};
 
 pub fn page(world: &World, target: &str) -> Page {
-    respond(&world.deps(), "GET", target)
+    respond(&world.deps().read(), "GET", target)
 }
 
 pub fn ok(world: &World, target: &str) -> String {

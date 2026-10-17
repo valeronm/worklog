@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use crate::domain::draft::Draft;
 use crate::domain::id::DocumentId;
-use crate::domain::ports::{Drafts, StoreError};
+use crate::domain::ports::{Drafts, DraftsRead, StoreError};
 
 use super::{files, io_error, optional};
 
@@ -29,7 +29,7 @@ impl FsDrafts {
     }
 }
 
-impl Drafts for FsDrafts {
+impl DraftsRead for FsDrafts {
     fn read(&self, document: &DocumentId) -> Result<Option<Draft>, StoreError> {
         let path = self.text(document);
         let Some(text) = optional(&path, fs::read_to_string(&path))? else {
@@ -48,6 +48,26 @@ impl Drafts for FsDrafts {
             .map_err(|e| StoreError::io(path.display(), e))
     }
 
+    fn list(&self) -> Result<Vec<Draft>, StoreError> {
+        let mut drafts = Vec::new();
+        for name in files(&self.dir)? {
+            let Some(document) = name
+                .strip_suffix(TEXT)
+                .and_then(|stem| DocumentId::parse(stem).ok())
+            else {
+                continue;
+            };
+            drafts.extend(self.read(&document)?);
+        }
+        Ok(drafts)
+    }
+
+    fn location(&self, document: &DocumentId) -> String {
+        self.text(document).display().to_string()
+    }
+}
+
+impl Drafts for FsDrafts {
     fn write(&self, draft: &Draft) -> Result<String, StoreError> {
         let path = self.text(&draft.document);
         let text = draft
@@ -67,24 +87,6 @@ impl Drafts for FsDrafts {
             optional(&path, fs::remove_file(&path))?;
         }
         Ok(())
-    }
-
-    fn list(&self) -> Result<Vec<Draft>, StoreError> {
-        let mut drafts = Vec::new();
-        for name in files(&self.dir)? {
-            let Some(document) = name
-                .strip_suffix(TEXT)
-                .and_then(|stem| DocumentId::parse(stem).ok())
-            else {
-                continue;
-            };
-            drafts.extend(self.read(&document)?);
-        }
-        Ok(drafts)
-    }
-
-    fn location(&self, document: &DocumentId) -> String {
-        self.text(document).display().to_string()
     }
 }
 

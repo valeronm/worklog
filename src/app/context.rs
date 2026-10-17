@@ -13,7 +13,7 @@ use crate::app::rows::{
     is_idea, row, shown,
 };
 use crate::app::rules::claims_of;
-use crate::app::{Deps, Failure};
+use crate::app::{Failure, ReadDeps};
 use crate::domain::document::Document;
 use crate::domain::id::DocumentId;
 use crate::domain::schema::{Claim, Date, Directory, KindOf};
@@ -90,7 +90,7 @@ struct Scope<'a> {
 }
 
 impl<'a> Scope<'a> {
-    fn of(deps: &Deps<'a>, directory: &str) -> Result<Scope<'a>, Failure> {
+    fn of(deps: &ReadDeps<'a>, directory: &str) -> Result<Scope<'a>, Failure> {
         let directory = deps.directory(directory)?;
         let machine = deps.machine()?;
         let lookup = Lookup::new(deps.store);
@@ -163,7 +163,7 @@ impl<'a> Scope<'a> {
 /// host's home is compared with a claim's in the `~/` form; one no claim could carry is a
 /// usage failure. A host with no machine topic is refused as not set up, and one whose
 /// machine topic is ended until that topic is reopened.
-pub fn context(deps: &Deps, directory: &str) -> Result<Context, Failure> {
+pub fn context(deps: &ReadDeps, directory: &str) -> Result<Context, Failure> {
     let scope = Scope::of(deps, directory)?;
     let Scope {
         lookup,
@@ -237,7 +237,7 @@ pub fn context(deps: &Deps, directory: &str) -> Result<Context, Failure> {
 
 /// The followups due in a session starting in `directory`: the `due` of its `context`, in
 /// that order, with the same reading of `directory` and the same refusals.
-pub fn due(deps: &Deps, directory: &str) -> Result<Vec<FollowupRow>, Failure> {
+pub fn due(deps: &ReadDeps, directory: &str) -> Result<Vec<FollowupRow>, Failure> {
     let scope = Scope::of(deps, directory)?;
     let followups = filed_by_topic(&scope.lookup, KindOf::Followup, &scope.may_be_due)?;
     Ok(scope.open_work(&followups)?.0)
@@ -384,7 +384,7 @@ mod tests {
     }
 
     fn at(world: &World, directory: &str) -> Context {
-        context(&world.deps(), directory).unwrap()
+        context(&world.deps().read(), directory).unwrap()
     }
 
     fn claimed(directory: &str) -> Via {
@@ -804,7 +804,7 @@ mod tests {
             &format!("touching = \"{}\"\n", world.machine()),
         );
 
-        let here = |directory: &str| due(&world.deps(), directory).unwrap();
+        let here = |directory: &str| due(&world.deps().read(), directory).unwrap();
         for directory in ["/work", "/work/src/..", "/work/src", "/other", "/"] {
             assert_eq!(here(directory), at(&world, directory).due, "{directory}");
         }
@@ -817,18 +817,18 @@ mod tests {
     fn what_is_due_is_refused_where_a_session_is() {
         let (mut world, [lantern]) = world_of(["lantern"]);
         claim(&world, &lantern, "/work");
-        let Err(Failure::Usage(text)) = due(&world.deps(), "work/x") else {
+        let Err(Failure::Usage(text)) = due(&world.deps().read(), "work/x") else {
             panic!("a path that is not from the root must be a usage failure");
         };
         assert!(text.contains("absolute path"), "{text}");
         world.amend(&world.machine(), &topic_fields("desk", ENDED), "\n");
-        let text = refused(due(&world.deps(), "/work"));
+        let text = refused(due(&world.deps().read(), "/work"));
         assert!(
             text.contains("is this host's machine topic and is ended"),
             "{text}"
         );
         world.host = FixedHost::new(None, None);
-        let text = refused(due(&world.deps(), "/work"));
+        let text = refused(due(&world.deps().read(), "/work"));
         assert!(text.contains("this host is not set up"), "{text}");
     }
 
@@ -983,7 +983,7 @@ mod tests {
         let (mut world, [lantern]) = world_of(["lantern"]);
         claim(&world, &lantern, "/work");
         world.host = FixedHost::new(None, None);
-        let text = refused(context(&world.deps(), "/work"));
+        let text = refused(context(&world.deps().read(), "/work"));
         assert!(text.contains("this host is not set up"), "{text}");
     }
 
@@ -1028,7 +1028,7 @@ mod tests {
         let (world, [lantern]) = world_of(["lantern"]);
         claim(&world, &lantern, "/");
         for bad in ["", "work/x", "~work", "./work"] {
-            let Err(Failure::Usage(text)) = context(&world.deps(), bad) else {
+            let Err(Failure::Usage(text)) = context(&world.deps().read(), bad) else {
                 panic!("{bad:?} must be a usage failure");
             };
             assert!(text.contains("absolute path"), "{text}");
@@ -1208,7 +1208,7 @@ mod tests {
         let (world, [lantern]) = world_of(["lantern"]);
         claim(&world, &lantern, "/work");
         world.amend(&world.machine(), &topic_fields("desk", ENDED), "\n");
-        let text = refused(context(&world.deps(), "/work"));
+        let text = refused(context(&world.deps().read(), "/work"));
         assert!(
             text.contains("desk: is this host's machine topic and is ended"),
             "{text}"
@@ -1236,7 +1236,7 @@ mod tests {
         }
         let world = world.counted();
         let deps = world.deps();
-        let context = context(&deps, "/work/src").unwrap();
+        let context = context(&deps.read(), "/work/src").unwrap();
         assert_eq!(context.topics.len(), claimed + 1);
         assert_eq!(context.due.len(), claimed);
         assert!(context.topics[..claimed].iter().all(|topic| {
@@ -1256,7 +1256,7 @@ mod tests {
     }
 
     fn here(world: &World, directory: &str) -> Vec<FollowupRow> {
-        due(&world.deps(), directory).unwrap()
+        due(&world.deps().read(), directory).unwrap()
     }
 
     #[test]
@@ -1402,9 +1402,12 @@ mod tests {
 
     fn due_scans_for(parts: usize) -> (usize, usize) {
         let opened = with_due_parts(parts).counted();
-        assert_eq!(context(&opened.deps(), "/work").unwrap().due.len(), parts);
+        assert_eq!(
+            context(&opened.deps().read(), "/work").unwrap().due.len(),
+            parts
+        );
         let listed = with_due_parts(parts).counted();
-        assert_eq!(due(&listed.deps(), "/work").unwrap().len(), parts);
+        assert_eq!(due(&listed.deps().read(), "/work").unwrap().len(), parts);
         (opened.store.scans(), listed.store.scans())
     }
 

@@ -5,7 +5,9 @@ use serde::Serialize;
 use toml::Value;
 
 use crate::domain::id::{DocumentId, VersionId};
-use crate::domain::ports::{Clock, Drafts, Host, Ids, StoreError, Usage};
+use crate::domain::ports::{
+    Clock, Drafts, DraftsRead, Host, HostRead, Ids, Store, StoreError, Usage, UsageRead,
+};
 use crate::domain::schema::{Date, Directory, KindOf, SchemaError};
 use crate::domain::version::Kind;
 
@@ -39,14 +41,127 @@ pub mod usage;
 pub use lookup::Stored;
 pub use rows::{FollowupRow, Reference, Row, TriggerShown};
 
+/// Read access to stored documents, drafts, usage, host state, and the clock.
+///
+/// ```
+/// use worklog::app::{Failure, ReadDeps, context, draft, list, show, usage};
+/// fn read(deps: &ReadDeps) -> Result<(), Failure> {
+///     list::facts(deps, None, false)?;
+///     draft::drafts(deps)?;
+///     context::context(deps, "/srv")?;
+///     show::diff(deps, "lantern", None)?;
+///     usage::usage(deps, None, None)?;
+///     Ok(())
+/// }
+/// ```
+///
+/// ```
+/// use worklog::{
+///     app::{ReadDeps, save},
+///     domain::{draft::Draft, id::DocumentId, usage::Invocation, version::Version},
+/// };
+/// fn inputs(_: &ReadDeps, _: &Version, _: &Draft, _: &DocumentId, _: &Invocation) {
+///     let _ = save::save;
+/// }
+/// ```
+///
+/// ```compile_fail
+/// use worklog::{app::ReadDeps, domain::version::Version};
+/// fn write(deps: &ReadDeps, version: &Version) {
+///     deps.store.put(version);
+/// }
+/// ```
+///
+/// ```compile_fail
+/// use worklog::{app::ReadDeps, domain::draft::Draft};
+/// fn write(deps: &ReadDeps, draft: &Draft) {
+///     deps.drafts.write(draft);
+/// }
+/// ```
+///
+/// ```compile_fail
+/// use worklog::{app::ReadDeps, domain::id::DocumentId};
+/// fn delete(deps: &ReadDeps, id: &DocumentId) {
+///     deps.drafts.delete(id);
+/// }
+/// ```
+///
+/// ```compile_fail
+/// use worklog::{app::ReadDeps, domain::usage::Invocation};
+/// fn record(deps: &ReadDeps, invocation: &Invocation) {
+///     deps.usage.record(invocation);
+/// }
+/// ```
+///
+/// ```compile_fail
+/// use worklog::{app::ReadDeps, domain::id::DocumentId};
+/// fn bind(deps: &ReadDeps, id: &DocumentId) {
+///     deps.host.bind(id);
+/// }
+/// ```
+///
+/// ```compile_fail
+/// use worklog::app::ReadDeps;
+/// fn mint(deps: &ReadDeps) {
+///     deps.ids.mint();
+/// }
+/// ```
+///
+/// ```compile_fail
+/// use worklog::app::{ReadDeps, save};
+/// fn change(deps: &ReadDeps) {
+///     save::save(deps, "lantern");
+/// }
+/// ```
+#[derive(Clone, Copy)]
+pub struct ReadDeps<'a> {
+    pub store: Stored<'a>,
+    pub drafts: &'a dyn DraftsRead,
+    pub clock: &'a dyn Clock,
+    pub host: &'a dyn HostRead,
+    pub usage: &'a dyn UsageRead,
+}
+
 #[derive(Clone, Copy)]
 pub struct Deps<'a> {
-    pub store: Stored<'a>,
-    pub drafts: &'a dyn Drafts,
-    pub ids: &'a dyn Ids,
-    pub clock: &'a dyn Clock,
-    pub host: &'a dyn Host,
-    pub usage: &'a dyn Usage,
+    writer: save::Writer<'a>,
+    drafts: &'a dyn Drafts,
+    ids: &'a dyn Ids,
+    clock: &'a dyn Clock,
+    host: &'a dyn Host,
+    usage: &'a dyn Usage,
+}
+
+impl<'a> Deps<'a> {
+    #[must_use]
+    pub fn new(
+        store: &'a dyn Store,
+        drafts: &'a dyn Drafts,
+        ids: &'a dyn Ids,
+        clock: &'a dyn Clock,
+        host: &'a dyn Host,
+        usage: &'a dyn Usage,
+    ) -> Deps<'a> {
+        Deps {
+            writer: save::Writer::new(store),
+            drafts,
+            ids,
+            clock,
+            host,
+            usage,
+        }
+    }
+
+    #[must_use]
+    pub fn read(&self) -> ReadDeps<'a> {
+        ReadDeps {
+            store: self.writer.read(),
+            drafts: self.drafts,
+            clock: self.clock,
+            host: self.host,
+            usage: self.usage,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -131,7 +246,7 @@ pub struct DraftRef {
     pub location: String,
 }
 
-impl Deps<'_> {
+impl ReadDeps<'_> {
     pub fn today(&self) -> Result<Date, Failure> {
         Ok(Date::parse(&self.clock.now().day())?)
     }
@@ -203,14 +318,7 @@ mod tests {
         host.link("/home/desk", "/atlas/desk");
         host.link("/srv/link", "/atlas/desk/projects/lantern");
         host.link("/srv/phone", "/atlas/phone");
-        let deps = Deps {
-            store: Stored::new(&store),
-            drafts: &drafts,
-            ids: &ids,
-            clock: &clock,
-            host: &host,
-            usage: &usage,
-        };
+        let deps = Deps::new(&store, &drafts, &ids, &clock, &host, &usage);
         for (given, held) in [
             ("/home/desk/projects/lantern", "~/projects/lantern"),
             ("/atlas/desk/projects/lantern", "~/projects/lantern"),
@@ -220,9 +328,13 @@ mod tests {
             ("/srv/lantern", "/srv/lantern"),
             ("~/projects/lantern", "~/projects/lantern"),
         ] {
-            assert_eq!(deps.directory(given).unwrap().as_str(), held, "{given}");
+            assert_eq!(
+                deps.read().directory(given).unwrap().as_str(),
+                held,
+                "{given}"
+            );
         }
-        let Err(Failure::Usage(text)) = deps.directory("srv/link") else {
+        let Err(Failure::Usage(text)) = deps.read().directory("srv/link") else {
             panic!("a path that is not from the root is no directory");
         };
         assert!(text.starts_with("\"srv/link\": "), "{text}");
@@ -237,23 +349,16 @@ mod tests {
         let clock = FixedClock::at("2026-10-09T18:22:41.118204+01:00");
         let bare = FixedHost::new(None, None);
         let set_up = FixedHost::new(Some(atlas()), None);
-        let deps = |host| Deps {
-            store: Stored::new(&store),
-            drafts: &drafts,
-            ids: &ids,
-            clock: &clock,
-            host,
-            usage: &usage,
-        };
+        let deps = |host| Deps::new(&store, &drafts, &ids, &clock, host, &usage);
 
         assert_eq!(
-            deps(&bare).today().unwrap(),
+            deps(&bare).read().today().unwrap(),
             Date::parse("2026-10-09").unwrap()
         );
-        let Err(Failure::Refused(text)) = deps(&bare).machine() else {
+        let Err(Failure::Refused(text)) = deps(&bare).read().machine() else {
             panic!("a host with no machine topic must be refused");
         };
         assert_eq!(text, "this host is not set up; run `worklog init`");
-        assert_eq!(deps(&set_up).machine(), Ok(atlas()));
+        assert_eq!(deps(&set_up).read().machine(), Ok(atlas()));
     }
 }

@@ -78,7 +78,7 @@ pub fn new_followup(deps: &Deps, what: &NewFollowup) -> Result<Made, Failure> {
             "a body is given with a summary; without one it is written in the draft".to_owned(),
         ));
     }
-    let lookup = Lookup::new(deps.store);
+    let lookup = Lookup::new(deps.read().store);
     let topics = what
         .topics
         .iter()
@@ -141,7 +141,7 @@ pub fn new_followup(deps: &Deps, what: &NewFollowup) -> Result<Made, Failure> {
 }
 
 pub fn set_trigger(deps: &Deps, address: &str, trigger: &TriggerArg) -> Result<Written, Failure> {
-    let lookup = Lookup::new(deps.store);
+    let lookup = Lookup::new(deps.read().store);
     let target = open(deps, &lookup, address)?;
     let Content::Followup(followup) = &target.record.content else {
         return Err(Failure::at(&target.label, "is not a followup"));
@@ -165,7 +165,7 @@ mod tests {
     use crate::app::save::save;
     use crate::app::testing::{World, head, refused, world_with_atlas};
     use crate::domain::id::DocumentId;
-    use crate::domain::ports::Drafts;
+    use crate::domain::ports::{Drafts, DraftsRead};
     use crate::domain::schema::{Content, Trigger};
 
     fn followup(world: &World, id: &DocumentId) -> crate::domain::schema::Followup {

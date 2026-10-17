@@ -6,7 +6,7 @@ use serde::Serialize;
 use crate::app::heads::{ended_for, held_under, is_forked, label_of, labeling_topic, row_head};
 use crate::app::index::Topics;
 use crate::app::lookup::Lookup;
-use crate::app::{Deps, Failure};
+use crate::app::{Failure, ReadDeps};
 use crate::domain::document::Document;
 use crate::domain::id::DocumentId;
 use crate::domain::schema::{Content, Date, KindOf, Record, Trigger};
@@ -174,7 +174,7 @@ fn membership_key(kind: KindOf) -> Option<&'static str> {
 }
 
 pub(super) fn reading<'a>(
-    deps: &Deps<'a>,
+    deps: &ReadDeps<'a>,
     address: Option<&str>,
 ) -> Result<(Lookup<'a>, Topics, Option<DocumentId>), Failure> {
     let lookup = Lookup::new(deps.store);
@@ -297,7 +297,7 @@ mod tests {
         Counting, ENDED, ENDED_FACT, REMOVED, TOPIC, World, entry, fact, fact_fields, followup,
         head, part_of, referred, to, to_ended, topic, topic_fields, world_with_atlas, written_at,
     };
-    use crate::domain::ports::Store;
+    use crate::domain::ports::{Store, StoreRead};
     use crate::domain::testing::first;
 
     fn row_of(world: &World, id: &DocumentId) -> Option<Row> {

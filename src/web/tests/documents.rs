@@ -137,7 +137,8 @@ fn a_forked_document_is_marked_and_shows_each_head_under_a_heading_naming_it() {
         })
         .collect();
     assert!(places[0] < places[1], "{html}");
-    let Shown::Document(shown) = show::show(&world.deps(), "lantern").expect("a document") else {
+    let Shown::Document(shown) = show::show(&world.deps().read(), "lantern").expect("a document")
+    else {
         panic!("expected a document");
     };
     let articles: Vec<&str> = html.split("<article class=\"head\">").skip(1).collect();

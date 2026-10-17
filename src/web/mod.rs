@@ -12,7 +12,7 @@ mod tests;
 use askama::Template;
 
 use crate::app::show::{self, Shown, ShownDocument};
-use crate::app::{Deps, Failure, check, list, search};
+use crate::app::{Failure, ReadDeps, check, list, search};
 use crate::domain::schema::KindOf;
 
 use pages::{
@@ -102,11 +102,11 @@ const LONGEST_TARGET: usize = 8192;
 /// The page for a request, whatever its method and target are: `target` is the request line's
 /// `/path?query`, and a method other than `GET` and `HEAD` is answered 405.
 #[must_use]
-pub fn respond(deps: &Deps, method: &str, target: &str) -> Page {
+pub fn respond(deps: &ReadDeps, method: &str, target: &str) -> Page {
     answer(deps, method, target).unwrap_or_else(Problem::page)
 }
 
-fn answer(deps: &Deps, method: &str, target: &str) -> Result<Page, Problem> {
+fn answer(deps: &ReadDeps, method: &str, target: &str) -> Result<Page, Problem> {
     if !matches!(method, "GET" | "HEAD") {
         return Err(Problem::NotAllowed(format!(
             "{method}: only GET and HEAD are answered"
@@ -123,7 +123,7 @@ fn answer(deps: &Deps, method: &str, target: &str) -> Result<Page, Problem> {
     route(deps, &path, &Query::parse(query).map_err(undecodable)?)
 }
 
-fn topic_page(deps: &Deps, document: &ShownDocument, query: &Query) -> Result<String, Problem> {
+fn topic_page(deps: &ReadDeps, document: &ShownDocument, query: &Query) -> Result<String, Problem> {
     let section = match query.get("show") {
         None => Section::FIRST,
         Some(show) => Section::named(show)
@@ -142,7 +142,7 @@ fn topic_page(deps: &Deps, document: &ShownDocument, query: &Query) -> Result<St
     Ok(TopicPage::new(document, &held, section).render()?)
 }
 
-fn shown(deps: &Deps, target: &str, query: &Query) -> Result<String, Problem> {
+fn shown(deps: &ReadDeps, target: &str, query: &Query) -> Result<String, Problem> {
     match show::show(deps, target)? {
         Shown::Version(compared) => Ok(VersionPage::new(&compared).render()?),
         Shown::Document(document) if document.reads_as == Some(KindOf::Topic) => {
@@ -152,7 +152,7 @@ fn shown(deps: &Deps, target: &str, query: &Query) -> Result<String, Problem> {
     }
 }
 
-fn searched(deps: &Deps, query: &Query) -> Result<Page, Problem> {
+fn searched(deps: &ReadDeps, query: &Query) -> Result<Page, Problem> {
     let asked = search::Query {
         term: query.get("q").unwrap_or_default(),
         regex: query.get("regex") == Some("1"),
@@ -184,7 +184,7 @@ fn searched(deps: &Deps, query: &Query) -> Result<Page, Problem> {
 const LOGGED: usize = 100;
 const MOST_LOGGED: usize = 500;
 
-fn logged(deps: &Deps, query: &Query) -> Result<String, Problem> {
+fn logged(deps: &ReadDeps, query: &Query) -> Result<String, Problem> {
     let limit = match query.get("n") {
         None => LOGGED,
         Some(n) => (n.parse().ok())
@@ -199,7 +199,7 @@ fn given(value: Option<&str>) -> Option<&str> {
     value.filter(|value| !value.is_empty())
 }
 
-fn route(deps: &Deps, path: &str, query: &Query) -> Result<Page, Problem> {
+fn route(deps: &ReadDeps, path: &str, query: &Query) -> Result<Page, Problem> {
     let page = path.trim_end_matches('/');
     if let Some(target) = page.strip_prefix(DOC) {
         return shown(deps, target, query).map(Page::ok);

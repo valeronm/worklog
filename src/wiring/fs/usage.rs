@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::domain::id::DocumentId;
-use crate::domain::ports::{StoreError, Usage};
+use crate::domain::ports::{StoreError, Usage, UsageRead};
 use crate::domain::usage::{Invocation, Kept, Session};
 use crate::domain::version::Stamp;
 
@@ -88,27 +88,7 @@ impl FsUsage {
     }
 }
 
-impl Usage for FsUsage {
-    fn record(&self, invocation: &Invocation) -> Result<(), StoreError> {
-        // A sync cannot reconcile two writers of one file.
-        let name = format!("{}-{}{EXTENSION}", invocation.machine, invocation.month());
-        let path = self.dir.join(name);
-        // The store the log is in is never made by a line.
-        match fs::create_dir(&self.dir) {
-            Err(e) if e.kind() != ErrorKind::AlreadyExists => return Err(io_error(&self.dir, &e)),
-            _ => {}
-        }
-        let mut file = fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)
-            .map_err(|e| io_error(&path, &e))?;
-        // Two processes can hold the file at once, and only a line written in one call cannot
-        // land inside another.
-        file.write_all(format!("{}\n", line(invocation)).as_bytes())
-            .map_err(|e| io_error(&path, &e))
-    }
-
+impl UsageRead for FsUsage {
     fn read(&self, kept: &Kept) -> Result<Vec<Invocation>, StoreError> {
         let names = match files(&self.dir) {
             Ok(names) => names,
@@ -131,6 +111,28 @@ impl Usage for FsUsage {
             found.extend(runs.filter(|run| kept.keeps(run)));
         }
         Ok(found)
+    }
+}
+
+impl Usage for FsUsage {
+    fn record(&self, invocation: &Invocation) -> Result<(), StoreError> {
+        // A sync cannot reconcile two writers of one file.
+        let name = format!("{}-{}{EXTENSION}", invocation.machine, invocation.month());
+        let path = self.dir.join(name);
+        // The store the log is in is never made by a line.
+        match fs::create_dir(&self.dir) {
+            Err(e) if e.kind() != ErrorKind::AlreadyExists => return Err(io_error(&self.dir, &e)),
+            _ => {}
+        }
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .map_err(|e| io_error(&path, &e))?;
+        // Two processes can hold the file at once, and only a line written in one call cannot
+        // land inside another.
+        file.write_all(format!("{}\n", line(invocation)).as_bytes())
+            .map_err(|e| io_error(&path, &e))
     }
 }
 

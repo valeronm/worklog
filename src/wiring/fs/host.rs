@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 
 use crate::domain::id::DocumentId;
-use crate::domain::ports::{Host, StoreError};
+use crate::domain::ports::{Host, HostRead, StoreError};
 use crate::domain::usage::Session;
 
 use super::Config;
@@ -71,30 +71,13 @@ fn on_disk(path: &Path) -> PathBuf {
     path.to_path_buf()
 }
 
-impl Host for FsHost {
+impl HostRead for FsHost {
     fn machine(&self) -> Result<Option<DocumentId>, StoreError> {
         Ok(self.machine.borrow().clone())
     }
 
     fn home(&self) -> Result<Option<String>, StoreError> {
         Ok(self.home.clone())
-    }
-
-    fn bind(&self, machine: &DocumentId) -> Result<(), StoreError> {
-        // Another process may have bound this host since the config was read.
-        if Config::read(&self.config)?.is_some() {
-            return Err(StoreError::io(
-                self.config.display(),
-                "this host is already bound",
-            ));
-        }
-        let config = Config {
-            store: self.store.clone(),
-            machine: machine.clone(),
-        };
-        config.write(&self.config)?;
-        self.machine.replace(Some(machine.clone()));
-        Ok(())
     }
 
     fn resolve(&self, absolute: &str) -> Result<String, StoreError> {
@@ -111,6 +94,25 @@ impl Host for FsHost {
     fn name(&self) -> Option<String> {
         let named = rustix::system::uname();
         named.nodename().to_str().ok().map(str::to_owned)
+    }
+}
+
+impl Host for FsHost {
+    fn bind(&self, machine: &DocumentId) -> Result<(), StoreError> {
+        // Another process may have bound this host since the config was read.
+        if Config::read(&self.config)?.is_some() {
+            return Err(StoreError::io(
+                self.config.display(),
+                "this host is already bound",
+            ));
+        }
+        let config = Config {
+            store: self.store.clone(),
+            machine: machine.clone(),
+        };
+        config.write(&self.config)?;
+        self.machine.replace(Some(machine.clone()));
+        Ok(())
     }
 }
 

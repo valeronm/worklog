@@ -24,10 +24,14 @@ const NEW: &str = "new";
 const SAVE: &str = "save";
 const RESOLVE: &str = "resolve";
 
+mod persistence;
+
+pub(super) use persistence::Writer;
+
 /// A refusal leaves the draft in place; a stored version deletes it.
 pub fn save(deps: &Deps, address: &str) -> Result<Written, Failure> {
-    let lookup = Lookup::new(deps.store);
-    let draft = draft_for(deps, &lookup, address)?;
+    let lookup = Lookup::new(deps.read().store);
+    let draft = draft_for(&deps.read(), &lookup, address)?;
     let (id, body) = (&draft.document, draft.body.as_str());
     let target = Target::of(&lookup, id, &draft.kind, &draft.fields, Origin::Draft)?;
     let label = target.change(&draft)?;
@@ -89,12 +93,7 @@ pub(super) struct Admitted {
 
 impl Admitted {
     pub(super) fn store(self, deps: &Deps) -> Result<Written, Failure> {
-        deps.store.put(&self.version)?;
-        Ok(Written {
-            document: self.version.envelope.document,
-            label: self.label,
-            version: self.version.id,
-        })
+        deps.writer.store(self)
     }
 }
 
@@ -244,13 +243,13 @@ impl<'a, 'b> Target<'a, 'b> {
 
     fn next(&self, deps: &Deps, fields: &Fields, body: &str) -> Result<Record, Failure> {
         let stepped = match self.document.state() {
-            State::Absent => step::next(&self.kind, fields, None, true, deps.today()?),
+            State::Absent => step::next(&self.kind, fields, None, true, deps.read().today()?),
             State::Live(head) => step::next(
                 &self.kind,
                 fields,
                 Some(&head.fields),
                 head.body != body,
-                deps.today()?,
+                deps.read().today()?,
             ),
             State::Forked(heads) => {
                 let Some((speaking, _)) = row_head(&self.document) else {
@@ -266,7 +265,7 @@ impl<'a, 'b> Target<'a, 'b> {
                     &speaking.fields,
                     &others,
                     speaking.body != body,
-                    deps.today()?,
+                    deps.read().today()?,
                 )
             }
         };
@@ -437,7 +436,7 @@ impl<'a, 'b> Target<'a, 'b> {
         label: &str,
     ) -> Result<Version, Failure> {
         let links = self.linked(&fields, body)?;
-        let (written, machine) = (deps.clock.now(), deps.machine()?);
+        let (written, machine) = (deps.clock.now(), deps.read().machine()?);
         let heads = self.document.heads();
         let envelope = Envelope::following(&heads, written.clone(), machine.clone(), label)
             .unwrap_or_else(|| {
@@ -480,7 +479,7 @@ mod tests {
         topic, topic_fields, world,
     };
     use crate::domain::draft::Draft;
-    use crate::domain::ports::{Drafts, Ids, Store};
+    use crate::domain::ports::{Drafts, DraftsRead, Ids, Store, StoreRead};
     use crate::domain::schema::address::Found;
     use crate::domain::schema::{Date, Ending, Reason, step};
     use crate::domain::testing::{after, first};
