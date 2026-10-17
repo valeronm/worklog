@@ -1,7 +1,8 @@
 use std::cell::{OnceCell, Ref, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 use crate::domain::document::{Document, State, Unreadable};
 use crate::domain::id::{DocumentId, VersionId, is_hex};
@@ -10,10 +11,15 @@ use crate::domain::version::{Kind, ReadError, Version};
 
 use super::{STAGING_PREFIX, USAGE_DIRECTORY, directories, files, io_error};
 
+mod cache;
+
+use cache::{Cache, Remembered};
+
 // A version's file is never rewritten. One instance is one snapshot: the tree is walked
 // once and remembered.
 pub struct FsStore {
     root: PathBuf,
+    cache: Option<Cache>,
     walked: OnceCell<RefCell<Walked>>,
 }
 
@@ -57,8 +63,25 @@ impl FsStore {
     pub fn new(root: PathBuf) -> FsStore {
         FsStore {
             root,
+            cache: None,
             walked: OnceCell::new(),
         }
+    }
+
+    /// Walks the tree through the cache kept under `dir`: a document directory whose
+    /// modification time the cache recorded is taken as the cache holds it, so a file
+    /// rewritten in place under an unchanged directory is read as it was.
+    #[must_use]
+    pub fn caching(mut self, dir: &Path) -> FsStore {
+        self.cache = Some(Cache::at(dir, &self.root));
+        self
+    }
+
+    /// Walks the tree through its cache as `caching` does, and leaves the cache as it was.
+    #[must_use]
+    pub fn recalling(mut self) -> FsStore {
+        self.cache = self.cache.take().map(Cache::reading_only);
+        self
     }
 
     pub fn open(root: PathBuf) -> Result<FsStore, StoreError> {
@@ -130,12 +153,51 @@ impl FsStore {
         if let Some(walked) = self.walked.get() {
             return Ok(walked.borrow());
         }
+        let held = match &self.cache {
+            Some(cache) => self.walk_through(cache)?,
+            None => self.walk()?,
+        };
+        Ok(self.walked.get_or_init(|| RefCell::new(held)).borrow())
+    }
+
+    fn walk(&self) -> Result<Walked, StoreError> {
         let mut held = Walked::new();
         for id in self.documents("")? {
             let document = self.read(&id)?;
             held.insert(id, document);
         }
-        Ok(self.walked.get_or_init(|| RefCell::new(held)).borrow())
+        Ok(held)
+    }
+
+    // `taken` is the walk's start, so a directory changed after it is recorded within the
+    // settling time and read again.
+    fn walk_through(&self, cache: &Cache) -> Result<Walked, StoreError> {
+        let taken = SystemTime::now();
+        let mut remembered = cache.read();
+        let mut found = BTreeMap::new();
+        let mut changed = false;
+        for id in self.documents("")? {
+            let dir = self.document_dir(&id);
+            let modified = fs::metadata(&dir)
+                .and_then(|metadata| metadata.modified())
+                .map_err(|e| io_error(&dir, &e))?;
+            let document = match remembered.remove(&id) {
+                Some(kept) if kept.modified == modified => kept.document,
+                _ => {
+                    let document = self.read(&id)?;
+                    changed |= document.unreadable().is_empty() && cache::settled(taken, modified);
+                    document
+                }
+            };
+            found.insert(id, Remembered { modified, document });
+        }
+        if changed || !remembered.is_empty() {
+            cache.write(taken, &found);
+        }
+        Ok(found
+            .into_iter()
+            .map(|(id, kept)| (id, kept.document))
+            .collect())
     }
 
     /// Reads the tree now unless it was read, so every later answer of this instance comes
@@ -264,6 +326,15 @@ impl StoreRead for FsStore {
         }
         Ok(found)
     }
+
+    fn reread(&self) -> Result<(), StoreError> {
+        let held = self.walk()?;
+        match self.walked.get() {
+            Some(walked) => *walked.borrow_mut() = held,
+            None => drop(self.walked.set(RefCell::new(held))),
+        }
+        Ok(())
+    }
 }
 
 impl Store for FsStore {
@@ -292,6 +363,8 @@ impl Store for FsStore {
 
 #[cfg(test)]
 mod tests {
+    use std::time::{Duration, SystemTime};
+
     use super::*;
     use crate::domain::testing::{LANTERN, after, first, lantern, store_contract};
     use crate::wiring::fs::RandomIds;
@@ -653,6 +726,146 @@ mod tests {
             unsettled.document(&lantern()).unwrap().state(),
             State::Absent
         );
+    }
+
+    fn cached(dir: &Path) -> FsStore {
+        FsStore::new(dir.join("store")).caching(&dir.join("cache"))
+    }
+
+    // The relay fact put, its directory settled and the cache written for it.
+    fn stocked(dir: &Path) -> (FsStore, Version) {
+        let store = cached(dir);
+        let relay = first(&lantern(), "fact", RELAY, "first\n");
+        store.put(&relay).unwrap();
+        settled(&store, &lantern());
+        store.settle().unwrap();
+        (store, relay)
+    }
+
+    // A directory changed within the cache's settling time is read again whatever the
+    // cache holds, so a test of what the cache answers backdates the directory first.
+    fn settled(store: &FsStore, id: &DocumentId) {
+        let dir = store.document_dir(id);
+        let earlier = SystemTime::now() - Duration::from_hours(1);
+        fs::File::open(&dir).unwrap().set_modified(earlier).unwrap();
+    }
+
+    #[test]
+    fn a_tree_that_did_not_change_is_answered_from_the_cache_until_it_is_reread() {
+        let dir = tempfile::tempdir().unwrap();
+        let (store, relay) = stocked(dir.path());
+
+        fs::write(path(&store, &relay), "damaged").unwrap();
+        let afresh = cached(dir.path());
+        afresh.settle().unwrap();
+        assert_eq!(
+            afresh.document(&lantern()).unwrap().state(),
+            State::Live(&relay)
+        );
+        assert_eq!(afresh.of_kind(&relay.envelope.kind).unwrap().len(), 1);
+        afresh.reread().unwrap();
+        assert_eq!(afresh.document(&lantern()).unwrap().state(), State::Absent);
+        assert_eq!(afresh.unreadable().unwrap().len(), 1);
+        let unwalked = cached(dir.path());
+        unwalked.reread().unwrap();
+        assert_eq!(unwalked.unreadable().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_directory_changed_within_the_settling_time_is_not_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = cached(dir.path());
+        let relay = first(&lantern(), "fact", RELAY, "first\n");
+        store.put(&relay).unwrap();
+        store.settle().unwrap();
+        assert!(!dir.path().join("cache").exists());
+
+        settled(&store, &lantern());
+        cached(dir.path()).settle().unwrap();
+        assert!(dir.path().join("cache").exists());
+    }
+
+    #[test]
+    fn a_version_that_landed_in_a_known_directory_is_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_, relay) = stocked(dir.path());
+
+        let renamed = after(&[&relay], "name = \"relay-pin\"", "second\n");
+        cached(dir.path()).put(&renamed).unwrap();
+        let afresh = cached(dir.path());
+        afresh.settle().unwrap();
+        let held = afresh.document(&lantern()).unwrap();
+        assert_eq!(held.state(), State::Live(&renamed));
+        assert_eq!(held.history(), [&renamed, &relay]);
+        assert_eq!(afresh.holding("name", &["relay-pin"]).unwrap(), [held]);
+    }
+
+    #[test]
+    fn a_recalling_store_reads_what_changed_and_writes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_, relay) = stocked(dir.path());
+        let file = fs::read_dir(dir.path().join("cache"))
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .next()
+            .unwrap();
+        let written = fs::read(&file).unwrap();
+
+        let renamed = after(&[&relay], "name = \"relay-pin\"", "second\n");
+        cached(dir.path()).put(&renamed).unwrap();
+        let recalling = cached(dir.path()).recalling();
+        recalling.settle().unwrap();
+        assert_eq!(
+            recalling.document(&lantern()).unwrap().state(),
+            State::Live(&renamed)
+        );
+        assert_eq!(fs::read(&file).unwrap(), written);
+    }
+
+    #[test]
+    fn a_document_that_appeared_is_found_and_one_that_is_gone_is_dropped() {
+        let dir = tempfile::tempdir().unwrap();
+        let (store, _) = stocked(dir.path());
+
+        let atlas = DocumentId::parse(ATLAS).unwrap();
+        let topic = first(&atlas, "topic", "name = \"atlas\"", "\n");
+        cached(dir.path()).put(&topic).unwrap();
+        fs::remove_dir_all(store.document_dir(&lantern())).unwrap();
+        let afresh = cached(dir.path());
+        afresh.settle().unwrap();
+        assert_eq!(
+            afresh.document(&atlas).unwrap().state(),
+            State::Live(&topic)
+        );
+        assert_eq!(afresh.document(&lantern()).unwrap().state(), State::Absent);
+        assert_eq!(
+            afresh.kinds().unwrap(),
+            std::slice::from_ref(&topic.envelope.kind)
+        );
+        assert_eq!(afresh.documents_under("7").unwrap(), [atlas]);
+    }
+
+    #[test]
+    fn a_document_holding_a_file_that_does_not_read_is_read_every_time() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = cached(dir.path());
+        let relay = first(&lantern(), "fact", RELAY, "first\n");
+        store.put(&relay).unwrap();
+        let torn = VersionId::of(b"torn");
+        fs::write(store.version_path(&lantern(), &torn), "damaged").unwrap();
+        settled(&store, &lantern());
+        store.settle().unwrap();
+        assert_eq!(
+            store.document(&lantern()).unwrap().state(),
+            State::Live(&relay)
+        );
+
+        fs::write(path(&store, &relay), "damaged too").unwrap();
+        let afresh = cached(dir.path());
+        afresh.settle().unwrap();
+        let held = afresh.document(&lantern()).unwrap();
+        assert_eq!(held.state(), State::Absent);
+        assert_eq!(held.unreadable().len(), 2);
     }
 
     #[test]

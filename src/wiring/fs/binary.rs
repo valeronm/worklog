@@ -31,7 +31,7 @@ impl Binary for FsBinary {
         let kept = std::fs::metadata(&self.exe)
             .map_err(|e| io_error(&self.exe, &e))?
             .permissions();
-        replace(&self.exe, bytes, Some(&kept))?;
+        replace(&self.exe, bytes, Some(&kept), true)?;
         Ok(self.exe.display().to_string())
     }
 

@@ -131,7 +131,7 @@ fn target_of(path: &Path) -> Result<PathBuf, StoreError> {
 fn replace_file(path: &Path, text: &str) -> Result<(), StoreError> {
     let target = target_of(path)?;
     let kept = fs::metadata(&target).ok().map(|held| held.permissions());
-    replace(&target, text.as_bytes(), kept.as_ref())
+    replace(&target, text.as_bytes(), kept.as_ref(), true)
 }
 
 #[cfg(test)]

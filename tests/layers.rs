@@ -689,7 +689,8 @@ fn a_file_that_makes_the_network_reader_is_found() {
 
 const RUNS_A_PROGRAM: [&str; 4] = ["output", "spawn", "status", "assert"];
 
-// A binary run without `RELEASES` set reads its releases from the network.
+// A binary run without `RELEASES` set reads its releases from the network, and one run
+// without `HOME_OF_THE_TOOL` set keeps its cache under the home directory.
 fn run_past_the_releases(text: &str) -> Vec<String> {
     let text = uncommented(text);
     let tokens = tokens(&text);
@@ -703,8 +704,10 @@ fn run_past_the_releases(text: &str) -> Vec<String> {
         let runs = body
             .windows(3)
             .any(|call| call[0] == "." && RUNS_A_PROGRAM.contains(&call[1]) && call[2] == "(");
-        if runs && !body.contains(&"RELEASES") {
-            found.push(format!("`{}` runs a program without `RELEASES`", body[1]));
+        for given in ["RELEASES", "HOME_OF_THE_TOOL"] {
+            if runs && !body.contains(&given) {
+                found.push(format!("`{}` runs a program without `{given}`", body[1]));
+            }
         }
     }
     found
@@ -716,38 +719,49 @@ fn every_scenario_runs_the_binary_with_its_releases_given() {
     assert_eq!(violations(&scenarios, run_past_the_releases), [""; 0]);
     let text = fs::read_to_string(&scenarios).expect("the scenarios");
     assert!(text.contains("\nconst RELEASES: &str = \"WORKLOG_RELEASES\";\n"));
+    assert!(text.contains("\nconst HOME_OF_THE_TOOL: &str = \"WORKLOG_HOME\";\n"));
 }
 
 #[test]
 fn a_helper_that_runs_the_binary_without_its_releases_is_found() {
     for clean in [
-        "fn run_as(&self, mut program: Command) -> Ran {\n    program.env(RELEASES, self.unpublished());\n    program.output()\n}\n",
-        "fn spawned(&self) -> Child {\n    program\n        .env(RELEASES, dir)\n        .spawn()\n        .expect(\"the binary runs\")\n}\n",
+        "fn run_as(&self, mut program: Command) -> Ran {\n    program.env(RELEASES, self.unpublished());\n    program.env(HOME_OF_THE_TOOL, self.root.join(\"next\"));\n    program.output()\n}\n",
+        "fn spawned(&self) -> Child {\n    program\n        .env(RELEASES, dir)\n        .env(HOME_OF_THE_TOOL, dir)\n        .spawn()\n        .expect(\"the binary runs\")\n}\n",
         "fn run(&self, args: &[&str]) -> Ran {\n    self.run_in(&self.home(), args)\n}\n",
         "fn listed(list: fn(&Host) -> Ran, host: &Host) -> Ran {\n    list(host)\n}\n",
         "fn waited() {\n    // program.output() is run_as's.\n    let output = ran.output;\n}\n",
     ] {
         assert_eq!(run_past_the_releases(clean), [""; 0], "{clean}");
     }
+    let without = |name: &str| {
+        [
+            format!("`{name}` runs a program without `RELEASES`"),
+            format!("`{name}` runs a program without `HOME_OF_THE_TOOL`"),
+        ]
+    };
     for (broken, found) in [
         (
             "fn bare(program: &mut Command) -> Output {\n    program.output().unwrap()\n}\n",
-            "`bare` runs a program without `RELEASES`",
+            without("bare").to_vec(),
         ),
         (
-            "fn run_as() {\n    program.env(RELEASES, dir).output();\n}\n\nfn served(program: &mut Command) -> Child {\n    program\n        . spawn ()\n        .unwrap()\n}\n",
-            "`served` runs a program without `RELEASES`",
+            "fn run_as() {\n    program.env(RELEASES, dir).env(HOME_OF_THE_TOOL, dir).output();\n}\n\nfn served(program: &mut Command) -> Child {\n    program\n        . spawn ()\n        .unwrap()\n}\n",
+            without("served").to_vec(),
         ),
         (
             "impl Host {\n    fn checked(&self) {\n        Command::cargo_bin(\"lantern\").unwrap().assert().success();\n    }\n}\n",
-            "`checked` runs a program without `RELEASES`",
+            without("checked").to_vec(),
+        ),
+        (
+            "fn run_as(&self, mut program: Command) -> Ran {\n    program.env(RELEASES, self.unpublished());\n    program.output()\n}\n",
+            vec!["`run_as` runs a program without `HOME_OF_THE_TOOL`".to_owned()],
         ),
         (
             "fn exits(program: &mut Command) -> bool {\n    program.status().unwrap().success()\n}\n",
-            "`exits` runs a program without `RELEASES`",
+            without("exits").to_vec(),
         ),
     ] {
-        assert_eq!(run_past_the_releases(broken), [found], "{broken}");
+        assert_eq!(run_past_the_releases(broken), found, "{broken}");
     }
 }
 
@@ -1516,4 +1530,22 @@ fn a_web_file_that_reaches_the_host_is_found() {
     ] {
         assert_eq!(host_reached(broken), [found], "{broken}");
     }
+}
+
+// A recalled version is checked against nothing, so only the cache that read its text once
+// builds one.
+#[test]
+fn a_version_is_recalled_only_by_the_cache() {
+    let mut found = Vec::new();
+    sources(&src(), &mut found);
+    let mut callers: Vec<String> = found
+        .iter()
+        .filter(|(_, text)| text.contains("recalled("))
+        .map(|(path, _)| {
+            let file = Path::new(path).strip_prefix(src()).expect("a file of it");
+            file.display().to_string()
+        })
+        .collect();
+    callers.sort();
+    assert_eq!(callers, ["domain/version.rs", "wiring/fs/store/cache.rs"]);
 }

@@ -68,6 +68,9 @@ impl Fits {
 /// host's machine whose directory this host's home would fold is a notice; a host with no
 /// machine topic or no home has none.
 pub fn check(deps: &ReadDeps) -> Result<Check, Failure> {
+    // A reading that trusts what the host remembers of the store answers for a file
+    // rewritten in place.
+    deps.store.reread()?;
     let lookup = Lookup::new(deps.store);
     let here = deps.host.machine()?.zip(deps.home()?);
     let (problems, notices) = found(&lookup, here.as_ref())?;

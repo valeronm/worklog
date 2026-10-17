@@ -123,7 +123,7 @@ fn offered(
     let Ok(Some(adapters)) = wiring::wire(variable, None) else {
         return Vec::new();
     };
-    list(&adapters.deps().read()).unwrap_or_default()
+    list(&adapters.recalling().deps().read()).unwrap_or_default()
 }
 
 // clap asks a source with no arguments.

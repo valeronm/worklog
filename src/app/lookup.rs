@@ -82,6 +82,10 @@ impl<'a> Stored<'a> {
     pub fn new(store: &'a dyn StoreRead) -> Stored<'a> {
         Stored(store)
     }
+
+    pub fn reread(&self) -> Result<(), Failure> {
+        Ok(self.0.reread()?)
+    }
 }
 
 type Question = (String, Vec<String>);

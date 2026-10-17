@@ -54,6 +54,9 @@ pub trait StoreRead {
     /// algorithm before it, each with its document; none for an empty
     /// prefix. A file named as a version counts whether or not it reads.
     fn versions_under(&self, prefix: &str) -> Result<Vec<(DocumentId, VersionId)>, StoreError>;
+    /// Reads every version again from what holds the store, past anything remembered of
+    /// an earlier reading.
+    fn reread(&self) -> Result<(), StoreError>;
 }
 
 pub trait Store: StoreRead {

@@ -20,6 +20,8 @@ clap = { version = "4", features = ["derive", "wrap_help"] }
 clap_complete = { version = "4", features = ["unstable-dynamic"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 getrandom = "0.4"
+# The cache of the store's parsed tree, read whole by every command.
+postcard = { version = "1", default-features = false, features = ["use-std"] }
 pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
 regex = "1"
 rustix = { version = "1.1.4", features = ["system"] }

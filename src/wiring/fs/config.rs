@@ -57,7 +57,7 @@ impl Config {
         table.insert(STORE.to_owned(), store.into());
         table.insert(MACHINE.to_owned(), self.machine.as_str().into());
         let text = toml::to_string(&table).map_err(|e| StoreError::io(path.display(), e))?;
-        replace(path, text.as_bytes(), None)
+        replace(path, text.as_bytes(), None, true)
     }
 }
 

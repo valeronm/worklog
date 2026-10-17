@@ -356,6 +356,27 @@ impl Version {
         }
     }
 
+    /// The parts as a reader of `text` found them once; nothing here parses
+    /// `text` beyond its fence, and `None` is a text with no fence.
+    #[must_use]
+    pub fn recalled(
+        id: VersionId,
+        envelope: Envelope,
+        fields: Fields,
+        links: Links,
+        text: String,
+    ) -> Option<Version> {
+        let body = fence::split(&text).ok()?.1.to_owned();
+        Some(Version {
+            id,
+            envelope,
+            fields,
+            links,
+            body,
+            text,
+        })
+    }
+
     /// The bytes the version was composed as or read from.
     #[must_use]
     pub fn text(&self) -> &str {
@@ -476,6 +497,22 @@ mod tests {
         let version = version("The relay is wired to GPIO 5.\n");
         assert_eq!(version.id, VersionId::of(version.text().as_bytes()));
         assert_eq!(Version::read(&version.id, version.text()), Ok(version));
+    }
+
+    #[test]
+    fn a_version_recalled_from_its_parts_and_text_is_the_one_that_was_read() {
+        let read = version("The relay is wired to GPIO 5.\n");
+        let recalled = |text: &str| {
+            Version::recalled(
+                read.id.clone(),
+                read.envelope.clone(),
+                read.fields.clone(),
+                read.links.clone(),
+                text.to_owned(),
+            )
+        };
+        assert_eq!(recalled(read.text()), Some(read.clone()));
+        assert_eq!(recalled("no fence\n"), None);
     }
 
     #[test]

@@ -44,6 +44,13 @@ impl Adapters {
         Ok(self.store.settle()?)
     }
 
+    /// Adapters whose store reads through this host's cache and leaves it as it was.
+    #[must_use]
+    pub fn recalling(mut self) -> Adapters {
+        self.store = self.store.recalling();
+        self
+    }
+
     /// Puts these adapters in the session of the agent whose hook's command holds `word`, under
     /// the id `given` returns for the key that agent's hook input holds it under. That session
     /// replaces the one a variable gave. `given` is not called for a word no agent's hook
@@ -83,13 +90,14 @@ pub fn wire(
             let store = match chosen {
                 None => FsStore::open(root.clone())?,
                 Some(_) => FsStore::new(root.clone()),
-            };
+            }
+            .caching(&paths.cache);
             let host = FsHost::bound(paths.config, paths.home, held, session);
             (root, store, host)
         }
         (None, Some(chosen)) => (
             chosen.clone(),
-            FsStore::chosen(chosen.clone())?,
+            FsStore::chosen(chosen.clone())?.caching(&paths.cache),
             FsHost::unbound(paths.config, paths.home, chosen, session),
         ),
         (None, None) => return Ok(None),

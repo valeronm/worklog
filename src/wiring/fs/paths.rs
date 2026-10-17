@@ -10,6 +10,8 @@ const APP: &str = "worklog";
 pub struct Paths {
     pub config: PathBuf,
     pub drafts: PathBuf,
+    /// The directory of this host's cache of each store.
+    pub cache: PathBuf,
     pub home: Option<String>,
     /// `XDG_CONFIG_HOME` or the home directory's `.config`, whatever `WORKLOG_HOME` holds.
     pub config_home: Option<PathBuf>,
@@ -45,6 +47,7 @@ impl Paths {
             return Ok(Paths {
                 config: root.join("config.toml"),
                 drafts: root.join("drafts"),
+                cache: root.join("cache"),
                 home,
                 config_home,
             });
@@ -65,6 +68,7 @@ impl Paths {
             drafts: base("XDG_STATE_HOME", ".local/state")
                 .join(APP)
                 .join("drafts"),
+            cache: base("XDG_CACHE_HOME", ".cache").join(APP),
             home: Some(home),
             config_home,
         })
@@ -103,6 +107,29 @@ mod tests {
             PathBuf::from("/home/desk/.local/state/worklog/drafts")
         );
         assert_eq!(paths.home, Some("/home/desk".to_owned()));
+    }
+
+    #[test]
+    fn the_cache_is_under_the_cache_base_directory_or_the_one_given_for_everything() {
+        let cache = |set: &[(&str, &str)]| resolved(set).unwrap().cache;
+        let home = ("HOME", "/home/desk");
+        assert_eq!(cache(&[home]), PathBuf::from("/home/desk/.cache/worklog"));
+        assert_eq!(
+            cache(&[home, ("XDG_CACHE_HOME", "/atlas/cache")]),
+            PathBuf::from("/atlas/cache/worklog")
+        );
+        assert_eq!(
+            cache(&[
+                home,
+                ("XDG_CACHE_HOME", "/atlas/cache"),
+                ("WORKLOG_HOME", "/lantern")
+            ]),
+            PathBuf::from("/lantern/cache")
+        );
+        assert_eq!(
+            cache(&[home, ("XDG_CACHE_HOME", "")]),
+            PathBuf::from("/home/desk/.cache/worklog")
+        );
     }
 
     #[test]

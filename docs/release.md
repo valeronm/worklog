@@ -53,6 +53,8 @@ what a reader tolerates; what follows from it:
   upgrade every machine sharing the store before the first document is
   written in the new shape.
 - A new key in a usage line is passed over by an older reader.
+- The host's cache is rebuilt by the first walk of a binary that did not
+  write it, so a release owes it nothing.
 
 ## A store from before 0.5.0
 

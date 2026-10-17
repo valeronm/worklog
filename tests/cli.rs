@@ -267,6 +267,16 @@ impl Host {
             .find(|file| file.to_str().unwrap().contains(version))
             .unwrap_or_else(|| panic!("the file of version {version}"))
     }
+
+    // A document directory changed within the cache's settling time is read again whatever
+    // the cache holds, so a scenario of what the cache answers backdates every one first.
+    fn settled(&self) {
+        let earlier = std::time::SystemTime::now() - Duration::from_hours(1);
+        for file in self.version_files() {
+            let dir = file.parent().unwrap();
+            fs::File::open(dir).unwrap().set_modified(earlier).unwrap();
+        }
+    }
 }
 
 struct Stocked {
@@ -1900,6 +1910,41 @@ fn a_damaged_file_is_named_by_check_and_the_rest_of_the_store_still_reads() {
     assert_eq!(column(&left, 2), ["lantern/relay"], "{left}");
     assert_eq!(host.ok(&["facts", "lantern"]), left);
     assert_eq!(column(&host.ok(&["ideas"]), 2), ["lantern/dimmer"]);
+}
+
+#[test]
+fn a_listing_trusts_an_unchanged_directory_and_check_reads_its_files() {
+    let host = Host::stocked();
+    let facts = host.ok(&["facts"]);
+    let history = host.ok(&["history", "lantern/fuse"]);
+    let version = &history[..12];
+    host.settled();
+    assert_eq!(host.ok(&["facts"]), facts);
+
+    fs::write(host.file_of(version), "not a version\n").unwrap();
+    assert_eq!(host.ok(&["facts"]), facts);
+    let checked = host.run(&["check"]);
+    assert_eq!((checked.stderr.as_str(), checked.code), ("", Some(1)));
+    assert!(
+        checked.stdout.contains(&format!(": {version}: ")),
+        "{}",
+        checked.stdout
+    );
+}
+
+#[test]
+fn the_check_page_reads_every_file_whatever_the_cache_holds() {
+    let host = Host::stocked();
+    let history = host.ok(&["history", "lantern/fuse"]);
+    let version = &history[..12];
+    host.settled();
+    let facts = host.ok(&["facts"]);
+    fs::write(host.file_of(version), "not a version\n").unwrap();
+    assert_eq!(host.ok(&["facts"]), facts);
+
+    let served = host.serve(&[]);
+    let checked = served.page("/check");
+    assert!(checked.contains(version), "{checked}");
 }
 
 #[test]
@@ -3692,7 +3737,10 @@ fn copy_of_the_binary(to: &Path) {
     let unpublished = to.with_extension("unpublished");
     let version = || {
         let mut copy = std::process::Command::new(to);
-        copy.arg("--version").env(RELEASES, &unpublished).output()
+        copy.arg("--version")
+            .env(RELEASES, &unpublished)
+            .env(HOME_OF_THE_TOOL, to.with_extension("home"))
+            .output()
     };
     loop {
         match version() {

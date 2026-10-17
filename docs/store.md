@@ -225,6 +225,29 @@ The file is `$XDG_CONFIG_HOME/worklog/config.toml`, or under `~/.config`
 where that variable is not set. `WORKLOG_HOME=<dir>` moves it to
 `<dir>/config.toml` and the drafts to `<dir>/drafts`.
 
+## The host's cache
+
+A host keeps what it parsed of the store's tree in one file per store,
+`$XDG_CACHE_HOME/worklog/<hash of the store's path>.store`, or under
+`~/.cache` where that variable is not set; `WORKLOG_HOME=<dir>` moves it
+to `<dir>/cache`. The file holds every document the last walk read, with
+the modification time its directory had, and nothing else: the version
+files stay what the store is, and the file is rebuilt from them whenever it
+is missing, does not read, or was written by another release of the binary.
+
+A walk takes a document as the cache holds it when its directory's
+modification time is the one recorded, and reads the directory's files
+otherwise. A version lands in its directory by rename, which is what moves
+the time. A file rewritten in place under a directory whose time did not
+move is read as the cache holds it; `check` reads every file whatever the
+cache holds. A shell completion reads through the cache and leaves it as
+it was, since a key press is no place for the file to be rewritten. A
+directory that changed within two seconds before the walk is not recorded
+and is read again by the next, since two changes inside the granularity of
+its time can look like one. A document holding a file that does not read
+is not kept, so a damaged file is read on every walk. A cache that cannot
+be written is left as it is and nothing is refused.
+
 ## Drafts
 
 Prose reaches the store through a draft, an editable file outside it. A

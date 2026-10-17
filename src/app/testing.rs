@@ -430,6 +430,10 @@ impl StoreRead for Counting {
         self.prefixes.set(self.prefixes.get() + 1);
         self.inner.versions_under(prefix)
     }
+
+    fn reread(&self) -> Result<(), StoreError> {
+        self.inner.reread()
+    }
 }
 
 impl Store for Counting {

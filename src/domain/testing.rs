@@ -56,6 +56,10 @@ impl StoreRead for FailingStore {
     fn versions_under(&self, _: &str) -> Result<Vec<(DocumentId, VersionId)>, StoreError> {
         FailingStore::gone()
     }
+
+    fn reread(&self) -> Result<(), StoreError> {
+        FailingStore::gone()
+    }
 }
 
 impl Store for FailingStore {
@@ -177,6 +181,10 @@ impl StoreRead for MemoryStore {
             .collect();
         found.sort();
         Ok(found)
+    }
+
+    fn reread(&self) -> Result<(), StoreError> {
+        Ok(())
     }
 }
 
@@ -548,11 +556,19 @@ fn compose(envelope: Envelope, fields: &str, body: &str) -> Version {
     Version::compose(envelope, fields, Links::default(), body.to_owned()).expect("a version")
 }
 
-fn stamp() -> Stamp {
+/// The moment every fixture is written at.
+///
+/// # Panics
+///
+/// Never.
+#[must_use]
+pub fn stamp() -> Stamp {
     Stamp::parse("2026-09-04T10:00:00+01:00").expect("a stamp")
 }
 
-fn desk() -> DocumentId {
+/// The machine every fixture is written on.
+#[must_use]
+pub fn desk() -> DocumentId {
     DocumentId::from_bytes([0xde; 16])
 }
 

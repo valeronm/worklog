@@ -64,7 +64,12 @@ fn open_staged(staging: &Path, private: bool) -> std::io::Result<File> {
     options.open(staging)
 }
 
-fn staged(staging: &Path, bytes: &[u8], permissions: Option<&Permissions>) -> std::io::Result<()> {
+fn staged(
+    staging: &Path,
+    bytes: &[u8],
+    permissions: Option<&Permissions>,
+    synced: bool,
+) -> std::io::Result<()> {
     let mut file = match open_staged(staging, permissions.is_some()) {
         // A run that was killed left its file, and its process id has been given out again.
         Err(e) if e.kind() == ErrorKind::AlreadyExists => {
@@ -75,7 +80,9 @@ fn staged(staging: &Path, bytes: &[u8], permissions: Option<&Permissions>) -> st
     };
     file.write_all(bytes)?;
     // A file renamed before its bytes reach the disk can be empty after a crash.
-    file.sync_all()?;
+    if synced {
+        file.sync_all()?;
+    }
     match permissions {
         Some(permissions) => file.set_permissions(permissions.clone()),
         None => Ok(()),
@@ -83,11 +90,13 @@ fn staged(staging: &Path, bytes: &[u8], permissions: Option<&Permissions>) -> st
 }
 
 /// Replaces `target` whole with `bytes`, through a file beside it that is gone again when the
-/// write fails. The file ends with `permissions`, or without them with those of a new file.
+/// write fails. The file ends with `permissions`, or without them with those of a new file,
+/// and `synced` has its bytes on the disk before it takes the target's name.
 fn replace(
     target: &Path,
     bytes: &[u8],
     permissions: Option<&Permissions>,
+    synced: bool,
 ) -> Result<(), StoreError> {
     let (Some(dir), Some(name)) = (target.parent(), target.file_name()) else {
         return Err(StoreError::io(target.display(), "is not a file's path"));
@@ -95,7 +104,7 @@ fn replace(
     std::fs::create_dir_all(dir).map_err(|e| io_error(dir, &e))?;
     // A rename replaces the file whole only from the same file system.
     let staging = staging_of(dir, name);
-    let replaced = staged(&staging, bytes, permissions)
+    let replaced = staged(&staging, bytes, permissions, synced)
         .map_err(|e| io_error(&staging, &e))
         .and_then(|()| std::fs::rename(&staging, target).map_err(|e| io_error(target, &e)));
     if replaced.is_err() {
@@ -157,7 +166,13 @@ mod tests {
 
         for asked in [0o600, 0o664, 0o755] {
             let staging = kept.path().join(format!("staged-{asked:o}"));
-            staged(&staging, b"atlas", Some(&Permissions::from_mode(asked))).unwrap();
+            staged(
+                &staging,
+                b"atlas",
+                Some(&Permissions::from_mode(asked)),
+                true,
+            )
+            .unwrap();
             assert_eq!(mode(&staging), asked);
             assert_eq!(fs::read(&staging).unwrap(), b"atlas");
         }
@@ -171,7 +186,7 @@ mod tests {
         let left = leftover(kept.path(), "lantern");
         fs::write(&left, "half").unwrap();
         fs::set_permissions(&left, Permissions::from_mode(0o444)).unwrap();
-        replace(&target, b"new", Some(&Permissions::from_mode(0o640))).unwrap();
+        replace(&target, b"new", Some(&Permissions::from_mode(0o640)), true).unwrap();
         assert_eq!(fs::read_to_string(&target).unwrap(), "new");
         assert_eq!(mode(&target), 0o640);
         assert_eq!(files(kept.path()).unwrap(), ["lantern"]);
@@ -186,7 +201,7 @@ mod tests {
         fs::write(&elsewhere, "kept").unwrap();
         std::os::unix::fs::symlink(&elsewhere, leftover(kept.path(), "lantern")).unwrap();
         for permissions in [None, Some(Permissions::from_mode(0o640))] {
-            replace(&target, b"new", permissions.as_ref()).unwrap();
+            replace(&target, b"new", permissions.as_ref(), true).unwrap();
             assert_eq!(fs::read_to_string(&elsewhere).unwrap(), "kept");
             assert!(fs::symlink_metadata(&target).unwrap().is_file());
             assert_eq!(fs::read_to_string(&target).unwrap(), "new");
@@ -203,7 +218,9 @@ mod tests {
         let target = kept.path().join("lantern");
         fs::create_dir(&target).unwrap();
         fs::write(target.join("relay"), "old").unwrap();
-        let refused = replace(&target, b"new", None).unwrap_err().to_string();
+        let refused = replace(&target, b"new", None, true)
+            .unwrap_err()
+            .to_string();
         assert!(
             refused.starts_with(&target.display().to_string()),
             "{refused}"
