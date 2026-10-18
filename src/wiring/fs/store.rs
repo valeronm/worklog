@@ -7,7 +7,7 @@ use std::time::SystemTime;
 
 use crate::domain::document::{Document, State, Unreadable};
 use crate::domain::id::{DocumentId, VersionId, is_hex};
-use crate::domain::ports::{Store, StoreError, StoreRead};
+use crate::domain::ports::{NotRead, Store, StoreError, StoreRead};
 use crate::domain::version::{Header, Kind, ReadError, Version, read_body};
 
 use super::{STAGING_PREFIX, USAGE_DIRECTORY, directories, files, io_error, optional};
@@ -221,10 +221,12 @@ impl FsStore {
         &self,
         document: &DocumentId,
         version: &VersionId,
-    ) -> Result<Option<String>, StoreError> {
+    ) -> Result<Result<String, NotRead>, StoreError> {
         let path = self.version_path(document, version);
-        let bytes = optional(&path, fs::read(&path))?;
-        Ok(bytes.and_then(|bytes| text_of(bytes).ok()))
+        let Some(bytes) = optional(&path, fs::read(&path))? else {
+            return Ok(Err(NotRead::Missing));
+        };
+        Ok(text_of(bytes).map_err(NotRead::Unreadable))
     }
 
     /// A Syncthing folder's ignore file is per host and never synced. One
@@ -261,18 +263,22 @@ impl StoreRead for FsStore {
         &self,
         document: &DocumentId,
         version: &VersionId,
-    ) -> Result<Option<Version>, StoreError> {
+    ) -> Result<Result<Version, NotRead>, StoreError> {
         let text = self.text(document, version)?;
-        Ok(text.and_then(|text| Version::read(version, &text).ok()))
+        Ok(text.and_then(|text| Version::read(version, &text).map_err(NotRead::Unreadable)))
     }
 
     fn body(
         &self,
         document: &DocumentId,
         version: &VersionId,
-    ) -> Result<Option<String>, StoreError> {
+    ) -> Result<Result<String, NotRead>, StoreError> {
         let text = self.text(document, version)?;
-        Ok(text.and_then(|text| read_body(version, &text).ok().map(str::to_owned)))
+        Ok(text.and_then(|text| {
+            read_body(version, &text)
+                .map(str::to_owned)
+                .map_err(NotRead::Unreadable)
+        }))
     }
 
     fn of_kind(&self, kind: &Kind) -> Result<Vec<Rc<Document>>, StoreError> {
@@ -776,21 +782,33 @@ mod tests {
         store.settle().unwrap();
         assert_eq!(
             store.version(&lantern(), &relay.id).unwrap(),
-            Some(relay.clone())
+            Ok(relay.clone())
         );
         assert_eq!(
             store.body(&lantern(), &relay.id).unwrap().as_deref(),
-            Some("first\n")
+            Ok("first\n")
         );
         fs::write(path(&store, &relay), "rewritten in place").unwrap();
         assert_eq!(
             store.headers(&lantern()).unwrap().state(),
             State::Live(relay.header())
         );
-        assert_eq!(store.version(&lantern(), &relay.id).unwrap(), None);
-        assert_eq!(store.body(&lantern(), &relay.id).unwrap(), None);
+        let corrupt = NotRead::Unreadable(ReadError::Corrupt);
+        assert_eq!(
+            store.version(&lantern(), &relay.id).unwrap(),
+            Err(corrupt.clone())
+        );
+        assert_eq!(
+            store.body(&lantern(), &relay.id).unwrap(),
+            Err(corrupt.clone())
+        );
         fs::write(path(&store, &relay), [0xff, 0xfe]).unwrap();
-        assert_eq!(store.body(&lantern(), &relay.id).unwrap(), None);
+        assert_eq!(store.body(&lantern(), &relay.id).unwrap(), Err(corrupt));
+        fs::remove_file(path(&store, &relay)).unwrap();
+        assert_eq!(
+            store.version(&lantern(), &relay.id).unwrap(),
+            Err(NotRead::Missing)
+        );
     }
 
     fn cached(dir: &Path) -> FsStore {
@@ -828,7 +846,7 @@ mod tests {
             State::Live(relay.header())
         );
         assert_eq!(afresh.of_kind(&relay.envelope.kind).unwrap().len(), 1);
-        assert_eq!(afresh.version(&lantern(), &relay.id).unwrap(), None);
+        assert!(afresh.version(&lantern(), &relay.id).unwrap().is_err());
         afresh.reread().unwrap();
         assert_eq!(afresh.headers(&lantern()).unwrap().state(), State::Absent);
         assert_eq!(afresh.unreadable().unwrap().len(), 1);

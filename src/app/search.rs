@@ -7,6 +7,7 @@ use serde::Serialize;
 
 use crate::app::heads::{ended_of, label_or_short};
 use crate::app::rows::{Reference, Row, by_label, documents, reading, row, shown};
+use crate::app::show::{Unread, Why};
 use crate::app::{Failure, ReadDeps};
 use crate::domain::document::Document;
 use crate::domain::id::{DocumentId, VersionId};
@@ -28,6 +29,8 @@ pub struct Hit {
     pub lines: Vec<Matched>,
     /// Where the term matched `row.label`.
     pub label_spans: Vec<Range<usize>>,
+    /// The row head whose file gave no body, matched on the label and the summary alone.
+    pub unread: Option<Unread>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -59,7 +62,8 @@ pub struct Logged {
 /// lines as written, trimmed, each with where the term matched it. An empty term and a
 /// pattern that does not compile are usage failures; an address that is not one topic is
 /// refused. A claim is never searched, and a forked document is searched in its row head
-/// only.
+/// only. A document whose row head's file gives no body is matched on its label and summary
+/// and carries why under `unread`.
 pub fn search(deps: &ReadDeps, query: &Query) -> Result<Vec<Hit>, Failure> {
     let matcher = matcher(query)?;
     let (lookup, topics, topic) = reading(deps, query.topic)?;
@@ -74,9 +78,16 @@ pub fn search(deps: &ReadDeps, query: &Query) -> Result<Vec<Hit>, Failure> {
         };
         for shown in shown(&topics, &documents, query.ended) {
             let row = shown.row;
-            let body = lookup
-                .body(&row.document, &shown.head.id)?
-                .unwrap_or_default();
+            let (body, unread) = match lookup.body(&row.document, &shown.head.id)? {
+                Ok(body) => (body, None),
+                Err(not_read) => (
+                    String::new(),
+                    Some(Unread {
+                        version: shown.head.id.clone(),
+                        why: Why::from(&not_read),
+                    }),
+                ),
+            };
             let lines: Vec<Matched> = std::iter::once(row.summary.as_str())
                 .chain(body.lines())
                 .filter_map(|line| {
@@ -94,6 +105,7 @@ pub fn search(deps: &ReadDeps, query: &Query) -> Result<Vec<Hit>, Failure> {
                         row,
                         lines,
                         label_spans,
+                        unread,
                     },
                 ));
             }
@@ -196,6 +208,7 @@ mod tests {
     };
     use crate::domain::id::DocumentId;
     use crate::domain::ports::{Store, StoreRead};
+    use crate::domain::version::ReadError;
 
     fn find(world: &World, term: &str) -> Vec<Hit> {
         query(world, term, false, None, false)
@@ -505,6 +518,28 @@ mod tests {
         let held = world.store.headers(id).unwrap();
         let (version, _) = row_head(&held).unwrap();
         stored(world, id, &version.id).body.trim().to_owned()
+    }
+
+    #[test]
+    fn a_candidate_whose_head_gives_no_body_matches_on_its_summary_and_says_why() {
+        let (world, lantern) = world();
+        let relay = fact_with(&world, &lantern, "relay-pin", "The relay pin", "pin four\n");
+        let torn = head_id(&world, &relay);
+        world
+            .store
+            .plant_unreadable(&relay, torn.clone(), ReadError::Corrupt);
+        let hits = find(&world, "pin");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(texts(&hits[0]), ["The relay pin"]);
+        let unread = hits[0].unread.as_ref().expect("the head's file");
+        assert_eq!(unread.version, torn);
+        assert_eq!(
+            unread.why,
+            Why::Corrupt {
+                text: ReadError::Corrupt.to_string()
+            }
+        );
+        assert!(find(&world, "four").is_empty());
     }
 
     #[test]

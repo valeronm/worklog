@@ -701,11 +701,33 @@ mod tests {
             "row": row(&relay, "fact", "lantern/relay", &[to(&lantern, "lantern")]),
             "lines": [{"text": "The relay.", "spans": [{"start": 0, "end": 9}]}],
             "label_spans": [],
+            "unread": null,
         }]);
-        vec![(
-            search::search(&world.deps().read(), &query).unwrap(),
-            expected,
-        )]
+        let whole = search::search(&world.deps().read(), &query).unwrap();
+        let torn = head_id(&world, &relay);
+        world
+            .store
+            .plant_unreadable(&relay, torn.clone(), ReadError::Corrupt);
+        let unread = json!([{
+            "row": row(&relay, "fact", "lantern/relay", &[to(&lantern, "lantern")]),
+            "lines": [],
+            "label_spans": [{"start": 8, "end": 13}],
+            "unread": {
+                "version": torn,
+                "why": {"type": "corrupt", "text": "the bytes do not hash to the file's name"},
+            },
+        }]);
+        let by_label = Query {
+            term: "relay",
+            ..query
+        };
+        vec![
+            (whole, expected),
+            (
+                search::search(&world.deps().read(), &by_label).unwrap(),
+                unread,
+            ),
+        ]
     }
 
     fn logged() -> Vec<(Vec<Logged>, Value)> {

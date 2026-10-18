@@ -239,8 +239,10 @@ missing, does not read, or was written by another release of the binary.
 A listing, a search by topic and the session opener answer from the
 headers alone. A command that shows, compares or searches a body reads
 the file of each version it shows, so a search over the whole store opens
-the current version of every document it searches, and a version whose
-file no longer reads as the cache recorded it is refused by name.
+the current version of every document it searches. A version whose file
+no longer reads as the cache recorded it is refused by name, and a search
+matches that document on its label and summary and says why its body did
+not read.
 
 A walk takes a document as the cache holds it when its directory's
 modification time is the one recorded, and reads the directory's files

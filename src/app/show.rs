@@ -12,6 +12,7 @@ use crate::app::{Failure, ReadDeps};
 use crate::domain::document::{Document, Unreadable};
 use crate::domain::draft::Draft;
 use crate::domain::id::{DocumentId, VersionId, is_id_prefix};
+use crate::domain::ports::NotRead;
 use crate::domain::schema::KindOf;
 use crate::domain::schema::address::Found;
 use crate::domain::schema::translate::referred;
@@ -31,13 +32,42 @@ pub enum Why {
     Corrupt { text: String },
     Newer { format: u32, text: String },
     Malformed { text: String },
+    Missing { text: String },
 }
 
 impl Why {
     #[must_use]
     pub fn text(&self) -> &str {
         match self {
-            Why::Corrupt { text } | Why::Newer { text, .. } | Why::Malformed { text } => text,
+            Why::Corrupt { text }
+            | Why::Newer { text, .. }
+            | Why::Malformed { text }
+            | Why::Missing { text } => text,
+        }
+    }
+}
+
+impl From<&ReadError> for Why {
+    fn from(error: &ReadError) -> Why {
+        let text = error.to_string();
+        match error {
+            ReadError::Corrupt => Why::Corrupt { text },
+            ReadError::Newer { format } => Why::Newer {
+                format: *format,
+                text,
+            },
+            ReadError::Malformed(_) => Why::Malformed { text },
+        }
+    }
+}
+
+impl From<&NotRead> for Why {
+    fn from(not_read: &NotRead) -> Why {
+        match not_read {
+            NotRead::Missing => Why::Missing {
+                text: not_read.to_string(),
+            },
+            NotRead::Unreadable(error) => Why::from(error),
         }
     }
 }
@@ -55,14 +85,9 @@ impl Unread {
 
 impl From<&Unreadable> for Unread {
     fn from(file: &Unreadable) -> Unread {
-        let text = file.why.to_string();
         Unread {
             version: file.version.clone(),
-            why: match file.why {
-                ReadError::Corrupt => Why::Corrupt { text },
-                ReadError::Newer { format } => Why::Newer { format, text },
-                ReadError::Malformed(_) => Why::Malformed { text },
-            },
+            why: Why::from(&file.why),
         }
     }
 }

@@ -9,8 +9,8 @@ use super::document::{Document, State, Unreadable};
 use super::draft::Draft;
 use super::id::{DocumentId, VersionId};
 use super::ports::{
-    Binary, Clock, Drafts, DraftsRead, Host, HostRead, Ids, Refreshed, Releases, Store, StoreError,
-    StoreRead, Usage, UsageRead,
+    Binary, Clock, Drafts, DraftsRead, Host, HostRead, Ids, NotRead, Refreshed, Releases, Store,
+    StoreError, StoreRead, Usage, UsageRead,
 };
 use super::release::{Built, ReleaseVersion, sha256_hex};
 use super::usage::{Invocation, Kept, Session};
@@ -29,11 +29,15 @@ impl StoreRead for FailingStore {
         FailingStore::gone()
     }
 
-    fn version(&self, _: &DocumentId, _: &VersionId) -> Result<Option<Version>, StoreError> {
+    fn version(
+        &self,
+        _: &DocumentId,
+        _: &VersionId,
+    ) -> Result<Result<Version, NotRead>, StoreError> {
         FailingStore::gone()
     }
 
-    fn body(&self, _: &DocumentId, _: &VersionId) -> Result<Option<String>, StoreError> {
+    fn body(&self, _: &DocumentId, _: &VersionId) -> Result<Result<String, NotRead>, StoreError> {
         FailingStore::gone()
     }
 
@@ -105,10 +109,19 @@ impl MemoryStore {
         Document::new(id.clone(), headers, unreadable)
     }
 
-    fn stored(&self, document: &DocumentId, version: &VersionId) -> Option<Version> {
+    // A version planted as unreadable reads as its damaged file would, stored or not.
+    fn stored(&self, document: &DocumentId, version: &VersionId) -> Result<Version, NotRead> {
+        let unreadable = self.unreadable.borrow();
+        if let Some(file) =
+            (unreadable.get(document).into_iter().flatten()).find(|file| file.version == *version)
+        {
+            return Err(NotRead::Unreadable(file.why.clone()));
+        }
         let all = self.versions.borrow();
-        let versions = all.get(document)?;
-        versions.iter().find(|held| held.id == *version).cloned()
+        (all.get(document).into_iter().flatten())
+            .find(|held| held.id == *version)
+            .cloned()
+            .ok_or(NotRead::Missing)
     }
 
     fn matching(&self, wanted: impl Fn(&Document) -> bool) -> Vec<Rc<Document>> {
@@ -136,7 +149,7 @@ impl StoreRead for MemoryStore {
         &self,
         document: &DocumentId,
         version: &VersionId,
-    ) -> Result<Option<Version>, StoreError> {
+    ) -> Result<Result<Version, NotRead>, StoreError> {
         Ok(self.stored(document, version))
     }
 
@@ -144,7 +157,7 @@ impl StoreRead for MemoryStore {
         &self,
         document: &DocumentId,
         version: &VersionId,
-    ) -> Result<Option<String>, StoreError> {
+    ) -> Result<Result<String, NotRead>, StoreError> {
         Ok(self.stored(document, version).map(|version| version.body))
     }
 
@@ -680,15 +693,21 @@ pub fn store_contract(store: &dyn Store, ids: &dyn Ids, damage: &dyn Fn(&Documen
     );
     assert_eq!(
         store.version(&lantern, &relay.id).expect("a read"),
-        Some(relay.clone())
+        Ok(relay.clone())
     );
     assert_eq!(
         store.body(&lantern, &relay.id).expect("a read").as_deref(),
-        Some("first\n")
+        Ok("first\n")
     );
     let never = VersionId::of(b"never");
-    assert_eq!(store.version(&lantern, &never).expect("a read"), None);
-    assert_eq!(store.body(&lantern, &never).expect("a read"), None);
+    assert_eq!(
+        store.version(&lantern, &never).expect("a read"),
+        Err(NotRead::Missing)
+    );
+    assert_eq!(
+        store.body(&lantern, &never).expect("a read"),
+        Err(NotRead::Missing)
+    );
 
     store
         .put(&first(&atlas, "topic", "name = \"atlas\"", "\n"))
@@ -813,8 +832,12 @@ fn reports_what_does_not_read(
 
     let torn = after(&[head], "name = \"relay\"", "third\n").id.clone();
     damage(lantern, &torn);
-    assert_eq!(store.version(lantern, &torn).expect("a read"), None);
-    assert_eq!(store.body(lantern, &torn).expect("a read"), None);
+    let corrupt = NotRead::Unreadable(ReadError::Corrupt);
+    assert_eq!(
+        store.version(lantern, &torn).expect("a read"),
+        Err(corrupt.clone())
+    );
+    assert_eq!(store.body(lantern, &torn).expect("a read"), Err(corrupt));
     let beside = whole(lantern);
     let named = store.versions_under(torn.short()).expect("a read");
     assert_eq!(named, [(lantern.clone(), torn.clone())]);

@@ -10,7 +10,7 @@ use crate::app::rows::Reference;
 use crate::app::{Failure, kind_named};
 use crate::domain::document::{Document, State};
 use crate::domain::id::{DocumentId, VersionId};
-use crate::domain::ports::StoreRead;
+use crate::domain::ports::{NotRead, StoreRead};
 use crate::domain::schema::address::{Address, Candidate, Found, Holds, choose, displayed, holds};
 use crate::domain::schema::{Content, Date, KindOf, Name, Record};
 use crate::domain::version::{Header, Kind, Version};
@@ -250,8 +250,8 @@ impl<'a> Lookup<'a> {
         Ok(held)
     }
 
-    /// The version with its body as its file stands; `what` is refused where the file does
-    /// not read as it.
+    /// The version with its body as its file stands; `what` is refused where the file gives
+    /// none.
     pub(super) fn version(
         &self,
         document: &DocumentId,
@@ -262,15 +262,12 @@ impl<'a> Lookup<'a> {
         if let Some(held) = self.versions.borrow().get(&key) {
             return Ok(Rc::clone(held));
         }
-        let Some(read) = self.store.version(document, version)? else {
-            return Err(Failure::at(
+        let read = self.store.version(document, version)?.map_err(|not_read| {
+            Failure::at(
                 what,
-                format!(
-                    "version {} does not read as its file stands",
-                    version.short()
-                ),
-            ));
-        };
+                format!("version {} does not read: {not_read}", version.short()),
+            )
+        })?;
         let held = Rc::new(read);
         self.versions.borrow_mut().insert(key, Rc::clone(&held));
         Ok(held)
@@ -280,7 +277,7 @@ impl<'a> Lookup<'a> {
         &self,
         document: &DocumentId,
         version: &VersionId,
-    ) -> Result<Option<String>, Failure> {
+    ) -> Result<Result<String, NotRead>, Failure> {
         Ok(self.store.body(document, version)?)
     }
 

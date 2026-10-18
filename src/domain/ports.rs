@@ -8,7 +8,7 @@ use super::document::Document;
 use super::draft::Draft;
 use super::id::{DocumentId, VersionId};
 use super::usage::{Invocation, Kept, Session};
-use super::version::{Kind, Stamp, Version};
+use super::version::{Kind, ReadError, Stamp, Version};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StoreError {
@@ -32,25 +32,41 @@ impl fmt::Display for StoreError {
     }
 }
 
+/// Why a version's file gave no version.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum NotRead {
+    /// No file is there.
+    Missing,
+    Unreadable(ReadError),
+}
+
+impl fmt::Display for NotRead {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            NotRead::Missing => f.write_str("its file is not there"),
+            NotRead::Unreadable(error) => error.fmt(f),
+        }
+    }
+}
+
 /// Every version of every document, by their headers across the store and one body at a
 /// time; no call returns the whole store.
 pub trait StoreRead {
     /// The headers of the versions held of the document, none for one never stored: from the
     /// one reading of the tree this instance makes, or from the document alone before one.
     fn headers(&self, id: &DocumentId) -> Result<Rc<Document>, StoreError>;
-    /// The version with its body, as its file reads now; `None` where the file is not
-    /// there or does not read as that version.
+    /// The version with its body, as its file reads now, or why the file gives none.
     fn version(
         &self,
         document: &DocumentId,
         version: &VersionId,
-    ) -> Result<Option<Version>, StoreError>;
-    /// The body of the version, as its file reads now; `None` as `version` gives it.
+    ) -> Result<Result<Version, NotRead>, StoreError>;
+    /// The body of the version, as its file reads now, or why the file gives none.
     fn body(
         &self,
         document: &DocumentId,
         version: &VersionId,
-    ) -> Result<Option<String>, StoreError>;
+    ) -> Result<Result<String, NotRead>, StoreError>;
     /// The documents of the kind, by id.
     fn of_kind(&self, kind: &Kind) -> Result<Vec<Rc<Document>>, StoreError>;
     /// The documents a head of which carries `key` as one of `values`, or as a

@@ -17,6 +17,15 @@ impl Render for Vec<Hit> {
         text
     }
 
+    fn notes(&self) -> Vec<String> {
+        (self.iter())
+            .filter_map(|hit| {
+                let unread = hit.unread.as_ref()?;
+                Some(format!("{}: {}", hit.row.label, unread.note()))
+            })
+            .collect()
+    }
+
     fn hits(&self) -> Option<usize> {
         Some(self.len())
     }
@@ -45,6 +54,7 @@ mod tests {
     use super::super::testing::{WRITTEN, row, stamp, to};
     use super::*;
     use crate::app::search::Matched;
+    use crate::app::show::{Unread, Why};
     use crate::domain::id::VersionId;
     use crate::domain::testing::{atlas, lantern};
 
@@ -59,6 +69,7 @@ mod tests {
                 })
                 .collect(),
             label_spans: Vec::new(),
+            unread: None,
         };
         let hits = vec![
             hit(&lantern(), "lantern/relay", &["Pin four", "The relay."]),
@@ -91,6 +102,7 @@ mod tests {
             row: row(&lantern(), "lantern/relay", "Pin four"),
             lines: Vec::new(),
             label_spans: Vec::new(),
+            unread: None,
         };
         let hits = vec![hit.clone(), hit];
         for json in [false, true] {
@@ -98,6 +110,33 @@ mod tests {
             assert_eq!(output(&Vec::<Hit>::new(), json).hits, Some(0));
             assert_eq!(output(&Vec::<Logged>::new(), json).hits, None);
         }
+    }
+
+    #[test]
+    fn a_hit_whose_body_did_not_read_is_a_note_naming_the_document_and_the_version() {
+        let torn = VersionId::of(b"torn");
+        let hit = Hit {
+            row: row(&lantern(), "lantern/relay", "Pin four"),
+            lines: Vec::new(),
+            label_spans: Vec::new(),
+            unread: Some(Unread {
+                version: torn.clone(),
+                why: Why::Missing {
+                    text: "its file is not there".to_owned(),
+                },
+            }),
+        };
+        let whole = Hit {
+            unread: None,
+            ..hit.clone()
+        };
+        assert_eq!(
+            vec![whole, hit].notes(),
+            [format!(
+                "lantern/relay: version {} does not read: its file is not there",
+                torn.short()
+            )]
+        );
     }
 
     #[test]

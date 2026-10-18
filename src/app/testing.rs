@@ -10,7 +10,7 @@ use crate::app::{Deps, Failure};
 use crate::domain::document::Document;
 use crate::domain::document::State;
 use crate::domain::id::{DocumentId, VersionId};
-use crate::domain::ports::{Clock, Ids, Store, StoreError, StoreRead};
+use crate::domain::ports::{Clock, Ids, NotRead, Store, StoreError, StoreRead};
 use crate::domain::schema::address::Found;
 use crate::domain::schema::{KindOf, Record};
 use crate::domain::testing::{
@@ -421,7 +421,7 @@ impl StoreRead for Counting {
         &self,
         document: &DocumentId,
         version: &VersionId,
-    ) -> Result<Option<Version>, StoreError> {
+    ) -> Result<Result<Version, NotRead>, StoreError> {
         self.versions.set(self.versions.get() + 1);
         self.inner.version(document, version)
     }
@@ -430,7 +430,7 @@ impl StoreRead for Counting {
         &self,
         document: &DocumentId,
         version: &VersionId,
-    ) -> Result<Option<String>, StoreError> {
+    ) -> Result<Result<String, NotRead>, StoreError> {
         self.texts.set(self.texts.get() + 1);
         self.inner.body(document, version)
     }
