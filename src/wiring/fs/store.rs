@@ -124,10 +124,24 @@ impl FsStore {
     }
 
     fn read_headers(&self, id: &DocumentId) -> Result<Rc<Document>, StoreError> {
+        let listed = self.version_ids(id)?;
+        self.headers_of(id, listed)
+    }
+
+    // A sync removes a version's file while a walk is on.
+    fn headers_of(
+        &self,
+        id: &DocumentId,
+        listed: Vec<VersionId>,
+    ) -> Result<Rc<Document>, StoreError> {
         let mut headers = Vec::new();
         let mut unreadable = Vec::new();
-        for name in self.version_ids(id)? {
-            let read = text_of(self.bytes(id, &name)?).and_then(|text| Header::read(&name, &text));
+        for name in listed {
+            let read = match self.text(id, &name)? {
+                Ok(text) => Header::read(&name, &text),
+                Err(NotRead::Missing) => continue,
+                Err(NotRead::Unreadable(why)) => Err(why),
+            };
             match read {
                 Ok(header) => headers.push(header),
                 Err(why) => unreadable.push(Unreadable { version: name, why }),
@@ -141,7 +155,7 @@ impl FsStore {
             return Ok(walked.borrow());
         }
         let held = match &self.cache {
-            Some(cache) => self.walk_through(cache)?,
+            Some(cache) => self.walk_through(cache, self.documents("")?)?,
             None => self.walk()?,
         };
         Ok(self.walked.get_or_init(|| RefCell::new(held)).borrow())
@@ -157,17 +171,18 @@ impl FsStore {
     }
 
     // `taken` is the walk's start, so a directory changed after it is recorded within the
-    // settling time and read again.
-    fn walk_through(&self, cache: &Cache) -> Result<Walked, StoreError> {
+    // settling time and read again. A sync removes a document directory while a walk is on.
+    fn walk_through(&self, cache: &Cache, listed: Vec<DocumentId>) -> Result<Walked, StoreError> {
         let taken = SystemTime::now();
         let mut remembered = cache.read();
         let mut found = BTreeMap::new();
         let mut changed = false;
-        for id in self.documents("")? {
+        for id in listed {
             let dir = self.document_dir(&id);
-            let modified = fs::metadata(&dir)
-                .and_then(|metadata| metadata.modified())
-                .map_err(|e| io_error(&dir, &e))?;
+            let modified = fs::metadata(&dir).and_then(|metadata| metadata.modified());
+            let Some(modified) = optional(&dir, modified)? else {
+                continue;
+            };
             let document = match remembered.remove(&id) {
                 Some(kept) if kept.modified == modified => kept.document,
                 _ => {
@@ -210,11 +225,6 @@ impl FsStore {
             .iter()
             .filter_map(|name| version_named(name))
             .collect())
-    }
-
-    fn bytes(&self, document: &DocumentId, version: &VersionId) -> Result<Vec<u8>, StoreError> {
-        let path = self.version_path(document, version);
-        fs::read(&path).map_err(|e| io_error(&path, &e))
     }
 
     fn text(
@@ -927,6 +937,40 @@ mod tests {
             std::slice::from_ref(&topic.envelope.kind)
         );
         assert_eq!(afresh.documents_under("7").unwrap(), [atlas]);
+    }
+
+    #[test]
+    fn a_document_directory_gone_since_the_listing_is_passed_over() {
+        let dir = tempfile::tempdir().unwrap();
+        let (store, _) = stocked(dir.path());
+        let atlas = DocumentId::parse(ATLAS).unwrap();
+        let topic = first(&atlas, "topic", "name = \"atlas\"", "\n");
+        store.put(&topic).unwrap();
+
+        let afresh = cached(dir.path());
+        let listed = afresh.documents("").unwrap();
+        assert!(listed.contains(&lantern()));
+        fs::remove_dir_all(afresh.document_dir(&lantern())).unwrap();
+        let walked = afresh
+            .walk_through(afresh.cache.as_ref().unwrap(), listed)
+            .unwrap();
+        assert_eq!(walked.keys().collect::<Vec<_>>(), [&atlas]);
+    }
+
+    #[test]
+    fn a_version_file_gone_since_its_listing_is_passed_over() {
+        let (_dir, store) = scratch();
+        let relay = first(&lantern(), "fact", RELAY, "first\n");
+        store.put(&relay).unwrap();
+        let renamed = after(&[&relay], "name = \"relay-pin\"", "second\n");
+        store.put(&renamed).unwrap();
+
+        let listed = store.version_ids(&lantern()).unwrap();
+        assert!(listed.contains(&renamed.id));
+        fs::remove_file(path(&store, &renamed)).unwrap();
+        let held = store.headers_of(&lantern(), listed).unwrap();
+        assert_eq!(held.state(), State::Live(relay.header()));
+        assert!(held.unreadable().is_empty());
     }
 
     #[test]
