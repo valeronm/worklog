@@ -51,6 +51,8 @@ pub fn forked_into(world: &World, id: &DocumentId, name: &str, rests: [&str; 2])
     rests.map(|rest| {
         hour += 1;
         let stamp = format!("2026-10-09T{hour}:00:00+01:00");
-        written_at(world, &root, &topic_fields(name, rest), &stamp, "\n", None).id
+        written_at(world, &root, &topic_fields(name, rest), &stamp, "\n", None)
+            .id
+            .clone()
     })
 }

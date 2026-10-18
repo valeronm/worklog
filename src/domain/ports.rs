@@ -2,6 +2,7 @@
 //! implement and the tests stub.
 
 use std::fmt;
+use std::rc::Rc;
 
 use super::document::Document;
 use super::draft::Draft;
@@ -31,19 +32,34 @@ impl fmt::Display for StoreError {
     }
 }
 
-/// Every version of every document; no call returns the whole store.
+/// Every version of every document, by their headers across the store and one body at a
+/// time; no call returns the whole store.
 pub trait StoreRead {
-    /// The versions held of the document; none for one never stored.
-    fn document(&self, id: &DocumentId) -> Result<Document, StoreError>;
+    /// The headers of the versions held of the document, none for one never stored: from the
+    /// one reading of the tree this instance makes, or from the document alone before one.
+    fn headers(&self, id: &DocumentId) -> Result<Rc<Document>, StoreError>;
+    /// The version with its body, as its file reads now; `None` where the file is not
+    /// there or does not read as that version.
+    fn version(
+        &self,
+        document: &DocumentId,
+        version: &VersionId,
+    ) -> Result<Option<Version>, StoreError>;
+    /// The body of the version, as its file reads now; `None` as `version` gives it.
+    fn body(
+        &self,
+        document: &DocumentId,
+        version: &VersionId,
+    ) -> Result<Option<String>, StoreError>;
     /// The documents of the kind, by id.
-    fn of_kind(&self, kind: &Kind) -> Result<Vec<Document>, StoreError>;
+    fn of_kind(&self, kind: &Kind) -> Result<Vec<Rc<Document>>, StoreError>;
     /// The documents a head of which carries `key` as one of `values`, or as a
     /// list with one of them in it, by id; none for no values.
-    fn holding(&self, key: &str, values: &[&str]) -> Result<Vec<Document>, StoreError>;
+    fn holding(&self, key: &str, values: &[&str]) -> Result<Vec<Rc<Document>>, StoreError>;
     /// The documents holding a file that does not read as a version, by id.
-    fn unreadable(&self) -> Result<Vec<Document>, StoreError>;
+    fn unreadable(&self) -> Result<Vec<Rc<Document>>, StoreError>;
     /// The documents with more than one head, by id.
-    fn forked(&self) -> Result<Vec<Document>, StoreError>;
+    fn forked(&self) -> Result<Vec<Rc<Document>>, StoreError>;
     /// The kinds of the documents held, each once, sorted; a document none of whose files
     /// read has no kind.
     fn kinds(&self) -> Result<Vec<Kind>, StoreError>;

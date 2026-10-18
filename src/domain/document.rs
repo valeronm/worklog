@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 use toml::Value;
 
 use super::id::{DocumentId, VersionId};
-use super::version::{Kind, ReadError, Version};
+use super::version::{Header, Kind, ReadError};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Unreadable {
@@ -14,10 +14,11 @@ pub struct Unreadable {
     pub why: ReadError,
 }
 
+/// The versions of one document, by their headers.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Document {
     id: DocumentId,
-    versions: Vec<Version>,
+    headers: Vec<Header>,
     heads: Vec<usize>,
     unreadable: Vec<Unreadable>,
 }
@@ -25,28 +26,24 @@ pub struct Document {
 #[derive(Clone, Debug, PartialEq)]
 pub enum State<'a> {
     Absent,
-    Live(&'a Version),
+    Live(&'a Header),
     /// Versions none of which is behind another.
-    Forked(Vec<&'a Version>),
+    Forked(Vec<&'a Header>),
 }
 
-fn behind(versions: &[Version]) -> BTreeSet<&VersionId> {
-    versions
+fn behind(headers: &[Header]) -> BTreeSet<&VersionId> {
+    headers
         .iter()
-        .flat_map(|version| &version.envelope.ancestors)
+        .flat_map(|header| &header.envelope.ancestors)
         .collect()
 }
 
 impl Document {
     #[must_use]
-    pub fn new(
-        id: DocumentId,
-        versions: Vec<Version>,
-        mut unreadable: Vec<Unreadable>,
-    ) -> Document {
-        let (mut versions, strays): (Vec<Version>, Vec<Version>) = versions
+    pub fn new(id: DocumentId, headers: Vec<Header>, mut unreadable: Vec<Unreadable>) -> Document {
+        let (mut headers, strays): (Vec<Header>, Vec<Header>) = headers
             .into_iter()
-            .partition(|version| version.envelope.document == id);
+            .partition(|header| header.envelope.document == id);
         unreadable.extend(strays.into_iter().map(|stray| Unreadable {
             why: ReadError::Malformed(format!(
                 "a version of document {}, not of {id}",
@@ -54,27 +51,44 @@ impl Document {
             )),
             version: stray.id,
         }));
-        versions.sort_by(|a, b| a.id.cmp(&b.id));
-        versions.dedup_by(|a, b| a.id == b.id);
+        headers.sort_by(|a, b| a.id.cmp(&b.id));
+        headers.dedup_by(|a, b| a.id == b.id);
         unreadable.sort_by(|a, b| a.version.cmp(&b.version));
-        let behind = behind(&versions);
-        let heads = (0..versions.len())
-            .filter(|at| !behind.contains(&versions[*at].id))
+        let behind = behind(&headers);
+        let heads = (0..headers.len())
+            .filter(|at| !behind.contains(&headers[*at].id))
             .collect();
         Document {
             id,
-            versions,
+            headers,
             heads,
             unreadable,
         }
     }
 
+    /// The document `new` builds from `headers`, taking `heads` as `new` computed them; a test
+    /// build alone checks that.
+    #[must_use]
+    pub fn as_recorded(id: DocumentId, headers: Vec<Header>, heads: Vec<usize>) -> Document {
+        let document = Document {
+            id,
+            headers,
+            heads,
+            unreadable: Vec::new(),
+        };
+        debug_assert_eq!(
+            document,
+            Document::new(document.id.clone(), document.headers.clone(), Vec::new())
+        );
+        document
+    }
+
     /// A version already held changes nothing.
     #[must_use]
-    pub fn with_version(&self, version: Version) -> Document {
-        let mut versions = self.versions.clone();
-        versions.push(version);
-        Document::new(self.id.clone(), versions, self.unreadable.clone())
+    pub fn with_version(&self, header: Header) -> Document {
+        let mut headers = self.headers.clone();
+        headers.push(header);
+        Document::new(self.id.clone(), headers, self.unreadable.clone())
     }
 
     #[must_use]
@@ -84,8 +98,19 @@ impl Document {
 
     /// The held versions no held version lists as an ancestor, by id.
     #[must_use]
-    pub fn heads(&self) -> Vec<&Version> {
-        self.heads.iter().map(|at| &self.versions[*at]).collect()
+    pub fn heads(&self) -> Vec<&Header> {
+        self.heads.iter().map(|at| &self.headers[*at]).collect()
+    }
+
+    /// The held versions by id, which `heads_at` indexes.
+    #[must_use]
+    pub fn headers(&self) -> &[Header] {
+        &self.headers
+    }
+
+    #[must_use]
+    pub fn heads_at(&self) -> &[usize] {
+        &self.heads
     }
 
     #[must_use]
@@ -99,14 +124,14 @@ impl Document {
     }
 
     #[must_use]
-    pub fn get(&self, id: &VersionId) -> Option<&Version> {
-        self.versions.iter().find(|version| version.id == *id)
+    pub fn get(&self, id: &VersionId) -> Option<&Header> {
+        self.headers.iter().find(|header| header.id == *id)
     }
 
     /// Every held version, the one with the most behind it first.
     #[must_use]
-    pub fn history(&self) -> Vec<&Version> {
-        let mut history: Vec<&Version> = self.versions.iter().collect();
+    pub fn history(&self) -> Vec<&Header> {
+        let mut history: Vec<&Header> = self.headers.iter().collect();
         history.sort_by(|a, b| {
             b.envelope
                 .ancestors
@@ -120,7 +145,7 @@ impl Document {
     /// The ancestors a held version lists that are not held.
     #[must_use]
     pub fn missing(&self) -> Vec<&VersionId> {
-        behind(&self.versions)
+        behind(&self.headers)
             .into_iter()
             .filter(|id| self.get(id).is_none())
             .collect()
@@ -133,7 +158,7 @@ impl Document {
 
     #[must_use]
     pub fn kind(&self) -> Option<&Kind> {
-        self.versions.first().map(|version| &version.envelope.kind)
+        self.headers.first().map(|header| &header.envelope.kind)
     }
 
     /// Whether a head's fields carry `key` as one of `values`, or as a list with one of
@@ -143,7 +168,7 @@ impl Document {
         let asked = |item: &Value| item.as_str().is_some_and(|text| values.contains(text));
         self.heads
             .iter()
-            .any(|at| match self.versions[*at].fields.get(key) {
+            .any(|at| match self.headers[*at].fields.get(key) {
                 Some(Value::Array(items)) => items.iter().any(asked),
                 Some(value) => asked(value),
                 None => false,
@@ -155,7 +180,7 @@ impl Document {
 mod tests {
     use super::*;
     use crate::domain::testing::{after, first, lantern};
-    use crate::domain::version::Envelope;
+    use crate::domain::version::{Envelope, Header, Version};
 
     const RELAY: &str = "name = \"relay\"\ntopics = [\"lantern\"]";
 
@@ -166,7 +191,10 @@ mod tests {
     fn document(versions: &[&Version]) -> Document {
         Document::new(
             lantern(),
-            versions.iter().copied().cloned().collect(),
+            versions
+                .iter()
+                .map(|version| version.header().clone())
+                .collect(),
             vec![],
         )
     }
@@ -178,15 +206,18 @@ mod tests {
         let right = after(&[&root], RELAY, "right\n");
         let merged = after(&[&left, &right], RELAY, "merged\n");
         assert_eq!(document(&[]).state(), State::Absent);
-        assert_eq!(document(&[&root]).state(), State::Live(&root));
-        assert_eq!(document(&[&root, &left]).state(), State::Live(&left));
+        assert_eq!(document(&[&root]).state(), State::Live(root.header()));
+        assert_eq!(
+            document(&[&root, &left]).state(),
+            State::Live(left.header())
+        );
         let forked = document(&[&root, &left, &right]);
-        let mut heads = vec![&left, &right];
+        let mut heads = vec![left.header(), right.header()];
         heads.sort_by(|a, b| a.id.cmp(&b.id));
         assert_eq!(forked.state(), State::Forked(heads));
         assert_eq!(
             document(&[&root, &left, &right, &merged]).state(),
-            State::Live(&merged)
+            State::Live(merged.header())
         );
     }
 
@@ -216,6 +247,7 @@ mod tests {
             version: VersionId::of(b"damaged"),
             why: ReadError::Corrupt,
         };
+        let (root, left, right) = (root.into_header(), left.into_header(), right.into_header());
         let held = Document::new(
             lantern(),
             vec![root.clone(), left.clone()],
@@ -236,9 +268,9 @@ mod tests {
         let middle = after(&[&root], RELAY, "middle\n");
         let newest = after(&[&middle], RELAY, "newest\n");
         let held = document(&[&root, &newest]);
-        assert_eq!(held.state(), State::Live(&newest));
+        assert_eq!(held.state(), State::Live(newest.header()));
         assert_eq!(held.missing(), vec![&middle.id]);
-        assert_eq!(held.history(), vec![&newest, &root]);
+        assert_eq!(held.history(), vec![newest.header(), root.header()]);
         assert!(document(&[&root, &middle, &newest]).missing().is_empty());
     }
 
@@ -252,7 +284,7 @@ mod tests {
         );
         let held = document(&[&root, &renamed]);
         assert_eq!(held.kind().map(Kind::as_str), Some("fact"));
-        assert_eq!(held.get(&root.id), Some(&root));
+        assert_eq!(held.get(&root.id), Some(root.header()));
         assert_eq!(document(&[]).kind(), None);
     }
 
@@ -293,10 +325,10 @@ mod tests {
         let stray = first(&atlas, "topic", "name = \"atlas\"", "\n");
         let held = Document::new(
             lantern(),
-            vec![stray.clone(), root.clone()],
+            vec![stray.header().clone(), root.header().clone()],
             vec![damaged.clone()],
         );
-        assert_eq!(held.state(), State::Live(&root));
+        assert_eq!(held.state(), State::Live(root.header()));
         assert_eq!(held.kind().map(Kind::as_str), Some("fact"));
         assert_eq!(held.unreadable().len(), 2);
         assert!(held.unreadable().contains(&damaged));
@@ -318,7 +350,11 @@ mod tests {
             assert_eq!(forward, backward, "subset {mask:b}");
             assert_ne!(forward.state(), State::Absent, "subset {mask:b}");
             if let Some(tip) = tip.filter(|tip| held.contains(tip)) {
-                assert_eq!(forward.state(), State::Live(tip), "subset {mask:b}");
+                assert_eq!(
+                    forward.state(),
+                    State::Live(tip.header()),
+                    "subset {mask:b}"
+                );
             }
         }
     }
@@ -341,5 +377,34 @@ mod tests {
 
         let merged = after(&[&left, &right], RELAY, "merged\n");
         every_subset_has_one_answer(&[&root, &left, &right, &merged], Some(&merged));
+    }
+
+    #[test]
+    fn a_document_as_recorded_is_the_one_built_from_its_headers() {
+        let root = root();
+        let left = after(&[&root], RELAY, "left\n");
+        let right = after(&[&root], "name = \"coil\"\ntopics = [\"phone\"]", "right\n");
+        let built = document(&[&root, &left, &right]);
+        let recorded = Document::as_recorded(
+            lantern(),
+            built.headers().to_vec(),
+            built.heads_at().to_vec(),
+        );
+        assert_eq!(recorded, built);
+        let heads: Vec<&Header> = built
+            .heads_at()
+            .iter()
+            .map(|at| &built.headers()[*at])
+            .collect();
+        assert_eq!(heads, built.heads());
+    }
+
+    #[test]
+    #[should_panic(expected = "assertion")]
+    fn a_document_recorded_with_heads_not_its_own_fails_a_test_build() {
+        let root = root();
+        let left = after(&[&root], RELAY, "left\n");
+        let built = document(&[&root, &left]);
+        let _ = Document::as_recorded(lantern(), built.headers().to_vec(), vec![0, 1]);
     }
 }

@@ -13,7 +13,7 @@ use crate::domain::id::{DocumentId, VersionId};
 use crate::domain::ports::StoreRead;
 use crate::domain::schema::address::{Address, Candidate, Found, Holds, choose, displayed, holds};
 use crate::domain::schema::{Content, Date, KindOf, Name, Record};
-use crate::domain::version::{Kind, Version};
+use crate::domain::version::{Header, Kind, Version};
 
 pub(super) fn with_article(word: &str) -> String {
     let article = if word.starts_with(['a', 'e', 'i', 'o', 'u']) {
@@ -69,7 +69,7 @@ pub(super) fn not_a(kind: KindOf) -> String {
     format!("is not {}", with_article(kind.word()))
 }
 
-fn read_or_refuse(head: &Version, what: &str) -> Result<Record, Failure> {
+fn read_or_refuse(head: &Header, what: &str) -> Result<Record, Failure> {
     Record::read(&head.envelope.kind, &head.fields).map_err(|error| Failure::at(what, error))
 }
 
@@ -217,10 +217,11 @@ pub(super) struct Unknown {
     pub(super) documents: Vec<Rc<Document>>,
 }
 
-// One command's view of the store: each question is put to the store once.
+// One command's view of the store: each question but a body read is put to the store once.
 pub(super) struct Lookup<'a> {
     store: &'a dyn StoreRead,
-    documents: RefCell<BTreeMap<DocumentId, Rc<Document>>>,
+    headers: RefCell<BTreeMap<DocumentId, Rc<Document>>>,
+    versions: RefCell<BTreeMap<(DocumentId, VersionId), Rc<Version>>>,
     kinds: RefCell<BTreeMap<&'static str, Vec<Rc<Document>>>>,
     holding: RefCell<BTreeMap<Question, Vec<DocumentId>>>,
     under: RefCell<BTreeMap<String, Vec<DocumentId>>>,
@@ -230,32 +231,65 @@ impl<'a> Lookup<'a> {
     pub(super) fn new(stored: Stored<'a>) -> Lookup<'a> {
         Lookup {
             store: stored.0,
-            documents: RefCell::default(),
+            headers: RefCell::default(),
+            versions: RefCell::default(),
             kinds: RefCell::default(),
             holding: RefCell::default(),
             under: RefCell::default(),
         }
     }
 
-    pub(super) fn document(&self, id: &DocumentId) -> Result<Rc<Document>, Failure> {
-        if let Some(held) = self.documents.borrow().get(id) {
+    pub(super) fn headers(&self, id: &DocumentId) -> Result<Rc<Document>, Failure> {
+        if let Some(held) = self.headers.borrow().get(id) {
             return Ok(Rc::clone(held));
         }
-        let held = Rc::new(self.store.document(id)?);
-        self.documents
+        let held = self.store.headers(id)?;
+        self.headers
             .borrow_mut()
             .insert(id.clone(), Rc::clone(&held));
         Ok(held)
     }
 
-    fn seeded(&self, documents: Vec<Document>) -> Vec<Rc<Document>> {
-        let mut held = self.documents.borrow_mut();
+    /// The version with its body as its file stands; `what` is refused where the file does
+    /// not read as it.
+    pub(super) fn version(
+        &self,
+        document: &DocumentId,
+        version: &VersionId,
+        what: &str,
+    ) -> Result<Rc<Version>, Failure> {
+        let key = (document.clone(), version.clone());
+        if let Some(held) = self.versions.borrow().get(&key) {
+            return Ok(Rc::clone(held));
+        }
+        let Some(read) = self.store.version(document, version)? else {
+            return Err(Failure::at(
+                what,
+                format!(
+                    "version {} does not read as its file stands",
+                    version.short()
+                ),
+            ));
+        };
+        let held = Rc::new(read);
+        self.versions.borrow_mut().insert(key, Rc::clone(&held));
+        Ok(held)
+    }
+
+    pub(super) fn body(
+        &self,
+        document: &DocumentId,
+        version: &VersionId,
+    ) -> Result<Option<String>, Failure> {
+        Ok(self.store.body(document, version)?)
+    }
+
+    fn seeded(&self, documents: Vec<Rc<Document>>) -> Vec<Rc<Document>> {
+        let mut held = self.headers.borrow_mut();
         documents
             .into_iter()
             .map(|document| {
-                let kept = held
-                    .entry(document.id().clone())
-                    .or_insert_with(|| Rc::new(document));
+                let kept = held.entry(document.id().clone()).or_insert(document);
                 Rc::clone(kept)
             })
             .collect()
@@ -274,8 +308,8 @@ impl<'a> Lookup<'a> {
         &self,
         id: &DocumentId,
         what: &str,
-    ) -> Result<(Version, Record), Failure> {
-        if !self.document(id)?.unreadable().is_empty() {
+    ) -> Result<(Rc<Version>, Record), Failure> {
+        if !self.headers(id)?.unreadable().is_empty() {
             return Err(unreadable(what));
         }
         self.only_head(id, what)
@@ -285,12 +319,15 @@ impl<'a> Lookup<'a> {
         &self,
         id: &DocumentId,
         what: &str,
-    ) -> Result<(Version, Record), Failure> {
-        let document = self.document(id)?;
+    ) -> Result<(Rc<Version>, Record), Failure> {
+        let document = self.headers(id)?;
         match document.state() {
             State::Absent => Err(no_such_document(what)),
             State::Forked(_) => Err(forked(what)),
-            State::Live(head) => Ok((head.clone(), read_or_refuse(head, what)?)),
+            State::Live(head) => {
+                let record = read_or_refuse(head, what)?;
+                Ok((self.version(id, &head.id, what)?, record))
+            }
         }
     }
 
@@ -359,7 +396,7 @@ impl<'a> Lookup<'a> {
     }
 
     pub(super) fn is_kind(&self, id: &DocumentId, kind: KindOf) -> Result<bool, Failure> {
-        let document = self.document(id)?;
+        let document = self.headers(id)?;
         Ok(kind_of(&document) == Some(kind) && row_head(&document).is_some())
     }
 
@@ -398,7 +435,7 @@ impl<'a> Lookup<'a> {
     }
 
     pub(super) fn address(&self, id: &DocumentId) -> Result<Option<String>, Failure> {
-        let document = self.document(id)?;
+        let document = self.headers(id)?;
         let Some((_, record)) = row_head(&document) else {
             return Ok(None);
         };
@@ -418,7 +455,7 @@ impl<'a> Lookup<'a> {
 
     // A former address differs from the current one in the name alone.
     pub(super) fn former_addresses(&self, id: &DocumentId) -> Result<Vec<String>, Failure> {
-        let document = self.document(id)?;
+        let document = self.headers(id)?;
         let Some((_, record)) = row_head(&document) else {
             return Ok(Vec::new());
         };
@@ -436,7 +473,7 @@ impl<'a> Lookup<'a> {
     }
 
     pub(super) fn reference(&self, id: &DocumentId) -> Result<Reference, Failure> {
-        let document = self.document(id)?;
+        let document = self.headers(id)?;
         Ok(match row_head(&document) {
             Some((_, record)) => {
                 let label = self.label_of(&record.content, id)?;
@@ -448,7 +485,7 @@ impl<'a> Lookup<'a> {
 
     // A document that is held and is no topic is referred to as one not held is.
     pub(super) fn topic_reference(&self, id: &DocumentId) -> Result<Reference, Failure> {
-        let document = self.document(id)?;
+        let document = self.headers(id)?;
         let topic = row_head(&document).and_then(|(_, record)| {
             let ended = ended_for(&record);
             match record.content {
@@ -478,7 +515,7 @@ impl<'a> Lookup<'a> {
         let values: BTreeSet<&str> = values.iter().map(AsRef::as_ref).collect();
         let mut holders = Vec::new();
         for id in self.holding(key, &values)? {
-            let document = self.document(&id)?;
+            let document = self.headers(&id)?;
             if is_holder(&document, kind, key, &values, ended) {
                 holders.push(document);
             }
@@ -508,7 +545,7 @@ impl<'a> Lookup<'a> {
     }
 
     pub(super) fn topic_name(&self, topic: &DocumentId) -> Result<Option<Name>, Failure> {
-        let document = self.document(topic)?;
+        let document = self.headers(topic)?;
         Ok(
             row_head(&document).and_then(|(_, record)| match record.content {
                 Content::Topic(topic) => Some(topic.name),
@@ -542,7 +579,7 @@ impl<'a> Lookup<'a> {
         let mut candidates = Vec::new();
         for key in ["name", "former_names"] {
             for id in self.holding(key, &BTreeSet::from([name.as_str()]))? {
-                let document = self.document(&id)?;
+                let document = self.headers(&id)?;
                 if kind_of(&document) != Some(kind) {
                     continue;
                 }
@@ -578,8 +615,8 @@ fn by_prefix(mut ids: Vec<DocumentId>) -> Found {
 mod tests {
     use super::*;
     use crate::app::testing::{
-        Counting, ENDED, ENDED_FACT, TOPIC, World, claim_fields, entry, fact, fork, found, topic,
-        topic_fields,
+        Counting, ENDED, ENDED_FACT, TOPIC, World, claim_fields, entry, fact, fork, found, head,
+        topic, topic_fields,
     };
     use crate::domain::ports::Store;
     use crate::domain::testing::{after, first, lantern};
@@ -696,7 +733,7 @@ mod tests {
         let world = World::new();
         let _machine = topic(&world, "desk", "");
         let lantern = topic(&world, "lantern", "");
-        let root = world.store.document(&lantern).unwrap().heads()[0].clone();
+        let root = head(&world, &lantern);
         let left = after(&[&root], &topic_fields("lantern", ""), "left\n");
         let right = after(&[&root], &topic_fields("phone", ""), "right\n");
         world.store.put(&left).unwrap();
@@ -734,7 +771,7 @@ mod tests {
         let world = World::new();
         let _machine = topic(&world, "desk", "");
         let lantern = topic(&world, "lantern", "");
-        let root = world.store.document(&lantern).unwrap().heads()[0].clone();
+        let root = head(&world, &lantern);
         let mut heads = Vec::new();
         for name in ["lantern", "phone"] {
             let head = after(&[&root], &topic_fields(name, ""), name);
@@ -791,7 +828,7 @@ mod tests {
         };
         assert!(text.contains("phone: no such document"), "{text}");
 
-        let root = world.store.document(&lantern).unwrap().heads()[0].clone();
+        let root = head(&world, &lantern);
         for body in ["left\n", "right\n"] {
             let fork = after(&[&root], &topic_fields("lantern", ""), body);
             world.store.put(&fork).unwrap();
@@ -948,7 +985,6 @@ mod tests {
         let held = holder_ids(&lookup, KindOf::Fact, "topic", &topics).unwrap();
         assert_eq!(held, [relay, map]);
         assert_eq!(counting.holdings.get(), 1);
-        assert_eq!(counting.documents.get(), 0);
         lookup
             .holders(KindOf::Fact, "topic", &topics, false)
             .unwrap();
@@ -995,9 +1031,8 @@ mod tests {
             .iter()
             .find(|document| document.id() == &lantern)
             .unwrap();
-        assert!(Rc::ptr_eq(listed, &lookup.document(&lantern).unwrap()));
+        assert!(Rc::ptr_eq(listed, &lookup.headers(&lantern).unwrap()));
         assert_eq!(lookup.label(&lantern).unwrap(), "lantern");
-        assert_eq!(counting.documents.get(), 0);
         let again = lookup.of_kind(KindOf::Topic).unwrap();
         assert!(Rc::ptr_eq(&again[0], &topics[0]));
         assert_eq!(counting.kinds.get(), 1);
@@ -1032,13 +1067,13 @@ mod tests {
         let counting = Counting::over(world.store);
         let lookup = Lookup::new(Stored::new(&counting));
 
-        let first = lookup.document(&lantern).unwrap();
-        let second = lookup.document(&lantern).unwrap();
+        let first = lookup.headers(&lantern).unwrap();
+        let second = lookup.headers(&lantern).unwrap();
         assert!(Rc::ptr_eq(&first, &second));
-        assert_eq!(counting.documents.get(), 1);
+        assert_eq!(counting.headers.get(), 1);
 
         lookup.find("lantern").unwrap();
-        let documents = counting.documents.get();
+        let headers = counting.headers.get();
         let holdings = counting.holdings.get();
         assert!(holdings > 0);
         lookup.find("lantern").unwrap();
@@ -1048,7 +1083,7 @@ mod tests {
         lookup
             .holders(KindOf::Fact, "topic", &[&lantern], false)
             .unwrap();
-        assert_eq!(counting.documents.get(), documents);
+        assert_eq!(counting.headers.get(), headers);
         assert_eq!(counting.holdings.get(), holdings + 1);
     }
 }

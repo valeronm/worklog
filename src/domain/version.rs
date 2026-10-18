@@ -190,14 +190,28 @@ pub struct Envelope {
     pub change: String,
 }
 
+/// What a reader finds in a version before its body.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Version {
+pub struct Header {
     pub id: VersionId,
     pub envelope: Envelope,
     pub fields: Fields,
     pub links: Links,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Version {
+    header: Header,
     pub body: String,
     text: String,
+}
+
+impl std::ops::Deref for Version {
+    type Target = Header;
+
+    fn deref(&self) -> &Header {
+        &self.header
+    }
 }
 
 fn ids(ids: &[VersionId]) -> Value {
@@ -306,7 +320,7 @@ impl Envelope {
     /// when there are none to follow.
     #[must_use]
     pub fn following(
-        heads: &[&Version],
+        heads: &[&Header],
         written: Stamp,
         machine: DocumentId,
         change: &str,
@@ -342,10 +356,12 @@ impl Version {
         let text =
             render(&envelope, &fields, &links, &body).ok_or(VersionError::DoesNotReadBack)?;
         let version = Version {
-            id: VersionId::of(text.as_bytes()),
-            envelope,
-            fields,
-            links,
+            header: Header {
+                id: VersionId::of(text.as_bytes()),
+                envelope,
+                fields,
+                links,
+            },
             body,
             text,
         };
@@ -356,76 +372,91 @@ impl Version {
         }
     }
 
-    /// The parts as a reader of `text` found them once; nothing here parses
-    /// `text` beyond its fence, and `None` is a text with no fence.
-    #[must_use]
-    pub fn recalled(
-        id: VersionId,
-        envelope: Envelope,
-        fields: Fields,
-        links: Links,
-        text: String,
-    ) -> Option<Version> {
-        let body = fence::split(&text).ok()?.1.to_owned();
-        Some(Version {
-            id,
-            envelope,
-            fields,
-            links,
-            body,
-            text,
-        })
-    }
-
     /// The bytes the version was composed as or read from.
     #[must_use]
     pub fn text(&self) -> &str {
         &self.text
     }
 
+    #[must_use]
+    pub fn header(&self) -> &Header {
+        &self.header
+    }
+
+    #[must_use]
+    pub fn into_header(self) -> Header {
+        self.header
+    }
+
     /// Refuses bytes that do not hash to `name`.
     pub fn read(name: &VersionId, text: &str) -> Result<Version, ReadError> {
-        if VersionId::of(text.as_bytes()) != *name {
-            return Err(ReadError::Corrupt);
-        }
-        let (header, body) = fence::split(text).map_err(malformed)?;
-        let mut header: Table = header
-            .parse()
-            .map_err(|e| malformed(format!("the header is not TOML: {e}")))?;
-        let format = match take(&mut header, "format")? {
-            Value::Integer(format) => u32::try_from(format).ok().filter(|f| *f > 0),
+        let (header, body) = parts(name, text)?;
+        Ok(Version {
+            header,
+            body: body.to_owned(),
+            text: text.to_owned(),
+        })
+    }
+}
+
+/// The body of the version's bytes, refusing bytes that do not hash to `name`.
+pub fn read_body<'t>(name: &VersionId, text: &'t str) -> Result<&'t str, ReadError> {
+    Ok(checked(name, text)?.1)
+}
+
+fn checked<'t>(name: &VersionId, text: &'t str) -> Result<(&'t str, &'t str), ReadError> {
+    if VersionId::of(text.as_bytes()) != *name {
+        return Err(ReadError::Corrupt);
+    }
+    fence::split(text).map_err(malformed)
+}
+
+fn parts<'t>(name: &VersionId, text: &'t str) -> Result<(Header, &'t str), ReadError> {
+    let (header, body) = checked(name, text)?;
+    let mut header: Table = header
+        .parse()
+        .map_err(|e| malformed(format!("the header is not TOML: {e}")))?;
+    let format = match take(&mut header, "format")? {
+        Value::Integer(format) => u32::try_from(format).ok().filter(|f| *f > 0),
+        _ => None,
+    }
+    .ok_or_else(|| malformed("`format` is not a format number"))?;
+    if format > FORMAT {
+        return Err(ReadError::Newer { format });
+    }
+    let envelope = Envelope {
+        document: document_of(&mut header, "document")?,
+        kind: Kind::parse(&text_of(&mut header, "kind")?).map_err(malformed)?,
+        parents: versions_of(&mut header, "parents")?,
+        ancestors: versions_of(&mut header, "ancestors")?,
+        written: match take(&mut header, "written")? {
+            Value::Datetime(written) => Stamp::of(written),
             _ => None,
         }
-        .ok_or_else(|| malformed("`format` is not a format number"))?;
-        if format > FORMAT {
-            return Err(ReadError::Newer { format });
-        }
-        let envelope = Envelope {
-            document: document_of(&mut header, "document")?,
-            kind: Kind::parse(&text_of(&mut header, "kind")?).map_err(malformed)?,
-            parents: versions_of(&mut header, "parents")?,
-            ancestors: versions_of(&mut header, "ancestors")?,
-            written: match take(&mut header, "written")? {
-                Value::Datetime(written) => Stamp::of(written),
-                _ => None,
-            }
-            .ok_or_else(|| malformed("`written` is not a date and time with an offset"))?,
-            machine: document_of(&mut header, "machine")?,
-            change: text_of(&mut header, "change")?,
-        };
-        let fields = table_of(&mut header, "fields")?;
-        let links = links_of(&mut header)?;
-        if let Some(key) = header.keys().next() {
-            return Err(malformed(format!("`{key}` is no key of format {format}")));
-        }
-        Ok(Version {
+        .ok_or_else(|| malformed("`written` is not a date and time with an offset"))?,
+        machine: document_of(&mut header, "machine")?,
+        change: text_of(&mut header, "change")?,
+    };
+    let fields = table_of(&mut header, "fields")?;
+    let links = links_of(&mut header)?;
+    if let Some(key) = header.keys().next() {
+        return Err(malformed(format!("`{key}` is no key of format {format}")));
+    }
+    Ok((
+        Header {
             id: name.clone(),
             envelope,
             fields,
             links,
-            body: body.to_owned(),
-            text: text.to_owned(),
-        })
+        },
+        body,
+    ))
+}
+
+impl Header {
+    /// The header of the version's bytes, refusing bytes that do not hash to `name`.
+    pub fn read(name: &VersionId, text: &str) -> Result<Header, ReadError> {
+        Ok(parts(name, text)?.0)
     }
 }
 
@@ -500,19 +531,22 @@ mod tests {
     }
 
     #[test]
-    fn a_version_recalled_from_its_parts_and_text_is_the_one_that_was_read() {
-        let read = version("The relay is wired to GPIO 5.\n");
-        let recalled = |text: &str| {
-            Version::recalled(
-                read.id.clone(),
-                read.envelope.clone(),
-                read.fields.clone(),
-                read.links.clone(),
-                text.to_owned(),
-            )
-        };
-        assert_eq!(recalled(read.text()), Some(read.clone()));
-        assert_eq!(recalled("no fence\n"), None);
+    fn a_header_and_a_body_read_alone_as_they_read_in_the_version() {
+        let version = version("The relay is wired to GPIO 5.\n");
+        let text = version.text();
+        assert_eq!(
+            Header::read(&version.id, text),
+            Ok(version.header().clone())
+        );
+        assert_eq!(read_body(&version.id, text), Ok(version.body.as_str()));
+        let other = VersionId::of(b"other");
+        assert_eq!(Header::read(&other, text), Err(ReadError::Corrupt));
+        assert_eq!(read_body(&other, text), Err(ReadError::Corrupt));
+        let unfenced = "no header\n";
+        assert!(matches!(
+            read_body(&VersionId::of(unfenced.as_bytes()), unfenced),
+            Err(ReadError::Malformed(_))
+        ));
     }
 
     #[test]
@@ -680,5 +714,19 @@ mod tests {
     fn a_stamp_reports_its_day() {
         let stamp = Stamp::parse("2026-10-09T18:22:41.118204+01:00").unwrap();
         assert_eq!(stamp.day(), "2026-10-09");
+    }
+
+    #[test]
+    fn a_version_s_header_is_its_parts_without_the_text() {
+        let version =
+            Version::compose(envelope(), fields(), Links::default(), "body\n".to_owned()).unwrap();
+        let header = Header {
+            id: version.id.clone(),
+            envelope: envelope(),
+            fields: fields(),
+            links: Links::default(),
+        };
+        assert_eq!(*version, header);
+        assert_eq!(version.into_header(), header);
     }
 }

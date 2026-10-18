@@ -209,7 +209,7 @@ mod tests {
         );
         assert_eq!(world.host.machine(), Ok(Some(lantern.clone())));
         assert_eq!(topics(&world), before);
-        let held = world.store.document(&lantern).unwrap();
+        let held = world.store.headers(&lantern).unwrap();
         assert_eq!(held.history().len(), 1);
     }
 

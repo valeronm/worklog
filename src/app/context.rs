@@ -186,7 +186,7 @@ pub fn context(deps: &ReadDeps, directory: &str) -> Result<Context, Failure> {
     let mut shown_topics = Vec::new();
     for (id, via) in vias {
         let (plain, ideas) = filed_on(topics, &filings.facts, id);
-        let document = lookup.document(id)?;
+        let document = lookup.headers(id)?;
         if is_forked(&document) {
             forks.extend(row(topics, &document).map(|found| found.row));
         }

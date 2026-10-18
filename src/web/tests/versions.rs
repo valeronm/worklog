@@ -1,14 +1,14 @@
 use super::{forked_into, has, lacks, main_of, ok, page, stamp};
 use crate::app::testing::{
-    ENDED, NOW, fact, fact_fields, fork, head, topic, topic_fields, world, world_with_atlas,
-    written_at,
+    ENDED, NOW, fact, fact_fields, fork, head, head_id, topic, topic_fields, world,
+    world_with_atlas, written_at,
 };
 use crate::domain::id::VersionId;
 
 #[test]
 fn a_history_is_a_row_a_version_newest_first_each_linked() {
     let (world, lantern) = world();
-    let root = head(&world, &lantern).id;
+    let root = head_id(&world, &lantern);
     let second = world.amend(&lantern, &topic_fields("lantern", ""), "second\n");
     let third = world.amend(&lantern, &topic_fields("lantern", ENDED), "third\n");
 
@@ -66,7 +66,7 @@ fn diff_of(html: &str) -> Vec<&str> {
 #[test]
 fn a_version_is_shown_with_its_parent_linked_and_what_it_changed() {
     let (world, lantern) = world();
-    let root = head(&world, &lantern).id;
+    let root = head_id(&world, &lantern);
     let second = world.amend(&lantern, &topic_fields("lantern", ""), "second <b>\n");
 
     let html = ok(&world, &format!("/doc/{second}"));

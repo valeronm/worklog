@@ -38,8 +38,8 @@ impl Adapters {
         )
     }
 
-    /// Every later answer of these adapters' store comes from one reading of its tree, made
-    /// here unless one was made.
+    /// Every later header read of these adapters' store comes from one reading of its
+    /// tree, made here unless one was made.
     pub fn settle(&self) -> Result<(), Failure> {
         Ok(self.store.settle()?)
     }

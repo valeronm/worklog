@@ -11,7 +11,7 @@ use crate::app::{Failure, ReadDeps, counted};
 use crate::domain::document::Document;
 use crate::domain::id::DocumentId;
 use crate::domain::schema::{Content, Directory, KindOf};
-use crate::domain::version::{ReadError, Version};
+use crate::domain::version::{Header, ReadError};
 
 /// What a store holds that a write would have refused to make, and what a person may want
 /// to look at.
@@ -200,7 +200,7 @@ fn unfit(lookup: &Lookup, id: &DocumentId, misfit: Misfit) -> Result<String, Fai
 fn references(
     lookup: &Lookup,
     fits: &mut Fits,
-    head: &Version,
+    head: &Header,
     kind: KindOf,
 ) -> Result<Vec<String>, Failure> {
     let mut wrong = Vec::new();
@@ -235,7 +235,7 @@ fn name_held_twice(
         .collect())
 }
 
-fn links(lookup: &Lookup, fits: &mut Fits, head: &Version) -> Result<Vec<String>, Failure> {
+fn links(lookup: &Lookup, fits: &mut Fits, head: &Header) -> Result<Vec<String>, Failure> {
     let mut stale = Vec::new();
     for (name, stored) in &head.links.0 {
         let nothing = format!("link {name}: resolves to nothing");
@@ -918,7 +918,7 @@ mod tests {
             ]
         );
         assert_eq!(checked(&world), Check::default());
-        let stored = head(&world, &phone).links.0;
+        let stored = head(&world, &phone).links.0.clone();
         assert_eq!(stored.len(), 2);
         assert!(stored.values().all(Option::is_none), "{stored:?}");
     }
@@ -1070,7 +1070,7 @@ mod tests {
         assert_eq!(world.store.unreadables.get(), 1);
         assert_eq!(world.store.forks.get(), 1);
         assert_eq!(world.store.scans(), KindOf::ALL.len() + 3);
-        assert_eq!(world.store.documents.get(), 2);
+        assert_eq!(world.store.headers.get(), 2);
     }
 
     #[test]
@@ -1178,7 +1178,7 @@ mod tests {
 
         forks::resolve(&deps, claim.as_str()).unwrap();
         let written = save(&deps, claim.as_str()).unwrap();
-        let document = world.store.document(&claim).unwrap();
+        let document = world.store.headers(&claim).unwrap();
         assert_eq!(document.heads().len(), 1);
         assert_eq!(document.heads()[0].id, written.version);
         assert_eq!(checked(&world), Check::default());

@@ -64,10 +64,14 @@ The check that keeps a usage line out of a directory holding nothing of
 the machine's topic runs on every logged run and reads that one document,
 not the tree.
 
-A walk takes a document from the host's cache on its directory's
-modification time alone, so a file rewritten in place is read as it was.
-`check` is the one command that reads every file whatever the cache
-holds, which is what keeps that hole a finding and not a silent loss.
+A walk takes a document's headers from the host's cache on its
+directory's modification time alone, so a file rewritten in place is read
+as it was. `check` is the one command that reads every file whatever the
+cache holds, which is what keeps that hole a finding and not a silent
+loss. The cache holds no body, so a body is read from its version's file
+as it stands. A document's headers come from the tree once it is walked
+and from the document's own directory before, which is what keeps the
+usage-line check off the tree.
 
 ## Documents
 

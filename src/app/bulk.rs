@@ -79,7 +79,7 @@ fn moved(target: &Open, from: &DocumentId, to: &DocumentId) -> Option<Fields> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::testing::{World, fact, head, refused, world_with_atlas};
+    use crate::app::testing::{World, fact, head, head_id, refused, world_with_atlas};
     use crate::domain::id::DocumentId;
     use crate::domain::ports::Store;
 
@@ -142,7 +142,7 @@ mod tests {
         let relay = fact(&world, &lantern, "relay-pin", "");
         let lamp = fact(&world, &lantern, "lamp-pin", "");
         let map = fact(&world, &atlas, "map", "");
-        let before = (head(&world, &relay).id, head(&world, &lamp).id);
+        let before = (head_id(&world, &relay), head_id(&world, &lamp));
         let text = refused(move_to(
             &world.deps(),
             &["lantern/relay-pin", "lantern/lamp-pin", "atlas/map"],
@@ -180,7 +180,7 @@ mod tests {
     }
 
     fn names_of(world: &World, ids: &[&DocumentId]) -> Vec<crate::domain::id::VersionId> {
-        ids.iter().map(|id| head(world, id).id).collect()
+        ids.iter().map(|id| head_id(world, id)).collect()
     }
 
     #[test]
@@ -259,7 +259,9 @@ mod tests {
         let (world, lantern, _) = world_with_atlas();
         let lamp = fact(&world, &lantern, "lamp-pin", "");
         let relay = fact(&world, &lantern, "relay-pin", "");
-        let planted = crate::domain::testing::first(&relay, "fact", "name = \"x\"", "\n").id;
+        let planted = crate::domain::testing::first(&relay, "fact", "name = \"x\"", "\n")
+            .id
+            .clone();
         world
             .store
             .plant_unreadable(&relay, planted, crate::domain::version::ReadError::Corrupt);

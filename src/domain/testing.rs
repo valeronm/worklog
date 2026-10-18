@@ -14,7 +14,7 @@ use super::ports::{
 };
 use super::release::{Built, ReleaseVersion, sha256_hex};
 use super::usage::{Invocation, Kept, Session};
-use super::version::{Envelope, Fields, Kind, Links, ReadError, Stamp, Version};
+use super::version::{Envelope, Fields, Header, Kind, Links, ReadError, Stamp, Version};
 
 pub struct FailingStore;
 
@@ -25,23 +25,31 @@ impl FailingStore {
 }
 
 impl StoreRead for FailingStore {
-    fn document(&self, _: &DocumentId) -> Result<Document, StoreError> {
+    fn headers(&self, _: &DocumentId) -> Result<Rc<Document>, StoreError> {
         FailingStore::gone()
     }
 
-    fn of_kind(&self, _: &Kind) -> Result<Vec<Document>, StoreError> {
+    fn version(&self, _: &DocumentId, _: &VersionId) -> Result<Option<Version>, StoreError> {
         FailingStore::gone()
     }
 
-    fn holding(&self, _: &str, _: &[&str]) -> Result<Vec<Document>, StoreError> {
+    fn body(&self, _: &DocumentId, _: &VersionId) -> Result<Option<String>, StoreError> {
         FailingStore::gone()
     }
 
-    fn unreadable(&self) -> Result<Vec<Document>, StoreError> {
+    fn of_kind(&self, _: &Kind) -> Result<Vec<Rc<Document>>, StoreError> {
         FailingStore::gone()
     }
 
-    fn forked(&self) -> Result<Vec<Document>, StoreError> {
+    fn holding(&self, _: &str, _: &[&str]) -> Result<Vec<Rc<Document>>, StoreError> {
+        FailingStore::gone()
+    }
+
+    fn unreadable(&self) -> Result<Vec<Rc<Document>>, StoreError> {
+        FailingStore::gone()
+    }
+
+    fn forked(&self) -> Result<Vec<Rc<Document>>, StoreError> {
         FailingStore::gone()
     }
 
@@ -85,17 +93,25 @@ impl MemoryStore {
     }
 
     fn held(&self, id: &DocumentId) -> Document {
-        let versions = self.versions.borrow().get(id).cloned().unwrap_or_default();
+        let headers = (self.versions.borrow().get(id))
+            .map(|versions| versions.iter().map(Version::header).cloned().collect())
+            .unwrap_or_default();
         let unreadable = self
             .unreadable
             .borrow()
             .get(id)
             .cloned()
             .unwrap_or_default();
-        Document::new(id.clone(), versions, unreadable)
+        Document::new(id.clone(), headers, unreadable)
     }
 
-    fn matching(&self, wanted: impl Fn(&Document) -> bool) -> Vec<Document> {
+    fn stored(&self, document: &DocumentId, version: &VersionId) -> Option<Version> {
+        let all = self.versions.borrow();
+        let versions = all.get(document)?;
+        versions.iter().find(|held| held.id == *version).cloned()
+    }
+
+    fn matching(&self, wanted: impl Fn(&Document) -> bool) -> Vec<Rc<Document>> {
         let ids: BTreeSet<DocumentId> = self
             .versions
             .borrow()
@@ -106,20 +122,37 @@ impl MemoryStore {
         ids.iter()
             .map(|id| self.held(id))
             .filter(|document| wanted(document))
+            .map(Rc::new)
             .collect()
     }
 }
 
 impl StoreRead for MemoryStore {
-    fn document(&self, id: &DocumentId) -> Result<Document, StoreError> {
-        Ok(self.held(id))
+    fn headers(&self, id: &DocumentId) -> Result<Rc<Document>, StoreError> {
+        Ok(Rc::new(self.held(id)))
     }
 
-    fn of_kind(&self, kind: &Kind) -> Result<Vec<Document>, StoreError> {
+    fn version(
+        &self,
+        document: &DocumentId,
+        version: &VersionId,
+    ) -> Result<Option<Version>, StoreError> {
+        Ok(self.stored(document, version))
+    }
+
+    fn body(
+        &self,
+        document: &DocumentId,
+        version: &VersionId,
+    ) -> Result<Option<String>, StoreError> {
+        Ok(self.stored(document, version).map(|version| version.body))
+    }
+
+    fn of_kind(&self, kind: &Kind) -> Result<Vec<Rc<Document>>, StoreError> {
         Ok(self.matching(|document| document.kind() == Some(kind)))
     }
 
-    fn holding(&self, key: &str, values: &[&str]) -> Result<Vec<Document>, StoreError> {
+    fn holding(&self, key: &str, values: &[&str]) -> Result<Vec<Rc<Document>>, StoreError> {
         if values.is_empty() {
             return Ok(Vec::new());
         }
@@ -127,11 +160,11 @@ impl StoreRead for MemoryStore {
         Ok(self.matching(|document| document.holds_any(key, &asked)))
     }
 
-    fn unreadable(&self) -> Result<Vec<Document>, StoreError> {
+    fn unreadable(&self) -> Result<Vec<Rc<Document>>, StoreError> {
         Ok(self.matching(|document| !document.unreadable().is_empty()))
     }
 
-    fn forked(&self) -> Result<Vec<Document>, StoreError> {
+    fn forked(&self) -> Result<Vec<Rc<Document>>, StoreError> {
         Ok(self.matching(|document| matches!(document.state(), State::Forked(_))))
     }
 
@@ -591,7 +624,8 @@ pub fn first(document: &DocumentId, kind: &str, fields: &str, body: &str) -> Ver
 /// When there is no head to follow or the parts do not make a version.
 #[must_use]
 pub fn after(heads: &[&Version], fields: &str, body: &str) -> Version {
-    let envelope = Envelope::following(heads, stamp(), desk(), "save").expect("a head to follow");
+    let heads: Vec<&Header> = heads.iter().map(|head| head.header()).collect();
+    let envelope = Envelope::following(&heads, stamp(), desk(), "save").expect("a head to follow");
     compose(envelope, fields, body)
 }
 
@@ -605,7 +639,7 @@ pub fn store_contract(store: &dyn Store, ids: &dyn Ids, damage: &dyn Fn(&Documen
     let atlas = ids.mint().expect("an id");
     assert_ne!(lantern, atlas);
     assert_eq!(
-        store.document(&lantern).expect("a read").state(),
+        store.headers(&lantern).expect("a read").state(),
         State::Absent
     );
     assert!(store.kinds().expect("a read").is_empty());
@@ -623,8 +657,8 @@ pub fn store_contract(store: &dyn Store, ids: &dyn Ids, damage: &dyn Fn(&Documen
         .put(&relay)
         .expect("a second write of the same version");
     assert_eq!(
-        store.document(&lantern).expect("a read").history(),
-        [&relay]
+        store.headers(&lantern).expect("a read").history(),
+        [relay.header()]
     );
 
     let renamed = after(
@@ -633,15 +667,34 @@ pub fn store_contract(store: &dyn Store, ids: &dyn Ids, damage: &dyn Fn(&Documen
         "second\n",
     );
     store.put(&renamed).expect("a write");
-    let held = store.document(&lantern).expect("a read");
-    assert_eq!(held.state(), State::Live(&renamed));
+    let held = store.headers(&lantern).expect("a read");
     assert_eq!(held.id(), &lantern);
+    assert_eq!(held.state(), State::Live(renamed.header()));
+    assert_eq!(held.history(), [renamed.header(), relay.header()]);
+    assert_eq!(
+        store
+            .headers(&ids.mint().expect("an id"))
+            .expect("a read")
+            .state(),
+        State::Absent
+    );
+    assert_eq!(
+        store.version(&lantern, &relay.id).expect("a read"),
+        Some(relay.clone())
+    );
+    assert_eq!(
+        store.body(&lantern, &relay.id).expect("a read").as_deref(),
+        Some("first\n")
+    );
+    let never = VersionId::of(b"never");
+    assert_eq!(store.version(&lantern, &never).expect("a read"), None);
+    assert_eq!(store.body(&lantern, &never).expect("a read"), None);
 
     store
         .put(&first(&atlas, "topic", "name = \"atlas\"", "\n"))
         .expect("a write");
 
-    answers_with_whole_documents(store, &lantern, &atlas);
+    answers_with_headers(store, &lantern, &atlas);
     reports_what_does_not_read(store, ids, damage, &renamed);
     finds_by_prefix(store, &renamed);
     lists_the_kinds_held(store, ids);
@@ -685,22 +738,22 @@ fn lists_the_kinds_held(store: &dyn Store, ids: &dyn Ids) {
     assert_eq!(found.len(), 2);
 }
 
-fn by_id(store: &dyn Store, ids: &[&DocumentId]) -> Vec<Document> {
-    let mut documents: Vec<Document> = ids
+fn by_id(store: &dyn Store, ids: &[&DocumentId]) -> Vec<Rc<Document>> {
+    let mut documents: Vec<Rc<Document>> = ids
         .iter()
-        .map(|id| store.document(id).expect("a read"))
+        .map(|id| store.headers(id).expect("a read"))
         .collect();
     documents.sort_by(|a, b| a.id().cmp(b.id()));
     documents
 }
 
-fn of_kind(store: &dyn Store, word: &str) -> Vec<Document> {
+fn of_kind(store: &dyn Store, word: &str) -> Vec<Rc<Document>> {
     store
         .of_kind(&Kind::parse(word).expect("a kind"))
         .expect("a read")
 }
 
-fn answers_with_whole_documents(store: &dyn Store, lantern: &DocumentId, atlas: &DocumentId) {
+fn answers_with_headers(store: &dyn Store, lantern: &DocumentId, atlas: &DocumentId) {
     let by_id = |ids: &[&DocumentId]| by_id(store, ids);
     let of_kind = |word: &str| of_kind(store, word);
     assert_eq!(of_kind("fact"), by_id(&[lantern]));
@@ -734,11 +787,11 @@ fn reports_what_does_not_read(
     head: &Version,
 ) {
     let lantern = &head.envelope.document;
-    let whole = |id: &DocumentId| store.document(id).expect("a read");
+    let whole = |id: &DocumentId| store.headers(id).expect("a read");
     let holding = |values: &[&str]| store.holding("name", values).expect("a read");
     assert!(store.unreadable().expect("a read").is_empty());
     let phone = ids.mint().expect("an id");
-    let lost = first(&phone, "topic", "name = \"phone\"", "\n").id;
+    let lost = first(&phone, "topic", "name = \"phone\"", "\n").id.clone();
     damage(&phone, &lost);
     let alone = whole(&phone);
     assert_eq!(alone.state(), State::Absent);
@@ -758,8 +811,10 @@ fn reports_what_does_not_read(
     }
     assert!(holding(&["phone"]).is_empty());
 
-    let torn = after(&[head], "name = \"relay\"", "third\n").id;
+    let torn = after(&[head], "name = \"relay\"", "third\n").id.clone();
     damage(lantern, &torn);
+    assert_eq!(store.version(lantern, &torn).expect("a read"), None);
+    assert_eq!(store.body(lantern, &torn).expect("a read"), None);
     let beside = whole(lantern);
     let named = store.versions_under(torn.short()).expect("a read");
     assert_eq!(named, [(lantern.clone(), torn.clone())]);
@@ -944,15 +999,17 @@ mod tests {
         let store = MemoryStore::default();
         let relay = first(&lantern(), "fact", "name = \"relay\"", "text\n");
         store.put(&relay).unwrap();
-        let planted = first(&lantern(), "fact", "name = \"other\"", "text\n").id;
+        let planted = first(&lantern(), "fact", "name = \"other\"", "text\n")
+            .id
+            .clone();
         store.plant_unreadable(&lantern(), planted, ReadError::Corrupt);
-        let held = store.document(&lantern()).unwrap();
+        let held = store.headers(&lantern()).unwrap();
         assert_eq!(held.unreadable().len(), 1);
         assert_eq!(held.state(), State::Live(&relay));
 
         let planted = relay.id.clone();
         store.plant_unreadable(&atlas(), planted, ReadError::Corrupt);
-        let alone = store.document(&atlas()).unwrap();
+        let alone = store.headers(&atlas()).unwrap();
         assert_eq!(alone.unreadable().len(), 1);
         assert_eq!(alone.state(), State::Absent);
     }

@@ -79,7 +79,7 @@ pub(super) fn fits(
     kind: Option<KindOf>,
     unended: bool,
 ) -> Result<Option<Misfit>, Failure> {
-    let document = lookup.document(id)?;
+    let document = lookup.headers(id)?;
     if matches!(document.state(), State::Absent) {
         return Ok(Some(Misfit::Missing));
     }
@@ -115,7 +115,7 @@ pub(super) fn other_holders<'i>(
 
 fn holds_name_of(lookup: &Lookup, holder: &DocumentId, content: &Content) -> Result<bool, Failure> {
     let name = content.naming().map(|(name, _)| name);
-    let document = lookup.document(holder)?;
+    let document = lookup.headers(holder)?;
     Ok(unended_heads(&document).iter().any(|(_, other)| {
         same_scope(content, &other.content) && other.content.naming().map(|(name, _)| name) == name
     }))
@@ -182,8 +182,8 @@ pub(super) fn claims_of(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::testing::{ENDED, World, entry, topic, topic_fields};
-    use crate::domain::ports::{Store, StoreRead};
+    use crate::app::testing::{ENDED, World, entry, head, topic, topic_fields};
+    use crate::domain::ports::Store;
     use crate::domain::testing::after;
 
     #[test]
@@ -215,7 +215,7 @@ mod tests {
         let world = World::new();
         let _machine = topic(&world, "desk", "");
         let lantern = topic(&world, "lantern", "");
-        let root = world.store.document(&lantern).unwrap().heads()[0].clone();
+        let root = head(&world, &lantern);
         let live = after(&[&root], &topic_fields("lantern", ""), "live\n");
         world.store.put(&live).unwrap();
         world
@@ -246,7 +246,7 @@ mod tests {
         let world = World::new();
         let _machine = topic(&world, "desk", "");
         let lantern = topic(&world, "lantern", "");
-        let root = world.store.document(&lantern).unwrap().heads()[0].clone();
+        let root = head(&world, &lantern);
         let left = after(&[&root], &topic_fields("lantern", ""), "left\n");
         let right = after(&[&root], &topic_fields("lantern", ENDED), "right\n");
         world.store.put(&left).unwrap();

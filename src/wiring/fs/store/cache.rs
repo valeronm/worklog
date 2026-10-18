@@ -1,21 +1,22 @@
-//! What a host keeps of a store's parsed tree, outside the store, so a reading reuses the
-//! parse of every document directory that did not change.
+//! What a host keeps of a store's parsed headers, outside the store, so a reading reuses
+//! the parse of every document directory that did not change.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::time::{Duration, SystemTime};
 
 use serde::{Deserialize, Serialize};
 
 use crate::domain::document::Document;
 use crate::domain::id::{DocumentId, VersionId};
-use crate::domain::version::{Envelope, FORMAT, Fields, Kind, Links, Stamp, Version};
+use crate::domain::version::{Envelope, FORMAT, Fields, Header, Kind, Links, Stamp};
 
 use super::super::replace;
 
 /// Raised with any change to the records below, since a build of the same version reads
 /// the file the last one wrote.
-const CACHE_FORMAT: u32 = 1;
+const CACHE_FORMAT: u32 = 3;
 
 /// A directory changed this close to the walk that recorded it may have changed again
 /// within the granularity of its modification time, and is read again.
@@ -26,11 +27,12 @@ pub struct Cache {
     writing: bool,
 }
 
-/// A document as its directory held it when the directory's modification time was `modified`.
+/// A document's headers as its directory held them when the directory's modification time
+/// was `modified`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Remembered {
     pub modified: SystemTime,
-    pub document: Document,
+    pub document: Rc<Document>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -45,11 +47,12 @@ struct Held {
 struct DocumentRecord {
     id: String,
     modified: SystemTime,
-    versions: Vec<VersionRecord>,
+    headers: Vec<HeaderRecord>,
+    heads: Vec<usize>,
 }
 
 #[derive(Serialize, Deserialize)]
-struct VersionRecord {
+struct HeaderRecord {
     id: String,
     kind: String,
     parents: Vec<String>,
@@ -59,7 +62,6 @@ struct VersionRecord {
     change: String,
     fields: Vec<(String, Value)>,
     links: Vec<(String, Option<String>)>,
-    text: String,
 }
 
 // postcard reads no self-describing value, which a TOML value is.
@@ -121,29 +123,28 @@ fn fields_of(pairs: Vec<(String, Value)>) -> Option<Fields> {
         .collect()
 }
 
-fn version_record(version: &Version) -> VersionRecord {
-    let envelope = &version.envelope;
+fn header_record(header: &Header) -> HeaderRecord {
+    let envelope = &header.envelope;
     let ids = |ids: &[VersionId]| ids.iter().map(|id| id.as_str().to_owned()).collect();
-    VersionRecord {
-        id: version.id.as_str().to_owned(),
+    HeaderRecord {
+        id: header.id.as_str().to_owned(),
         kind: envelope.kind.as_str().to_owned(),
         parents: ids(&envelope.parents),
         ancestors: ids(&envelope.ancestors),
         written: envelope.written.to_string(),
         machine: envelope.machine.as_str().to_owned(),
         change: envelope.change.clone(),
-        fields: table_of(&version.fields),
-        links: version
+        fields: table_of(&header.fields),
+        links: header
             .links
             .0
             .iter()
             .map(|(name, id)| (name.clone(), id.as_ref().map(|id| id.as_str().to_owned())))
             .collect(),
-        text: version.text().to_owned(),
     }
 }
 
-fn version_of(document: &DocumentId, record: VersionRecord) -> Option<Version> {
+fn header_of(document: &DocumentId, record: HeaderRecord) -> Option<Header> {
     let ids = |ids: Vec<String>| {
         ids.iter()
             .map(|id| VersionId::parse(id).ok())
@@ -169,23 +170,25 @@ fn version_of(document: &DocumentId, record: VersionRecord) -> Option<Version> {
             Some((name, id))
         })
         .collect::<Option<_>>()?;
-    Version::recalled(
-        VersionId::parse(&record.id).ok()?,
+    Some(Header {
+        id: VersionId::parse(&record.id).ok()?,
         envelope,
-        fields_of(record.fields)?,
-        Links(links),
-        record.text,
-    )
+        fields: fields_of(record.fields)?,
+        links: Links(links),
+    })
 }
 
 fn document_of(record: DocumentRecord) -> Option<(DocumentId, Remembered)> {
     let id = DocumentId::parse(&record.id).ok()?;
-    let versions = record
-        .versions
+    let headers = record
+        .headers
         .into_iter()
-        .map(|version| version_of(&id, version))
+        .map(|header| header_of(&id, header))
         .collect::<Option<Vec<_>>>()?;
-    let document = Document::new(id.clone(), versions, Vec::new());
+    if record.heads.iter().any(|at| *at >= headers.len()) {
+        return None;
+    }
+    let document = Rc::new(Document::as_recorded(id.clone(), headers, record.heads));
     Some((
         id,
         Remembered {
@@ -251,12 +254,8 @@ impl Cache {
                 .map(|(id, held)| DocumentRecord {
                     id: id.as_str().to_owned(),
                     modified: held.modified,
-                    versions: held
-                        .document
-                        .history()
-                        .into_iter()
-                        .map(version_record)
-                        .collect(),
+                    headers: held.document.headers().iter().map(header_record).collect(),
+                    heads: held.document.heads_at().to_vec(),
                 })
                 .collect(),
         };
@@ -274,7 +273,7 @@ mod tests {
     use super::*;
     use crate::domain::document::Unreadable;
     use crate::domain::testing::{after, atlas, desk, first, lantern, stamp};
-    use crate::domain::version::ReadError;
+    use crate::domain::version::{ReadError, Version};
 
     fn scratch() -> (tempfile::TempDir, Cache) {
         let dir = tempfile::tempdir().unwrap();
@@ -310,18 +309,19 @@ mod tests {
         Version::compose(envelope, fields, links, "The relay.\n".to_owned()).unwrap()
     }
 
-    fn remembered(document: Document, modified: SystemTime) -> Remembered {
+    fn remembered(document: Rc<Document>, modified: SystemTime) -> Remembered {
         Remembered { modified, document }
     }
 
-    fn held(id: DocumentId, versions: Vec<Version>) -> Document {
-        Document::new(id, versions, Vec::new())
+    fn held(id: DocumentId, versions: &[Version]) -> Rc<Document> {
+        let headers = versions.iter().map(Version::header).cloned().collect();
+        Rc::new(Document::new(id, headers, Vec::new()))
     }
 
-    fn topic() -> Document {
+    fn topic() -> Rc<Document> {
         held(
             atlas(),
-            vec![first(&atlas(), "topic", "name = \"atlas\"", "\n")],
+            &[first(&atlas(), "topic", "name = \"atlas\"", "\n")],
         )
     }
 
@@ -330,11 +330,11 @@ mod tests {
         let (_dir, cache) = scratch();
         let relay = relay();
         let renamed = after(&[&relay], "name = \"relay-pin\"", "second\n");
+        let other = after(&[&relay], "name = \"relay\"", "other\n");
+        let forked = held(lantern(), &[relay, renamed, other]);
+        assert_eq!(forked.heads().len(), 2);
         let documents = BTreeMap::from([
-            (
-                lantern(),
-                remembered(held(lantern(), vec![relay, renamed]), settled()),
-            ),
+            (lantern(), remembered(forked, settled())),
             (
                 atlas(),
                 remembered(topic(), settled() - Duration::from_secs(1)),
@@ -351,7 +351,7 @@ mod tests {
         let documents = BTreeMap::from([
             (
                 lantern(),
-                remembered(held(lantern(), vec![relay()]), now() - SETTLING),
+                remembered(held(lantern(), &[relay()]), now() - SETTLING),
             ),
             (atlas(), remembered(topic(), just_settled)),
         ]);
@@ -369,7 +369,11 @@ mod tests {
             version: VersionId::of(b"torn"),
             why: ReadError::Corrupt,
         };
-        let torn = Document::new(lantern(), vec![relay()], vec![torn]);
+        let torn = Rc::new(Document::new(
+            lantern(),
+            vec![relay().header().clone()],
+            vec![torn],
+        ));
         let documents = BTreeMap::from([
             (lantern(), remembered(torn, settled())),
             (atlas(), remembered(topic(), settled())),
@@ -390,7 +394,7 @@ mod tests {
         assert!(cache.read().is_empty());
         let documents = BTreeMap::from([(
             lantern(),
-            remembered(held(lantern(), vec![relay()]), settled()),
+            remembered(held(lantern(), &[relay()]), settled()),
         )]);
         cache.write(now(), &documents);
         assert_eq!(cache.read(), documents);
@@ -414,7 +418,7 @@ mod tests {
             now(),
             &BTreeMap::from([(
                 lantern(),
-                remembered(held(lantern(), vec![relay()]), settled()),
+                remembered(held(lantern(), &[relay()]), settled()),
             )]),
         );
         assert!(cache.read().is_empty());
@@ -429,7 +433,7 @@ mod tests {
         let (_dir, cache) = scratch();
         let documents = BTreeMap::from([(
             lantern(),
-            remembered(held(lantern(), vec![relay()]), settled()),
+            remembered(held(lantern(), &[relay()]), settled()),
         )]);
         let reading =
             Cache::at(cache.file.parent().unwrap(), Path::new("/atlas/store")).reading_only();
@@ -448,7 +452,7 @@ mod tests {
         let other = Cache::at(dir.path(), Path::new("/lantern/store"));
         let documents = BTreeMap::from([(
             lantern(),
-            remembered(held(lantern(), vec![relay()]), settled()),
+            remembered(held(lantern(), &[relay()]), settled()),
         )]);
         cache.write(now(), &documents);
         assert_eq!(cache.read(), documents);

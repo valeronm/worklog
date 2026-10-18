@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use crate::app::draft::refuse_open;
 use crate::app::lookup::{Lookup, refuse_ended};
 use crate::app::save::{Admitted, stepped};
@@ -9,7 +11,7 @@ use crate::domain::version::{Fields, Version};
 pub(super) struct Open {
     pub id: DocumentId,
     pub label: String,
-    pub head: Version,
+    pub head: Rc<Version>,
     pub record: Record,
 }
 

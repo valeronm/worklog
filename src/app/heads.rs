@@ -7,9 +7,9 @@ use crate::domain::id::DocumentId;
 use crate::domain::schema::address::displayed;
 use crate::domain::schema::graph::Edges;
 use crate::domain::schema::{Content, Directory, KindOf, Name, Record, SchemaError};
-use crate::domain::version::{Fields, Version};
+use crate::domain::version::{Fields, Header};
 
-pub(super) fn read_or_skip(head: &Version) -> Option<Record> {
+pub(super) fn read_or_skip(head: &Header) -> Option<Record> {
     Record::read(&head.envelope.kind, &head.fields).ok()
 }
 
@@ -17,7 +17,7 @@ pub(super) fn is_forked(document: &Document) -> bool {
     matches!(document.state(), State::Forked(_))
 }
 
-pub(super) fn unread_heads(document: &Document) -> Vec<(&Version, SchemaError)> {
+pub(super) fn unread_heads(document: &Document) -> Vec<(&Header, SchemaError)> {
     document
         .heads()
         .into_iter()
@@ -29,7 +29,7 @@ pub(super) fn unread_heads(document: &Document) -> Vec<(&Version, SchemaError)> 
         .collect()
 }
 
-pub(super) type Read<'d> = (&'d Version, Record);
+pub(super) type Read<'d> = (&'d Header, Record);
 
 pub(super) fn readable_heads(document: &Document) -> Vec<Read<'_>> {
     document
@@ -74,7 +74,7 @@ pub(super) fn unended_heads(document: &Document) -> Vec<Read<'_>> {
     heads
 }
 
-pub(super) fn heads_not_ended(document: &Document) -> Vec<&Version> {
+pub(super) fn heads_not_ended(document: &Document) -> Vec<&Header> {
     let mut heads = document.heads();
     heads.retain(|head| !version_is_ended(head));
     heads
@@ -85,7 +85,7 @@ pub(super) fn all_ended(heads: &[Read]) -> bool {
 }
 
 // A version that does not read as a record counts as not ended.
-pub(super) fn version_is_ended(version: &Version) -> bool {
+pub(super) fn version_is_ended(version: &Header) -> bool {
     read_or_skip(version).is_some_and(|record| record.ending.is_some())
 }
 
@@ -94,7 +94,7 @@ pub(super) fn ended_for(record: &Record) -> Option<String> {
     Some(ending.reason.word().to_owned())
 }
 
-pub(super) fn ended_of(version: &Version) -> Option<String> {
+pub(super) fn ended_of(version: &Header) -> Option<String> {
     ended_for(&read_or_skip(version)?)
 }
 

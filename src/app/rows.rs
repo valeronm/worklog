@@ -10,7 +10,7 @@ use crate::app::{Failure, ReadDeps};
 use crate::domain::document::Document;
 use crate::domain::id::DocumentId;
 use crate::domain::schema::{Content, Date, KindOf, Record, Trigger};
-use crate::domain::version::Version;
+use crate::domain::version::Header;
 
 /// Another document as a result refers to it: the id the referring document stores, the
 /// label the document referred to has now, or its short id, and the reason it ended with.
@@ -57,7 +57,7 @@ pub struct Row {
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct Shown<'d> {
     pub(super) row: Row,
-    pub(super) head: &'d Version,
+    pub(super) head: &'d Header,
     pub(super) record: Record,
 }
 
@@ -302,7 +302,7 @@ mod tests {
 
     fn row_of(world: &World, id: &DocumentId) -> Option<Row> {
         let topics = Topics::load(&world.lookup()).unwrap();
-        row(&topics, &world.store.document(id).unwrap()).map(|shown| shown.row)
+        row(&topics, &world.store.headers(id).unwrap()).map(|shown| shown.row)
     }
 
     #[test]
@@ -524,7 +524,8 @@ mod tests {
                     summary,
                     None,
                 )
-                .id,
+                .id
+                .clone(),
                 summary,
             ));
         }
@@ -702,7 +703,9 @@ mod tests {
         ] {
             let fields = fact_fields(&lantern, "relay-pin", summary, "");
             heads.push((
-                written_at(&world, &root, &fields, stamp, summary, None).id,
+                written_at(&world, &root, &fields, stamp, summary, None)
+                    .id
+                    .clone(),
                 summary,
             ));
         }
@@ -745,7 +748,7 @@ mod tests {
         let lantern = topic(&world, "lantern", "");
         let atlas = topic(&world, "atlas", &part_of(&[&lantern]));
         let relay = fact(&world, &atlas, "relay-pin", "");
-        let document = world.store.document(&relay).unwrap();
+        let document = world.store.headers(&relay).unwrap();
         let counting = Counting::over(world.store);
         let lookup = Lookup::new(Stored::new(&counting));
         let topics = Topics::load(&lookup).unwrap();
@@ -756,7 +759,6 @@ mod tests {
         assert_eq!(row.label, "atlas/relay-pin");
         assert_eq!(counting.questions(), 1);
         assert_eq!(counting.kinds.get(), 1);
-        assert_eq!(counting.documents.get(), 0);
     }
 
     #[test]

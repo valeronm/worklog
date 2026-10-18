@@ -13,7 +13,7 @@ pub fn resolve(deps: &Deps, address: &str) -> Result<DraftRef, Failure> {
     let lookup = Lookup::new(deps.read().store);
     let id = lookup.one(address)?;
     let label = lookup.label(&id)?;
-    let document = lookup.document(&id)?;
+    let document = lookup.headers(&id)?;
     let State::Forked(heads) = document.state() else {
         return Err(Failure::at(&label, "is not forked"));
     };
@@ -25,7 +25,8 @@ pub fn resolve(deps: &Deps, address: &str) -> Result<DraftRef, Failure> {
         return Err(no_head_reads(&label));
     };
     let kind = KindOf::of(&shown.envelope.kind)?;
-    let mut draft = Draft::of(shown);
+    let shown = lookup.version(&id, &shown.id, &label)?;
+    let mut draft = Draft::of(&shown);
     draft.parents = heads.iter().map(|head| head.id.clone()).collect();
     draft.fields = names(&lookup, &step::shown(&shown.fields), kind)?;
     let location = deps.drafts.write(&draft)?;
@@ -41,7 +42,9 @@ mod tests {
     use crate::app::draft::drafts;
     use crate::app::save::save;
     use crate::app::show::{Shown, show};
-    use crate::app::testing::{ENDED, TOPIC, World, fork, found, head, refused, topic, world};
+    use crate::app::testing::{
+        ENDED, TOPIC, World, fork, found, head, refused, stored, topic, world,
+    };
     use crate::domain::id::{DocumentId, VersionId};
     use crate::domain::ports::{Drafts, DraftsRead, Store, StoreRead};
     use crate::domain::schema::address::Found;
@@ -58,10 +61,10 @@ mod tests {
         assert_eq!(opened.location, world.drafts.location(&lantern));
         let draft = world.drafts.read(&lantern).unwrap().expect("a draft");
         assert_eq!(draft.parents, heads);
-        let document = world.store.document(&lantern).unwrap();
+        let document = world.store.headers(&lantern).unwrap();
         let (shown, _) = row_head(&document).unwrap();
         assert_eq!(shown.id, heads[1]);
-        assert_eq!(draft.body, shown.body);
+        assert_eq!(draft.body, stored(&world, &lantern, &shown.id).body);
         assert_eq!(
             toml::to_string(&draft.fields).unwrap(),
             "name = \"lantern\"\nsummary = \"s\"\n"
@@ -71,7 +74,7 @@ mod tests {
         assert!(text.contains("a draft of lantern is open"), "{text}");
 
         let written = save(&deps, "lantern").unwrap();
-        let document = world.store.document(&lantern).unwrap();
+        let document = world.store.headers(&lantern).unwrap();
         assert_eq!(document.heads().len(), 1);
         assert_eq!(document.heads()[0].id, written.version);
         assert_eq!(document.heads()[0].envelope.change, "resolve");
@@ -89,12 +92,14 @@ mod tests {
     fn a_fork_holding_an_unreadable_version_is_not_resolved() {
         let (world, lantern) = world();
         fork(&world, &lantern, &format!("name = \"lantern\"\n{TOPIC}"));
+        let held = world.store.headers(&lantern).unwrap();
         let planted = after(
-            &[&world.store.document(&lantern).unwrap().heads()[0].clone()],
+            &[&stored(&world, &lantern, &held.heads()[0].id)],
             "x = 1",
             "\n",
         )
-        .id;
+        .id
+        .clone();
         world
             .store
             .plant_unreadable(&lantern, planted, ReadError::Corrupt);
@@ -116,7 +121,7 @@ mod tests {
             ),
             "\n",
         );
-        let root = world.store.document(&relay).unwrap().heads()[0].clone();
+        let root = head(&world, &relay);
         for summary in ["left", "right"] {
             let fields = format!(
                 "name = \"relay-pin\"\ntopic = \"{lantern}\"\ncreated = 2026-09-04\n\
@@ -124,7 +129,7 @@ mod tests {
             );
             world.store.put(&after(&[&root], &fields, summary)).unwrap();
         }
-        let held = world.store.document(&relay).unwrap();
+        let held = world.store.headers(&relay).unwrap();
         let (shown, _) = row_head(&held).unwrap();
         assert_eq!(shown.id, held.heads()[1].id);
         let summary = shown.fields["summary"].as_str().unwrap().to_owned();
@@ -154,7 +159,7 @@ mod tests {
             .unwrap();
         world.store.put(&live).unwrap();
         world.store.put(&ended).unwrap();
-        let heads: Vec<VersionId> = (world.store.document(&lantern).unwrap().heads())
+        let heads: Vec<VersionId> = (world.store.headers(&lantern).unwrap().heads())
             .iter()
             .map(|head| head.id.clone())
             .collect();
@@ -190,14 +195,14 @@ mod tests {
             .unwrap();
         world.store.put(&live).unwrap();
         world.store.put(&unread).unwrap();
-        let document = world.store.document(&lantern).unwrap();
+        let document = world.store.headers(&lantern).unwrap();
         assert_eq!(document.heads()[0].id, unread.id);
 
         resolve(&deps, lantern.as_str()).unwrap();
         let draft = world.drafts.read(&lantern).unwrap().expect("a draft");
         assert_eq!(draft.body, "live\n");
         let written = save(&deps, lantern.as_str()).unwrap();
-        let document = world.store.document(&lantern).unwrap();
+        let document = world.store.headers(&lantern).unwrap();
         let [only] = document.heads()[..] else {
             panic!("expected one head");
         };
@@ -226,8 +231,8 @@ mod tests {
         assert_eq!(on_atlas.len(), 2, "{:?}", found.problems);
         assert_eq!(found.fork_count, 1);
 
-        let held = world.store.document(&atlas).unwrap();
-        let mut draft = Draft::of(held.heads()[0]);
+        let held = world.store.headers(&atlas).unwrap();
+        let mut draft = Draft::of(&stored(&world, &atlas, &held.heads()[0].id));
         draft.parents = heads;
         world.drafts.write(&draft).unwrap();
         let text = refused(save(&deps, atlas.as_str()));
@@ -235,7 +240,7 @@ mod tests {
             text.contains("no head of this fork reads; a newer worklog may be needed"),
             "{text}"
         );
-        assert_eq!(world.store.document(&atlas).unwrap().heads().len(), 2);
+        assert_eq!(world.store.headers(&atlas).unwrap().heads().len(), 2);
     }
 
     fn named(name: &str, former: &str, rest: &str) -> String {
@@ -351,12 +356,7 @@ mod tests {
         crate::app::draft::checkout(&deps, "phone").unwrap();
         let text = refused(resolve(&deps, "phone"));
         assert!(text.contains("is not forked"), "{text}");
-        let planted = after(
-            &[&world.store.document(&phone).unwrap().heads()[0].clone()],
-            "x = 1",
-            "\n",
-        )
-        .id;
+        let planted = after(&[&head(&world, &phone)], "x = 1", "\n").id.clone();
         world
             .store
             .plant_unreadable(&phone, planted, ReadError::Corrupt);

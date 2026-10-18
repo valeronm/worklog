@@ -1,7 +1,7 @@
 use super::{forked_into, has, lacks, main_of, ok};
 use crate::app::show;
 use crate::app::testing::{
-    DONE, ENDED, ENDED_FACT, REMOVED, World, entry, fact, fact_fields, followup, fork, head,
+    DONE, ENDED, ENDED_FACT, REMOVED, World, entry, fact, fact_fields, followup, fork, head_id,
     topic_fields, world_with_atlas,
 };
 use crate::domain::id::{DocumentId, VersionId};
@@ -177,7 +177,7 @@ fn a_document_s_page_marks_a_field_that_refers_to_a_document_that_ended() {
 fn a_version_s_page_and_a_check_mark_the_document_that_ended() {
     let Ended { world, atlas, .. } = ended();
     let to_atlas = anchor("ended", &atlas, "retired", "atlas");
-    let version = head(&world, &atlas).id;
+    let version = head_id(&world, &atlas);
     let page = ok(&world, &format!("/doc/{version}"));
     has(
         &page,
@@ -230,7 +230,7 @@ fn a_page_of_documents_none_of_which_ended_marks_no_link() {
         "Paint the case",
         &format!("entry = \"{driver}\"\nabout = \"{relay}\"\ntouching = \"{atlas}\"\n"),
     );
-    let version = head(&world, &relay).id;
+    let version = head_id(&world, &relay);
     world
         .store
         .plant_unreadable(&lantern, VersionId::of(b"lost"), ReadError::Corrupt);

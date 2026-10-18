@@ -15,7 +15,7 @@ use crate::domain::id::{DocumentId, VersionId, is_id_prefix};
 use crate::domain::schema::KindOf;
 use crate::domain::schema::address::Found;
 use crate::domain::schema::translate::referred;
-use crate::domain::version::{ReadError, Stamp, Version};
+use crate::domain::version::{Header, ReadError, Stamp, Version};
 
 /// A file of the document that does not read as a version.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -251,7 +251,7 @@ fn resolved(lookup: &Lookup, address: &str) -> Result<Option<Resolved>, Failure>
                 1 => {
                     let (document, version) = held.remove(0);
                     if let Some(broken) = lookup
-                        .document(&document)?
+                        .headers(&document)?
                         .unreadable()
                         .iter()
                         .find(|broken| broken.version == version)
@@ -365,18 +365,21 @@ fn shown_version(lookup: &Lookup, version: &Version, head: bool) -> Result<Shown
     })
 }
 
-fn is_head(document: &Document, version: &Version) -> bool {
+fn is_head(document: &Document, version: &Header) -> bool {
     document.heads().iter().any(|head| head.id == version.id)
 }
 
-fn held<'a>(
-    document: &'a Document,
+// A version the reading of the tree did not record names nothing, whatever file is there.
+fn held(
+    lookup: &Lookup,
+    document: &Document,
     version: &VersionId,
     address: &str,
-) -> Result<&'a Version, Failure> {
-    document
-        .get(version)
-        .ok_or_else(|| names_no_document(address))
+) -> Result<Rc<Version>, Failure> {
+    if document.get(version).is_none() {
+        return Err(names_no_document(address));
+    }
+    lookup.version(document.id(), version, address)
 }
 
 /// Resolves a document by name, id prefix or former name, and a version by the start of its
@@ -388,12 +391,15 @@ pub fn show(deps: &ReadDeps, address: &str) -> Result<Shown, Failure> {
     let resolved = resolve(&lookup, address)?;
     match resolved {
         Resolved::Document(id) => {
-            let document = lookup.document(&id)?;
+            let document = lookup.headers(&id)?;
             let label = lookup.label(&id)?;
             let heads = document
                 .heads()
                 .into_iter()
-                .map(|head| shown_version(&lookup, head, true))
+                .map(|head| {
+                    let head = lookup.version(&id, &head.id, address)?;
+                    shown_version(&lookup, &head, true)
+                })
                 .collect::<Result<_, _>>()?;
             let speaking = row_head(&document).map(|(_, record)| record);
             Ok(Shown::Document(ShownDocument {
@@ -411,15 +417,15 @@ pub fn show(deps: &ReadDeps, address: &str) -> Result<Shown, Failure> {
             }))
         }
         Resolved::Version { document, version } => {
-            let held_document = lookup.document(&document)?;
-            let version = held(&held_document, &version, address)?;
-            let head = is_head(&held_document, version);
+            let held_document = lookup.headers(&document)?;
+            let version = held(&lookup, &held_document, &version, address)?;
+            let head = is_head(&held_document, &version);
             let of = lookup.reference(&document)?;
             Ok(Shown::Version(Box::new(Compared {
                 document_ended: of.ended().map(str::to_owned),
                 label: of.label,
-                sides: against_parents(&lookup, &held_document, version)?,
-                version: shown_version(&lookup, version, head)?,
+                sides: against_parents(&lookup, &held_document, &version, address)?,
+                version: shown_version(&lookup, &version, head)?,
                 document,
             })))
         }
@@ -437,7 +443,7 @@ pub fn history(deps: &ReadDeps, address: &str) -> Result<History, Failure> {
             )));
         }
     };
-    let document = lookup.document(&id)?;
+    let document = lookup.headers(&id)?;
     let of = lookup.reference(&id)?;
     let versions = document
         .history()
@@ -464,8 +470,10 @@ pub fn history(deps: &ReadDeps, address: &str) -> Result<History, Failure> {
 }
 
 fn sides(
+    lookup: &Lookup,
     document: &Document,
     parents: &[VersionId],
+    address: &str,
     before: impl Fn(&Version) -> Result<String, Failure>,
 ) -> Result<Vec<Side>, Failure> {
     if parents.is_empty() {
@@ -478,10 +486,10 @@ fn sides(
     parents
         .iter()
         .map(|parent| match document.get(parent) {
-            Some(version) => Ok(Side {
+            Some(_) => Ok(Side {
                 against: Some(parent.clone()),
                 held: true,
-                before: before(version)?,
+                before: before(&*lookup.version(document.id(), parent, address)?)?,
             }),
             None => Ok(Side {
                 against: Some(parent.clone()),
@@ -496,10 +504,15 @@ fn against_parents(
     lookup: &Lookup,
     document: &Document,
     version: &Version,
+    address: &str,
 ) -> Result<Vec<Side>, Failure> {
-    sides(document, &version.envelope.parents, |parent| {
-        shown_text(lookup, parent)
-    })
+    sides(
+        lookup,
+        document,
+        &version.envelope.parents,
+        address,
+        |parent| shown_text(lookup, parent),
+    )
 }
 
 fn draft_text(lookup: &Lookup, version: &Version) -> Result<String, Failure> {
@@ -521,10 +534,10 @@ fn diff_draft(
         Err(Failure::Refused(_)) if !named => return Err(names_no_document(address)),
         Err(other) => return Err(other),
     };
-    let document = lookup.document(&draft.document)?;
+    let document = lookup.headers(&draft.document)?;
     let label = draft_label(&draft);
     Ok(Diff {
-        sides: sides(&document, &draft.parents, |version| {
+        sides: sides(lookup, &document, &draft.parents, address, |version| {
             draft_text(lookup, version)
         })?,
         after: render(&draft, &label)?,
@@ -532,7 +545,7 @@ fn diff_draft(
     })
 }
 
-fn is_earlier(a: &Version, b: &Version) -> bool {
+fn is_earlier(a: &Header, b: &Header) -> bool {
     if b.envelope.ancestors.contains(&a.id) {
         return true;
     }
@@ -548,7 +561,7 @@ fn version_argument(
     other: &str,
 ) -> Result<(Rc<Document>, VersionId), Failure> {
     match resolve(lookup, address)? {
-        Resolved::Version { document, version } => Ok((lookup.document(&document)?, version)),
+        Resolved::Version { document, version } => Ok((lookup.headers(&document)?, version)),
         Resolved::Document(_) => Err(Failure::Usage(format!(
             "{address}: names a document; comparing with {other} takes versions"
         ))),
@@ -571,29 +584,29 @@ pub fn diff(deps: &ReadDeps, first: &str, second: Option<&str>) -> Result<Diff, 
         let Some(Resolved::Version { document, version }) = found else {
             return diff_draft(deps, &lookup, first, found.is_some());
         };
-        let document = lookup.document(&document)?;
-        let version = held(&document, &version, first)?;
+        let document = lookup.headers(&document)?;
+        let version = held(&lookup, &document, &version, first)?;
         return Ok(Diff {
             label: lookup.label(&version.envelope.document)?,
-            sides: against_parents(&lookup, &document, version)?,
-            after: shown_text(&lookup, version)?,
+            sides: against_parents(&lookup, &document, &version, first)?,
+            after: shown_text(&lookup, &version)?,
         });
     };
     let (a_document, a) = version_argument(&lookup, first, second)?;
     let (b_document, b) = version_argument(&lookup, second, first)?;
     let (a, b) = (
-        held(&a_document, &a, first)?,
-        held(&b_document, &b, second)?,
+        held(&lookup, &a_document, &a, first)?,
+        held(&lookup, &b_document, &b, second)?,
     );
-    let (earlier, later) = if is_earlier(a, b) { (a, b) } else { (b, a) };
+    let (earlier, later) = if is_earlier(&a, &b) { (a, b) } else { (b, a) };
     Ok(Diff {
         label: lookup.label(&later.envelope.document)?,
         sides: vec![Side {
             against: Some(earlier.id.clone()),
             held: true,
-            before: shown_text(&lookup, earlier)?,
+            before: shown_text(&lookup, &earlier)?,
         }],
-        after: shown_text(&lookup, later)?,
+        after: shown_text(&lookup, &later)?,
     })
 }
 
@@ -602,8 +615,8 @@ mod tests {
     use super::*;
     use crate::app::draft::checkout;
     use crate::app::testing::{
-        ENDED, ENDED_FACT, REMOVED, TOPIC, World, fact, fact_fields, fork, head, refused, to,
-        to_ended, topic, topic_fields, world, world_with_atlas, written_at,
+        ENDED, ENDED_FACT, REMOVED, TOPIC, World, fact, fact_fields, fork, head, head_id, refused,
+        stored, to, to_ended, topic, topic_fields, world, world_with_atlas, written_at,
     };
     use crate::domain::draft::Draft;
     use crate::domain::id::VersionId;
@@ -795,7 +808,7 @@ mod tests {
     #[test]
     fn an_ended_document_is_shown() {
         let (world, lantern) = world();
-        let root = head(&world, &lantern).id;
+        let root = head_id(&world, &lantern);
         assert_eq!(compared(&world, root.short()).document_ended, None);
         assert_eq!(
             history(&world.deps().read(), "lantern").unwrap().ended,
@@ -1150,7 +1163,7 @@ mod tests {
         let relay = fact(&world, &lantern, "relay-pin", "");
         let atlas = topic(&world, "atlas", "");
         let unheld = DocumentId::from_bytes([0x42; 16]);
-        let root = head(&world, &atlas).id;
+        let root = head_id(&world, &atlas);
         let saved = world.amend_linking(
             &atlas,
             &topic_fields("atlas", ""),
@@ -1501,9 +1514,11 @@ mod tests {
         let (world, lantern) = world();
         let root = head(&world, &lantern);
         let one = fork(&world, &lantern, &topic_fields("lantern", ""));
-        let held = world.store.document(&lantern).unwrap();
         let joined = after(
-            &[held.get(&one[0]).unwrap(), held.get(&one[1]).unwrap()],
+            &[
+                &stored(&world, &lantern, &one[0]),
+                &stored(&world, &lantern, &one[1]),
+            ],
             &topic_fields("lantern", ""),
             "joined\n",
         );
@@ -1673,8 +1688,7 @@ mod tests {
     fn a_draft_started_from_two_heads_is_compared_with_each() {
         let (world, lantern) = world();
         let heads = fork(&world, &lantern, &topic_fields("lantern", ""));
-        let held = world.store.document(&lantern).unwrap();
-        let mut draft = Draft::of(held.get(&heads[0]).unwrap());
+        let mut draft = Draft::of(&stored(&world, &lantern, &heads[0]));
         draft.parents = heads.clone();
         draft.fields = topic_fields("lantern", "").parse().unwrap();
         draft.body = "resolved\n".to_owned();

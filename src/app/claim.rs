@@ -76,7 +76,7 @@ fn held(
 mod tests {
     use super::*;
     use crate::app::heads::read_or_skip;
-    use crate::app::testing::{ENDED, TOPIC, World, claim_fields, fork, refused, topic};
+    use crate::app::testing::{ENDED, TOPIC, World, claim_fields, fork, head, refused, topic};
     use crate::domain::ports::StoreRead;
     use crate::domain::schema::Content;
     use crate::domain::version::{Kind, Version};
@@ -89,8 +89,7 @@ mod tests {
     }
 
     fn stored(world: &World, written: &Written) -> (Version, Record) {
-        let document = world.store.document(&written.document).unwrap();
-        let head = document.heads()[0].clone();
+        let head = head(world, &written.document);
         let record = read_or_skip(&head).unwrap();
         (head, record)
     }
@@ -212,7 +211,7 @@ mod tests {
         assert_ne!(ours.document, theirs);
         let ended = unclaim(&deps, "lantern", Some("~/lantern")).unwrap();
         assert_eq!(ended.document, ours.document);
-        let other = world.store.document(&theirs).unwrap();
+        let other = world.store.headers(&theirs).unwrap();
         let head = other.heads()[0].clone();
         assert_eq!(head.envelope.change, "new");
         assert_eq!(read_or_skip(&head).unwrap().ending, None);

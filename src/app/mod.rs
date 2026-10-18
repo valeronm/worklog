@@ -285,6 +285,42 @@ mod tests {
     };
 
     #[test]
+    fn a_listing_reads_no_body() {
+        use crate::app::testing::{DONE, World, entry, fact, followup, topic};
+        type Listing = fn(&ReadDeps) -> Result<(), Failure>;
+        let listings: [(&str, Listing); 12] = [
+            ("topics", |deps| list::topics(deps, None, false).map(drop)),
+            ("facts", |deps| list::facts(deps, None, false).map(drop)),
+            ("ideas", |deps| list::ideas(deps, None, false).map(drop)),
+            ("entries", |deps| {
+                list::entries(deps, Some("lantern"), None, false).map(drop)
+            }),
+            ("followups", |deps| {
+                list::followups(deps, None, true).map(drop)
+            }),
+            ("forks", |deps| list::forks(deps).map(drop)),
+            ("log", |deps| search::log(deps, 10, None).map(drop)),
+            ("history", |deps| show::history(deps, "lantern").map(drop)),
+            ("context", |deps| context::context(deps, "/work").map(drop)),
+            ("due", |deps| context::due(deps, "/work").map(drop)),
+            ("machines", |deps| machines::machines(deps).map(drop)),
+            ("check", |deps| check::check(deps).map(drop)),
+        ];
+        for (name, listing) in listings {
+            let world = World::new();
+            topic(&world, "desk", "");
+            let lantern = topic(&world, "lantern", "");
+            fact(&world, &lantern, "relay-pin", "");
+            entry(&world, "2026-09-04", "lamp-driver", &[&lantern]);
+            followup(&world, &[&lantern], "open", "");
+            followup(&world, &[&lantern], "done", DONE);
+            let world = world.counted();
+            listing(&world.deps().read()).unwrap_or_else(|failure| panic!("{name}: {failure}"));
+            assert_eq!(world.store.bodies(), 0, "{name}");
+        }
+    }
+
+    #[test]
     fn a_failure_reads_as_its_text() {
         assert_eq!(
             Failure::at("lantern", "is ended").to_string(),

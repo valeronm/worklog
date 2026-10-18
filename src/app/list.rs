@@ -706,7 +706,6 @@ mod tests {
                 .iter()
                 .all(|part| { (part.fact_count, part.idea_count, part.open_count) == (1, 1, 1) })
         );
-        assert_eq!(world.store.documents.get(), 0);
         world.store.scans()
     }
 
@@ -1070,7 +1069,7 @@ mod tests {
             ["atlas", "lantern/relay-pin"]
         );
         assert_eq!(rows[1].document, relay);
-        let stored = world.store.document(&relay).unwrap();
+        let stored = world.store.headers(&relay).unwrap();
         let in_store: Vec<VersionId> = stored.heads().iter().map(|h| h.id.clone()).collect();
         let listed: Vec<VersionId> = rows[1].heads.iter().map(|h| h.version.clone()).collect();
         assert_eq!(listed, in_store);
@@ -1099,7 +1098,7 @@ mod tests {
             (&absent, "2026-10-09T11:00:00+01:00"),
         ] {
             let head = written_at(&world, &root, &fields, stamp, "\n", Some(machine));
-            written.push((head.id, machine.short()));
+            written.push((head.id.clone(), machine.short()));
         }
         written.sort();
 

@@ -1,4 +1,5 @@
 use std::cell::Cell;
+use std::rc::Rc;
 
 use crate::app::heads::read_or_skip;
 use crate::app::lookup::{Lookup, Stored};
@@ -98,7 +99,7 @@ impl World {
         body: &str,
         links: &[(&str, Option<&DocumentId>)],
     ) -> VersionId {
-        let held = self.store.document(id).expect("a read");
+        let held = self.store.headers(id).expect("a read");
         let envelope = Envelope::following(&held.heads(), self.clock.now(), self.machine(), "save")
             .expect("a head to follow");
         let fields: Fields = fields.parse().expect("fields in TOML");
@@ -110,7 +111,7 @@ impl World {
         let version =
             Version::compose(envelope, fields, links, body.to_owned()).expect("a version");
         self.store.put(&version).expect("a write");
-        version.id
+        version.id.clone()
     }
 }
 
@@ -218,7 +219,7 @@ pub fn fork(world: &World, id: &DocumentId, fields: &str) -> Vec<VersionId> {
             .put(&after(&[&root], fields, body))
             .expect("a write");
     }
-    let held = world.store.document(id).expect("a read");
+    let held = world.store.headers(id).expect("a read");
     held.heads().iter().map(|head| head.id.clone()).collect()
 }
 
@@ -231,7 +232,7 @@ pub fn written_at(
     machine: Option<&DocumentId>,
 ) -> Version {
     let envelope = Envelope::following(
-        &[root],
+        &[root.header()],
         Stamp::parse(stamp).unwrap(),
         machine.cloned().unwrap_or_else(|| world.machine()),
         "save",
@@ -304,10 +305,22 @@ pub fn labels<T>(items: &[T], row_of: impl Fn(&T) -> &Row) -> Vec<String> {
 }
 
 pub fn head(world: &World, id: &DocumentId) -> Version {
-    match world.store.document(id).expect("a read").state() {
-        State::Live(head) => head.clone(),
+    match world.store.headers(id).expect("a read").state() {
+        State::Live(head) => stored(world, id, &head.id),
         other => panic!("expected a live document, got {other:?}"),
     }
+}
+
+pub fn stored(world: &World, id: &DocumentId, version: &VersionId) -> Version {
+    world
+        .store
+        .version(id, version)
+        .expect("a read")
+        .expect("a stored version")
+}
+
+pub fn head_id(world: &World, id: &DocumentId) -> VersionId {
+    head(world, id).id.clone()
 }
 
 pub fn record(world: &World, id: &DocumentId) -> Record {
@@ -328,7 +341,9 @@ pub fn refused<T>(result: Result<T, Failure>) -> String {
 
 pub struct Counting {
     pub inner: MemoryStore,
-    pub documents: Cell<usize>,
+    pub headers: Cell<usize>,
+    pub versions: Cell<usize>,
+    pub texts: Cell<usize>,
     pub holdings: Cell<usize>,
     pub kinds: Cell<usize>,
     pub kind_lists: Cell<usize>,
@@ -341,7 +356,9 @@ impl Counting {
     pub fn over(inner: MemoryStore) -> Counting {
         Counting {
             inner,
-            documents: Cell::new(0),
+            headers: Cell::new(0),
+            versions: Cell::new(0),
+            texts: Cell::new(0),
             holdings: Cell::new(0),
             kinds: Cell::new(0),
             kind_lists: Cell::new(0),
@@ -354,7 +371,11 @@ impl Counting {
 
 impl Counting {
     pub fn questions(&self) -> usize {
-        self.documents.get() + self.holdings.get() + self.kinds.get()
+        self.headers.get() + self.bodies() + self.holdings.get() + self.kinds.get()
+    }
+
+    pub fn bodies(&self) -> usize {
+        self.versions.get() + self.texts.get()
     }
 
     // A scan reads more than one document's directory.
@@ -391,27 +412,45 @@ impl Counted {
 }
 
 impl StoreRead for Counting {
-    fn document(&self, id: &DocumentId) -> Result<Document, StoreError> {
-        self.documents.set(self.documents.get() + 1);
-        self.inner.document(id)
+    fn headers(&self, id: &DocumentId) -> Result<Rc<Document>, StoreError> {
+        self.headers.set(self.headers.get() + 1);
+        self.inner.headers(id)
     }
 
-    fn of_kind(&self, kind: &Kind) -> Result<Vec<Document>, StoreError> {
+    fn version(
+        &self,
+        document: &DocumentId,
+        version: &VersionId,
+    ) -> Result<Option<Version>, StoreError> {
+        self.versions.set(self.versions.get() + 1);
+        self.inner.version(document, version)
+    }
+
+    fn body(
+        &self,
+        document: &DocumentId,
+        version: &VersionId,
+    ) -> Result<Option<String>, StoreError> {
+        self.texts.set(self.texts.get() + 1);
+        self.inner.body(document, version)
+    }
+
+    fn of_kind(&self, kind: &Kind) -> Result<Vec<Rc<Document>>, StoreError> {
         self.kinds.set(self.kinds.get() + 1);
         self.inner.of_kind(kind)
     }
 
-    fn holding(&self, key: &str, values: &[&str]) -> Result<Vec<Document>, StoreError> {
+    fn holding(&self, key: &str, values: &[&str]) -> Result<Vec<Rc<Document>>, StoreError> {
         self.holdings.set(self.holdings.get() + 1);
         self.inner.holding(key, values)
     }
 
-    fn unreadable(&self) -> Result<Vec<Document>, StoreError> {
+    fn unreadable(&self) -> Result<Vec<Rc<Document>>, StoreError> {
         self.unreadables.set(self.unreadables.get() + 1);
         self.inner.unreadable()
     }
 
-    fn forked(&self) -> Result<Vec<Document>, StoreError> {
+    fn forked(&self) -> Result<Vec<Rc<Document>>, StoreError> {
         self.forks.set(self.forks.get() + 1);
         self.inner.forked()
     }

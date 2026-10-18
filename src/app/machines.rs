@@ -73,7 +73,7 @@ pub fn machines(deps: &ReadDeps) -> Result<Vec<String>, Failure> {
         .collect();
     let mut names = BTreeSet::new();
     for id in writers {
-        let document = lookup.document(id)?;
+        let document = lookup.headers(id)?;
         if kind_of(&document) != Some(KindOf::Topic) {
             continue;
         }

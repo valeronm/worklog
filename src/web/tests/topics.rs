@@ -1,6 +1,6 @@
 use super::{has, lacks, main_of, ok, page, stamp};
 use crate::app::testing::{
-    ENDED, ENDED_FACT, REMOVED, World, claim_fields, entry, fact, followup, fork, head, part_of,
+    ENDED, ENDED_FACT, REMOVED, World, claim_fields, entry, fact, followup, fork, head_id, part_of,
     topic, topic_fields, uses, world,
 };
 use crate::domain::id::{DocumentId, VersionId};
@@ -311,7 +311,7 @@ fn a_topic_s_document_page_is_its_topic_page() {
     has(&whole, "<h1>lantern</h1>");
     has(&whole, &tabs(&lantern, "Facts", FILED));
 
-    let version = head(&world, &lantern).id;
+    let version = head_id(&world, &lantern);
     let of_version = ok(&world, &format!("/doc/{version}"));
     has(&of_version, "<span class=\"kind\">version</span>");
     lacks(&of_version, "class=\"tabs\"");

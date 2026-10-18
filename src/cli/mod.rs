@@ -288,7 +288,7 @@ fn serve(
         }
         _ => {}
     }
-    // A directory store answers from one reading of its tree, so each request has its own.
+    // A directory store answers header reads from one reading of its tree.
     let settled = || {
         let adapters = wired(environment)?;
         adapters.settle()?;

@@ -18,7 +18,7 @@ use crate::domain::schema::address::Found;
 use crate::domain::schema::graph::Edges;
 use crate::domain::schema::kind::Reference;
 use crate::domain::schema::{Content, KindOf, Record, links, step, translate};
-use crate::domain::version::{Envelope, Fields, Kind, Links, Version};
+use crate::domain::version::{Envelope, Fields, Header, Kind, Links, Version};
 
 const NEW: &str = "new";
 const SAVE: &str = "save";
@@ -125,7 +125,7 @@ impl<'a, 'b> Target<'a, 'b> {
         fields: &Fields,
         origin: Origin,
     ) -> Result<Target<'a, 'b>, Failure> {
-        let document = lookup.document(id)?;
+        let document = lookup.headers(id)?;
         let what = match lookup.address(id)? {
             Some(address) => address,
             None => match spelled_by(lookup, kind, fields)? {
@@ -241,6 +241,11 @@ impl<'a, 'b> Target<'a, 'b> {
         turned.map_err(|error| self.refusal(error))
     }
 
+    fn version_of(&self, head: &Header) -> Result<Rc<Version>, Failure> {
+        self.lookup
+            .version(self.document.id(), &head.id, &self.what)
+    }
+
     fn next(&self, deps: &Deps, fields: &Fields, body: &str) -> Result<Record, Failure> {
         let stepped = match self.document.state() {
             State::Absent => step::next(&self.kind, fields, None, true, deps.read().today()?),
@@ -248,7 +253,7 @@ impl<'a, 'b> Target<'a, 'b> {
                 &self.kind,
                 fields,
                 Some(&head.fields),
-                head.body != body,
+                self.version_of(head)?.body != body,
                 deps.read().today()?,
             ),
             State::Forked(heads) => {
@@ -264,7 +269,7 @@ impl<'a, 'b> Target<'a, 'b> {
                     fields,
                     &speaking.fields,
                     &others,
-                    speaking.body != body,
+                    self.version_of(speaking)?.body != body,
                     deps.read().today()?,
                 )
             }
@@ -295,7 +300,7 @@ impl<'a, 'b> Target<'a, 'b> {
         if fork == Fork::Refused
             && let [head] = self.document.heads().as_slice()
             && head.fields == fields
-            && head.body == body
+            && self.version_of(head)?.body == body
         {
             return Err(match self.origin {
                 Origin::Draft => self.refusal("the draft equals its parent"),
@@ -384,7 +389,7 @@ impl<'a, 'b> Target<'a, 'b> {
             return Ok(());
         };
         let failed = Failed::default();
-        let edges_of = |id: &DocumentId| match self.lookup.document(id) {
+        let edges_of = |id: &DocumentId| match self.lookup.headers(id) {
             Ok(document) => Some(topic_edges(&document)),
             Err(failure) => {
                 failed.keep(failure);
@@ -456,7 +461,7 @@ fn spelled_by(lookup: &Lookup, kind: &Kind, fields: &Fields) -> Result<Option<St
     Ok(spelled(kind, &named))
 }
 
-fn held<'v>(heads: &[&'v Version], key: &str) -> Vec<&'v str> {
+fn held<'v>(heads: &[&'v Header], key: &str) -> Vec<&'v str> {
     let mut held = Vec::new();
     for head in heads {
         for text in texts(&head.fields, key) {
@@ -475,8 +480,8 @@ mod tests {
     use super::*;
     use crate::app::draft::{self, New};
     use crate::app::testing::{
-        ENDED, ENDED_FACT, TOPIC, World, entry, fact, fact_fields, fork, head, record, refused,
-        topic, topic_fields, world,
+        ENDED, ENDED_FACT, TOPIC, World, entry, fact, fact_fields, fork, head, head_id, record,
+        refused, stored, topic, topic_fields, world,
     };
     use crate::domain::draft::Draft;
     use crate::domain::ports::{Drafts, DraftsRead, Ids, Store, StoreRead};
@@ -660,7 +665,7 @@ mod tests {
         let deps = world.deps();
         draft::checkout(&deps, "lantern").unwrap();
         set(&world, &lantern, "summary", "A lamp controller");
-        let planted = first(&lantern, "topic", "name = \"x\"", "\n").id;
+        let planted = first(&lantern, "topic", "name = \"x\"", "\n").id.clone();
         world
             .store
             .plant_unreadable(&lantern, planted, ReadError::Corrupt);
@@ -827,7 +832,7 @@ mod tests {
                 .clone_into(&mut draft.body);
         });
         save(&world.deps(), "phone").unwrap();
-        let links = head(&world, &phone).links.0;
+        let links = head(&world, &phone).links.0.clone();
         assert_eq!(
             links.into_iter().collect::<Vec<_>>(),
             vec![
@@ -864,7 +869,7 @@ mod tests {
             draft.body.push_str("And [[lantern/unknown]].\n");
         });
         save(&deps, "phone").unwrap();
-        let links = head(&world, &phone).links.0;
+        let links = head(&world, &phone).links.0.clone();
         assert_eq!(
             links.into_iter().collect::<Vec<_>>(),
             vec![
@@ -908,7 +913,7 @@ mod tests {
         }
         crate::app::fork::resolve(&deps, "phone").unwrap();
         save(&deps, "phone").unwrap();
-        let links = head(&world, &phone).links.0;
+        let links = head(&world, &phone).links.0.clone();
         assert_eq!(
             links.into_iter().collect::<Vec<_>>(),
             vec![
@@ -929,7 +934,7 @@ mod tests {
                 .clone_into(&mut draft.body);
         });
         save(&world.deps(), "lantern/relay-pin").unwrap();
-        let links = head(&world, &relay).links.0;
+        let links = head(&world, &relay).links.0.clone();
         assert_eq!(
             links.into_iter().collect::<Vec<_>>(),
             vec![
@@ -963,8 +968,8 @@ mod tests {
         let (world, lantern) = world();
         let deps = world.deps();
         let heads = fork(&world, &lantern, &format!("name = \"lantern\"\n{TOPIC}"));
-        let held = world.store.document(&lantern).unwrap();
-        let mut draft = Draft::of(held.heads()[1]);
+        let held = world.store.headers(&lantern).unwrap();
+        let mut draft = Draft::of(&stored(&world, &lantern, &held.heads()[1].id));
         draft.fields = step::shown(&draft.fields);
         "both\n".clone_into(&mut draft.body);
         world.drafts.write(&draft).unwrap();
@@ -1111,7 +1116,10 @@ mod tests {
         save(&world.deps(), "lantern").unwrap();
         let merged = head(&world, &lantern);
         assert_eq!(merged.envelope.change, "resolve");
-        assert_eq!(merged.envelope.parents, vec![ended.id, live.id]);
+        assert_eq!(
+            merged.envelope.parents,
+            vec![ended.id.clone(), live.id.clone()]
+        );
         assert_eq!(merged.fields.get("ended"), None);
         assert_eq!(merged.fields.get("created"), Some(&day("2026-09-04")));
     }
@@ -1231,7 +1239,7 @@ mod tests {
     fn a_draft_with_a_parent_of_a_document_not_stored_is_refused() {
         let (world, lantern) = world();
         let phone = new_topic(&world, "phone");
-        let elsewhere = head(&world, &lantern).id;
+        let elsewhere = head_id(&world, &lantern);
         edit(&world, &phone, |draft| draft.parents = vec![elsewhere]);
         let text = refused(save(&world.deps(), "phone"));
         assert!(
@@ -1256,10 +1264,10 @@ mod tests {
         assert_eq!(stored.id, written.version);
         assert_eq!(stored.fields, ended);
         assert_eq!(stored.envelope.change, "end");
-        assert_eq!(stored.envelope.parents, vec![root.id]);
+        assert_eq!(stored.envelope.parents, vec![root.id.clone()]);
         assert_eq!(stored.links.0.get("desk"), Some(&world.host.bound()));
 
-        let planted = first(&lantern, "topic", "name = \"x\"", "\n").id;
+        let planted = first(&lantern, "topic", "name = \"x\"", "\n").id.clone();
         world
             .store
             .plant_unreadable(&lantern, planted, ReadError::Corrupt);

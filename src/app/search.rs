@@ -11,7 +11,7 @@ use crate::app::{Failure, ReadDeps};
 use crate::domain::document::Document;
 use crate::domain::id::{DocumentId, VersionId};
 use crate::domain::schema::KindOf;
-use crate::domain::version::{Stamp, Version};
+use crate::domain::version::{Header, Stamp};
 
 const SEARCHED: [KindOf; 4] = [KindOf::Topic, KindOf::Fact, KindOf::Entry, KindOf::Followup];
 
@@ -74,8 +74,11 @@ pub fn search(deps: &ReadDeps, query: &Query) -> Result<Vec<Hit>, Failure> {
         };
         for shown in shown(&topics, &documents, query.ended) {
             let row = shown.row;
+            let body = lookup
+                .body(&row.document, &shown.head.id)?
+                .unwrap_or_default();
             let lines: Vec<Matched> = std::iter::once(row.summary.as_str())
-                .chain(shown.head.body.lines())
+                .chain(body.lines())
                 .filter_map(|line| {
                     let found: Vec<Range<usize>> =
                         matcher.find_iter(line).map(|found| found.range()).collect();
@@ -151,7 +154,7 @@ pub fn log(deps: &ReadDeps, limit: usize, machine: Option<&str>) -> Result<Vec<L
     for unknown in lookup.unknown()? {
         documents.extend(unknown.documents);
     }
-    let mut versions: Vec<(&Version, &Document)> = Vec::new();
+    let mut versions: Vec<(&Header, &Document)> = Vec::new();
     for document in &documents {
         let written = document.history().into_iter().filter(|version| {
             (machine.as_ref()).is_none_or(|wanted| *wanted == version.envelope.machine)
@@ -188,7 +191,8 @@ mod tests {
     use super::*;
     use crate::app::heads::row_head;
     use crate::app::testing::{
-        ENDED, World, fact, fact_fields, fork, head, labels, to, topic, world, written_at,
+        ENDED, World, fact, fact_fields, fork, head, head_id, labels, stored, to, topic, world,
+        written_at,
     };
     use crate::domain::id::DocumentId;
     use crate::domain::ports::{Store, StoreRead};
@@ -498,9 +502,9 @@ mod tests {
     }
 
     fn head_body(world: &World, id: &DocumentId) -> String {
-        let held = world.store.document(id).unwrap();
+        let held = world.store.headers(id).unwrap();
         let (version, _) = row_head(&held).unwrap();
-        version.body.trim().to_owned()
+        stored(world, id, &version.id).body.trim().to_owned()
     }
 
     #[test]
@@ -520,8 +524,12 @@ mod tests {
         )
         .unwrap();
         assert_eq!(world.store.kinds.get(), KindOf::ALL.len() - 1);
-        assert_eq!(world.store.documents.get(), 0);
         assert_eq!(world.store.holdings.get(), 0);
+        assert_eq!(
+            (world.store.texts.get(), world.store.versions.get()),
+            (3, 0),
+            "one body read per document searched"
+        );
     }
 
     fn rewritten(world: &World, id: &DocumentId, stamp: &str, machine: &DocumentId) -> VersionId {
@@ -535,6 +543,7 @@ mod tests {
             Some(machine),
         )
         .id
+        .clone()
     }
 
     fn logged(world: &World, limit: usize, machine: Option<&str>) -> Vec<Logged> {
@@ -623,7 +632,6 @@ mod tests {
         log(&deps.read(), 10, None).unwrap();
         assert_eq!(world.store.kinds.get(), KindOf::ALL.len());
         assert_eq!(world.store.holdings.get(), 0);
-        assert_eq!(world.store.documents.get(), 0);
     }
 
     #[test]
@@ -734,7 +742,7 @@ mod tests {
     fn the_log_lists_the_versions_of_a_document_whose_head_does_not_read() {
         let (world, lantern) = world();
         let relay = fact(&world, &lantern, "relay-pin", "");
-        let first = head(&world, &relay).id;
+        let first = head_id(&world, &relay);
         let second = world.amend(&relay, "name = \"relay-pin\"\n", "\n");
         let mine: Vec<Logged> = logged(&world, usize::MAX, None)
             .into_iter()
@@ -750,7 +758,7 @@ mod tests {
     fn the_log_lists_the_versions_of_a_kind_this_worklog_does_not_know() {
         let (world, _) = world();
         let sketch = world.put("sketch", "name = \"one\"\n", "\n");
-        let first = head(&world, &sketch).id;
+        let first = head_id(&world, &sketch);
         let second = world.amend(&sketch, "name = \"two\"\n", "\n");
         let world = world.counted();
         let deps = world.deps();
@@ -771,7 +779,7 @@ mod tests {
     fn the_log_lists_the_versions_of_an_ended_document() {
         let (world, lantern) = world();
         let relay = fact(&world, &lantern, "relay-pin", "");
-        let first = head(&world, &relay).id;
+        let first = head_id(&world, &relay);
         let fields = format!(
             "name = \"relay-pin\"\ntopic = \"{lantern}\"\ncreated = 2026-09-04\n\
              confirmed = 2026-09-04\nsummary = \"s\"\n{ENDED}"

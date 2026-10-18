@@ -227,13 +227,20 @@ where that variable is not set. `WORKLOG_HOME=<dir>` moves it to
 
 ## The host's cache
 
-A host keeps what it parsed of the store's tree in one file per store,
-`$XDG_CACHE_HOME/worklog/<hash of the store's path>.store`, or under
-`~/.cache` where that variable is not set; `WORKLOG_HOME=<dir>` moves it
-to `<dir>/cache`. The file holds every document the last walk read, with
-the modification time its directory had, and nothing else: the version
-files stay what the store is, and the file is rebuilt from them whenever it
-is missing, does not read, or was written by another release of the binary.
+A host keeps the headers it parsed of the store's tree in one file per
+store, `$XDG_CACHE_HOME/worklog/<hash of the store's path>.store`, or
+under `~/.cache` where that variable is not set; `WORKLOG_HOME=<dir>`
+moves it to `<dir>/cache`. The file holds, for every document the last
+walk read, the header of each of its versions and the modification time
+its directory had, and nothing else: no body is cached, the version files
+stay what the store is, and the file is rebuilt from them whenever it is
+missing, does not read, or was written by another release of the binary.
+
+A listing, a search by topic and the session opener answer from the
+headers alone. A command that shows, compares or searches a body reads
+the file of each version it shows, so a search over the whole store opens
+the current version of every document it searches, and a version whose
+file no longer reads as the cache recorded it is refused by name.
 
 A walk takes a document as the cache holds it when its directory's
 modification time is the one recorded, and reads the directory's files

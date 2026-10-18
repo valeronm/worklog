@@ -2,28 +2,29 @@ use std::cell::{OnceCell, Ref, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::time::SystemTime;
 
 use crate::domain::document::{Document, State, Unreadable};
 use crate::domain::id::{DocumentId, VersionId, is_hex};
 use crate::domain::ports::{Store, StoreError, StoreRead};
-use crate::domain::version::{Kind, ReadError, Version};
+use crate::domain::version::{Header, Kind, ReadError, Version, read_body};
 
-use super::{STAGING_PREFIX, USAGE_DIRECTORY, directories, files, io_error};
+use super::{STAGING_PREFIX, USAGE_DIRECTORY, directories, files, io_error, optional};
 
 mod cache;
 
 use cache::{Cache, Remembered};
 
-// A version's file is never rewritten. One instance is one snapshot: the tree is walked
-// once and remembered.
+// A version's file is never rewritten. One instance is one reading of the tree, and a body
+// is read from its file as it stands.
 pub struct FsStore {
     root: PathBuf,
     cache: Option<Cache>,
     walked: OnceCell<RefCell<Walked>>,
 }
 
-type Walked = BTreeMap<DocumentId, Document>;
+type Walked = BTreeMap<DocumentId, Rc<Document>>;
 
 fn file_name(id: &VersionId) -> String {
     format!("{id}.md")
@@ -33,27 +34,12 @@ fn version_named(name: &str) -> Option<VersionId> {
     VersionId::parse(name.strip_suffix(".md")?).ok()
 }
 
-// A file that does not read is still a version file of its document.
-fn files_of(document: &Document) -> Vec<VersionId> {
-    let mut ids: Vec<VersionId> = document
-        .history()
-        .into_iter()
-        .map(|version| version.id.clone())
-        .chain(
-            document
-                .unreadable()
-                .iter()
-                .map(|file| file.version.clone()),
-        )
-        .collect();
-    ids.sort();
-    ids.dedup();
-    ids
+fn text_of(bytes: Vec<u8>) -> Result<String, ReadError> {
+    String::from_utf8(bytes).map_err(|_| ReadError::Corrupt)
 }
 
-fn parse(bytes: Vec<u8>, name: &VersionId) -> Result<Version, ReadError> {
-    let text = String::from_utf8(bytes).map_err(|_| ReadError::Corrupt)?;
-    Version::read(name, &text)
+fn empty(id: &DocumentId) -> Rc<Document> {
+    Rc::new(Document::new(id.clone(), Vec::new(), Vec::new()))
 }
 
 impl FsStore {
@@ -137,16 +123,17 @@ impl FsStore {
         Ok(found)
     }
 
-    fn read(&self, id: &DocumentId) -> Result<Document, StoreError> {
-        let mut versions = Vec::new();
+    fn read_headers(&self, id: &DocumentId) -> Result<Rc<Document>, StoreError> {
+        let mut headers = Vec::new();
         let mut unreadable = Vec::new();
         for name in self.version_ids(id)? {
-            match parse(self.bytes(id, &name)?, &name) {
-                Ok(version) => versions.push(version),
+            let read = text_of(self.bytes(id, &name)?).and_then(|text| Header::read(&name, &text));
+            match read {
+                Ok(header) => headers.push(header),
                 Err(why) => unreadable.push(Unreadable { version: name, why }),
             }
         }
-        Ok(Document::new(id.clone(), versions, unreadable))
+        Ok(Rc::new(Document::new(id.clone(), headers, unreadable)))
     }
 
     fn walked(&self) -> Result<Ref<'_, Walked>, StoreError> {
@@ -163,7 +150,7 @@ impl FsStore {
     fn walk(&self) -> Result<Walked, StoreError> {
         let mut held = Walked::new();
         for id in self.documents("")? {
-            let document = self.read(&id)?;
+            let document = self.read_headers(&id)?;
             held.insert(id, document);
         }
         Ok(held)
@@ -184,7 +171,7 @@ impl FsStore {
             let document = match remembered.remove(&id) {
                 Some(kept) if kept.modified == modified => kept.document,
                 _ => {
-                    let document = self.read(&id)?;
+                    let document = self.read_headers(&id)?;
                     changed |= document.unreadable().is_empty() && cache::settled(taken, modified);
                     document
                 }
@@ -200,13 +187,16 @@ impl FsStore {
             .collect())
     }
 
-    /// Reads the tree now unless it was read, so every later answer of this instance comes
-    /// from one reading of it.
+    /// Reads the tree now unless it was read, so every later header read of this instance
+    /// comes from one reading of it.
     pub fn settle(&self) -> Result<(), StoreError> {
         self.walked().map(drop)
     }
 
-    fn matching(&self, wanted: impl Fn(&Document) -> bool) -> Result<Vec<Document>, StoreError> {
+    fn matching(
+        &self,
+        wanted: impl Fn(&Document) -> bool,
+    ) -> Result<Vec<Rc<Document>>, StoreError> {
         let walked = self.walked()?;
         Ok(walked
             .values()
@@ -225,6 +215,16 @@ impl FsStore {
     fn bytes(&self, document: &DocumentId, version: &VersionId) -> Result<Vec<u8>, StoreError> {
         let path = self.version_path(document, version);
         fs::read(&path).map_err(|e| io_error(&path, &e))
+    }
+
+    fn text(
+        &self,
+        document: &DocumentId,
+        version: &VersionId,
+    ) -> Result<Option<String>, StoreError> {
+        let path = self.version_path(document, version);
+        let bytes = optional(&path, fs::read(&path))?;
+        Ok(bytes.and_then(|bytes| text_of(bytes).ok()))
     }
 
     /// A Syncthing folder's ignore file is per host and never synced. One
@@ -250,19 +250,36 @@ impl FsStore {
 }
 
 impl StoreRead for FsStore {
-    fn document(&self, id: &DocumentId) -> Result<Document, StoreError> {
-        let Some(walked) = self.walked.get() else {
-            return self.read(id);
-        };
-        let held = walked.borrow().get(id).cloned();
-        Ok(held.unwrap_or_else(|| Document::new(id.clone(), Vec::new(), Vec::new())))
+    fn headers(&self, id: &DocumentId) -> Result<Rc<Document>, StoreError> {
+        match self.walked.get() {
+            Some(walked) => Ok(walked.borrow().get(id).map_or_else(|| empty(id), Rc::clone)),
+            None => self.read_headers(id),
+        }
     }
 
-    fn of_kind(&self, kind: &Kind) -> Result<Vec<Document>, StoreError> {
+    fn version(
+        &self,
+        document: &DocumentId,
+        version: &VersionId,
+    ) -> Result<Option<Version>, StoreError> {
+        let text = self.text(document, version)?;
+        Ok(text.and_then(|text| Version::read(version, &text).ok()))
+    }
+
+    fn body(
+        &self,
+        document: &DocumentId,
+        version: &VersionId,
+    ) -> Result<Option<String>, StoreError> {
+        let text = self.text(document, version)?;
+        Ok(text.and_then(|text| read_body(version, &text).ok().map(str::to_owned)))
+    }
+
+    fn of_kind(&self, kind: &Kind) -> Result<Vec<Rc<Document>>, StoreError> {
         self.matching(|document| document.kind() == Some(kind))
     }
 
-    fn holding(&self, key: &str, values: &[&str]) -> Result<Vec<Document>, StoreError> {
+    fn holding(&self, key: &str, values: &[&str]) -> Result<Vec<Rc<Document>>, StoreError> {
         if values.is_empty() {
             return Ok(Vec::new());
         }
@@ -270,17 +287,17 @@ impl StoreRead for FsStore {
         self.matching(|document| document.holds_any(key, &asked))
     }
 
-    fn unreadable(&self) -> Result<Vec<Document>, StoreError> {
+    fn unreadable(&self) -> Result<Vec<Rc<Document>>, StoreError> {
         self.matching(|document| !document.unreadable().is_empty())
     }
 
-    fn forked(&self) -> Result<Vec<Document>, StoreError> {
+    fn forked(&self) -> Result<Vec<Rc<Document>>, StoreError> {
         self.matching(|document| matches!(document.state(), State::Forked(_)))
     }
 
     fn kinds(&self) -> Result<Vec<Kind>, StoreError> {
         let walked = self.walked()?;
-        let held: BTreeSet<&Kind> = walked.values().filter_map(Document::kind).collect();
+        let held: BTreeSet<&Kind> = walked.values().filter_map(|held| held.kind()).collect();
         Ok(held.into_iter().cloned().collect())
     }
 
@@ -292,7 +309,10 @@ impl StoreRead for FsStore {
             let walked = walked.borrow();
             return Ok(walked
                 .iter()
-                .filter(|(id, held)| id.as_str().starts_with(prefix) && !files_of(held).is_empty())
+                .filter(|(id, held)| {
+                    id.as_str().starts_with(prefix)
+                        && !(held.headers().is_empty() && held.unreadable().is_empty())
+                })
                 .map(|(id, _)| id.clone())
                 .collect());
         }
@@ -309,11 +329,14 @@ impl StoreRead for FsStore {
         let mut found = Vec::new();
         if let Some(walked) = self.walked.get() {
             for (document, held) in walked.borrow().iter() {
-                for version in files_of(held) {
-                    if version.starts_with(prefix) {
-                        found.push((document.clone(), version));
-                    }
-                }
+                // A version put over its file that did not read is a header and an unreadable
+                // file both.
+                let unread = (held.unreadable().iter().map(|file| &file.version))
+                    .filter(|version| held.get(version).is_none());
+                let named = (held.headers().iter().map(|header| &header.id))
+                    .chain(unread)
+                    .filter(|version| version.starts_with(prefix));
+                found.extend(named.map(|version| (document.clone(), version.clone())));
             }
             return Ok(found);
         }
@@ -354,8 +377,8 @@ impl Store for FsStore {
             let mut walked = walked.borrow_mut();
             let held = walked
                 .entry(document.clone())
-                .or_insert_with(|| Document::new(document.clone(), Vec::new(), Vec::new()));
-            *held = held.with_version(version.clone());
+                .or_insert_with(|| empty(document));
+            *held = Rc::new(held.with_version(version.header().clone()));
         }
         Ok(())
     }
@@ -380,7 +403,7 @@ mod tests {
 
     fn reread(store: &FsStore, id: &DocumentId) {
         if let Some(walked) = store.walked.get() {
-            let document = store.read(id).unwrap();
+            let document = store.read_headers(id).unwrap();
             walked.borrow_mut().insert(id.clone(), document);
         }
     }
@@ -568,8 +591,8 @@ mod tests {
         store.put(&relay).unwrap();
         store.put(&rewired).unwrap();
         fs::write(path(&store, &relay), "damaged").unwrap();
-        let held = store.document(&lantern()).unwrap();
-        assert_eq!(held.state(), State::Live(&rewired));
+        let held = store.headers(&lantern()).unwrap();
+        assert_eq!(held.state(), State::Live(rewired.header()));
         assert_eq!(
             held.unreadable(),
             [Unreadable {
@@ -585,7 +608,7 @@ mod tests {
         assert_eq!(store.of_kind(&fact).unwrap(), [held]);
         fs::write(path(&store, &rewired), [0xff, 0xfe]).unwrap();
         reread(&store, &lantern());
-        let held = store.document(&lantern()).unwrap();
+        let held = store.headers(&lantern()).unwrap();
         assert_eq!(held.unreadable().len(), 2);
         assert!(store.of_kind(&fact).unwrap().is_empty());
         assert_eq!(store.unreadable().unwrap(), [held]);
@@ -599,7 +622,7 @@ mod tests {
         let misplaced = store.version_path(&lantern(), &stray.id);
         fs::create_dir_all(misplaced.parent().unwrap()).unwrap();
         fs::write(misplaced, stray.text()).unwrap();
-        let held = store.document(&lantern()).unwrap();
+        let held = store.headers(&lantern()).unwrap();
         assert_eq!(held.state(), State::Absent);
         match &held.unreadable()[0].why {
             ReadError::Malformed(why) => assert!(why.contains(ATLAS), "{why}"),
@@ -631,8 +654,8 @@ mod tests {
         fs::write(dir.path().join("7f").join(ATLAS), "and one as a document").unwrap();
         fs::create_dir_all(dir.path().join("7f").join("not-a-document")).unwrap();
         fs::create_dir_all(dir.path().join(".stfolder")).unwrap();
-        let held = store.document(&lantern()).unwrap();
-        assert_eq!(held.history(), [&relay]);
+        let held = store.headers(&lantern()).unwrap();
+        assert_eq!(held.history(), [relay.header()]);
         assert!(held.unreadable().is_empty());
         assert_eq!(store.documents_under("7").unwrap(), [lantern()]);
         assert!(store.documents_under("a").unwrap().is_empty());
@@ -656,7 +679,7 @@ mod tests {
                 "{prefix}"
             );
         }
-        let held = store.document(&lantern()).unwrap();
+        let held = store.headers(&lantern()).unwrap();
         assert_eq!(held.state(), State::Absent);
         assert!(held.unreadable().is_empty());
         assert!(store.unreadable().unwrap().is_empty());
@@ -688,7 +711,7 @@ mod tests {
         fs::write(store.version_path(&atlas, &torn), "damaged").unwrap();
         let fact = Kind::parse("fact").unwrap();
         let forked = store.of_kind(&fact).unwrap();
-        let damaged = store.document(&atlas).unwrap();
+        let damaged = store.headers(&atlas).unwrap();
         assert_eq!(damaged.unreadable().len(), 1);
 
         fs::remove_dir_all(dir.path()).unwrap();
@@ -700,9 +723,9 @@ mod tests {
         assert_eq!(store.holding("name", &["relay"]).unwrap(), forked);
         assert_eq!(store.forked().unwrap(), forked);
         assert_eq!(store.unreadable().unwrap(), std::slice::from_ref(&damaged));
-        assert_eq!(store.document(&atlas).unwrap(), damaged);
+        assert_eq!(store.headers(&atlas).unwrap(), damaged);
         let absent = DocumentId::from_bytes([0x42; 16]);
-        assert_eq!(store.document(&absent).unwrap().state(), State::Absent);
+        assert_eq!(store.headers(&absent).unwrap().state(), State::Absent);
     }
 
     #[test]
@@ -714,8 +737,8 @@ mod tests {
         store.settle().unwrap();
 
         fs::remove_dir_all(dir.path()).unwrap();
-        let held = store.document(&lantern()).unwrap();
-        assert_eq!(held.state(), State::Live(&relay));
+        let held = store.headers(&lantern()).unwrap();
+        assert_eq!(held.state(), State::Live(relay.header()));
         assert_eq!(store.documents_under(LANTERN).unwrap(), [lantern()]);
         assert_eq!(
             store.versions_under(relay.id.short()).unwrap(),
@@ -723,9 +746,51 @@ mod tests {
         );
         let unsettled = FsStore::new(dir.path().to_path_buf());
         assert_eq!(
-            unsettled.document(&lantern()).unwrap().state(),
+            unsettled.headers(&lantern()).unwrap().state(),
             State::Absent
         );
+    }
+
+    #[test]
+    fn headers_before_a_walk_read_the_one_directory_and_walk_nothing() {
+        let (dir, store) = scratch();
+        let atlas = DocumentId::parse(ATLAS).unwrap();
+        let relay = first(&lantern(), "fact", RELAY, "first\n");
+        store.put(&relay).unwrap();
+        store
+            .put(&first(&atlas, "topic", "name = \"atlas\"", "\n"))
+            .unwrap();
+        let unwalked = FsStore::new(dir.path().to_path_buf());
+        let held = unwalked.headers(&lantern()).unwrap();
+        assert_eq!(held.state(), State::Live(relay.header()));
+        assert!(unwalked.walked.get().is_none());
+        fs::remove_dir_all(unwalked.document_dir(&atlas)).unwrap();
+        assert_eq!(unwalked.headers(&atlas).unwrap().state(), State::Absent);
+    }
+
+    #[test]
+    fn a_version_and_its_body_read_from_the_file_as_it_stands() {
+        let (_dir, store) = scratch();
+        let relay = first(&lantern(), "fact", RELAY, "first\n");
+        store.put(&relay).unwrap();
+        store.settle().unwrap();
+        assert_eq!(
+            store.version(&lantern(), &relay.id).unwrap(),
+            Some(relay.clone())
+        );
+        assert_eq!(
+            store.body(&lantern(), &relay.id).unwrap().as_deref(),
+            Some("first\n")
+        );
+        fs::write(path(&store, &relay), "rewritten in place").unwrap();
+        assert_eq!(
+            store.headers(&lantern()).unwrap().state(),
+            State::Live(relay.header())
+        );
+        assert_eq!(store.version(&lantern(), &relay.id).unwrap(), None);
+        assert_eq!(store.body(&lantern(), &relay.id).unwrap(), None);
+        fs::write(path(&store, &relay), [0xff, 0xfe]).unwrap();
+        assert_eq!(store.body(&lantern(), &relay.id).unwrap(), None);
     }
 
     fn cached(dir: &Path) -> FsStore {
@@ -759,12 +824,13 @@ mod tests {
         let afresh = cached(dir.path());
         afresh.settle().unwrap();
         assert_eq!(
-            afresh.document(&lantern()).unwrap().state(),
-            State::Live(&relay)
+            afresh.headers(&lantern()).unwrap().state(),
+            State::Live(relay.header())
         );
         assert_eq!(afresh.of_kind(&relay.envelope.kind).unwrap().len(), 1);
+        assert_eq!(afresh.version(&lantern(), &relay.id).unwrap(), None);
         afresh.reread().unwrap();
-        assert_eq!(afresh.document(&lantern()).unwrap().state(), State::Absent);
+        assert_eq!(afresh.headers(&lantern()).unwrap().state(), State::Absent);
         assert_eq!(afresh.unreadable().unwrap().len(), 1);
         let unwalked = cached(dir.path());
         unwalked.reread().unwrap();
@@ -794,9 +860,9 @@ mod tests {
         cached(dir.path()).put(&renamed).unwrap();
         let afresh = cached(dir.path());
         afresh.settle().unwrap();
-        let held = afresh.document(&lantern()).unwrap();
-        assert_eq!(held.state(), State::Live(&renamed));
-        assert_eq!(held.history(), [&renamed, &relay]);
+        let held = afresh.headers(&lantern()).unwrap();
+        assert_eq!(held.state(), State::Live(renamed.header()));
+        assert_eq!(held.history(), [renamed.header(), relay.header()]);
         assert_eq!(afresh.holding("name", &["relay-pin"]).unwrap(), [held]);
     }
 
@@ -816,8 +882,8 @@ mod tests {
         let recalling = cached(dir.path()).recalling();
         recalling.settle().unwrap();
         assert_eq!(
-            recalling.document(&lantern()).unwrap().state(),
-            State::Live(&renamed)
+            recalling.headers(&lantern()).unwrap().state(),
+            State::Live(renamed.header())
         );
         assert_eq!(fs::read(&file).unwrap(), written);
     }
@@ -834,10 +900,10 @@ mod tests {
         let afresh = cached(dir.path());
         afresh.settle().unwrap();
         assert_eq!(
-            afresh.document(&atlas).unwrap().state(),
-            State::Live(&topic)
+            afresh.headers(&atlas).unwrap().state(),
+            State::Live(topic.header())
         );
-        assert_eq!(afresh.document(&lantern()).unwrap().state(), State::Absent);
+        assert_eq!(afresh.headers(&lantern()).unwrap().state(), State::Absent);
         assert_eq!(
             afresh.kinds().unwrap(),
             std::slice::from_ref(&topic.envelope.kind)
@@ -856,14 +922,14 @@ mod tests {
         settled(&store, &lantern());
         store.settle().unwrap();
         assert_eq!(
-            store.document(&lantern()).unwrap().state(),
-            State::Live(&relay)
+            store.headers(&lantern()).unwrap().state(),
+            State::Live(relay.header())
         );
 
         fs::write(path(&store, &relay), "damaged too").unwrap();
         let afresh = cached(dir.path());
         afresh.settle().unwrap();
-        let held = afresh.document(&lantern()).unwrap();
+        let held = afresh.headers(&lantern()).unwrap();
         assert_eq!(held.state(), State::Absent);
         assert_eq!(held.unreadable().len(), 2);
     }
@@ -882,16 +948,16 @@ mod tests {
         let topic = first(&atlas, "topic", "name = \"atlas\"", "\n");
         store.put(&topic).unwrap();
         let afresh = FsStore::new(dir.path().to_path_buf());
-        let held = afresh.document(&lantern()).unwrap();
-        assert_eq!(held.state(), State::Live(&renamed));
-        assert_eq!(store.document(&lantern()).unwrap(), held);
+        let held = afresh.headers(&lantern()).unwrap();
+        assert_eq!(held.state(), State::Live(renamed.header()));
+        assert_eq!(store.headers(&lantern()).unwrap(), held);
         assert_eq!(store.of_kind(&fact).unwrap(), std::slice::from_ref(&held));
         assert_eq!(store.holding("name", &["relay-pin"]).unwrap(), [held]);
         assert!(store.holding("name", &["relay"]).unwrap().is_empty());
         assert_eq!(store.kinds().unwrap(), [fact, topic.envelope.kind.clone()]);
         assert_eq!(
             store.of_kind(&topic.envelope.kind).unwrap(),
-            [afresh.document(&atlas).unwrap()]
+            [afresh.headers(&atlas).unwrap()]
         );
         assert_eq!(store.documents_under("7").unwrap(), [lantern(), atlas]);
     }
@@ -914,12 +980,12 @@ mod tests {
         store.put(&topic).unwrap();
         fs::remove_dir_all(dir.path()).unwrap();
 
-        let held = store.document(&lantern()).unwrap();
-        assert_eq!(held.history(), [&renamed, &relay]);
-        assert_eq!(held.state(), State::Live(&renamed));
+        let held = store.headers(&lantern()).unwrap();
+        assert_eq!(held.history(), [renamed.header(), relay.header()]);
+        assert_eq!(held.state(), State::Live(renamed.header()));
         assert!(held.unreadable().is_empty());
-        let named = store.document(&atlas).unwrap();
-        assert_eq!(named.state(), State::Live(&topic));
+        let named = store.headers(&atlas).unwrap();
+        assert_eq!(named.state(), State::Live(topic.header()));
         assert_eq!(store.of_kind(&fact).unwrap(), std::slice::from_ref(&held));
         assert_eq!(
             store.of_kind(&topic.envelope.kind).unwrap(),
@@ -1002,10 +1068,10 @@ mod tests {
         store.put(&right).unwrap();
         let forked = store.forked().unwrap();
         assert_eq!(forked.len(), 1);
-        let mut heads = vec![&left, &right];
+        let mut heads = vec![left.header(), right.header()];
         heads.sort_by(|a, b| a.id.cmp(&b.id));
         assert_eq!(forked[0].state(), State::Forked(heads));
-        assert_eq!(forked, [store.document(&lantern()).unwrap()]);
+        assert_eq!(forked, [store.headers(&lantern()).unwrap()]);
     }
 
     #[test]

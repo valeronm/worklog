@@ -26,7 +26,7 @@ pub fn record(deps: &Deps, run: &Run, outcome: Outcome) -> Result<(), Failure> {
     let machine = deps.read().machine()?;
     // A directory that has not synced or mounted holds no file of the machine's topic, and a
     // line appended there creates files at the path the store belongs at.
-    let held = Lookup::new(deps.read().store).document(&machine)?;
+    let held = Lookup::new(deps.read().store).headers(&machine)?;
     if held.history().is_empty() && held.unreadable().is_empty() {
         return Ok(());
     }
@@ -161,6 +161,6 @@ mod tests {
         topic(&world, "desk", "");
         let world = world.counted();
         record(&world.deps(), &run("topics", "/srv"), Outcome::default()).unwrap();
-        assert_eq!((world.store.documents.get(), world.store.scans()), (1, 0));
+        assert_eq!((world.store.headers.get(), world.store.scans()), (1, 0));
     }
 }

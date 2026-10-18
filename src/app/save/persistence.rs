@@ -16,10 +16,11 @@ impl<'a> Writer<'a> {
 
     pub(super) fn store(&self, admitted: Admitted) -> Result<Written, Failure> {
         self.0.put(&admitted.version)?;
+        let header = admitted.version.into_header();
         Ok(Written {
-            document: admitted.version.envelope.document,
+            document: header.envelope.document,
             label: admitted.label,
-            version: admitted.version.id,
+            version: header.id,
         })
     }
 }

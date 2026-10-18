@@ -1531,21 +1531,3 @@ fn a_web_file_that_reaches_the_host_is_found() {
         assert_eq!(host_reached(broken), [found], "{broken}");
     }
 }
-
-// A recalled version is checked against nothing, so only the cache that read its text once
-// builds one.
-#[test]
-fn a_version_is_recalled_only_by_the_cache() {
-    let mut found = Vec::new();
-    sources(&src(), &mut found);
-    let mut callers: Vec<String> = found
-        .iter()
-        .filter(|(_, text)| text.contains("recalled("))
-        .map(|(path, _)| {
-            let file = Path::new(path).strip_prefix(src()).expect("a file of it");
-            file.display().to_string()
-        })
-        .collect();
-    callers.sort();
-    assert_eq!(callers, ["domain/version.rs", "wiring/fs/store/cache.rs"]);
-}

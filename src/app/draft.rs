@@ -264,8 +264,10 @@ pub(super) fn spelled(kind: &Kind, fields: &Fields) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::testing::{ENDED, ENDED_FACT, TOPIC, World, fact, refused, topic, world};
-    use crate::domain::ports::{Drafts, DraftsRead, Store, StoreRead};
+    use crate::app::testing::{
+        ENDED, ENDED_FACT, TOPIC, World, fact, head, head_id, refused, topic, world,
+    };
+    use crate::domain::ports::{Drafts, DraftsRead, Store};
     use crate::domain::version::{Kind, ReadError};
 
     fn stored(world: &World, id: &DocumentId) -> Draft {
@@ -333,7 +335,7 @@ mod tests {
     #[test]
     fn a_new_fact_goes_under_a_forked_topic_with_a_head_that_is_not_ended() {
         let (world, lantern) = world();
-        let root = world.store.document(&lantern).unwrap().heads()[0].clone();
+        let root = head(&world, &lantern);
         for (rest, body) in [("", "left\n"), (ENDED, "right\n")] {
             let fork = crate::domain::testing::after(
                 &[&root],
@@ -447,7 +449,7 @@ mod tests {
     fn a_checkout_shows_names_and_hides_the_tools_fields() {
         let (world, lantern) = world();
         let relay = fact(&world, &lantern, "relay-pin", "former_names = [\"old\"]\n");
-        let head = world.store.document(&relay).unwrap().heads()[0].id.clone();
+        let head = head_id(&world, &relay);
         let opened = checkout(&world.deps(), "lantern/relay-pin").unwrap();
         assert_eq!(opened.document, relay);
         let draft = stored(&world, &relay);
@@ -473,7 +475,7 @@ mod tests {
         assert!(text.contains("is ended; reopen it first"), "{text}");
 
         let phone = topic(&world, "phone", "");
-        let root = world.store.document(&phone).unwrap().heads()[0].clone();
+        let root = head(&world, &phone);
         for body in ["left\n", "right\n"] {
             let fork = crate::domain::testing::after(
                 &[&root],
@@ -494,7 +496,9 @@ mod tests {
         assert!(text.contains("a claim is never edited"), "{text}");
 
         let atlas = topic(&world, "atlas", "");
-        let planted = crate::domain::testing::first(&atlas, "topic", "name = \"x\"", "\n").id;
+        let planted = crate::domain::testing::first(&atlas, "topic", "name = \"x\"", "\n")
+            .id
+            .clone();
         world
             .store
             .plant_unreadable(&atlas, planted, ReadError::Corrupt);

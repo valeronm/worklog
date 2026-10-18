@@ -371,7 +371,7 @@ mod tests {
         let offered = offered(&world.deps().read(), &NAMED, Wanted::Ended).unwrap();
         assert_eq!(offered.len(), ended);
         let store = &world.store;
-        assert_eq!((store.holdings.get(), store.documents.get()), (0, 0));
+        assert_eq!(store.holdings.get(), 0);
         store.scans()
     }
 

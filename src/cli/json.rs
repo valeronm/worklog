@@ -51,7 +51,7 @@ mod tests {
     use crate::app::show::{Diff, History, Shown};
     use crate::app::testing::{
         ENDED as RETIRED, ENDED_FACT, NOW, World, claim_fields, entry, fact, followup, fork, head,
-        part_of, topic, topic_fields, uses, world, world_with_atlas, written_at,
+        head_id, part_of, topic, topic_fields, uses, world, world_with_atlas, written_at,
     };
     use crate::app::upgrade::{Checked, Upgrade};
     use crate::app::usage::MachineUsage;
@@ -361,7 +361,7 @@ mod tests {
         let (world, lantern) = world();
         let relay = fact(&world, &lantern, "relay", "");
         let verified = amend::verify(&world.deps(), "lantern/relay").unwrap();
-        let version = head(&world, &relay).id;
+        let version = head_id(&world, &relay);
         assert!(version.as_str().starts_with("b3-"));
         let expected = json!({"document": relay, "label": "lantern/relay", "version": version});
         vec![(verified, expected)]
@@ -371,7 +371,7 @@ mod tests {
         let (world, lantern, _) = world_with_atlas();
         let relay = fact(&world, &lantern, "relay", "");
         let moved = bulk::move_to(&world.deps(), &["lantern/relay"], "lantern", "atlas").unwrap();
-        let version = head(&world, &relay).id;
+        let version = head_id(&world, &relay);
         let expected = json!([{"document": relay, "label": "atlas/relay", "version": version}]);
         vec![(moved, expected)]
     }
@@ -725,7 +725,7 @@ mod tests {
             })
         };
         let first = |id: &DocumentId, row: Value| logged(id, &head(&world, id).id, row);
-        let root = head(&world, &lantern).id;
+        let root = head_id(&world, &lantern);
         let retired = world.amend(&lantern, &topic_fields("lantern", RETIRED), "\n");
         let ended = with(
             row(&lantern, "topic", "lantern", &[]),
@@ -758,7 +758,7 @@ mod tests {
 
     fn forked(world: &World) -> (Shown, Value) {
         let phone = topic(world, "phone", "");
-        let root = head(world, &phone).id;
+        let root = head_id(world, &phone);
         let heads = fork(world, &phone, &topic_fields("phone", ""));
         let of_forked = show::show(&world.deps().read(), "phone").unwrap();
         let bodies: Vec<&str> = match &of_forked {
@@ -806,7 +806,7 @@ mod tests {
 
     fn linking(world: &World, lantern: &DocumentId) -> (Shown, Value) {
         let compass = topic(world, "compass", "");
-        let made = head(world, &compass).id;
+        let made = head_id(world, &compass);
         let unheld = DocumentId::from_bytes([0x42; 16]);
         let body = "See [[lantern]], [[phone]] and [[unknown]].\n";
         let linking = world.amend_linking(
@@ -944,7 +944,7 @@ mod tests {
         });
         let of_unknown = show::show(&deps.read(), label).unwrap();
 
-        let hash = head(&world, &gadget).id;
+        let hash = head_id(&world, &gadget);
         let mut one = json!({
             "type": "version",
             "document": gadget,
@@ -957,7 +957,7 @@ mod tests {
         one["sides"] = json!([{"against": null, "held": true, "before": ""}]);
         let of_version = show::show(&deps.read(), hash.short()).unwrap();
 
-        let root = head(&world, &lantern).id;
+        let root = head_id(&world, &lantern);
         let retired = world.amend(&lantern, &topic_fields("lantern", RETIRED), "\n");
         let ended = json!({
             "type": "document",
@@ -1051,7 +1051,7 @@ mod tests {
         });
         let of_gadget = show::history(&world.deps().read(), label).unwrap();
         let desk = world.machine();
-        let made = head(&world, &desk).id;
+        let made = head_id(&world, &desk);
         let retired = world.amend(&desk, &topic_fields("desk", RETIRED), "\n");
         let row = |version: &VersionId, change: &str, parents: Value, ended: Value| {
             json!({
@@ -1086,7 +1086,7 @@ mod tests {
     fn diffs() -> Vec<(Diff, Value)> {
         let (world, lantern) = world();
         let deps = world.deps();
-        let root = head(&world, &lantern).id;
+        let root = head_id(&world, &lantern);
         draft::checkout(&deps, "lantern").unwrap();
         let text = "+++\nname = \"lantern\"\nsummary = \"s\"\n+++\n\n";
         let drafted = json!({
