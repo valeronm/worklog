@@ -15,6 +15,11 @@ use fs::{
 };
 use net::GitHubReleases;
 
+/// The last reading of the store a process made through its adapters, which adapters built
+/// `continuing` it start from.
+#[derive(Default)]
+pub struct Reading(fs::Reading);
+
 /// The ports of one command, since the store among them is read once.
 pub struct Adapters {
     store: FsStore,
@@ -48,6 +53,13 @@ impl Adapters {
     #[must_use]
     pub fn recalling(mut self) -> Adapters {
         self.store = self.store.recalling();
+        self
+    }
+
+    /// Adapters whose store starts its reading from `reading` and leaves its reading there.
+    #[must_use]
+    pub fn continuing(mut self, reading: &Reading) -> Adapters {
+        self.store = self.store.continuing(&reading.0);
         self
     }
 

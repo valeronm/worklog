@@ -250,12 +250,15 @@ otherwise. A version lands in its directory by rename, which is what moves
 the time. A file rewritten in place under a directory whose time did not
 move is read as the cache holds it; `check` reads every file whatever the
 cache holds. A shell completion reads through the cache and leaves it as
-it was, since a key press is no place for the file to be rewritten. A
-directory that changed within two seconds before the walk is not recorded
-and is read again by the next, since two changes inside the granularity of
-its time can look like one. A document holding a file that does not read
-is not kept, so a damaged file is read on every walk. A cache that cannot
-be written is left as it is and nothing is refused.
+it was, since a key press is no place for the file to be rewritten.
+`serve` keeps the reading its last request made in the process and starts
+the next request's walk from it in place of the file, so a page reads and
+decodes the file once per process and every walk still reads each directory
+whose time moved. A directory that changed within two seconds before the walk is
+not recorded and is read again by the next, since two changes inside the
+granularity of its time can look like one. A document holding a file that
+does not read is not kept, so a damaged file is read on every walk. A
+cache that cannot be written is left as it is and nothing is refused.
 
 ## Drafts
 

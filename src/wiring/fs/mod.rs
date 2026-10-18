@@ -21,7 +21,7 @@ pub use host::FsHost;
 pub use ids::RandomIds;
 pub use paths::{Paths, set};
 pub use releases::DirReleases;
-pub use store::FsStore;
+pub use store::{FsStore, Reading};
 pub use usage::{FsUsage, USAGE_DIRECTORY};
 
 use std::fs::{File, OpenOptions, Permissions};

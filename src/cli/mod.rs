@@ -289,8 +289,9 @@ fn serve(
         _ => {}
     }
     // A directory store answers header reads from one reading of its tree.
+    let reading = wiring::Reading::default();
     let settled = || {
-        let adapters = wired(environment)?;
+        let adapters = wired(environment)?.continuing(&reading);
         adapters.settle()?;
         Ok(adapters)
     };

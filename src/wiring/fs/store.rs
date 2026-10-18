@@ -21,8 +21,14 @@ use cache::{Cache, Remembered};
 pub struct FsStore {
     root: PathBuf,
     cache: Option<Cache>,
+    reading: Option<Reading>,
     walked: OnceCell<RefCell<Walked>>,
 }
+
+/// The last walk a process made through a store's cache, which a store built `continuing` it
+/// starts from in place of the cache's file. Cloning shares the one reading.
+#[derive(Clone, Default)]
+pub struct Reading(Rc<RefCell<Option<BTreeMap<DocumentId, Remembered>>>>);
 
 type Walked = BTreeMap<DocumentId, Rc<Document>>;
 
@@ -50,6 +56,7 @@ impl FsStore {
         FsStore {
             root,
             cache: None,
+            reading: None,
             walked: OnceCell::new(),
         }
     }
@@ -67,6 +74,14 @@ impl FsStore {
     #[must_use]
     pub fn recalling(mut self) -> FsStore {
         self.cache = self.cache.take().map(Cache::reading_only);
+        self
+    }
+
+    /// Walks the tree through its cache as `caching` does, starting from the walk `reading`
+    /// holds where it holds one, and leaves this walk in it.
+    #[must_use]
+    pub fn continuing(mut self, reading: &Reading) -> FsStore {
+        self.reading = Some(reading.clone());
         self
     }
 
@@ -174,7 +189,11 @@ impl FsStore {
     // settling time and read again. A sync removes a document directory while a walk is on.
     fn walk_through(&self, cache: &Cache, listed: Vec<DocumentId>) -> Result<Walked, StoreError> {
         let taken = SystemTime::now();
-        let mut remembered = cache.read();
+        let kept = self
+            .reading
+            .as_ref()
+            .and_then(|reading| reading.0.borrow().clone());
+        let mut remembered = kept.unwrap_or_else(|| cache.read());
         let mut found = BTreeMap::new();
         let mut changed = false;
         for id in listed {
@@ -195,6 +214,12 @@ impl FsStore {
         }
         if changed || !remembered.is_empty() {
             cache.write(taken, &found);
+        }
+        if let Some(reading) = &self.reading {
+            let kept = cache::recorded(taken, &found)
+                .map(|(id, held)| (id.clone(), held.clone()))
+                .collect();
+            *reading.0.borrow_mut() = Some(kept);
         }
         Ok(found
             .into_iter()
@@ -898,11 +923,7 @@ mod tests {
     fn a_recalling_store_reads_what_changed_and_writes_nothing() {
         let dir = tempfile::tempdir().unwrap();
         let (_, relay) = stocked(dir.path());
-        let file = fs::read_dir(dir.path().join("cache"))
-            .unwrap()
-            .map(|entry| entry.unwrap().path())
-            .next()
-            .unwrap();
+        let file = cache_file(dir.path());
         let written = fs::read(&file).unwrap();
 
         let renamed = after(&[&relay], "name = \"relay-pin\"", "second\n");
@@ -937,6 +958,45 @@ mod tests {
             std::slice::from_ref(&topic.envelope.kind)
         );
         assert_eq!(afresh.documents_under("7").unwrap(), [atlas]);
+    }
+
+    fn cache_file(dir: &Path) -> PathBuf {
+        fs::read_dir(dir.join("cache"))
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .next()
+            .unwrap()
+    }
+
+    #[test]
+    fn a_held_reading_carries_each_walk_to_the_next_in_place_of_the_cache_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let (store, relay) = stocked(dir.path());
+        let reading = Reading::default();
+        cached(dir.path()).continuing(&reading).settle().unwrap();
+
+        let renamed = after(&[&relay], "name = \"relay-pin\"", "second\n");
+        store.put(&renamed).unwrap();
+        settled(&store, &lantern());
+        let next = cached(dir.path()).continuing(&reading);
+        next.settle().unwrap();
+        assert_eq!(
+            next.headers(&lantern()).unwrap().state(),
+            State::Live(renamed.header())
+        );
+
+        fs::write(cache_file(dir.path()), "not a cache").unwrap();
+        fs::write(path(&store, &renamed), "damaged").unwrap();
+        let later = cached(dir.path()).continuing(&reading);
+        later.settle().unwrap();
+        assert_eq!(
+            later.headers(&lantern()).unwrap().state(),
+            State::Live(renamed.header())
+        );
+        assert_eq!(
+            cached(dir.path()).headers(&lantern()).unwrap().state(),
+            State::Live(relay.header())
+        );
     }
 
     #[test]

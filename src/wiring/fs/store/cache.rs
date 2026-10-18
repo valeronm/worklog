@@ -83,6 +83,18 @@ pub fn settled(taken: SystemTime, modified: SystemTime) -> bool {
         .is_some_and(|before| modified < before)
 }
 
+/// A document holding a file that does not read is read again by every walk, and one whose
+/// directory was not settled when the walk began at `taken` may have changed again within the
+/// granularity of its time.
+pub fn recorded(
+    taken: SystemTime,
+    documents: &BTreeMap<DocumentId, Remembered>,
+) -> impl Iterator<Item = (&DocumentId, &Remembered)> {
+    documents.iter().filter(move |(_, held)| {
+        held.document.unreadable().is_empty() && settled(taken, held.modified)
+    })
+}
+
 fn value_of(value: &toml::Value) -> Value {
     match value {
         toml::Value::String(text) => Value::String(text.clone()),
@@ -246,11 +258,7 @@ impl Cache {
             cache_format: CACHE_FORMAT,
             store_format: FORMAT,
             binary: env!("CARGO_PKG_VERSION").to_owned(),
-            documents: documents
-                .iter()
-                .filter(|(_, held)| {
-                    held.document.unreadable().is_empty() && settled(taken, held.modified)
-                })
+            documents: recorded(taken, documents)
                 .map(|(id, held)| DocumentRecord {
                     id: id.as_str().to_owned(),
                     modified: held.modified,
