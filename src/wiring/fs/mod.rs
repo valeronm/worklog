@@ -105,7 +105,7 @@ fn replace(
     let (Some(dir), Some(name)) = (target.parent(), target.file_name()) else {
         return Err(StoreError::io(target.display(), "is not a file's path"));
     };
-    std::fs::create_dir_all(dir).map_err(|e| io_error(dir, &e))?;
+    make_dir(dir)?;
     // A rename replaces the file whole only from the same file system.
     let staging = staging_of(dir, name);
     let replaced = staged(&staging, bytes, permissions, synced)

@@ -10,7 +10,7 @@ use crate::domain::id::{DocumentId, VersionId, is_hex};
 use crate::domain::ports::{NotRead, Store, StoreError, StoreRead};
 use crate::domain::version::{Header, Kind, ReadError, Version, read_body};
 
-use super::{STAGING_PREFIX, USAGE_DIRECTORY, directories, files, io_error, optional};
+use super::{STAGING_PREFIX, USAGE_DIRECTORY, directories, files, io_error, make_dir, optional};
 
 mod cache;
 
@@ -408,7 +408,7 @@ impl Store for FsStore {
         let target = dir.join(file_name(&version.id));
         if !target.exists() {
             self.keep_sync_clean()?;
-            fs::create_dir_all(&dir).map_err(|e| io_error(&dir, &e))?;
+            make_dir(&dir)?;
             // Syncthing picks up a file as soon as it appears.
             let staging = dir.join(format!("{STAGING_PREFIX}{}", version.id));
             fs::write(&staging, version.text()).map_err(|e| io_error(&staging, &e))?;

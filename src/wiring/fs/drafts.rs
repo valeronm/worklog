@@ -5,7 +5,7 @@ use crate::domain::draft::Draft;
 use crate::domain::id::DocumentId;
 use crate::domain::ports::{Drafts, DraftsRead, StoreError};
 
-use super::{files, io_error, optional};
+use super::{files, io_error, make_dir, optional};
 
 pub struct FsDrafts {
     dir: PathBuf,
@@ -73,7 +73,7 @@ impl Drafts for FsDrafts {
         let text = draft
             .text()
             .map_err(|e| StoreError::io(path.display(), e))?;
-        fs::create_dir_all(&self.dir).map_err(|e| io_error(&self.dir, &e))?;
+        make_dir(&self.dir)?;
         // A text without an origin is refused, where an origin without a
         // text reads as no draft.
         let origin = self.origin(&draft.document);
