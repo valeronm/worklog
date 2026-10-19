@@ -384,6 +384,12 @@ pub enum ReadCommand {
         /// Only from this day on, `YYYY-MM-DD`
         #[arg(long)]
         since: Option<String>,
+        /// Only what this agent's sessions ran, `none` for runs in no session
+        #[arg(long)]
+        agent: Option<String>,
+        /// The refusals under each command, with how often each was given
+        #[arg(long)]
+        refused: bool,
     },
 }
 

@@ -90,6 +90,38 @@ impl Render for Vec<ClaimRow> {
     }
 }
 
+fn usage_heading(text: &mut String, counts: &MachineUsage) {
+    let runs = counted(counts.run_count(), "run", "runs");
+    let refused = match counts.refused_count() {
+        0 => String::new(),
+        refused => format!(", {refused} refused"),
+    };
+    let _ = writeln!(text, "{} — {runs}{refused}", counts.machine.label);
+    let agents: Vec<String> = (counts.agents.iter())
+        .map(|agent| {
+            let runs = counted(agent.run_count, "run", "runs");
+            match &agent.agent {
+                Some(name) => {
+                    let sessions = counted(agent.session_count, "session", "sessions");
+                    format!("{name} {runs} in {sessions}")
+                }
+                None => format!("no agent {runs}"),
+            }
+        })
+        .collect();
+    if !agents.is_empty() {
+        let _ = writeln!(text, "{INDENT}{}", agents.join(" · "));
+    }
+}
+
+fn usage_notes(counts: &[MachineUsage]) -> Vec<String> {
+    if counts.is_empty() {
+        vec!["nothing logged".to_owned()]
+    } else {
+        Vec::new()
+    }
+}
+
 impl Render for Vec<MachineUsage> {
     fn text(&self) -> String {
         let mut text = String::new();
@@ -97,22 +129,58 @@ impl Render for Vec<MachineUsage> {
             if at > 0 {
                 text.push('\n');
             }
-            let runs = counts.commands.iter().map(|count| count.run_count).sum();
-            let runs = counted(runs, "run", "runs");
-            let _ = writeln!(text, "{} — {runs}", counts.machine.label);
+            usage_heading(&mut text, counts);
+            let widest = (counts.commands.iter())
+                .map(|count| count.command.chars().count())
+                .max()
+                .unwrap_or(0);
             for count in &counts.commands {
-                let _ = writeln!(text, "{:>7} {}", count.run_count, count.command);
+                let _ = match count.refused_count() {
+                    0 => writeln!(text, "{:>7} {}", count.run_count, count.command),
+                    refused => writeln!(
+                        text,
+                        "{:>7} {:<widest$}  {refused} refused",
+                        count.run_count, count.command
+                    ),
+                };
             }
         }
         text
     }
 
     fn notes(&self) -> Vec<String> {
-        if self.is_empty() {
-            vec!["nothing logged".to_owned()]
-        } else {
-            Vec::new()
+        usage_notes(self)
+    }
+}
+
+/// The usage counts as the refusals each command was answered, under the machine that ran
+/// it; a command refused nothing is left out.
+pub(in crate::cli) struct Refusals<'a>(pub(in crate::cli) &'a [MachineUsage]);
+
+impl Render for Refusals<'_> {
+    fn text(&self) -> String {
+        let mut text = String::new();
+        for (at, counts) in self.0.iter().enumerate() {
+            if at > 0 {
+                text.push('\n');
+            }
+            usage_heading(&mut text, counts);
+            for count in counts
+                .commands
+                .iter()
+                .filter(|count| !count.refusals.is_empty())
+            {
+                let _ = writeln!(text, "{INDENT}{}", count.command);
+                for refusal in &count.refusals {
+                    let _ = writeln!(text, "{:>7} {}", refusal.count, refusal.text);
+                }
+            }
         }
+        text
+    }
+
+    fn notes(&self) -> Vec<String> {
+        usage_notes(self.0)
     }
 }
 
@@ -146,7 +214,8 @@ mod tests {
     use super::*;
     use crate::app::TriggerShown;
     use crate::app::list::ForkHead;
-    use crate::app::testing::counted;
+    use crate::app::testing::{by_no_agent, counted as commands_of};
+    use crate::app::usage::{AgentUsage, CommandCount, Refusal};
     use crate::domain::id::{DocumentId, VersionId};
     use crate::domain::schema::Date;
     use crate::domain::testing::{atlas, lantern};
@@ -157,10 +226,14 @@ mod tests {
 
     #[test]
     fn usage_is_each_machine_over_its_commands_with_how_often_each_ran() {
-        let counts = |label: &str, commands: &[(&str, usize)]| MachineUsage {
-            machine: to(label),
-            topic: Some(label.to_owned()),
-            commands: counted(commands),
+        let counts = |label: &str, commands: &[(&str, usize)]| {
+            let commands = commands_of(commands);
+            MachineUsage {
+                machine: to(label),
+                topic: Some(label.to_owned()),
+                agents: by_no_agent(&commands),
+                commands,
+            }
         };
         let listed = vec![
             counts("desk", &[("show", 1200), ("new entry", 2)]),
@@ -169,10 +242,12 @@ mod tests {
         assert_eq!(
             listed.text(),
             "desk — 1202 runs\n\
+             \x20   no agent 1202 runs\n\
              \x20  1200 show\n\
              \x20     2 new entry\n\
              \n\
              phone — 1 run\n\
+             \x20   no agent 1 run\n\
              \x20     1 context\n"
         );
         assert_eq!(Vec::<MachineUsage>::new().text(), "");
@@ -180,23 +255,81 @@ mod tests {
 
     #[test]
     fn a_machine_is_headed_by_its_label_and_no_run_at_all_is_a_note() {
-        let labeled = |label: &str, topic: Option<&str>| MachineUsage {
-            machine: to(label),
-            topic: topic.map(str::to_owned),
-            commands: counted(&[("show", 2)]),
+        let labeled = |label: &str, topic: Option<&str>| {
+            let commands = commands_of(&[("show", 2)]);
+            MachineUsage {
+                machine: to(label),
+                topic: topic.map(str::to_owned),
+                agents: by_no_agent(&commands),
+                commands,
+            }
         };
         let listed = vec![labeled(atlas().as_str(), None)];
         assert_eq!(
             listed.text(),
-            format!("{} — 2 runs\n      2 show\n", atlas())
+            format!("{} — 2 runs\n    no agent 2 runs\n      2 show\n", atlas())
         );
         let short = atlas().short().to_owned();
         assert_eq!(
             vec![labeled(&short, Some(&short))].text(),
-            format!("{short} — 2 runs\n      2 show\n")
+            format!("{short} — 2 runs\n    no agent 2 runs\n      2 show\n")
         );
         assert_eq!(listed.notes(), [""; 0]);
         assert_eq!(Vec::<MachineUsage>::new().notes(), ["nothing logged"]);
+    }
+
+    #[test]
+    fn usage_splits_a_machine_s_runs_by_agent_and_counts_its_refusals() {
+        let refusal = |text: &str, count| Refusal {
+            text: text.to_owned(),
+            count,
+        };
+        let listed = vec![MachineUsage {
+            machine: to("desk"),
+            topic: Some("desk".to_owned()),
+            agents: vec![
+                AgentUsage {
+                    agent: Some("Lamp".to_owned()),
+                    run_count: 3,
+                    session_count: 2,
+                },
+                AgentUsage {
+                    agent: None,
+                    run_count: 1,
+                    session_count: 0,
+                },
+            ],
+            commands: vec![
+                CommandCount {
+                    command: "show".to_owned(),
+                    run_count: 3,
+                    refusals: vec![
+                        refusal("torch: names no document", 2),
+                        refusal("lamp: names no document", 1),
+                    ],
+                },
+                CommandCount {
+                    command: "new entry".to_owned(),
+                    run_count: 1,
+                    refusals: Vec::new(),
+                },
+            ],
+        }];
+        assert_eq!(
+            listed.text(),
+            "desk — 4 runs, 3 refused\n\
+             \x20   Lamp 3 runs in 2 sessions · no agent 1 run\n\
+             \x20     3 show       3 refused\n\
+             \x20     1 new entry\n"
+        );
+        assert_eq!(
+            Refusals(&listed).text(),
+            "desk — 4 runs, 3 refused\n\
+             \x20   Lamp 3 runs in 2 sessions · no agent 1 run\n\
+             \x20   show\n\
+             \x20     2 torch: names no document\n\
+             \x20     1 lamp: names no document\n"
+        );
     }
 
     #[test]

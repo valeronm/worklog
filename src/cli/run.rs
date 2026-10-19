@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use super::args::{ChangeCommand, Command, DraftCommand, ListCommand, NewWhat, ReadCommand};
-use super::render::{Output, output};
+use super::render::{Output, Refusals, output, output_as};
 use super::{Environment, agents};
 use crate::app::followup::{NewFollowup, TriggerArg};
 use crate::app::search::Query;
@@ -10,6 +10,7 @@ use crate::app::{
     search, setup, show, usage,
 };
 use crate::domain::schema::Reason;
+use crate::domain::usage::Agent;
 
 fn directory(environment: &Environment, given: Option<&Path>) -> Result<String, Failure> {
     let path = match given {
@@ -30,6 +31,13 @@ fn claimed(
         return Ok(None);
     }
     directory(environment, dir).map(Some)
+}
+
+fn agent(word: &str) -> Agent {
+    match word {
+        "none" => Agent::None,
+        name => Agent::Named(name.to_owned()),
+    }
 }
 
 fn trigger<'a>(when: &'a str, what: Option<&'a str>) -> Result<TriggerArg<'a>, Failure> {
@@ -220,10 +228,20 @@ fn read(
             output(&context::due(deps, &directory)?, json)
         }
         ReadCommand::Check => output(&check::check(deps)?, json),
-        ReadCommand::Usage { machine, since } => output(
-            &usage::usage(deps, machine.as_deref(), since.as_deref())?,
-            json,
-        ),
+        ReadCommand::Usage {
+            machine,
+            since,
+            agent,
+            refused,
+        } => {
+            let by = agent.as_deref().map(self::agent);
+            let counts = usage::usage(deps, machine.as_deref(), since.as_deref(), by)?;
+            if *refused {
+                output_as(&counts, &Refusals(&counts), json)
+            } else {
+                output(&counts, json)
+            }
+        }
     })
 }
 
@@ -692,14 +710,29 @@ mod tests {
             world.usage.record(&run).unwrap();
         }
         let counted = fixture.text(&["usage"]);
-        assert_eq!(counted, "desk — 2 runs\n      1 facts\n      1 show\n");
+        assert_eq!(
+            counted,
+            "desk — 2 runs\n    no agent 2 runs\n      1 facts\n      1 show\n"
+        );
         assert_eq!(fixture.text(&["usage", "--machine", "desk"]), counted);
+        assert_eq!(fixture.text(&["usage", "--agent", "none"]), counted);
+        let none = fixture.run(&["usage", "--agent", "lamp"]).unwrap();
+        assert_eq!((none.text.as_str(), none.exit), ("", 0));
+        assert_eq!(none.notes, ["nothing logged"]);
+        assert_eq!(
+            fixture.text(&["usage", "--refused"]),
+            "desk — 2 runs\n    no agent 2 runs\n"
+        );
+        assert_eq!(
+            fixture.text(&["usage", "--refused", "--json"]),
+            fixture.text(&["usage", "--json"])
+        );
         let none = fixture.run(&["usage", "--machine", "atlas"]).unwrap();
         assert_eq!((none.text.as_str(), none.exit), ("", 0));
         assert_eq!(none.notes, ["nothing logged"]);
         assert_eq!(
             fixture.text(&["usage", "--since", "2026-09-02"]),
-            "desk — 1 run\n      1 facts\n"
+            "desk — 1 run\n    no agent 1 run\n      1 facts\n"
         );
         let later = ["usage", "--since", "2026-09-03", "--json"];
         assert_eq!(fixture.text(&later), "[]\n");

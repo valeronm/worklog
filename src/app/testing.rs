@@ -5,7 +5,7 @@ use crate::app::heads::read_or_skip;
 use crate::app::lookup::{Lookup, Stored};
 use crate::app::rows::{Reference, Row};
 use crate::app::show::{HistoryRow, ShownVersion};
-use crate::app::usage::CommandCount;
+use crate::app::usage::{AgentUsage, CommandCount};
 use crate::app::{Deps, Failure};
 use crate::domain::document::Document;
 use crate::domain::document::State;
@@ -254,8 +254,17 @@ pub fn counted(counts: &[(&str, usize)]) -> Vec<CommandCount> {
         .map(|(command, run_count)| CommandCount {
             command: (*command).to_owned(),
             run_count: *run_count,
+            refusals: Vec::new(),
         })
         .collect()
+}
+
+pub fn by_no_agent(counts: &[CommandCount]) -> Vec<AgentUsage> {
+    vec![AgentUsage {
+        agent: None,
+        run_count: counts.iter().map(|count| count.run_count).sum(),
+        session_count: 0,
+    }]
 }
 
 pub fn to(document: &DocumentId, label: &str) -> Reference {

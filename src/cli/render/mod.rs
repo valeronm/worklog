@@ -21,6 +21,7 @@ use crate::render::{change_or_ending, ended, written};
 
 #[cfg(test)]
 pub(super) use context::CONTEXT_BYTES;
+pub(super) use listings::Refusals;
 #[cfg(test)]
 pub(super) use testing::assert_fits;
 
@@ -81,10 +82,19 @@ pub(super) trait Render {
 /// The text of `result` with its notes, or under `json` the result itself with no notes,
 /// since it carries what they say.
 pub(super) fn output<T: Render + Serialize + Pinned>(result: &T, json: bool) -> Output {
+    output_as(result, result, json)
+}
+
+/// The text of `view` with its notes, or under `json` `result` itself with no notes.
+pub(super) fn output_as<T, V>(result: &T, view: &V, json: bool) -> Output
+where
+    T: Render + Serialize + Pinned,
+    V: Render,
+{
     let (text, notes) = if json {
         (printed(result), Vec::new())
     } else {
-        (result.text(), result.notes())
+        (view.text(), view.notes())
     };
     Output {
         text,

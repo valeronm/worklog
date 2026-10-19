@@ -973,7 +973,7 @@ mod tests {
         assert_eq!(usage.read(&Kept::default()), Ok(runs.to_vec()));
         let of_atlas = Kept {
             machine: Some(atlas()),
-            since: None,
+            ..Kept::default()
         };
         assert_eq!(usage.read(&of_atlas), Ok(runs[1..].to_vec()));
     }

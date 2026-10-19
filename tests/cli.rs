@@ -3277,7 +3277,7 @@ fn every_run_is_logged_under_the_machine_that_ran_it() {
     assert_eq!((refused.stdout.as_str(), refused.code), ("", Some(1)));
     assert_eq!(
         host.used_ok(&["usage"]),
-        "desk — 3 runs\n      2 facts\n      1 show\n"
+        "desk — 3 runs, 1 refused\n    no agent 3 runs\n      2 facts\n      1 show   1 refused\n"
     );
 
     let files = host.usage_files();
@@ -3360,7 +3360,14 @@ fn every_run_is_logged_under_the_machine_that_ran_it() {
     );
     assert_eq!(
         counted[0]["commands"][0],
-        serde_json::json!({"command": "usage", "run_count": 6})
+        serde_json::json!({
+            "command": "usage",
+            "run_count": 6,
+            "refusals": [
+                {"text": "`soon` is not a date (YYYY-MM-DD)", "count": 1},
+                {"text": "torch: names no document", "count": 1},
+            ],
+        })
     );
 }
 
@@ -3422,7 +3429,8 @@ fn a_command_line_the_parser_refuses_is_logged_under_the_command_it_named() {
     );
     assert_eq!(
         host.used_ok(&["usage"]),
-        "desk — 3 runs\n      1 facts\n      1 new entry\n      1 serve\n"
+        "desk — 3 runs, 3 refused\n    no agent 3 runs\n      1 facts      1 refused\n\
+         \x20     1 new entry  1 refused\n      1 serve      1 refused\n"
     );
 }
 
@@ -3531,7 +3539,10 @@ fn a_binary_the_path_does_not_find_logs_nothing() {
     }
     assert_eq!(host.usage_files(), [""; 0]);
     host.used_ok(&["facts", "lantern"]);
-    assert_eq!(host.used_ok(&["usage"]), "desk — 1 run\n      1 facts\n");
+    assert_eq!(
+        host.used_ok(&["usage"]),
+        "desk — 1 run\n    no agent 1 run\n      1 facts\n"
+    );
 }
 
 #[test]
@@ -3572,10 +3583,10 @@ fn a_store_holding_its_usage_log_alone_is_one_a_host_can_be_bound_to() {
     assert_eq!(other.usage_files().len(), 2);
     let counted = other.used_ok(&["usage"]);
     let unheld = host.machine("desk");
-    let of_unheld = format!("{unheld} — 1 run\n      1 topics\n");
+    let of_unheld = format!("{unheld} — 1 run\n    no agent 1 run\n      1 topics\n");
     assert_eq!(
         counted,
-        format!("{of_unheld}\nphone — 1 run\n      1 topics\n")
+        format!("{of_unheld}\nphone — 1 run\n    no agent 1 run\n      1 topics\n")
     );
     assert_eq!(other.used_ok(&["usage", "--machine", &unheld]), of_unheld);
     let machines = other.json(&["usage"]);
@@ -3640,7 +3651,7 @@ fn a_renamed_machine_topic_keeps_its_file_and_is_printed_by_its_new_name() {
     let files = host.usage_files();
     assert_eq!(files.len(), 1, "{files:?}");
     assert!(files[0].starts_with(&host.machine("bench")), "{files:?}");
-    let counted = "bench — 3 runs\n      2 facts\n      1 rename\n";
+    let counted = "bench — 3 runs\n    no agent 3 runs\n      2 facts\n      1 rename\n";
     assert_eq!(host.used_ok(&["usage"]), counted);
     let by_the_old_name = host.used_ok(&["usage", "--machine", "desk"]);
     assert!(
@@ -3653,7 +3664,7 @@ fn a_renamed_machine_topic_keeps_its_file_and_is_printed_by_its_new_name() {
     assert_eq!(host.usage_files().len(), 2);
     assert_eq!(
         phone.used_ok(&["usage", "--machine", "phone"]),
-        "phone — 1 run\n      1 topics\n"
+        "phone — 1 run\n    no agent 1 run\n      1 topics\n"
     );
 }
 

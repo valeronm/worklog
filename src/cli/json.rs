@@ -65,6 +65,7 @@ mod tests {
     use crate::domain::testing::{
         ASSET, BINARY, LANTERN, REFRESHED, atlas, build, first, published, ran, version as release,
     };
+    use crate::domain::usage::{Invocation, Session};
     use crate::domain::version::{Kind, ReadError, Stamp};
 
     fn snake(word: &str) -> bool {
@@ -1289,25 +1290,47 @@ mod tests {
             let run = ran(machine, command, "2026-09-04");
             world.usage.record(&run).unwrap();
         }
+        let refused = Invocation {
+            session: Some(Session {
+                agent: "Lamp".to_owned(),
+                id: "s1".to_owned(),
+            }),
+            exit: 1,
+            refusal: Some("torch: names no document".to_owned()),
+            ..ran(&world.machine(), "show", "2026-09-04")
+        };
+        world.usage.record(&refused).unwrap();
         let expected = json!([
             {
                 "machine": to(&unheld, unheld.as_str()),
                 "topic": null,
-                "commands": [{"command": "context", "run_count": 1}],
+                "agents": [{"agent": null, "run_count": 1, "session_count": 0}],
+                "commands": [{"command": "context", "run_count": 1, "refusals": []}],
             },
             {
                 "machine": to(&world.machine(), "desk"),
                 "topic": "desk",
+                "agents": [
+                    {"agent": null, "run_count": 3, "session_count": 0},
+                    {"agent": "Lamp", "run_count": 1, "session_count": 1},
+                ],
                 "commands": [
-                    {"command": "show", "run_count": 2},
-                    {"command": "new entry", "run_count": 1},
+                    {
+                        "command": "show",
+                        "run_count": 3,
+                        "refusals": [{"text": "torch: names no document", "count": 1}],
+                    },
+                    {"command": "new entry", "run_count": 1, "refusals": []},
                 ],
             },
         ]);
         let deps = world.deps();
-        let none = usage::usage(&deps.read(), None, Some("2099-01-01")).unwrap();
+        let none = usage::usage(&deps.read(), None, Some("2099-01-01"), None).unwrap();
         vec![
-            (usage::usage(&deps.read(), None, None).unwrap(), expected),
+            (
+                usage::usage(&deps.read(), None, None, None).unwrap(),
+                expected,
+            ),
             (none, json!([])),
         ]
     }

@@ -1,4 +1,5 @@
-use std::collections::BTreeMap;
+use std::cmp::Reverse;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Serialize;
 
@@ -8,12 +9,35 @@ use crate::app::{Failure, ReadDeps};
 use crate::domain::id::DocumentId;
 use crate::domain::schema::Date;
 use crate::domain::schema::address::Found;
-use crate::domain::usage::{Invocation, Kept};
+use crate::domain::usage::{Agent, Invocation, Kept, Session};
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Refusal {
+    pub text: String,
+    pub count: usize,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct CommandCount {
     pub command: String,
     pub run_count: usize,
+    /// Most often first, then by text.
+    pub refusals: Vec<Refusal>,
+}
+
+impl CommandCount {
+    #[must_use]
+    pub fn refused_count(&self) -> usize {
+        self.refusals.iter().map(|refusal| refusal.count).sum()
+    }
+}
+
+/// `agent` is `None` for the runs made in no agent's session, and their `session_count` is 0.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct AgentUsage {
+    pub agent: Option<String>,
+    pub run_count: usize,
+    pub session_count: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -22,22 +46,39 @@ pub struct MachineUsage {
     pub machine: Reference,
     /// The name of the topic that answers for the machine.
     pub topic: Option<String>,
+    /// Most runs first, then by name, the runs of no agent last among equals.
+    pub agents: Vec<AgentUsage>,
     pub commands: Vec<CommandCount>,
 }
 
+impl MachineUsage {
+    #[must_use]
+    pub fn run_count(&self) -> usize {
+        self.commands.iter().map(|count| count.run_count).sum()
+    }
+
+    #[must_use]
+    pub fn refused_count(&self) -> usize {
+        self.commands.iter().map(CommandCount::refused_count).sum()
+    }
+}
+
 /// How often each command was run, by the machine that ran it: the machines by label, and a
-/// machine's commands most run first, then by name.
+/// machine's commands most run first, then by name, each with the refusals it was answered
+/// and the machine's runs split by the agent whose session made them.
 ///
 /// `machine` names a topic, by its name or its id as any document is named, and keeps the
 /// runs of that machine; the whole id of a machine no topic answers for is taken where the
 /// log holds a run of it, and any other address that is not one topic is refused. `since` is
 /// `YYYY-MM-DD` and keeps the runs written on that day and after, a run's day being the date
 /// its stamp is written with, at the offset of the host that ran it; anything else is a usage
-/// failure. A command line that named no command is not counted.
+/// failure. `agent` keeps the runs made in one agent's sessions, or in no session. A command
+/// line that named no command is not counted.
 pub fn usage(
     deps: &ReadDeps,
     machine: Option<&str>,
     since: Option<&str>,
+    agent: Option<Agent>,
 ) -> Result<Vec<MachineUsage>, Failure> {
     let (lookup, topics, _) = reading(deps, None)?;
     let (machine, its_runs) = match machine {
@@ -49,34 +90,85 @@ pub fn usage(
         .transpose()?
         .map(|day| day.to_string());
     let runs = match its_runs {
-        Some(runs) if since.is_none() => runs,
-        _ => deps.usage.read(&Kept { machine, since })?,
+        Some(runs) if since.is_none() && agent.is_none() => runs,
+        _ => deps.usage.read(&Kept {
+            machine,
+            since,
+            agent,
+        })?,
     };
-    let mut counted: BTreeMap<DocumentId, BTreeMap<String, usize>> = BTreeMap::new();
+    let mut counted: BTreeMap<DocumentId, Counted> = BTreeMap::new();
     for run in runs {
         if !run.command.is_empty() {
-            *(counted.entry(run.machine).or_default())
-                .entry(run.command)
-                .or_default() += 1;
+            (counted.entry(run.machine).or_default()).add(run.command, run.refusal, run.session);
         }
     }
     let mut machines: Vec<MachineUsage> = (counted.into_iter())
-        .map(|(machine, commands)| {
-            let mut commands: Vec<CommandCount> = (commands.into_iter())
-                .map(|(command, run_count)| CommandCount { command, run_count })
-                .collect();
-            commands.sort_by(|a, b| (b.run_count, &a.command).cmp(&(a.run_count, &b.command)));
-            MachineUsage {
-                machine: topics.machine(&machine),
-                topic: topics.name(&machine).map(ToString::to_string),
-                commands,
-            }
+        .map(|(machine, Counted { commands, agents })| MachineUsage {
+            machine: topics.machine(&machine),
+            topic: topics.name(&machine).map(ToString::to_string),
+            agents: agent_rows(agents),
+            commands: command_rows(commands),
         })
         .collect();
     machines.sort_by(|a, b| {
         (&a.machine.label, &a.machine.document).cmp(&(&b.machine.label, &b.machine.document))
     });
     Ok(machines)
+}
+
+#[derive(Default)]
+struct Counted {
+    commands: BTreeMap<String, (usize, BTreeMap<String, usize>)>,
+    agents: BTreeMap<Option<String>, (usize, BTreeSet<String>)>,
+}
+
+impl Counted {
+    fn add(&mut self, command: String, refusal: Option<String>, session: Option<Session>) {
+        let (runs, refusals) = self.commands.entry(command).or_default();
+        *runs += 1;
+        if let Some(refusal) = refusal {
+            *refusals.entry(refusal).or_default() += 1;
+        }
+        let (agent, session) = match session {
+            Some(session) => (Some(session.agent), Some(session.id)),
+            None => (None, None),
+        };
+        let (runs, sessions) = self.agents.entry(agent).or_default();
+        *runs += 1;
+        sessions.extend(session);
+    }
+}
+
+// The maps come in key order, which a stable sort by count alone keeps among equals.
+fn command_rows(commands: BTreeMap<String, (usize, BTreeMap<String, usize>)>) -> Vec<CommandCount> {
+    let mut commands: Vec<CommandCount> = (commands.into_iter())
+        .map(|(command, (run_count, refusals))| {
+            let mut refusals: Vec<Refusal> = (refusals.into_iter())
+                .map(|(text, count)| Refusal { text, count })
+                .collect();
+            refusals.sort_by_key(|refusal| Reverse(refusal.count));
+            CommandCount {
+                command,
+                run_count,
+                refusals,
+            }
+        })
+        .collect();
+    commands.sort_by_key(|count| Reverse(count.run_count));
+    commands
+}
+
+fn agent_rows(agents: BTreeMap<Option<String>, (usize, BTreeSet<String>)>) -> Vec<AgentUsage> {
+    let mut agents: Vec<AgentUsage> = (agents.into_iter())
+        .map(|(agent, (run_count, sessions))| AgentUsage {
+            agent,
+            run_count,
+            session_count: sessions.len(),
+        })
+        .collect();
+    agents.sort_by_key(|agent| (Reverse(agent.run_count), agent.agent.is_none()));
+    agents
 }
 
 type Named = (Option<DocumentId>, Option<Vec<Invocation>>);
@@ -88,7 +180,7 @@ fn machine_named(deps: &ReadDeps, lookup: &Lookup, address: &str) -> Result<Name
     {
         let its_runs = Kept {
             machine: Some(id.clone()),
-            since: None,
+            ..Kept::default()
         };
         let runs = deps.usage.read(&its_runs)?;
         if !runs.is_empty() {
@@ -105,7 +197,8 @@ mod tests {
     use super::*;
     use crate::app::amend::rename;
     use crate::app::testing::{
-        ENDED, World, counted, fact, refused, to, to_ended, topic, topic_fields, world_with_atlas,
+        ENDED, World, by_no_agent, counted, fact, refused, to, to_ended, topic, topic_fields,
+        world_with_atlas,
     };
     use crate::domain::id::DocumentId;
     use crate::domain::ports::{StoreError, Usage, UsageRead};
@@ -130,16 +223,20 @@ mod tests {
         let (world, _, _) = world_with_atlas();
         let phone = topic(&world, "phone", "");
         logged(&world, &phone);
-        let all = usage(&world.deps().read(), None, None).unwrap();
+        let all = usage(&world.deps().read(), None, None, None).unwrap();
+        let desk_commands = counted(&[("show", 2), ("context", 1), ("new entry", 1)]);
         let desk = MachineUsage {
             machine: to(&world.machine(), "desk"),
             topic: Some("desk".to_owned()),
-            commands: counted(&[("show", 2), ("context", 1), ("new entry", 1)]),
+            agents: by_no_agent(&desk_commands),
+            commands: desk_commands,
         };
+        let phone_commands = counted(&[("context", 1)]);
         let phone = MachineUsage {
             machine: to(&phone, "phone"),
             topic: Some("phone".to_owned()),
-            commands: counted(&[("context", 1)]),
+            agents: by_no_agent(&phone_commands),
+            commands: phone_commands,
         };
         assert_eq!(all, [desk, phone]);
     }
@@ -150,7 +247,7 @@ mod tests {
         let phone = topic(&world, "phone", "");
         logged(&world, &phone);
         let deps = world.deps();
-        let of = |machine, since| usage(&deps.read(), machine, since);
+        let of = |machine, since| usage(&deps.read(), machine, since, None);
 
         let only = of(Some("phone"), None).unwrap();
         assert_eq!(only.len(), 1);
@@ -179,6 +276,87 @@ mod tests {
     }
 
     #[test]
+    fn runs_are_split_by_agent_with_sessions_counted_and_kept_for_one_agent() {
+        let (world, _, _) = world_with_atlas();
+        let in_session = |agent: &str, id: &str, command: &str| Invocation {
+            session: Some(Session {
+                agent: agent.to_owned(),
+                id: id.to_owned(),
+            }),
+            ..ran(&world.machine(), command, "2026-09-02")
+        };
+        for run in [
+            in_session("Lamp", "a", "show"),
+            in_session("Lamp", "a", "save"),
+            in_session("Lamp", "b", "show"),
+            in_session("Torch", "c", "show"),
+            ran(&world.machine(), "context", "2026-09-02"),
+        ] {
+            world.usage.record(&run).unwrap();
+        }
+        let deps = world.deps();
+        let of = |machine, agent| usage(&deps.read(), machine, None, agent);
+        let named = |name: &str| Some(Agent::Named(name.to_owned()));
+
+        let all = of(None, None).unwrap();
+        let by = |agent: Option<&str>, run_count, session_count| AgentUsage {
+            agent: agent.map(str::to_owned),
+            run_count,
+            session_count,
+        };
+        assert_eq!(
+            all[0].agents,
+            [
+                by(Some("Lamp"), 3, 2),
+                by(Some("Torch"), 1, 1),
+                by(None, 1, 0)
+            ]
+        );
+        let lamp = of(None, named("lamp")).unwrap();
+        assert_eq!(lamp[0].commands, counted(&[("show", 2), ("save", 1)]));
+        assert_eq!(lamp[0].agents, [by(Some("Lamp"), 3, 2)]);
+        let none = of(None, Some(Agent::None)).unwrap();
+        assert_eq!(none[0].commands, counted(&[("context", 1)]));
+        assert_eq!(of(None, named("candle")), Ok(Vec::new()));
+        let narrowed = of(Some("desk"), named("Torch")).unwrap();
+        assert_eq!(narrowed[0].commands, counted(&[("show", 1)]));
+    }
+
+    #[test]
+    fn a_command_s_refusals_are_counted_by_their_text_most_often_first() {
+        let (world, _, _) = world_with_atlas();
+        let refused = |text: &str| Invocation {
+            exit: 1,
+            refusal: Some(text.to_owned()),
+            ..ran(&world.machine(), "show", "2026-09-02")
+        };
+        for run in [
+            refused("torch: names no document"),
+            refused("lamp: names no document"),
+            refused("torch: names no document"),
+            ran(&world.machine(), "show", "2026-09-02"),
+        ] {
+            world.usage.record(&run).unwrap();
+        }
+        let all = usage(&world.deps().read(), None, None, None).unwrap();
+        let show = &all[0].commands[0];
+        let refusal = |text: &str, count| Refusal {
+            text: text.to_owned(),
+            count,
+        };
+        assert_eq!(show.run_count, 4);
+        assert_eq!(
+            show.refusals,
+            [
+                refusal("torch: names no document", 2),
+                refusal("lamp: names no document", 1)
+            ]
+        );
+        assert_eq!(show.refused_count(), 3);
+        assert_eq!((all[0].run_count(), all[0].refused_count()), (4, 3));
+    }
+
+    #[test]
     fn a_day_is_the_one_of_the_stamp_as_written_whatever_day_it_was_elsewhere() {
         let (world, _, _) = world_with_atlas();
         for (command, written) in [
@@ -192,7 +370,7 @@ mod tests {
             world.usage.record(&run).unwrap();
         }
         let deps = world.deps();
-        let since = |day| usage(&deps.read(), None, Some(day)).unwrap();
+        let since = |day| usage(&deps.read(), None, Some(day), None).unwrap();
         assert_eq!(
             since("2026-09-01")[0].commands,
             counted(&[("early", 1), ("late", 1)])
@@ -212,7 +390,7 @@ mod tests {
                 .unwrap();
         }
         let deps = world.deps();
-        let of = |machine: &str| usage(&deps.read(), Some(machine), None);
+        let of = |machine: &str| usage(&deps.read(), Some(machine), None, None);
         let machines = |machine: &str| -> Vec<DocumentId> {
             let counts = of(machine).unwrap();
             counts
@@ -252,7 +430,7 @@ mod tests {
             .unwrap();
         rename(&world.deps(), "desk", "bench").unwrap();
 
-        let all = usage(&world.deps().read(), None, None).unwrap();
+        let all = usage(&world.deps().read(), None, None, None).unwrap();
         let machines: Vec<(&Reference, Option<&str>)> = (all.iter())
             .map(|counts| (&counts.machine, counts.topic.as_deref()))
             .collect();
@@ -263,7 +441,7 @@ mod tests {
                 (&to(&unheld, unheld.as_str()), None)
             ]
         );
-        let renamed = usage(&world.deps().read(), Some("desk"), None).unwrap();
+        let renamed = usage(&world.deps().read(), Some("desk"), None, None).unwrap();
         assert_eq!(renamed.len(), 1);
         assert_eq!(renamed[0].machine, to(&world.machine(), "bench"));
     }
@@ -288,13 +466,14 @@ mod tests {
                 usage: &log,
                 ..deps.read()
             };
-            usage(&asking, machine, since).unwrap();
+            usage(&asking, machine, since, None).unwrap();
             log.0.into_inner()
         };
         assert_eq!(asked(None, None), [Kept::default()]);
         let narrowed = Kept {
             machine: Some(world.machine()),
             since: Some("2026-09-03".to_owned()),
+            agent: None,
         };
         assert_eq!(asked(Some("desk"), Some("2026-09-03")), [narrowed]);
     }

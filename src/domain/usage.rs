@@ -34,11 +34,31 @@ impl Invocation {
     }
 }
 
+/// The agent a kept run was made by: none at all, or one named as its session names it,
+/// whatever the case.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Agent {
+    None,
+    Named(String),
+}
+
+impl Agent {
+    #[must_use]
+    pub fn ran(&self, run: &Invocation) -> bool {
+        match (self, &run.session) {
+            (Agent::None, None) => true,
+            (Agent::Named(name), Some(session)) => session.agent.eq_ignore_ascii_case(name),
+            _ => false,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Kept {
     pub machine: Option<DocumentId>,
     /// `YYYY-MM-DD`, compared with the day a run's stamp is written with.
     pub since: Option<String>,
+    pub agent: Option<Agent>,
 }
 
 impl Kept {
@@ -48,6 +68,7 @@ impl Kept {
             .as_ref()
             .is_none_or(|only| *only == run.machine)
             && (self.since.as_ref()).is_none_or(|day| run.written.day() >= *day)
+            && self.agent.as_ref().is_none_or(|agent| agent.ran(run))
     }
 
     /// Whether a run of `machine` written in `month`, `YYYY-MM`, can be one kept.
@@ -74,6 +95,7 @@ mod tests {
         Kept {
             machine,
             since: since.map(str::to_owned),
+            ..Kept::default()
         }
     }
 

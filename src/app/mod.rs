@@ -50,7 +50,7 @@ pub use rows::{FollowupRow, Reference, Row, TriggerShown};
 ///     draft::drafts(deps)?;
 ///     context::context(deps, "/srv")?;
 ///     show::diff(deps, "lantern", None)?;
-///     usage::usage(deps, None, None)?;
+///     usage::usage(deps, None, None, None)?;
 ///     Ok(())
 /// }
 /// ```

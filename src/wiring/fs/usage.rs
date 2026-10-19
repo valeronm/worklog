@@ -349,6 +349,7 @@ mod tests {
             let kept = Kept {
                 machine,
                 since: since.map(str::to_owned),
+                ..Kept::default()
             };
             usage.read(&kept).unwrap()
         };
@@ -405,8 +406,8 @@ mod tests {
 
         let from = |day: &str| {
             let kept = Kept {
-                machine: None,
                 since: Some(day.to_owned()),
+                ..Kept::default()
             };
             usage.read(&kept).unwrap()
         };
