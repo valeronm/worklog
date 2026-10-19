@@ -55,7 +55,7 @@ or record something.
 Prose goes through a draft. The records are the agent's own: write them
 without putting the text to the user for approval, and answer for their
 content afterwards through `show` and `history`. What the user decides is
-what happens next, the triage under Open work; never the text of a record.
+what happens next, the triage under Open work.
 
 1. `worklog new topic <name>`, `worklog new fact <topic>/<name>`,
    `worklog new idea <topic>/<name>`, `worklog new entry <name>`,
@@ -80,10 +80,11 @@ what happens next, the triage under Open work; never the text of a record.
    document's next version. A refusal says what is wrong; the draft stays
    for another edit. `worklog discard <target>` deletes the draft.
 
-A draft is named as its document is; a new entry's is `<date>-<name>`. If
-`save` says the document moved on since the draft was checked out, another
-session or machine wrote in between: read the draft, or `diff` it, for the
-edits made, then `discard`, `checkout` again, make the edits again, `save`.
+A draft is taken by its document's name or id; its path is only for the
+edit. If `save` says the document moved on since the draft was checked
+out, another session or machine wrote in between: read the draft, or
+`diff` it, for the edits made, then `discard`, `checkout` again, make the
+edits again, `save`.
 
 State changes are commands and need no draft. Each is refused while a
 draft of its document is open.
@@ -206,8 +207,8 @@ Which store holds it:
 
 - A repo's own docs, its README and its agent instructions, hold what a
   stranger cloning it needs. A fact that turns out to be the repo's
-  business moves there and is ended here as `moved`, never copied: two
-  stores holding one claim is how one goes stale.
+  business moves there and is ended here as `moved`: two stores holding
+  one claim is how one goes stale.
 - A fact holds what is true of its subject wherever a session runs and is
   not the repo's business: a device quirk and the setting that works
   around it, a decision and the reasoning that would otherwise be
@@ -219,9 +220,9 @@ Which store holds it:
 
 Writing one well:
 
-- File a fact under the narrowest topic it is true of. A topic is a
-  subject, never an activity: `testing` says what the work was, and its
-  facts belong to whatever it was done to.
+- File a fact under the narrowest topic it is true of. A topic is what
+  the work was done to: `testing` names the work, and its facts belong to
+  whatever was tested.
 - Verify before distilling. Turning an older record into a fact means
   checking every claim against the code first; a stale source can assert
   the opposite of the evidence it cites.
@@ -351,10 +352,10 @@ know; a claim whose directory is under the home directory and not stored
 that way. An entry's links are citations and are not checked.
 
 A notice that a document links an ended one is a question about the
-linking document, never about the link. Read the document whole, with the
-target and what ended it, and decide one of two things. It is over too:
-end it with the reason that fits, as an idea is `built` once the designs
-it rests on are, or a fact `superseded` or `false`. Or it still holds:
+linking document. Read the document whole, with the target and what
+ended it, and decide one of two things. It is over too: end it with the
+reason that fits, as an idea is `built` once the designs it rests on are,
+or a fact `superseded` or `false`. Or it still holds:
 rewrite what the ending made untrue, and where a sentence only cites the
 target, point it at what the target became, the entry that built it or
 the fact that replaced it. Removing or rewording the link so the notice
