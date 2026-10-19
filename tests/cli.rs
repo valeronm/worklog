@@ -2356,6 +2356,14 @@ impl Host {
         self.home().join(".codex/rules/worklog.rules")
     }
 
+    fn config_of_codex(&self) -> PathBuf {
+        self.home().join(".codex/config.toml")
+    }
+
+    fn drafts(&self) -> PathBuf {
+        self.root.join("next/drafts")
+    }
+
     fn hooks_json(&self, home: &str) -> Value {
         serde_json::from_str(&fs::read_to_string(self.hooks_of(home)).unwrap()).unwrap()
     }
@@ -2363,8 +2371,15 @@ impl Host {
     fn placed(&self, homes: &[&str]) -> Vec<PathBuf> {
         (homes.iter())
             .flat_map(|home| {
-                let rule = (*home == ".codex").then(|| self.rule_of_codex());
-                [Some(self.skill_of(home)), rule, Some(self.hooks_of(home))]
+                let codex = *home == ".codex";
+                let rule = codex.then(|| self.rule_of_codex());
+                let config = codex.then(|| self.config_of_codex());
+                [
+                    Some(self.skill_of(home)),
+                    rule,
+                    config,
+                    Some(self.hooks_of(home)),
+                ]
             })
             .flatten()
             .collect()
@@ -2477,6 +2492,14 @@ fn agents_install_reaches_the_agents_present_and_notes_a_hook_already_there() {
             .unwrap()
             .contains("pattern = [\"worklog\"]")
     );
+    assert_eq!(
+        fs::read_to_string(host.config_of_codex()).unwrap(),
+        format!(
+            "[sandbox_workspace_write]\nwritable_roots = [\"{}\"]\n",
+            host.drafts().display()
+        )
+    );
+    assert!(host.drafts().is_dir());
     assert!(!host.home().join(".claude").exists());
     let hooks = fs::read(host.hooks_of(".codex")).unwrap();
 
@@ -2544,6 +2567,7 @@ fn agents_refresh_rewrites_a_stale_skill_rule_and_hook_and_nothing_else() {
         lines(&[
             host.skill_of(".claude"),
             host.rule_of_codex(),
+            host.config_of_codex(),
             host.hooks_of(".codex")
         ])
     );
@@ -2585,10 +2609,12 @@ fn agents_uninstall_takes_back_only_what_install_placed() {
             host.hooks_of(".claude"),
             skills(".codex"),
             host.rule_of_codex(),
+            host.config_of_codex(),
             host.hooks_of(".codex"),
         ])
     );
     assert!(!host.rule_of_codex().exists());
+    assert_eq!(fs::read_to_string(host.config_of_codex()).unwrap(), "");
     assert_eq!(fs::read_to_string(&other_skill).unwrap(), "desk");
     assert!(!skills(".claude").exists());
     assert_eq!(host.hooks_json(".claude"), before);
@@ -2660,6 +2686,47 @@ fn agents_refresh_and_uninstall_over_a_hooks_file_that_is_not_json_change_nothin
         let ran = host.run(&["agents", action]);
         assert_eq!((ran.stdout.as_str(), ran.code), ("", Some(1)), "{action}");
         assert!(ran.stderr.contains("not readable as JSON"), "{action}");
+        assert_eq!(snapshot(&host), before, "{action}");
+    }
+}
+
+#[test]
+fn a_codex_config_keeps_what_it_held_through_an_install_and_an_uninstall() {
+    let host = Host::new().with_agents(&[".codex"]);
+    let theirs = "# mine\nmodel = \"atlas\"\n\n[sandbox_workspace_write]\n\
+                  writable_roots = [\"/lantern\"]\n";
+    fs::write(host.config_of_codex(), theirs).unwrap();
+    host.ok(&["agents", "install"]);
+    assert_eq!(
+        fs::read_to_string(host.config_of_codex()).unwrap(),
+        format!(
+            "# mine\nmodel = \"atlas\"\n\n[sandbox_workspace_write]\n\
+             writable_roots = [\"/lantern\", \"{}\"]\n",
+            host.drafts().display()
+        )
+    );
+    host.ok(&["agents", "uninstall"]);
+    assert_eq!(fs::read_to_string(host.config_of_codex()).unwrap(), theirs);
+}
+
+#[test]
+fn a_codex_config_of_another_shape_is_refused_and_nothing_is_written() {
+    let host = Host::new().with_agents(&[".claude", ".codex"]);
+    fs::write(host.config_of_codex(), "sandbox_workspace_write = 4\n").unwrap();
+    let refused = format!(
+        "worklog: {}: `sandbox_workspace_write` is not a table\n",
+        host.config_of_codex().display()
+    );
+    let before = snapshot(&host);
+    assert_refused(&host.run(&["agents", "install"]), 1, &refused);
+    assert_eq!(snapshot(&host), before);
+
+    let skill = host.skill_of(".codex");
+    fs::create_dir_all(skill.parent().unwrap()).unwrap();
+    fs::write(&skill, "old").unwrap();
+    let before = snapshot(&host);
+    for action in ["refresh", "uninstall"] {
+        assert_refused(&host.run(&["agents", action]), 1, &refused);
         assert_eq!(snapshot(&host), before, "{action}");
     }
 }
@@ -4110,6 +4177,11 @@ fn a_misnamed_binary_whose_hook_is_installed_is_upgraded_and_its_refresh_refused
         "{}: the binary's file name must be worklog, or its hook is not found again\n",
         installed.display()
     );
+    let skipped = format!(
+        "worklog: {}: fish's completions are not written, since the binary's file name is not \
+         worklog\n",
+        installed.display()
+    );
     let bytes = fs::read(binary()).unwrap();
     host.publish(&format!("v{CURRENT}"), b"", b"");
     let before = snapshot(&host);
@@ -4117,7 +4189,7 @@ fn a_misnamed_binary_whose_hook_is_installed_is_upgraded_and_its_refresh_refused
     assert_refused(
         &stayed,
         1,
-        &format!("worklog: already at {CURRENT}\nworklog: {refusal}"),
+        &format!("worklog: already at {CURRENT}\n{skipped}worklog: {refusal}"),
     );
     assert_eq!(snapshot(&host), before);
 
@@ -4127,8 +4199,9 @@ fn a_misnamed_binary_whose_hook_is_installed_is_upgraded_and_its_refresh_refused
         upgraded.stderr,
         format!(
             "worklog: upgraded {CURRENT} to 9.9.9\n\
-             worklog: {} refresh: {refusal}",
-            installed.display()
+             worklog: {} refresh: {}worklog: {refusal}",
+            installed.display(),
+            skipped.strip_prefix("worklog: ").unwrap()
         )
     );
     assert_eq!(
@@ -4246,7 +4319,11 @@ fn refresh_writes_its_skill_over_the_one_the_tool_before_the_rebuild_left() {
     let printed = host.ok(&["refresh"]);
     assert_eq!(
         printed,
-        lines(&[host.skill_of(".codex"), host.rule_of_codex()])
+        lines(&[
+            host.skill_of(".codex"),
+            host.rule_of_codex(),
+            host.config_of_codex()
+        ])
     );
     assert_eq!(
         fs::read_to_string(&left).unwrap(),

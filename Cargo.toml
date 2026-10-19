@@ -34,6 +34,8 @@ similar = "2"
 tiny_http = "0.12"
 # preserve_order so a header keeps the order its keys were written in.
 toml = { version = "1.1.8", features = ["preserve_order"] }
+# Keeps the comments and layout of an agent's config it adds a writable root to.
+toml_edit = "0.25.17"
 # gzip off: the release assets are binaries, and the redirect it reads
 # for the tag carries no body.
 ureq = { version = "3", default-features = false, features = ["rustls"] }

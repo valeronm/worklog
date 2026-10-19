@@ -166,6 +166,9 @@ struct Known {
     session: &'static str,
     hook: Hook,
     rule: Option<Rule>,
+    /// Under the agent's home, the file that lists the directories its sandbox lets a session
+    /// write to.
+    config: Option<&'static str>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -206,6 +209,7 @@ static AGENTS: [Known; 2] = [
             session: "session_id",
         },
         rule: None,
+        config: None,
     },
     Known {
         name: "Codex",
@@ -217,6 +221,7 @@ static AGENTS: [Known; 2] = [
             session: "session_id",
         },
         rule: Some(CODEX_RULE),
+        config: Some("config.toml"),
     },
 ];
 
@@ -303,6 +308,19 @@ impl Agent {
     pub fn write_hooks(&self, text: &str) -> Result<(), Failure> {
         Ok(self.files.write_hooks(text)?)
     }
+
+    #[must_use]
+    pub fn config(&self) -> Option<&Path> {
+        self.files.config()
+    }
+
+    pub fn read_config(&self) -> Result<Option<String>, Failure> {
+        Ok(self.files.read_config()?)
+    }
+
+    pub fn write_config(&self, text: &str) -> Result<Option<PathBuf>, Failure> {
+        Ok(self.files.write_config(text)?)
+    }
 }
 
 /// The agents this tool knows, present on this host or not, under `HOME` and not under the
@@ -318,6 +336,7 @@ pub fn agents(variable: &dyn Fn(&str) -> Option<OsString>) -> Result<Vec<Agent>,
             home.join(known.home),
             known.hooks,
             known.rule.as_ref().map(|rule| rule.file),
+            known.config,
         ),
         homes: homes.clone(),
         known,
@@ -338,6 +357,16 @@ pub(crate) fn homes(variable: &dyn Fn(&str) -> Option<OsString>) -> Result<Vec<P
         homes.push(resolved);
     }
     Ok(homes)
+}
+
+/// This host's drafts directory, wherever `WORKLOG_HOME` or `XDG_STATE_HOME` puts it.
+pub(crate) fn drafts(variable: &dyn Fn(&str) -> Option<OsString>) -> Result<PathBuf, Failure> {
+    Ok(Paths::resolved(variable)?.drafts)
+}
+
+/// Codex grants no writable root that is missing.
+pub(crate) fn make_drafts(drafts: &Path) -> Result<(), Failure> {
+    Ok(fs::make_dir(drafts)?)
 }
 
 /// The file fish reads the completions of `command` from, under `XDG_CONFIG_HOME` or the home

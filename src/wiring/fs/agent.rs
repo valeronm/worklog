@@ -14,15 +14,23 @@ pub struct FsAgent {
     skill_dir: PathBuf,
     hooks: PathBuf,
     rule: Option<PathBuf>,
+    config: Option<PathBuf>,
 }
 
 impl FsAgent {
-    pub fn new(name: &'static str, home: PathBuf, hooks: &str, rule: Option<&str>) -> FsAgent {
+    pub fn new(
+        name: &'static str,
+        home: PathBuf,
+        hooks: &str,
+        rule: Option<&str>,
+        config: Option<&str>,
+    ) -> FsAgent {
         FsAgent {
             name,
             skill_dir: home.join("skills").join(SKILL_DIRECTORY),
             hooks: home.join(hooks),
             rule: rule.map(|rule| home.join(rule)),
+            config: config.map(|config| home.join(config)),
             home,
         }
     }
@@ -89,6 +97,26 @@ impl FsAgent {
         Ok(optional(file, fs::remove_file(file))?.map(|()| file.clone()))
     }
 
+    pub fn config(&self) -> Option<&Path> {
+        self.config.as_deref()
+    }
+
+    pub fn read_config(&self) -> Result<Option<String>, StoreError> {
+        let Some(file) = &self.config else {
+            return Ok(None);
+        };
+        read_optional(file)
+    }
+
+    /// Returns the file written, or `None` for an agent that has no config.
+    pub fn write_config(&self, text: &str) -> Result<Option<PathBuf>, StoreError> {
+        let Some(file) = &self.config else {
+            return Ok(None);
+        };
+        self.in_home(file, text)?;
+        Ok(Some(file.clone()))
+    }
+
     fn in_home(&self, file: &Path, text: &str) -> Result<(), StoreError> {
         replace_under(&self.home, file, text)
     }
@@ -139,7 +167,13 @@ mod tests {
     use super::*;
 
     fn agent(home: &Path) -> FsAgent {
-        FsAgent::new("Claude Code", home.join(".claude"), "settings.json", None)
+        FsAgent::new(
+            "Claude Code",
+            home.join(".claude"),
+            "settings.json",
+            None,
+            None,
+        )
     }
 
     #[test]
@@ -152,6 +186,7 @@ mod tests {
             home.clone(),
             "hooks.json",
             Some("rules/lantern.rules"),
+            None,
         );
         assert_eq!(taking.read_rule(), Ok(None));
         assert_eq!(taking.remove_rule(), Ok(None));

@@ -118,6 +118,13 @@ therefore also writes `rules/worklog.rules`, a rule that runs every
 tool's own: a refresh writes it wherever the skill or the hook is, and an
 uninstall removes it.
 
+The rule covers commands, not the edit tool, which the sandbox keeps out of
+the drafts directory too. An install therefore also adds that directory, by
+its absolute path, to `sandbox_workspace_write.writable_roots` in
+`~/.codex/config.toml`, keeping the rest of the file as written. A refresh
+adds it wherever the skill or the hook is, and an uninstall takes out that
+one entry.
+
 ## Completions
 
 Completions are answered by the binary, so a shell is offered what the

@@ -38,7 +38,11 @@ fn io_error(location: &Path, error: &std::io::Error) -> StoreError {
     StoreError::io(location.display(), error)
 }
 
-// Every file and directory here is created by its first write.
+pub fn make_dir(dir: &Path) -> Result<(), StoreError> {
+    std::fs::create_dir_all(dir).map_err(|e| io_error(dir, &e))
+}
+
+// A missing file or directory is one not made yet.
 fn optional<T>(at: &Path, result: std::io::Result<T>) -> Result<Option<T>, StoreError> {
     match result {
         Ok(value) => Ok(Some(value)),

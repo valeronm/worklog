@@ -616,11 +616,12 @@ mod tests {
         assert_eq!(
             printed(&asked),
             format!(
-                "atlas created\n{}\n{}\n{}\n{}\n{}\n",
+                "atlas created\n{}\n{}\n{}\n{}\n{}\n{}\n",
                 home.skill(".claude").display(),
                 hooks.display(),
                 home.skill(".codex").display(),
                 home.root.join("home/.codex/rules/worklog.rules").display(),
+                home.root.join("home/.codex/config.toml").display(),
                 home.root.join("home/.codex/hooks.json").display()
             )
         );

@@ -137,6 +137,12 @@ calls its rules experimental and nothing checks the form or the directory
 against it: a change on its side drops the usage lines and the writes of
 its sessions without failing a test.
 
+What the tool owns in Codex's `config.toml` is the one writable root equal
+to the host's drafts directory, along with an array or table its removal
+leaves empty. The rest of that file is the user's and keeps its comments
+and layout. Nothing checks that Codex still reads that key, so a rename on
+its side leaves drafts unwritable to its edit tool without failing a test.
+
 `init` touches neither the skill nor the hooks file unless given
 `--agents` or told yes to the question it asks on a terminal. A refresh
 writes only where the thing already is, fish's completions directory

@@ -1,11 +1,11 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
 use super::args::AgentsAction;
 use super::render::{Output, Render, Stopped, output};
 use super::skill::SKILL;
-use super::{Environment, NAME, hook};
+use super::{Environment, NAME, hook, sandbox};
 use crate::app::Failure;
 use crate::app::setup::Bound;
 use crate::domain::id::DocumentId;
@@ -79,6 +79,27 @@ impl Done {
         Ok(planned.is_some())
     }
 
+    fn config(&mut self, agent: &Agent, planned: Option<&str>) -> Result<(), Failure> {
+        if let Some(text) = planned
+            && let Some(file) = agent.write_config(text)?
+        {
+            self.wrote(&file);
+        }
+        Ok(())
+    }
+
+    fn granted(
+        &mut self,
+        agent: &Agent,
+        planned: Option<&str>,
+        drafts: &Path,
+    ) -> Result<(), Failure> {
+        if planned.is_some() {
+            wiring::make_drafts(drafts)?;
+        }
+        self.config(agent, planned)
+    }
+
     /// The notes are given under `json` too, since the value printed there carries none.
     pub(super) fn output(self, bound: Option<Bound>, json: bool) -> Output {
         let mut made = match bound {
@@ -131,36 +152,63 @@ pub(super) fn present_names(environment: &Environment) -> Result<Vec<&'static st
     Ok(present.map(Agent::name).collect())
 }
 
-type Planned = Vec<(Agent, Option<String>)>;
+/// An agent's hooks file and config, each as it is to be written, or `None` where it stays.
+struct Planned {
+    agent: Agent,
+    hooks: Option<String>,
+    config: Option<String>,
+}
 
-// Every agent's hooks file is read and edited in memory before the first write.
+// Every agent's hooks file and config is read and edited in memory before the first write.
 fn planned(
     agents: Vec<Agent>,
     hooks: impl Fn(&Agent) -> Result<Option<String>, Failure>,
-) -> Result<Planned, Failure> {
+    config: impl Fn(&Agent) -> Result<Option<String>, Failure>,
+) -> Result<Vec<Planned>, Failure> {
     agents
         .into_iter()
-        .map(|agent| hooks(&agent).map(|text| (agent, text)))
+        .map(|agent| {
+            Ok(Planned {
+                hooks: hooks(&agent)?,
+                config: config(&agent)?,
+                agent,
+            })
+        })
         .collect()
 }
 
 /// An install with every refusal behind it: the binary's path is known and makes a command,
-/// an agent is present, and each hooks file was edited in memory.
-pub(super) struct Placing(Planned);
+/// an agent is present, and each hooks file and config was edited in memory.
+pub(super) struct Placing {
+    planned: Vec<Planned>,
+    drafts: PathBuf,
+}
 
 impl Placing {
     pub(super) fn on_this_host(environment: &Environment) -> Result<Placing, Failure> {
         let binary = environment.binary()?;
         let agents = present(wiring::agents(environment.variable)?)?;
-        planned(agents, |agent| hook::installed(agent, binary)).map(Placing)
+        let drafts = wiring::drafts(environment.variable)?;
+        let planned = planned(
+            agents,
+            |agent| hook::installed(agent, binary),
+            |agent| sandbox::installed(agent, &drafts),
+        )?;
+        Ok(Placing { planned, drafts })
     }
 
     fn install_into(&self, done: &mut Done) -> Result<(), Failure> {
-        for (agent, hooks) in &self.0 {
+        for Planned {
+            agent,
+            hooks,
+            config,
+        } in &self.planned
+        {
             done.wrote(&agent.write_skill(SKILL)?);
             if let Some(rule) = agent.write_rule()? {
                 done.wrote(&rule);
             }
+            done.granted(agent, config.as_deref(), &self.drafts)?;
             if !done.hooks(agent, hooks.as_deref())? {
                 done.notes.push(format!(
                     "{}: a SessionStart hook already runs {NAME} context",
@@ -192,48 +240,61 @@ pub(super) fn initialized(
     Ok(done.output(Some(bound), json))
 }
 
-/// A refresh planned and not yet written: each hooks file was edited in memory.
-pub(super) struct Refreshing(Vec<Refreshed>);
+/// A refresh planned and not yet written: each hooks file and config was edited in memory.
+pub(super) struct Refreshing {
+    refreshed: Vec<Refreshed>,
+    drafts: PathBuf,
+}
 
 struct Refreshed {
     agent: Agent,
-    holds_hook: bool,
+    skill: Option<String>,
+    /// Whether the skill or the hook is there, as on a host set up before the rule or the root
+    /// existed.
+    installed: bool,
     hooks: Option<String>,
+    config: Option<String>,
 }
 
 impl Refreshing {
     pub(super) fn on_this_host(environment: &Environment) -> Result<Refreshing, Failure> {
         let agents = wiring::agents(environment.variable)?;
+        let drafts = wiring::drafts(environment.variable)?;
         let refreshed = |agent: Agent| {
+            let skill = agent.read_skill()?;
             let (holds_hook, hooks) = hook::refreshed(&agent, || environment.binary())?;
+            let installed = skill.is_some() || holds_hook;
+            let config = if installed {
+                sandbox::installed(&agent, &drafts)?
+            } else {
+                None
+            };
             Ok(Refreshed {
                 agent,
-                holds_hook,
+                skill,
+                installed,
                 hooks,
+                config,
             })
         };
-        agents
+        let refreshed = agents
             .into_iter()
             .map(refreshed)
-            .collect::<Result<_, _>>()
-            .map(Refreshing)
+            .collect::<Result<_, Failure>>()?;
+        Ok(Refreshing { refreshed, drafts })
     }
 
     pub(super) fn write_into(&self, done: &mut Done) -> Result<(), Failure> {
-        for Refreshed {
-            agent,
-            holds_hook,
-            hooks,
-        } in &self.0
-        {
-            let skill = agent.read_skill()?;
-            if skill.as_deref().is_some_and(|held| held != SKILL) {
+        for refreshed in &self.refreshed {
+            let agent = &refreshed.agent;
+            if (refreshed.skill.as_deref()).is_some_and(|held| held != SKILL) {
                 done.wrote(&agent.write_skill(SKILL)?);
             }
-            if let Some(rule) = agent.refresh_rule(skill.is_some() || *holds_hook)? {
+            if let Some(rule) = agent.refresh_rule(refreshed.installed)? {
                 done.wrote(&rule);
             }
-            done.hooks(agent, hooks.as_deref())?;
+            done.granted(agent, refreshed.config.as_deref(), &self.drafts)?;
+            done.hooks(agent, refreshed.hooks.as_deref())?;
         }
         Ok(())
     }
@@ -241,13 +302,21 @@ impl Refreshing {
 
 fn uninstall_into(environment: &Environment, done: &mut Done) -> Result<(), Failure> {
     let agents = wiring::agents(environment.variable)?;
-    for (agent, hooks) in planned(agents, hook::uninstalled)? {
+    let drafts = wiring::drafts(environment.variable)?;
+    let uninstalled = |agent: &Agent| sandbox::uninstalled(agent, &drafts);
+    for Planned {
+        agent,
+        hooks,
+        config,
+    } in planned(agents, hook::uninstalled, uninstalled)?
+    {
         if let Some(dir) = agent.remove_skill()? {
             done.wrote(&dir);
         }
         if let Some(rule) = agent.remove_rule()? {
             done.wrote(&rule);
         }
+        done.config(&agent, config.as_deref())?;
         done.hooks(&agent, hooks.as_deref())?;
     }
     Ok(())

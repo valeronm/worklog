@@ -11,6 +11,7 @@ mod prompt;
 mod refresh;
 mod render;
 mod run;
+mod sandbox;
 mod skill;
 mod upgrade;
 

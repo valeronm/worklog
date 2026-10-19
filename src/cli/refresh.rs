@@ -28,11 +28,11 @@ fn fish_completions(
 }
 
 pub(super) fn refresh_into(environment: &Environment, done: &mut Done) -> Result<(), Failure> {
-    let agents = Refreshing::on_this_host(environment)?;
     let homes = wiring::homes(environment.variable)?;
     let homes: Vec<&Path> = homes.iter().map(PathBuf::as_path).collect();
     // A binary whose path is unknown or cannot be quoted is refused before the first write.
     let completions = fish_completions(environment, &homes, done)?;
+    let agents = Refreshing::on_this_host(environment)?;
     agents.write_into(done)?;
     if let Some((file, line)) = completions {
         wiring::write_completions(&file, &line)?;
