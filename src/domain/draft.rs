@@ -1,13 +1,15 @@
 //! A document being edited on this machine: its fields and body as a
-//! session edits them, and beside them what the edit started from.
+//! session edits them, and beside them what the edit started from and the
+//! session that opened it.
 
-use std::fmt;
+use std::fmt::{self, Write as _};
 
 use toml::Table;
 
 use super::fence::{self, FenceError};
 use super::id::{DocumentId, VersionId};
-use super::version::{self, Fields, Kind, Version};
+use super::session::Session;
+use super::version::{self, Fields, Kind, Stamp, Version};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DraftError {
@@ -35,6 +37,15 @@ pub struct Draft {
     pub parents: Vec<VersionId>,
     pub fields: Fields,
     pub body: String,
+    /// `None` for a draft opened outside an agent session.
+    pub opened_in: Option<Session>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Listed {
+    pub draft: Draft,
+    /// When the draft's text was last written, by the tool or an editor.
+    pub touched: Stamp,
 }
 
 fn content(text: &str) -> Result<(Fields, String), DraftError> {
@@ -54,6 +65,7 @@ impl Draft {
             parents: Vec::new(),
             fields,
             body,
+            opened_in: None,
         }
     }
 
@@ -65,6 +77,7 @@ impl Draft {
             parents: vec![version.id.clone()],
             fields: version.fields.clone(),
             body: version.body.clone(),
+            opened_in: None,
         }
     }
 
@@ -88,11 +101,19 @@ impl Draft {
     #[must_use]
     pub fn origin(&self) -> String {
         let parents: Vec<String> = self.parents.iter().map(|id| format!("\"{id}\"")).collect();
-        format!(
+        let mut origin = format!(
             "kind = \"{}\"\nparents = [{}]\n",
             self.kind,
             parents.join(", ")
-        )
+        );
+        if let Some(Session { agent, id }) = &self.opened_in {
+            let (agent, id) = (
+                toml::Value::from(agent.as_str()),
+                toml::Value::from(id.as_str()),
+            );
+            let _ = writeln!(origin, "agent = {agent}\nsession = {id}");
+        }
+        origin
     }
 
     pub fn read(document: DocumentId, origin: &str, text: &str) -> Result<Draft, DraftError> {
@@ -100,6 +121,13 @@ impl Draft {
         let mut origin: Table = origin.parse().map_err(|e: toml::de::Error| wrong(&e))?;
         let kind = version::text_of(&mut origin, "kind").map_err(|e| wrong(&e))?;
         let parents = version::versions_of(&mut origin, "parents").map_err(|e| wrong(&e))?;
+        let opened_in = match (origin.remove("agent"), origin.remove("session")) {
+            (None, None) => None,
+            (Some(toml::Value::String(agent)), Some(toml::Value::String(id))) => {
+                Some(Session { agent, id })
+            }
+            _ => return Err(wrong(&"`agent` and `session` are not both text")),
+        };
         let (fields, body) = content(text)?;
         Ok(Draft {
             document,
@@ -107,6 +135,7 @@ impl Draft {
             parents,
             fields,
             body,
+            opened_in,
         })
     }
 }
@@ -207,6 +236,33 @@ mod tests {
             assert!(
                 matches!(
                     Draft::read(lantern(), origin, &text),
+                    Err(DraftError::Origin(_))
+                ),
+                "{origin}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_session_a_draft_was_opened_in_reads_back_from_its_origin() {
+        let mut draft = draft();
+        draft.opened_in = Some(Session {
+            agent: "Lamp".to_owned(),
+            id: "s-\"1\"".to_owned(),
+        });
+        let text = draft.text().unwrap();
+        let origin = draft.origin();
+        assert!(origin.contains("\nagent = \"Lamp\"\n"), "{origin}");
+        assert_eq!(Draft::read(lantern(), &origin, &text), Ok(draft.clone()));
+        for half in [
+            "agent = \"Lamp\"\n",
+            "session = \"s-1\"\n",
+            "agent = 1\nsession = \"s-1\"\n",
+        ] {
+            let origin = format!("kind = \"fact\"\nparents = []\n{half}");
+            assert!(
+                matches!(
+                    Draft::read(lantern(), &origin, &text),
                     Err(DraftError::Origin(_))
                 ),
                 "{origin}"

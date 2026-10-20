@@ -62,10 +62,12 @@ mod tests {
     use crate::domain::id::{DocumentId, VersionId};
     use crate::domain::ports::Usage as _;
     use crate::domain::schema::{Date, Directory, KindOf, Name};
+    use crate::domain::session::Session;
     use crate::domain::testing::{
-        ASSET, BINARY, LANTERN, REFRESHED, atlas, build, first, published, ran, version as release,
+        ASSET, BINARY, DRAFTED, LANTERN, REFRESHED, atlas, build, first, lamp_session, published,
+        ran, version as release,
     };
-    use crate::domain::usage::{Invocation, Session};
+    use crate::domain::usage::Invocation;
     use crate::domain::version::{Kind, ReadError, Stamp};
 
     fn snake(word: &str) -> bool {
@@ -134,7 +136,8 @@ mod tests {
         a_stored_version_is_its_document_its_label_and_its_whole_hash: Written = stored,
         the_versions_a_move_stores_are_listed: Vec<Written> = moved,
         a_draft_opened_is_its_document_and_its_path: DraftRef = opened,
-        a_listed_draft_holds_its_kind_its_label_and_its_path: Vec<DraftRow> = drafts,
+        a_listed_draft_holds_its_kind_its_label_its_path_its_opener_and_when_it_was_touched:
+            Vec<DraftRow> = drafts,
         a_draft_discarded_is_null: () = discarded,
         a_followup_made_is_the_version_stored_or_the_draft_opened: Made = made,
         a_bound_host_is_its_machine_topic_whether_it_was_made_and_what_agents_got: Initialized = bound,
@@ -385,18 +388,41 @@ mod tests {
     }
 
     fn drafts() -> Vec<(Vec<DraftRow>, Value)> {
-        let (world, lantern) = world();
-        let deps = world.deps();
-        let none = draft::drafts(&deps.read()).unwrap();
-        draft::checkout(&deps, "lantern").unwrap();
-        let expected = json!([{
-            "document": lantern,
-            "kind": "topic",
-            "label": "lantern",
-            "path": format!("memory:{lantern}"),
-        }]);
+        let (mut world, lantern, atlas) = world_with_atlas();
+        let none = draft::drafts(&world.deps().read()).unwrap();
+        world.host.set_session(Some(lamp_session()));
+        draft::checkout(&world.deps(), "lantern").unwrap();
+        world.host.set_session(None);
+        draft::checkout(&world.deps(), "atlas").unwrap();
+        let row = |document: &DocumentId, label: &str, opener: Value| {
+            json!({
+                "document": document,
+                "kind": "topic",
+                "label": label,
+                "path": format!("memory:{document}"),
+                "opener": opener,
+                "touched": DRAFTED,
+                "age_seconds": 761,
+            })
+        };
+        let at_a_terminal = draft::drafts(&world.deps().read()).unwrap();
+        let expected = json!([
+            row(
+                &lantern,
+                "lantern",
+                json!({"type": "other_session", "agent": "Lamp", "session": "s-1"})
+            ),
+            row(&atlas, "atlas", json!({"type": "no_session"})),
+        ]);
+        world.host.set_session(Some(lamp_session()));
+        let in_the_session = draft::drafts(&world.deps().read()).unwrap();
+        let this = json!([
+            row(&lantern, "lantern", json!({"type": "this_session"})),
+            row(&atlas, "atlas", json!({"type": "no_session"})),
+        ]);
         vec![
-            (draft::drafts(&deps.read()).unwrap(), expected),
+            (at_a_terminal, expected),
+            (in_the_session, this),
             (none, json!([])),
         ]
     }

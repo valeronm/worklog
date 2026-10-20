@@ -5,11 +5,12 @@ use crate::app::heads::label_or_short;
 use crate::app::lookup::{Lookup, refuse_ended};
 use crate::app::rules::{name_is_free, referencable};
 use crate::app::{Deps, DraftRef, Failed, Failure, ReadDeps, kind_named, text};
-use crate::domain::draft::Draft;
+use crate::domain::draft::{Draft, Listed};
 use crate::domain::id::{DocumentId, is_id_prefix};
 use crate::domain::schema::address::{Address, Found};
 use crate::domain::schema::{Content, Date, Entry, Fact, KindOf, Name, Topic, step, translate};
-use crate::domain::version::{Fields, Kind, Version};
+use crate::domain::session::Session;
+use crate::domain::version::{Fields, Kind, Stamp, Version};
 
 pub enum New<'a> {
     Topic {
@@ -112,12 +113,20 @@ pub fn new(deps: &Deps, what: &New) -> Result<DraftRef, Failure> {
     };
     let id = deps.ids.mint()?;
     name_is_free(&lookup, &id, &content)?;
-    for open in deps.drafts.list()? {
+    for Listed { draft: open, .. } in deps.drafts.list()? {
         if spelled(&open.kind, &open.fields).as_deref() == Some(address.as_str()) {
             return Err(draft_open(&address));
         }
     }
-    let draft = Draft::first(id, kind_named(content.kind()), fields, body.to_owned());
+    open_draft(
+        deps,
+        Draft::first(id, kind_named(content.kind()), fields, body.to_owned()),
+    )
+}
+
+/// Writes `draft` as opened in this process's session.
+pub(super) fn open_draft(deps: &Deps, mut draft: Draft) -> Result<DraftRef, Failure> {
+    draft.opened_in = deps.host.session();
     let location = deps.drafts.write(&draft)?;
     Ok(DraftRef {
         document: draft.document,
@@ -148,12 +157,7 @@ pub fn checkout(deps: &Deps, address: &str) -> Result<DraftRef, Failure> {
         return Err(Failure::at(&label, "a claim is never edited"));
     }
     refuse_ended(&record, &label)?;
-    let draft = opened(&lookup, &head, kind)?;
-    let location = deps.drafts.write(&draft)?;
-    Ok(DraftRef {
-        document: id,
-        location,
-    })
+    open_draft(deps, opened(&lookup, &head, kind)?)
 }
 
 pub(super) fn opened(lookup: &Lookup, version: &Version, kind: KindOf) -> Result<Draft, Failure> {
@@ -196,20 +200,45 @@ pub struct DraftRow {
     pub label: String,
     #[serde(rename = "path")]
     pub location: String,
+    pub opener: Opener,
+    pub touched: Stamp,
+    /// Whole seconds from `touched` to now; 0 for a draft touched after now.
+    pub age_seconds: u64,
+}
+
+/// Whose a draft is, by the agent session it was opened in.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum Opener {
+    ThisSession,
+    OtherSession { agent: String, session: String },
+    NoSession,
 }
 
 pub fn drafts(deps: &ReadDeps) -> Result<Vec<DraftRow>, Failure> {
     let mut open = deps.drafts.list()?;
-    open.sort_by(|a, b| a.document.cmp(&b.document));
-    Ok(open
-        .iter()
-        .map(|draft| DraftRow {
-            document: draft.document.clone(),
+    open.sort_by(|a, b| a.draft.document.cmp(&b.draft.document));
+    let now = deps.clock.now().instant();
+    let this = deps.host.session();
+    let row = |Listed { draft, touched }: Listed| {
+        let (label, location) = (draft_label(&draft), deps.drafts.location(&draft.document));
+        let opener = match draft.opened_in {
+            None => Opener::NoSession,
+            Some(session) if this.as_ref() == Some(&session) => Opener::ThisSession,
+            Some(Session { agent, id }) => Opener::OtherSession { agent, session: id },
+        };
+        let age_seconds = u64::try_from((now - touched.instant()) / 1_000_000_000).unwrap_or(0);
+        DraftRow {
+            document: draft.document,
             kind: draft.kind.to_string(),
-            label: draft_label(draft),
-            location: deps.drafts.location(&draft.document),
-        })
-        .collect())
+            label,
+            location,
+            opener,
+            touched,
+            age_seconds,
+        }
+    };
+    Ok(open.into_iter().map(row).collect())
 }
 
 // The draft of a stored document the address finds is tried before a draft whose document's
@@ -231,6 +260,7 @@ pub(super) fn draft_for(deps: &ReadDeps, lookup: &Lookup, address: &str) -> Resu
         .drafts
         .list()?
         .into_iter()
+        .map(|listed| listed.draft)
         .filter(|draft| {
             (is_id_prefix(address) && draft.document.as_str().starts_with(address))
                 || spelled(&draft.kind, &draft.fields).as_deref() == Some(address)
@@ -268,6 +298,7 @@ mod tests {
         ENDED, ENDED_FACT, TOPIC, World, fact, head, head_id, refused, topic, world,
     };
     use crate::domain::ports::{Drafts, DraftsRead, Store};
+    use crate::domain::testing::lamp_session;
     use crate::domain::version::{Kind, ReadError};
 
     fn stored(world: &World, id: &DocumentId) -> Draft {
@@ -612,6 +643,37 @@ mod tests {
         for row in &rows {
             assert_eq!(row.location, world.drafts.location(&row.document));
         }
+    }
+
+    #[test]
+    fn a_draft_keeps_the_session_it_was_opened_in() {
+        let (mut world, _) = world();
+        world.host.set_session(Some(lamp_session()));
+        let lantern = checkout(&world.deps(), "lantern").unwrap();
+        world.host.set_session(None);
+        let phone = new(&world.deps(), &New::Topic { name: "phone" }).unwrap();
+        let opened_in = |opened: &DraftRef| {
+            world
+                .drafts
+                .read(&opened.document)
+                .unwrap()
+                .unwrap()
+                .opened_in
+        };
+        assert_eq!(opened_in(&lantern), Some(lamp_session()));
+        assert_eq!(opened_in(&phone), None);
+    }
+
+    #[test]
+    fn a_listed_draft_s_age_runs_from_its_last_touch_to_now() {
+        let (world, _) = world();
+        let opened = checkout(&world.deps(), "lantern").unwrap();
+        let age = || drafts(&world.deps().read()).unwrap()[0].age_seconds;
+        assert_eq!(age(), 12 * 60 + 41);
+        world
+            .drafts
+            .touch(&opened.document, "2026-10-09T18:30:00+01:00");
+        assert_eq!(age(), 0);
     }
 
     #[test]

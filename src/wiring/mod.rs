@@ -8,7 +8,7 @@ mod net;
 
 use crate::app::{Deps, Failure};
 use crate::domain::ports::{Binary, Releases};
-use crate::domain::usage::Session;
+use crate::domain::session::Session;
 use fs::{
     Config, DirReleases, FsAgent, FsBinary, FsDrafts, FsHost, FsStore, FsUsage, Paths, RandomIds,
     SystemClock,

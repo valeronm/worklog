@@ -509,7 +509,7 @@ fn a_draft_is_opened_listed_stored_and_discarded() {
     );
     assert_eq!(
         host.ok(&["drafts"]),
-        format!("lantern {}\n", draft.display())
+        format!("lantern  no session  just now  {}\n", draft.display())
     );
     assert_stored(&host.ok(&["save", "lantern"]), "lantern");
     assert_eq!(host.ok(&["drafts"]), "");
@@ -519,6 +519,33 @@ fn a_draft_is_opened_listed_stored_and_discarded() {
     assert_eq!(reopened, draft);
     assert_eq!(host.ok(&["discard", "lantern"]), "");
     assert_eq!(host.ok(&["drafts"]), "");
+}
+
+#[test]
+fn a_listed_draft_is_this_session_s_only_in_the_session_that_opened_it() {
+    let host = Host::set_up("desk");
+    let (agent, variable) = SESSIONS[0];
+    let in_session = |args: &[&str]| {
+        let mut program = Command::cargo_bin("worklog").expect("the binary");
+        program.env(variable, "7f3a91c0-55e2");
+        let ran = host.run_as(program, &host.home(), args);
+        assert_eq!((ran.stderr.as_str(), ran.code), ("", Some(0)), "{args:?}");
+        ran.stdout
+    };
+    let opened = in_session(&["new", "topic", "lantern"]);
+    let path = opened.strip_suffix('\n').expect("one line");
+    assert_eq!(
+        in_session(&["drafts"]),
+        format!("lantern  this session  just now  {path}\n")
+    );
+    assert_eq!(
+        host.ok(&["drafts"]),
+        format!("lantern  {agent} 7f3a91c0  just now  {path}\n")
+    );
+    let listed = host.json(&["drafts"]);
+    let expected =
+        serde_json::json!({"type": "other_session", "agent": agent, "session": "7f3a91c0-55e2"});
+    assert_eq!(listed[0]["opener"], expected, "{listed}");
 }
 
 #[test]

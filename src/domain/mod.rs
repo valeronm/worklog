@@ -8,6 +8,7 @@ pub mod id;
 pub mod ports;
 pub mod release;
 pub mod schema;
+pub mod session;
 pub mod usage;
 pub mod version;
 

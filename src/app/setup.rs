@@ -6,7 +6,7 @@ use crate::app::{Deps, Failure, kind_named, text};
 use crate::domain::id::DocumentId;
 use crate::domain::ports::{Host, HostRead, StoreError};
 use crate::domain::schema::{KindOf, Name};
-use crate::domain::usage::Session;
+use crate::domain::session::Session;
 use crate::domain::version::Fields;
 
 const INIT: &str = "init";

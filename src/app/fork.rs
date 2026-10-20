@@ -1,4 +1,4 @@
-use crate::app::draft::{names, refuse_open};
+use crate::app::draft::{names, open_draft, refuse_open};
 use crate::app::heads::row_head;
 use crate::app::lookup::{Lookup, no_head_reads, unreadable};
 use crate::app::{Deps, DraftRef, Failure};
@@ -29,11 +29,7 @@ pub fn resolve(deps: &Deps, address: &str) -> Result<DraftRef, Failure> {
     let mut draft = Draft::of(&shown);
     draft.parents = heads.iter().map(|head| head.id.clone()).collect();
     draft.fields = names(&lookup, &step::shown(&shown.fields), kind)?;
-    let location = deps.drafts.write(&draft)?;
-    Ok(DraftRef {
-        document: id,
-        location,
-    })
+    open_draft(deps, draft)
 }
 
 #[cfg(test)]

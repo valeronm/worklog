@@ -1,13 +1,8 @@
 //! One line per command run, in the log each machine keeps in the store.
 
 use super::id::DocumentId;
+use super::session::Session;
 use super::version::Stamp;
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Session {
-    pub agent: String,
-    pub id: String,
-}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Invocation {

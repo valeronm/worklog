@@ -9,7 +9,8 @@ use crate::app::{Failure, ReadDeps};
 use crate::domain::id::DocumentId;
 use crate::domain::schema::Date;
 use crate::domain::schema::address::Found;
-use crate::domain::usage::{Agent, Invocation, Kept, Session};
+use crate::domain::session::Session;
+use crate::domain::usage::{Agent, Invocation, Kept};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Refusal {

@@ -1,5 +1,5 @@
 //! A line a read prints separates its fields with two spaces; the one line a write command
-//! prints, and each line of `drafts`, with one.
+//! prints with one.
 
 mod check;
 mod context;
@@ -14,9 +14,9 @@ use std::fmt::Write as _;
 use serde::Serialize;
 
 use super::json::{Pinned, nothing, printed};
-use crate::app::draft::DraftRow;
+use crate::app::draft::{DraftRow, Opener};
 use crate::app::followup::Made;
-use crate::app::{DraftRef, Failure, Row, Written};
+use crate::app::{DraftRef, Failure, Row, Written, counted};
 use crate::render::{change_or_ending, ended, written};
 
 #[cfg(test)]
@@ -177,12 +177,54 @@ impl Render for Made {
 
 impl Render for Vec<DraftRow> {
     fn text(&self) -> String {
+        let fields: Vec<[String; 4]> = (self.iter())
+            .map(|row| {
+                let (opener, age) = (opener(&row.opener), age(row.age_seconds));
+                [row.label.clone(), opener, age, row.location.clone()]
+            })
+            .collect();
+        let widest = |at: usize| {
+            let widths = fields.iter().map(|row| row[at].chars().count());
+            widths.max().unwrap_or(0)
+        };
+        let (label, opener, age) = (widest(0), widest(1), widest(2));
         let mut text = String::new();
-        for row in self {
-            let _ = writeln!(text, "{} {}", row.label, row.location);
+        for [label_of, opener_of, age_of, location] in &fields {
+            let _ = writeln!(
+                text,
+                "{label_of:<label$}  {opener_of:<opener$}  {age_of:<age$}  {location}"
+            );
         }
         text
     }
+}
+
+fn opener(opener: &Opener) -> String {
+    match opener {
+        Opener::ThisSession => "this session".to_owned(),
+        Opener::NoSession => "no session".to_owned(),
+        Opener::OtherSession { agent, session } => {
+            format!("{agent} {}", session.chars().take(8).collect::<String>())
+        }
+    }
+}
+
+fn age(seconds: u64) -> String {
+    const MINUTE: u64 = 60;
+    const HOUR: u64 = 60 * MINUTE;
+    const DAY: u64 = 24 * HOUR;
+    const TWO_DAYS: u64 = 2 * DAY;
+    const WEEK: u64 = 7 * DAY;
+    const TWO_WEEKS: u64 = 2 * WEEK;
+    let (count, one, several) = match seconds {
+        0..MINUTE => return "just now".to_owned(),
+        MINUTE..HOUR => (seconds / MINUTE, "minute", "minutes"),
+        HOUR..TWO_DAYS => (seconds / HOUR, "hour", "hours"),
+        TWO_DAYS..TWO_WEEKS => (seconds / DAY, "day", "days"),
+        _ => (seconds / WEEK, "week", "weeks"),
+    };
+    let count = usize::try_from(count).unwrap_or(usize::MAX);
+    format!("{} ago", counted(count, one, several))
 }
 
 #[cfg(test)]
@@ -192,6 +234,7 @@ mod tests {
     use crate::app::show::{Shown, ShownDocument, Unread};
     use crate::domain::id::VersionId;
     use crate::domain::testing::{atlas, lantern};
+    use crate::domain::version::Stamp;
 
     fn stored(label: &str) -> Written {
         Written {
@@ -273,18 +316,49 @@ mod tests {
     }
 
     #[test]
-    fn a_draft_is_listed_by_its_label_and_its_place() {
-        let row = |label: &str, location: &str| DraftRow {
+    fn a_draft_is_listed_by_its_label_its_opener_its_age_and_its_place() {
+        let row = |label: &str, opener: Opener, age_seconds: u64, location: &str| DraftRow {
             document: lantern(),
             kind: "topic".to_owned(),
             label: label.to_owned(),
             location: location.to_owned(),
+            opener,
+            touched: Stamp::parse("2026-09-04T10:00:00+00:00").unwrap(),
+            age_seconds,
+        };
+        let other = Opener::OtherSession {
+            agent: "Lamp".to_owned(),
+            session: "7f3a91c0-55e2".to_owned(),
         };
         assert_eq!(
-            vec![row("lantern", "/desk/a.md"), row("atlas", "/desk/b.md")].text(),
-            "lantern /desk/a.md\natlas /desk/b.md\n"
+            vec![
+                row("lantern", Opener::ThisSession, 240, "/desk/a.md"),
+                row("atlas", other, 2 * 86_400, "/desk/b.md"),
+                row("2026-09-04-lamp", Opener::NoSession, 30, "/desk/c.md"),
+            ]
+            .text(),
+            "lantern          this session   4 minutes ago  /desk/a.md\n\
+             atlas            Lamp 7f3a91c0  2 days ago     /desk/b.md\n\
+             2026-09-04-lamp  no session     just now       /desk/c.md\n"
         );
         assert_eq!(Vec::<DraftRow>::new().text(), "");
+    }
+
+    #[test]
+    fn a_draft_s_age_is_counted_in_the_largest_unit_that_reads_plainly() {
+        let ages = [
+            (59, "just now"),
+            (60, "1 minute ago"),
+            (3_599, "59 minutes ago"),
+            (3_600, "1 hour ago"),
+            (2 * 86_400 - 1, "47 hours ago"),
+            (2 * 86_400, "2 days ago"),
+            (14 * 86_400 - 1, "13 days ago"),
+            (14 * 86_400, "2 weeks ago"),
+        ];
+        for (seconds, shown) in ages {
+            assert_eq!(age(seconds), shown, "{seconds}");
+        }
     }
 
     #[test]

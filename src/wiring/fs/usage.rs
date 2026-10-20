@@ -6,7 +6,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::domain::id::DocumentId;
 use crate::domain::ports::{StoreError, Usage, UsageRead};
-use crate::domain::usage::{Invocation, Kept, Session};
+use crate::domain::session::Session;
+use crate::domain::usage::{Invocation, Kept};
 use crate::domain::version::Stamp;
 
 use super::{files, io_error};

@@ -284,7 +284,13 @@ The `.origin.toml` file is what the draft started from:
 ```
 kind = "fact"
 parents = ["b3-5c1e…"]
+agent = "Claude Code"
+session = "7f3a91c0-…"
 ```
+
+`agent` and `session` name the agent session the draft was opened in, and
+are both absent for a draft opened outside one. `drafts` compares them
+with the session it runs in to say whose a draft is, and only reports it.
 
 `parents` is empty for a document that does not exist yet, one head for a
 document opened as it stands, and every head for a fork being resolved. A

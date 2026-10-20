@@ -1,10 +1,12 @@
-use std::fs;
+use std::fs::{self, File};
+use std::io::Read as _;
 use std::path::PathBuf;
 
-use crate::domain::draft::Draft;
+use crate::domain::draft::{Draft, Listed};
 use crate::domain::id::DocumentId;
 use crate::domain::ports::{Drafts, DraftsRead, StoreError};
 
+use super::clock::stamp_at;
 use super::{files, io_error, make_dir, optional};
 
 pub struct FsDrafts {
@@ -29,12 +31,17 @@ impl FsDrafts {
     }
 }
 
-impl DraftsRead for FsDrafts {
-    fn read(&self, document: &DocumentId) -> Result<Option<Draft>, StoreError> {
+impl FsDrafts {
+    fn listed(&self, document: &DocumentId) -> Result<Option<Listed>, StoreError> {
         let path = self.text(document);
-        let Some(text) = optional(&path, fs::read_to_string(&path))? else {
+        let Some(mut file) = optional(&path, File::open(&path))? else {
             return Ok(None);
         };
+        let mut text = String::new();
+        file.read_to_string(&mut text)
+            .map_err(|e| io_error(&path, &e))?;
+        let touched = (file.metadata().and_then(|metadata| metadata.modified()))
+            .map_err(|e| io_error(&path, &e))?;
         let origin_path = self.origin(document);
         let origin =
             optional(&origin_path, fs::read_to_string(&origin_path))?.ok_or_else(|| {
@@ -43,12 +50,21 @@ impl DraftsRead for FsDrafts {
                     "missing, so what the draft started from is unknown",
                 )
             })?;
-        Draft::read(document.clone(), &origin, &text)
-            .map(Some)
-            .map_err(|e| StoreError::io(path.display(), e))
+        let draft = Draft::read(document.clone(), &origin, &text)
+            .map_err(|e| StoreError::io(path.display(), e))?;
+        Ok(Some(Listed {
+            draft,
+            touched: stamp_at(touched),
+        }))
+    }
+}
+
+impl DraftsRead for FsDrafts {
+    fn read(&self, document: &DocumentId) -> Result<Option<Draft>, StoreError> {
+        Ok(self.listed(document)?.map(|listed| listed.draft))
     }
 
-    fn list(&self) -> Result<Vec<Draft>, StoreError> {
+    fn list(&self) -> Result<Vec<Listed>, StoreError> {
         let mut drafts = Vec::new();
         for name in files(&self.dir)? {
             let Some(document) = name
@@ -57,7 +73,7 @@ impl DraftsRead for FsDrafts {
             else {
                 continue;
             };
-            drafts.extend(self.read(&document)?);
+            drafts.extend(self.listed(&document)?);
         }
         Ok(drafts)
     }
@@ -130,6 +146,8 @@ mod tests {
         let edited = drafts.read(&draft.document).unwrap().unwrap();
         assert_eq!(edited.body, "second\n");
         assert_eq!(edited.parents, draft.parents);
+        let modified = fs::metadata(&text).unwrap().modified().unwrap();
+        assert_eq!(drafts.list().unwrap()[0].touched, stamp_at(modified));
     }
 
     #[test]

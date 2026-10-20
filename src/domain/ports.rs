@@ -5,9 +5,10 @@ use std::fmt;
 use std::rc::Rc;
 
 use super::document::Document;
-use super::draft::Draft;
+use super::draft::{Draft, Listed};
 use super::id::{DocumentId, VersionId};
-use super::usage::{Invocation, Kept, Session};
+use super::session::Session;
+use super::usage::{Invocation, Kept};
 use super::version::{Kind, ReadError, Stamp, Version};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -105,7 +106,7 @@ pub trait Ids {
 pub trait DraftsRead {
     fn read(&self, document: &DocumentId) -> Result<Option<Draft>, StoreError>;
     /// Every draft, by its document's id.
-    fn list(&self) -> Result<Vec<Draft>, StoreError>;
+    fn list(&self) -> Result<Vec<Listed>, StoreError>;
     /// Where the draft of the document is or would be.
     fn location(&self, document: &DocumentId) -> String;
 }

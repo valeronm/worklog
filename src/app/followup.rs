@@ -1,7 +1,7 @@
 use serde::{Serialize, Serializer};
 use toml::Value;
 
-use crate::app::draft::named;
+use crate::app::draft::{named, open_draft};
 use crate::app::live::open;
 use crate::app::lookup::Lookup;
 use crate::app::rules::referencable;
@@ -126,11 +126,7 @@ pub fn new_followup(deps: &Deps, what: &NewFollowup) -> Result<Made, Failure> {
     let id = deps.ids.mint()?;
     if what.summary.is_none() {
         let draft = Draft::first(id, kind, fields, "\n".to_owned());
-        let location = deps.drafts.write(&draft)?;
-        return Ok(Made::Draft(DraftRef {
-            document: draft.document,
-            location,
-        }));
+        return Ok(Made::Draft(open_draft(deps, draft)?));
     }
     let body = match what.body.map(str::trim) {
         Some(body) if !body.is_empty() => format!("\n{body}\n"),

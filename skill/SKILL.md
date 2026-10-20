@@ -373,7 +373,10 @@ does one holding a version this binary cannot read: report it and leave
 it.
 
 `worklog drafts` lists the drafts open on this host, this session's
-and any other's: a draft is the session's that opened it. Save or discard
-only a draft this session opened. Report the rest and leave them; one
-that is plainly abandoned is put to the user, who says whether it is
-finished or dropped.
+and any other's: a draft is the session's that opened it. Each line says
+whose it is, `this session`, another session's or `no session`, and how
+long ago it was last touched. Save or discard only a draft this session
+opened. Report the rest and leave them: one another session touched
+recently is that session's until shown otherwise, and one that is
+plainly abandoned is put to the user, who says whether it is finished or
+dropped.

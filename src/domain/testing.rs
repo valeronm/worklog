@@ -6,14 +6,15 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
 use super::document::{Document, State, Unreadable};
-use super::draft::Draft;
+use super::draft::{Draft, Listed};
 use super::id::{DocumentId, VersionId};
 use super::ports::{
     Binary, Clock, Drafts, DraftsRead, Host, HostRead, Ids, NotRead, Refreshed, Releases, Store,
     StoreError, StoreRead, Usage, UsageRead,
 };
 use super::release::{Built, ReleaseVersion, sha256_hex};
-use super::usage::{Invocation, Kept, Session};
+use super::session::Session;
+use super::usage::{Invocation, Kept};
 use super::version::{Envelope, Fields, Header, Kind, Links, ReadError, Stamp, Version};
 
 pub struct FailingStore;
@@ -245,17 +246,35 @@ impl Store for MemoryStore {
     }
 }
 
+/// The time `MemoryDrafts` gives each draft it writes, until `touch` sets another.
+pub const DRAFTED: &str = "2026-10-09T18:10:00+01:00";
+
 #[derive(Default)]
 pub struct MemoryDrafts {
-    drafts: RefCell<BTreeMap<DocumentId, Draft>>,
+    drafts: RefCell<BTreeMap<DocumentId, Listed>>,
+}
+
+impl MemoryDrafts {
+    /// # Panics
+    ///
+    /// When `document` has no draft or `at` is not a stamp.
+    pub fn touch(&self, document: &DocumentId, at: &str) {
+        let mut drafts = self.drafts.borrow_mut();
+        let listed = drafts.get_mut(document).expect("a draft");
+        listed.touched = Stamp::parse(at).expect("a stamp");
+    }
 }
 
 impl DraftsRead for MemoryDrafts {
     fn read(&self, document: &DocumentId) -> Result<Option<Draft>, StoreError> {
-        Ok(self.drafts.borrow().get(document).cloned())
+        Ok(self
+            .drafts
+            .borrow()
+            .get(document)
+            .map(|listed| listed.draft.clone()))
     }
 
-    fn list(&self) -> Result<Vec<Draft>, StoreError> {
+    fn list(&self) -> Result<Vec<Listed>, StoreError> {
         Ok(self.drafts.borrow().values().cloned().collect())
     }
 
@@ -266,9 +285,13 @@ impl DraftsRead for MemoryDrafts {
 
 impl Drafts for MemoryDrafts {
     fn write(&self, draft: &Draft) -> Result<String, StoreError> {
+        let listed = Listed {
+            draft: draft.clone(),
+            touched: Stamp::parse(DRAFTED).expect("a stamp"),
+        };
         self.drafts
             .borrow_mut()
-            .insert(draft.document.clone(), draft.clone());
+            .insert(draft.document.clone(), listed);
         Ok(self.location(&draft.document))
     }
 
@@ -896,6 +919,13 @@ pub fn drafts_contract(drafts: &dyn Drafts, ids: &dyn Ids) {
     );
     assert_eq!(drafts.read(&lantern).expect("a read"), Some(draft.clone()));
 
+    let opened = Draft {
+        opened_in: Some(lamp_session()),
+        ..draft.clone()
+    };
+    drafts.write(&opened).expect("a write");
+    assert_eq!(drafts.read(&lantern).expect("a read"), Some(opened));
+
     let edited = draft
         .with_text("+++\nname = \"relay-pin\"\n+++\nsecond\n")
         .expect("a draft");
@@ -911,7 +941,10 @@ pub fn drafts_contract(drafts: &dyn Drafts, ids: &dyn Ids) {
     drafts.write(&topic).expect("a write");
     let mut expected = vec![edited, topic];
     expected.sort_by(|a, b| a.document.cmp(&b.document));
-    assert_eq!(drafts.list().expect("a read"), expected);
+    let listed: Vec<Draft> = (drafts.list().expect("a read").into_iter())
+        .map(|listed| listed.draft)
+        .collect();
+    assert_eq!(listed, expected);
 
     drafts.delete(&lantern).expect("a delete");
     assert_eq!(drafts.read(&lantern).expect("a read"), None);

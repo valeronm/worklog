@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use crate::domain::id::DocumentId;
 use crate::domain::ports::{Host, HostRead, StoreError};
-use crate::domain::usage::Session;
+use crate::domain::session::Session;
 
 use super::Config;
 

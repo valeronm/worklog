@@ -1,4 +1,6 @@
-use chrono::{Local, SecondsFormat};
+use std::time::SystemTime;
+
+use chrono::{DateTime, Local, SecondsFormat};
 
 use crate::domain::ports::Clock;
 use crate::domain::version::Stamp;
@@ -7,9 +9,14 @@ pub struct SystemClock;
 
 impl Clock for SystemClock {
     fn now(&self) -> Stamp {
-        let text = Local::now().to_rfc3339_opts(SecondsFormat::Micros, false);
-        Stamp::parse(&text).expect("chrono writes RFC 3339 with an offset")
+        stamp_at(SystemTime::now())
     }
+}
+
+/// `time` at the local offset.
+pub(super) fn stamp_at(time: SystemTime) -> Stamp {
+    let text = DateTime::<Local>::from(time).to_rfc3339_opts(SecondsFormat::Micros, false);
+    Stamp::parse(&text).expect("chrono writes RFC 3339 with an offset")
 }
 
 #[cfg(test)]
