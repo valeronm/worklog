@@ -83,10 +83,33 @@ impl Render for Vec<ClaimRow> {
         for row in self {
             let directory = row.directory.as_deref().unwrap_or("(anywhere)");
             let forked = if row.forked { "forked" } else { "" };
-            let fields = [&row.topic.label, directory, row.document.short(), forked];
+            let missing = if row.missing().is_some() {
+                "missing"
+            } else {
+                ""
+            };
+            let fields = [
+                &row.topic.label,
+                directory,
+                row.document.short(),
+                forked,
+                missing,
+            ];
             line(&mut text, &fields);
         }
         text
+    }
+
+    fn notes(&self) -> Vec<String> {
+        (self.iter())
+            .filter_map(|row| {
+                let (topic, directory) = (&row.topic.label, row.missing()?);
+                Some(format!(
+                    "{topic}: {directory} is not on this machine; \
+                     `worklog unclaim {topic} {directory}` ends the claim"
+                ))
+            })
+            .collect()
     }
 }
 
@@ -465,16 +488,26 @@ mod tests {
             machine: to("desk"),
             topic: to(topic),
             directory: directory.map(str::to_owned),
+            exists: directory.map(|_| true),
             forked,
         };
+        let mut gone = claim(atlas(), "atlas", Some("~/old/atlas"), false);
+        gone.exists = Some(false);
         let listed = vec![
             claim(atlas(), "atlas", None, false),
+            gone,
             claim(lantern(), "lantern", Some("~/projects/lantern"), true),
         ];
         assert_eq!(
             listed.text(),
             "atlas  (anywhere)  a71a5000\n\
+             atlas  ~/old/atlas  a71a5000  missing\n\
              lantern  ~/projects/lantern  7f3a91c0  forked\n"
+        );
+        assert_eq!(
+            listed.notes(),
+            ["atlas: ~/old/atlas is not on this machine; \
+              `worklog unclaim atlas ~/old/atlas` ends the claim"]
         );
         assert_eq!(Vec::<ClaimRow>::new().text(), "");
     }

@@ -37,6 +37,10 @@ impl HostRead for Becoming<'_> {
         self.host.resolve(absolute)
     }
 
+    fn is_directory(&self, absolute: &str) -> Result<bool, StoreError> {
+        self.host.is_directory(absolute)
+    }
+
     fn session(&self) -> Option<Session> {
         self.host.session()
     }

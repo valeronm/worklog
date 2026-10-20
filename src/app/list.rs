@@ -55,7 +55,21 @@ pub struct ClaimRow {
     pub machine: Reference,
     pub topic: Reference,
     pub directory: Option<String>,
+    /// Whether the directory is on this host; `None` for a claim with no directory, one of
+    /// another machine, and one under `~` on a host with no home.
+    pub exists: Option<bool>,
     pub forked: bool,
+}
+
+impl ClaimRow {
+    /// The directory, when it is not on this host.
+    #[must_use]
+    pub fn missing(&self) -> Option<&str> {
+        match (self.exists, &self.directory) {
+            (Some(false), Some(directory)) => Some(directory),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -233,26 +247,39 @@ pub fn where_(
         None => deps.machine()?,
     };
     let topic = topic.map(|address| lookup.one_topic(address)).transpose()?;
-    claim_rows(&lookup, &machine, topic.as_ref())
+    claim_rows(deps, &lookup, &machine, topic.as_ref())
 }
 
 /// The unended claims of `machine`, ordered as `where_` orders them; none when it is no
 /// machine topic.
 pub fn claims_on(deps: &ReadDeps, machine: &DocumentId) -> Result<Vec<ClaimRow>, Failure> {
-    claim_rows(&Lookup::new(deps.store), machine, None)
+    claim_rows(deps, &Lookup::new(deps.store), machine, None)
 }
 
 fn claim_rows(
+    deps: &ReadDeps,
     lookup: &Lookup,
     machine: &DocumentId,
     topic: Option<&DocumentId>,
 ) -> Result<Vec<ClaimRow>, Failure> {
+    // `None` for another machine's claims, whose directories this host cannot check.
+    let home = match deps.host.machine()? {
+        Some(here) if here == *machine => Some(deps.home()?),
+        _ => None,
+    };
     let mut rows = Vec::new();
     for (document, claim) in claims_of(lookup, machine)? {
         if topic.is_some_and(|topic| *topic != claim.topic) {
             continue;
         }
+        let exists = match (&home, &claim.directory) {
+            (Some(home), Some(directory)) => (directory.from_root(home.as_deref()))
+                .map(|path| deps.host.is_directory(&path))
+                .transpose()?,
+            _ => None,
+        };
         rows.push(ClaimRow {
+            exists,
             document: document.id().clone(),
             machine: lookup.topic_reference(&claim.machine)?,
             topic: lookup.topic_reference(&claim.topic)?,
@@ -973,6 +1000,52 @@ mod tests {
                 .len(),
             2
         );
+    }
+
+    #[test]
+    fn a_claim_of_this_machine_says_whether_its_directory_is_on_this_host() {
+        let (mut world, lantern) = world();
+        let phone = topic(&world, "phone", "");
+        let desk = world.machine();
+        claim(&world, &desk, &lantern, "~/here");
+        claim(&world, &desk, &lantern, "~/gone");
+        claim(&world, &desk, &lantern, "/srv/gone");
+        claim(&world, &desk, &lantern, "");
+        claim(&world, &phone, &lantern, "~/gone");
+        world.host.set_home(Some("/home/desk".to_owned()));
+        world.host.remove("/home/desk/gone");
+        world.host.remove("/srv/gone");
+        let placed = |directory: &str, exists| (Some(directory.to_owned()), exists);
+        assert_eq!(
+            claim_exists(&world, None),
+            [
+                (None, None),
+                placed("/srv/gone", Some(false)),
+                placed("~/gone", Some(false)),
+                placed("~/here", Some(true)),
+            ]
+        );
+        assert_eq!(
+            claim_exists(&world, Some("phone")),
+            [placed("~/gone", None)]
+        );
+        world.host.set_home(None);
+        assert_eq!(
+            claim_exists(&world, None),
+            [
+                (None, None),
+                placed("/srv/gone", Some(false)),
+                placed("~/gone", None),
+                placed("~/here", None),
+            ]
+        );
+    }
+
+    fn claim_exists(world: &World, machine: Option<&str>) -> Vec<(Option<String>, Option<bool>)> {
+        let rows = where_(&world.deps().read(), None, machine).unwrap();
+        rows.into_iter()
+            .map(|row| (row.directory, row.exists))
+            .collect()
     }
 
     #[test]

@@ -284,6 +284,14 @@ struct Stocked {
     files: Vec<(PathBuf, Vec<u8>)>,
 }
 
+fn unclaimed(dir: &Path) -> String {
+    format!(
+        "{} is claimed by no topic — `worklog new topic <name>` opens one to write from what it \
+         holds, then `worklog claim <name>`, run here, places it\n",
+        dir.display()
+    )
+}
+
 fn opened(sections: &[&str]) -> String {
     [sections, &[CLOSING]].concat().join("\n")
 }
@@ -872,7 +880,10 @@ fn a_session_opens_on_what_is_due_under_a_part_of_its_topic() {
 fn a_session_over_an_empty_store_opens_on_the_machine_topic_alone() {
     let host = Host::set_up("desk");
     assert_eq!(host.ok(&["context"]), opened(&[DESK]));
-    assert_eq!(host.ok_in(&host.root, &["context"]), opened(&[DESK]));
+    assert_eq!(
+        host.ok_in(&host.root, &["context"]),
+        opened(&[&unclaimed(&host.root), DESK])
+    );
 }
 
 #[test]
@@ -897,7 +908,14 @@ fn a_directory_is_claimed_and_unclaimed_as_the_file_system_resolves_it() {
     host.ok(&["claim", "lantern", "link/../projects/lantern"]);
     fs::remove_file(host.home().join("link")).unwrap();
     fs::remove_dir(&project).unwrap();
-    assert_eq!(host.ok(&["where"]), placed());
+    let gone = host.run(&["where"]);
+    assert_eq!(gone.code, Some(0));
+    assert_eq!(gone.stdout, placed().replace('\n', "  missing\n"));
+    assert_eq!(
+        gone.stderr,
+        "worklog: lantern: ~/projects/lantern is not on this machine; \
+         `worklog unclaim lantern ~/projects/lantern` ends the claim\n"
+    );
     host.ok(&["unclaim", "lantern", "projects/lantern"]);
     assert_eq!(host.ok(&["where"]), "");
 }
@@ -919,7 +937,10 @@ fn a_session_in_a_linked_directory_is_opened_by_the_claim_on_the_directory_itsel
         host.ok_in(&host.root, &["context", "link/case/later"]),
         here
     );
-    assert_eq!(host.ok_in(&host.root, &["context"]), opened(&[DESK]));
+    assert_eq!(
+        host.ok_in(&host.root, &["context"]),
+        opened(&[&unclaimed(&host.root), DESK])
+    );
 }
 
 #[test]

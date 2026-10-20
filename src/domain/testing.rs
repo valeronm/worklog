@@ -517,6 +517,7 @@ pub struct FixedHost {
     home: Option<String>,
     binds: bool,
     links: Vec<(String, String)>,
+    missing: Vec<String>,
     session: Option<Session>,
     name: Option<String>,
 }
@@ -531,6 +532,7 @@ impl FixedHost {
             home,
             binds: true,
             links: Vec::new(),
+            missing: Vec::new(),
             session: None,
             name: None,
         }
@@ -561,6 +563,11 @@ impl FixedHost {
         self.name = name;
     }
 
+    /// Makes `absolute` no directory; every other path is one.
+    pub fn remove(&mut self, absolute: &str) {
+        self.missing.push(absolute.to_owned());
+    }
+
     /// Makes `link`, and every path under it, resolve to `target` and the same path under it.
     pub fn link(&mut self, link: &str, target: &str) {
         self.links.push((link.to_owned(), target.to_owned()));
@@ -582,6 +589,10 @@ impl HostRead for FixedHost {
             (rest.is_empty() || rest.starts_with('/')).then(|| format!("{target}{rest}"))
         });
         Ok(through.unwrap_or_else(|| absolute.to_owned()))
+    }
+
+    fn is_directory(&self, absolute: &str) -> Result<bool, StoreError> {
+        Ok(!self.missing.iter().any(|missing| missing == absolute))
     }
 
     fn session(&self) -> Option<Session> {

@@ -171,6 +171,7 @@ fn forks(rows: &[Row]) -> String {
 struct Page {
     due: Vec<String>,
     summary: Option<String>,
+    unclaimed: Option<String>,
     forks: Option<String>,
     counts: Vec<String>,
     topics: Vec<[String; FORMS]>,
@@ -221,6 +222,13 @@ impl Page {
                     label = context.machine.label
                 )
             }),
+            unclaimed: context.unclaimed.then(|| {
+                format!(
+                    "{} is claimed by no topic — `worklog new topic <name>` opens one to write \
+                     from what it holds, then `worklog claim <name>`, run here, places it\n",
+                    context.directory
+                )
+            }),
             forks: (!context.forks.is_empty()).then(|| forks(&context.forks)),
             counts,
             topics: context.topics.iter().map(forms).collect(),
@@ -245,7 +253,8 @@ impl Page {
                 text.push_str(&more_due(given.due_counted));
             }
         }
-        for section in (self.summary.iter()).chain(&self.forks).chain(&self.counts) {
+        let sections = (self.summary.iter()).chain(&self.unclaimed);
+        for section in sections.chain(&self.forks).chain(&self.counts) {
             open(text, section);
         }
         let mut left_out = 0;
@@ -292,7 +301,7 @@ impl Render for Context {
             page.fill(&given, &mut text);
         }
         // The last step leaves lines of bounded length: the fixed ones, the counts, the fork
-        // labels and the machine topic's missing summary.
+        // labels, the machine topic's missing summary and the unclaimed directory.
         text
     }
 }
@@ -388,6 +397,7 @@ mod tests {
             forks: Vec::new(),
             draft_count: 0,
             machine_needs_summary: false,
+            unclaimed: false,
         }
     }
 
@@ -720,6 +730,26 @@ mod tests {
         assert!(rest.starts_with("\nForked — "), "{rest}");
     }
 
+    const UNCLAIMED: &str = "~/projects/lantern is claimed by no topic — `worklog new topic \
+                             <name>` opens one to write from what it holds, then `worklog claim \
+                             <name>`, run here, places it\n";
+
+    #[test]
+    fn an_unclaimed_directory_is_named_after_the_missing_summary_and_before_the_forks() {
+        let mut opened = context(
+            vec![loaded("desk", machine(), Vec::new(), Vec::new())],
+            vec![],
+        );
+        assert!(!opened.text().contains("claimed by no topic"));
+        opened.unclaimed = true;
+        opened.machine_needs_summary = true;
+        opened.forks = forked(1);
+        let text = opened.text();
+        let (before, rest) = text.split_once(UNCLAIMED).unwrap();
+        assert!(before.ends_with(&format!("{NEEDS_SUMMARY}\n")), "{before}");
+        assert!(rest.starts_with("\nForked — "), "{rest}");
+    }
+
     #[test]
     fn fork_labels_are_named_while_their_line_is_short_whatever_else_gives_way() {
         let mut opened = context(vec![filled("lantern", here(), 3, 1)], vec![due(1)]);
@@ -823,6 +853,7 @@ mod tests {
         let page = Page {
             due: vec!["due 2026-01-01  7f3a91c0  Order a fuse\n".to_owned(); 2],
             summary: None,
+            unclaimed: None,
             forks: None,
             counts: Vec::new(),
             topics: Vec::new(),
@@ -885,11 +916,13 @@ mod tests {
             opened.open_count = usize::MAX;
             opened.draft_count = usize::MAX;
             opened.machine_needs_summary = true;
+            opened.unclaimed = true;
             let text = opened.text();
             let case = format!("{due_count} due, {fork_count} forks, {topic_count} topics");
             assert_case_fits(&case, &text);
             assert!(text.ends_with(CLOSING), "{case}");
             assert!(text.contains(NEEDS_SUMMARY), "{case}");
+            assert!(text.contains(UNCLAIMED), "{case}");
 
             let named = text.matches("due 2026-01-01  7f3a91c0  ").count();
             let more = number_before(&text, " more due — ").unwrap_or(0);

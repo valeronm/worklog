@@ -70,6 +70,25 @@ impl Directory {
         Directory::parse(&fold_home(given, home))
     }
 
+    /// This directory as a path from the root on a host whose home directory is `home`; `None`
+    /// for one under `~` with no home or a home that is not absolute.
+    #[must_use]
+    pub fn from_root(&self, home: Option<&str>) -> Option<String> {
+        let Some(rest) = self.0.strip_prefix('~') else {
+            return Some(self.0.clone());
+        };
+        let home = home.filter(|home| home.starts_with('/'))?;
+        match format!("{}{rest}", home.trim_end_matches('/')) {
+            root if root.is_empty() => Some("/".to_owned()),
+            path => Some(path),
+        }
+    }
+
+    #[must_use]
+    pub fn is_home(&self) -> bool {
+        self.0 == "~"
+    }
+
     /// The number of components of this directory when `other` is it or under it by whole
     /// components; a directory under `~` and an absolute one never cover each other.
     #[must_use]
@@ -191,6 +210,34 @@ mod tests {
         }
         assert_eq!(fold_home("/srv", Some("/")), "~/srv");
         assert_eq!(fold_home("/", Some("/")), "~");
+    }
+
+    #[test]
+    fn a_directory_from_the_root_folds_back_to_itself() {
+        for home in ["/home/desk", "/home/desk/", "/"] {
+            for path in ["/home/desk", "/home/desk/lantern", "/srv/lantern", "/"] {
+                let folded = Directory::on_host(path, Some(home)).unwrap();
+                let back = folded.from_root(Some(home)).unwrap();
+                assert_eq!(
+                    Directory::on_host(&back, Some(home)),
+                    Ok(folded),
+                    "{path} {home}"
+                );
+            }
+        }
+        assert_eq!(
+            directory("~/lantern")
+                .from_root(Some("/home/desk"))
+                .as_deref(),
+            Some("/home/desk/lantern")
+        );
+        assert_eq!(directory("~").from_root(Some("/")).as_deref(), Some("/"));
+        assert_eq!(directory("/srv").from_root(None).as_deref(), Some("/srv"));
+        for home in [None, Some("desk"), Some("")] {
+            assert_eq!(directory("~/lantern").from_root(home), None, "{home:?}");
+        }
+        assert!(directory("~/").is_home());
+        assert!(!directory("~/lantern").is_home() && !directory("/").is_home());
     }
 
     #[test]

@@ -200,7 +200,9 @@ fn claim_lines(claims: &[ClaimRow]) -> Vec<ClaimLine> {
                         row.directory.as_deref().unwrap_or("anywhere"),
                         None,
                     ),
-                    marks: marks(row.forked, None),
+                    marks: (marks(row.forked, None).into_iter())
+                        .chain(row.missing().map(|_| "missing".to_owned()))
+                        .collect(),
                 })
                 .collect(),
         })

@@ -37,6 +37,8 @@ pub struct Context {
     pub draft_count: usize,
     /// The machine topic's summary is `machines::PLACEHOLDER`.
     pub machine_needs_summary: bool,
+    /// No claim of this machine covers `directory`, and it is not the home directory.
+    pub unclaimed: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -83,6 +85,7 @@ struct Scope<'a> {
     today: Date,
     machine: DocumentId,
     directory: Directory,
+    in_directory: bool,
     claims: Vec<Rc<Document>>,
     vias: Vec<(DocumentId, Via)>,
     counted: BTreeSet<DocumentId>,
@@ -134,6 +137,7 @@ impl<'a> Scope<'a> {
             today,
             machine,
             directory,
+            in_directory: claimed.in_directory,
             claims: claimed.loading,
             vias,
             counted,
@@ -232,6 +236,7 @@ pub fn context(deps: &ReadDeps, directory: &str) -> Result<Context, Failure> {
         forks,
         draft_count: deps.drafts.list()?.len(),
         machine_needs_summary: topics.summary(machine) == Some(PLACEHOLDER),
+        unclaimed: !directory.is_home() && !scope.in_directory,
     })
 }
 
@@ -585,6 +590,17 @@ mod tests {
             loaded(&at(&world, "~/work")),
             [("desk", Via::Machine { from: None })]
         );
+    }
+
+    #[test]
+    fn a_directory_no_claim_covers_is_unclaimed_unless_it_is_the_home() {
+        let (world, [lantern, atlas]) = world_of(["lantern", "atlas"]);
+        claim(&world, &lantern, "~/work/lantern");
+        claim(&world, &atlas, "");
+        assert!(!at(&world, "~/work/lantern/src").unclaimed);
+        assert!(at(&world, "~/work").unclaimed);
+        assert!(at(&world, "/srv").unclaimed);
+        assert!(!at(&world, "~").unclaimed);
     }
 
     #[test]

@@ -169,6 +169,8 @@ pub trait HostRead {
     /// `absolute` with the links followed through the longest part of it that exists on this
     /// host's file system, the rest kept as given.
     fn resolve(&self, absolute: &str) -> Result<String, StoreError>;
+    /// Whether `absolute` is a directory on this host's file system, following links.
+    fn is_directory(&self, absolute: &str) -> Result<bool, StoreError>;
     /// The agent session this process runs in; `None` at a terminal.
     fn session(&self) -> Option<Session>;
     /// The name the operating system has for this host, as it gives it; `None` for one that

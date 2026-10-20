@@ -1,11 +1,12 @@
 use std::cell::RefCell;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use crate::domain::id::DocumentId;
 use crate::domain::ports::{Host, HostRead, StoreError};
 use crate::domain::session::Session;
 
-use super::Config;
+use super::{Config, io_error};
 
 // This host as its config file and its environment described it when the command started.
 pub struct FsHost {
@@ -85,6 +86,17 @@ impl HostRead for FsHost {
             .into_os_string()
             .into_string()
             .map_err(|resolved| StoreError::io(Path::new(&resolved).display(), "is not UTF-8"))
+    }
+
+    fn is_directory(&self, absolute: &str) -> Result<bool, StoreError> {
+        let path = Path::new(absolute);
+        match std::fs::metadata(path) {
+            Ok(metadata) => Ok(metadata.is_dir()),
+            Err(e) if matches!(e.kind(), ErrorKind::NotFound | ErrorKind::NotADirectory) => {
+                Ok(false)
+            }
+            Err(e) => Err(io_error(path, &e)),
+        }
     }
 
     fn session(&self) -> Option<Session> {

@@ -354,7 +354,9 @@ fn a_tab_s_count_is_the_length_of_the_listing_its_section_links_to() {
 
 #[test]
 fn a_machine_topic_lists_its_claims_by_topic_under_a_tab_of_its_own() {
-    let (world, lantern) = world();
+    let (mut world, lantern) = world();
+    world.host.set_home(Some("/home/desk".to_owned()));
+    world.host.remove("/home/desk/lamp");
     let desk = world.machine();
     let atlas = topic(&world, "atlas", "");
     let anywhere = world.put("claim", &claim_fields(&desk, &atlas, ""), "\n");
@@ -378,7 +380,7 @@ fn a_machine_topic_lists_its_claims_by_topic_under_a_tab_of_its_own() {
              <li><a class=\"title\" href=\"/doc/{atlas}\">atlas</a>\
              <span class=\"details\"><a href=\"/doc/{anywhere}\">anywhere</a></span></li>\
              <li><a class=\"title\" href=\"/doc/{lantern}\">lantern</a>\
-             <span class=\"details\"><a href=\"/doc/{lamp}\">~/lamp</a></span>\
+             <span class=\"details\"><a href=\"/doc/{lamp}\">~/lamp</a> <span class=\"mark\">missing</span></span>\
              <span class=\"details\"><a href=\"/doc/{here}\">~/lantern</a></span></li></ul>"
         ),
     );

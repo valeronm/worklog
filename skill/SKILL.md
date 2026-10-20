@@ -276,16 +276,10 @@ and all of them load there. `worklog claim <topic> --anywhere` places
 a topic in no directory: it loads in a session no claimed directory
 covers.
 
-A checkout is unclaimed when `context` shows no topic as `claimed at` a
-directory: `worklog new topic <name>`, with a summary written from
-the repo and `part_of` or `uses` for the topics it belongs with, then
-`worklog claim <name>` inside it.
-
 `worklog where` lists this machine's claims, each with its topic, its
 directory and its id; `worklog where <topic>` shows one topic's, and
 `--machine <name>` another machine's. `worklog unclaim <topic>
-[<dir>]`, or with `--anywhere`, ends a claim; after a checkout moves,
-unclaim the old directory by its path and claim the new one.
+[<dir>]`, or with `--anywhere`, ends a claim.
 
 ## Search and recall
 

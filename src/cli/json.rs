@@ -651,7 +651,8 @@ mod tests {
     }
 
     fn claims() -> Vec<(Vec<ClaimRow>, Value)> {
-        let (world, lantern, atlas) = world_with_atlas();
+        let (mut world, lantern, atlas) = world_with_atlas();
+        world.host.set_home(Some("/home/desk".to_owned()));
         let machine = world.machine();
         let placed = claim_fields(&machine, &lantern, "~/projects/lantern");
         let placed = world.put("claim", &placed, "\n");
@@ -662,6 +663,7 @@ mod tests {
                 "machine": to(&machine, "desk"),
                 "topic": to(&atlas, "atlas"),
                 "directory": null,
+                "exists": null,
                 "forked": false,
             },
             {
@@ -669,6 +671,7 @@ mod tests {
                 "machine": to(&machine, "desk"),
                 "topic": to(&lantern, "lantern"),
                 "directory": "~/projects/lantern",
+                "exists": true,
                 "forked": false,
             },
         ]);
@@ -1233,6 +1236,7 @@ mod tests {
             "forks": [],
             "draft_count": 0,
             "machine_needs_summary": false,
+            "unclaimed": false,
         });
         let here =
             context::context(&world.deps().read(), "/home/desk/projects/lantern/case").unwrap();
