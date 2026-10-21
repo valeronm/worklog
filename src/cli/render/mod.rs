@@ -293,6 +293,7 @@ mod tests {
                 version: VersionId::of(b"lost"),
                 why: crate::domain::version::ReadError::Corrupt,
             })],
+            linked_from: Vec::new(),
         });
         assert_eq!(output(&unheld, false).notes.len(), 1);
         let json = output(&unheld, true);

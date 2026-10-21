@@ -7,6 +7,7 @@ use crate::app::save::Admitted;
 use crate::app::{Deps, Failure, Written, text};
 use crate::domain::id::DocumentId;
 use crate::domain::schema::Content;
+use crate::domain::schema::kind::Role;
 use crate::domain::version::Fields;
 
 /// Writes nothing unless every document passes its checks.
@@ -45,7 +46,7 @@ fn moved(target: &Open, from: &DocumentId, to: &DocumentId) -> Option<Fields> {
     let holds = |value: Option<&Value>| value.and_then(Value::as_str) == Some(from.as_str());
     let to_text = || text(to.as_str());
     let kind = target.record.content.kind();
-    let filed_under = kind.key_where(|reference| reference.membership)?;
+    let filed_under = kind.key_where(|reference| reference.role == Role::Filed)?;
     match &target.record.content {
         Content::Fact(_) if holds(fields.get(filed_under)) => {
             fields.insert(filed_under.to_owned(), to_text());

@@ -148,7 +148,10 @@ fn shown(deps: &ReadDeps, target: &str, query: &Query) -> Result<String, Problem
         Shown::Document(document) if document.reads_as == Some(KindOf::Topic) => {
             topic_page(deps, &document, query)
         }
-        Shown::Document(document) => Ok(DocumentPage::new(&document).render()?),
+        Shown::Document(mut document) => {
+            document.linked_from = show::linked_from(deps, &document.document, true)?;
+            Ok(DocumentPage::new(&document).render()?)
+        }
     }
 }
 

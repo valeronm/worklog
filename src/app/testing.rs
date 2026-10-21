@@ -172,20 +172,20 @@ pub fn fact(world: &World, topic: &DocumentId, name: &str, rest: &str) -> Docume
     world.put("fact", &fact_fields(topic, name, "s", rest), "The relay.\n")
 }
 
-pub fn entry(world: &World, date: &str, name: &str, topics: &[&DocumentId]) -> DocumentId {
+pub fn entry_fields(world: &World, date: &str, name: &str, topics: &[&DocumentId]) -> String {
     let topics = if topics.is_empty() {
         String::new()
     } else {
         list("topics", topics)
     };
-    world.put(
-        "entry",
-        &format!(
-            "name = \"{name}\"\ndate = {date}\nmachine = \"{}\"\n{topics}summary = \"s\"\n",
-            world.machine()
-        ),
-        "\n",
+    format!(
+        "name = \"{name}\"\ndate = {date}\nmachine = \"{}\"\n{topics}summary = \"s\"\n",
+        world.machine()
     )
+}
+
+pub fn entry(world: &World, date: &str, name: &str, topics: &[&DocumentId]) -> DocumentId {
+    world.put("entry", &entry_fields(world, date, name, topics), "\n")
 }
 
 pub fn followup(world: &World, topics: &[&DocumentId], summary: &str, rest: &str) -> DocumentId {

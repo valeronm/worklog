@@ -25,7 +25,7 @@ pub struct Item {
 }
 
 impl Item {
-    fn new(row: &Row, lead: &str) -> Item {
+    pub(super) fn new(row: &Row, lead: &str) -> Item {
         Item {
             line: Line::from(row),
             lead: vec![Text::plain(lead)],

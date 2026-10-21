@@ -101,7 +101,7 @@ draft of its document is open.
   unless `--ended` is given, and takes no change until `worklog
   reopen <target> <why>` brings it back.
   Ending a document leaves every live document that links it resting on
-  something that is over. After an `end`, a `done` or a `drop`, run
+  something that is over; `show` lists them before it is ended. After an `end`, a `done` or a `drop`, run
   `worklog check`, and for each document it names as linking the ended
   one, read that document whole and decide what became of it, in the
   same session.
@@ -309,8 +309,11 @@ Tell the user what was found that bears on the work, citing names.
 - `worklog log [n]` — the newest versions written anywhere in the
   store, twenty unless told, so what other machines wrote since is one
   call; `--machine <name>` for one machine's writes.
-- `worklog show <target>` prints a document as it stands and
-  `worklog history <target>` its versions, each with an id. Given
+- `worklog show <target>` prints a document as it stands, then
+  under `==== linked from` the live documents that link it or refer to
+  it, with the entries that do counted, `--ended` for the ended ones
+  too; `worklog history <target>` prints its versions, each with an
+  id. Given
   the start of such an id, `worklog show <id>` prints that version,
   `worklog diff <id>` what it changed, and `worklog diff <id>
   <id>` what changed between two.

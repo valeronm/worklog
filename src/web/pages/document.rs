@@ -7,7 +7,9 @@ use super::links::{Link, Nav, Place, Stamped, Text, doc_href, history_href, mark
 use super::listing::{Item, entry_items, fact_items, followup_items, leave_out};
 use crate::app::FollowupRow;
 use crate::app::list::{ClaimRow, EntryRow, FactRow, TopicRow};
+use crate::app::show::Linker;
 use crate::app::show::{FieldItem, ShownDocument, ShownField, ShownVersion};
+use crate::domain::schema::KindOf;
 use crate::render::{ended, unread_notes};
 use crate::web::markdown::{Markup, summary_html, to_html};
 
@@ -71,10 +73,20 @@ pub struct Sheet {
     pub former: Vec<String>,
     pub notes: Vec<String>,
     pub heads: Vec<Head>,
+    pub linked_from: Vec<Item>,
+    pub cited_by: Vec<Item>,
+}
+
+fn linker_items(linkers: &[&Linker]) -> Vec<Item> {
+    (linkers.iter())
+        .map(|linker| Item::new(&linker.row, &linker.by.join(", ")))
+        .collect()
 }
 
 impl From<&ShownDocument> for Sheet {
     fn from(document: &ShownDocument) -> Sheet {
+        let (cited_by, linked_from): (Vec<_>, Vec<_>) =
+            (document.linked_from.iter()).partition(|linker| linker.row.kind == KindOf::Entry);
         Sheet {
             label: document.label.clone(),
             kind: document.kind.clone(),
@@ -84,6 +96,8 @@ impl From<&ShownDocument> for Sheet {
             former: document.former.clone(),
             notes: unread_notes(&document.unreadable),
             heads: document.heads.iter().map(Head::from).collect(),
+            linked_from: linker_items(&linked_from),
+            cited_by: linker_items(&cited_by),
         }
     }
 }

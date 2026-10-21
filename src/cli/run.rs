@@ -197,7 +197,13 @@ fn read(
     command: &ReadCommand,
 ) -> Result<Output, Failure> {
     Ok(match command {
-        ReadCommand::Show { target } => output(&show::show(deps, target)?, json),
+        ReadCommand::Show { target, ended } => {
+            let mut shown = show::show(deps, target)?;
+            if let show::Shown::Document(document) = &mut shown {
+                document.linked_from = show::linked_from(deps, &document.document, *ended)?;
+            }
+            output(&shown, json)
+        }
         ReadCommand::History { target } => output(&show::history(deps, target)?, json),
         ReadCommand::Diff { target, other } => {
             output(&show::diff(deps, target, other.as_deref())?, json)

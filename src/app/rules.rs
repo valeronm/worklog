@@ -8,7 +8,7 @@ use crate::app::lookup::{Lookup, no_such_document, not_a};
 use crate::domain::document::{Document, State};
 use crate::domain::id::DocumentId;
 use crate::domain::schema::graph::{Edges, closes_cycle};
-use crate::domain::schema::kind::Reference;
+use crate::domain::schema::kind::{Reference, Role};
 use crate::domain::schema::{Claim, Content, KindOf};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -158,8 +158,7 @@ pub(super) fn claims_of(
     lookup: &Lookup,
     machine: &DocumentId,
 ) -> Result<Vec<(Rc<Document>, Claim)>, Failure> {
-    let to_machine =
-        |reference: &Reference| reference.target == Some(KindOf::Topic) && !reference.membership;
+    let to_machine = |reference: &Reference| reference.role == Role::Machine;
     let Some(key) = KindOf::Claim.key_where(to_machine) else {
         return Ok(Vec::new());
     };

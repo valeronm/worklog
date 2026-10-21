@@ -9,6 +9,7 @@ use crate::app::lookup::Lookup;
 use crate::app::{Failure, ReadDeps};
 use crate::domain::document::Document;
 use crate::domain::id::DocumentId;
+use crate::domain::schema::kind::Role;
 use crate::domain::schema::{Content, Date, KindOf, Record, Trigger};
 use crate::domain::version::Header;
 
@@ -170,7 +171,7 @@ impl Filings {
 }
 
 fn membership_key(kind: KindOf) -> Option<&'static str> {
-    kind.key_where(|reference| reference.membership)
+    kind.key_where(|reference| reference.role == Role::Filed)
 }
 
 pub(super) fn reading<'a>(

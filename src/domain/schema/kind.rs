@@ -33,13 +33,27 @@ pub struct Reference {
     pub unended_when_made: bool,
     /// Whether a document holding this reference keeps its target from being ended.
     pub holds_open: bool,
-    /// Whether the document belongs to the topics this field names.
-    pub membership: bool,
+    pub role: Role,
+}
+
+/// What a document holding a reference is to the documents the field names.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Role {
+    Refers,
+    /// It belongs to the topics the field names.
+    Filed,
+    /// It belongs to the machine the field names.
+    Machine,
 }
 
 impl Reference {
     const fn filed(mut self) -> Reference {
-        self.membership = true;
+        self.role = Role::Filed;
+        self
+    }
+
+    const fn of_machine(mut self) -> Reference {
+        self.role = Role::Machine;
         self
     }
 }
@@ -55,7 +69,7 @@ const fn reference(
         target,
         unended_when_made,
         holds_open,
-        membership: false,
+        role: Role::Refers,
     }
 }
 
@@ -66,7 +80,7 @@ const TOPIC_REFERENCES: [Reference; 2] = [
 ];
 const FACT_REFERENCES: [Reference; 1] = [reference("topic", TOPIC, true, true).filed()];
 const ENTRY_REFERENCES: [Reference; 2] = [
-    reference("machine", TOPIC, true, false),
+    reference("machine", TOPIC, true, false).of_machine(),
     reference("topics", TOPIC, true, false).filed(),
 ];
 const FOLLOWUP_REFERENCES: [Reference; 4] = [
@@ -76,7 +90,7 @@ const FOLLOWUP_REFERENCES: [Reference; 4] = [
     reference("touching", TOPIC, true, true),
 ];
 const CLAIM_REFERENCES: [Reference; 2] = [
-    reference("machine", TOPIC, true, true),
+    reference("machine", TOPIC, true, true).of_machine(),
     reference("topic", TOPIC, true, true).filed(),
 ];
 
@@ -153,6 +167,15 @@ impl KindOf {
     /// references and the document that ended it.
     pub fn reference_keys(self) -> impl Iterator<Item = &'static str> {
         (self.references().iter())
+            .map(|reference| reference.key)
+            .chain([Ending::BY])
+    }
+
+    /// The keys of the kind's references that are `Role::Refers`, and the document that
+    /// ended it.
+    pub fn pointing_keys(self) -> impl Iterator<Item = &'static str> {
+        (self.references().iter())
+            .filter(|reference| reference.role == Role::Refers)
             .map(|reference| reference.key)
             .chain([Ending::BY])
     }
@@ -658,8 +681,23 @@ mod tests {
     }
 
     #[test]
+    fn a_document_points_at_what_it_is_about_and_not_at_its_topics_or_machine() {
+        let pointing = KindOf::ALL.map(|kind| kind.pointing_keys().collect::<Vec<_>>());
+        assert_eq!(
+            pointing,
+            [
+                vec!["part_of", "uses", "ended_by"],
+                vec!["ended_by"],
+                vec!["ended_by"],
+                vec!["entry", "about", "touching", "ended_by"],
+                vec!["ended_by"],
+            ]
+        );
+    }
+
+    #[test]
     fn a_key_is_found_by_what_its_reference_is_for() {
-        let filed = |kind: KindOf| kind.key_where(|reference| reference.membership);
+        let filed = |kind: KindOf| kind.key_where(|reference| reference.role == Role::Filed);
         assert_eq!(
             KindOf::ALL.map(filed),
             [
@@ -675,7 +713,7 @@ mod tests {
             Some("entry")
         );
         assert_eq!(
-            KindOf::Claim.key_where(|reference| reference.target == TOPIC && !reference.membership),
+            KindOf::Claim.key_where(|reference| reference.role == Role::Machine),
             Some("machine")
         );
         assert_eq!(

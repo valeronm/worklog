@@ -1,9 +1,10 @@
 use std::fmt::Write as _;
 
-use super::{Render, change_or_ending, line, written};
-use crate::app::Reference;
-use crate::app::show::{Diff, History, Shown, ShownVersion, Unread};
+use super::{Render, change_or_ending, line, row_fields, written};
+use crate::app::show::{Diff, History, Linker, Shown, ShownVersion, Unread};
+use crate::app::{Reference, counted};
 use crate::domain::id::VersionId;
+use crate::domain::schema::KindOf;
 use crate::domain::version::Stamp;
 use crate::render::diff::{UNTERMINATED, hunks};
 use crate::render::{against, unread_notes};
@@ -44,6 +45,29 @@ fn unread(label: &str, files: &[Unread]) -> Vec<String> {
         .collect()
 }
 
+// An entry's links cite what was true on its day.
+fn linked_from(text: &mut String, linkers: &[Linker]) {
+    if linkers.is_empty() {
+        return;
+    }
+    if !text.is_empty() && !text.ends_with('\n') {
+        text.push('\n');
+    }
+    let _ = writeln!(text, "==== linked from");
+    let (entries, rest): (Vec<_>, Vec<_>) =
+        (linkers.iter()).partition(|linker| linker.row.kind == KindOf::Entry);
+    for linker in rest {
+        line(text, &row_fields(&linker.row, vec![linker.by.join(",")]));
+    }
+    if !entries.is_empty() {
+        let _ = writeln!(
+            text,
+            "{}",
+            counted(entries.len(), KindOf::Entry.word(), KindOf::Entry.plural())
+        );
+    }
+}
+
 impl Render for Shown {
     fn text(&self) -> String {
         let mut text = String::new();
@@ -57,6 +81,7 @@ impl Render for Shown {
                         text.push_str(&head.text);
                     }
                 }
+                linked_from(&mut text, &document.linked_from);
             }
             Shown::Version(compared) => named(&mut text, &compared.version),
         }
@@ -168,6 +193,7 @@ mod tests {
             ended: None,
             heads,
             unreadable: Vec::new(),
+            linked_from: Vec::new(),
         }
     }
 
@@ -208,6 +234,39 @@ mod tests {
         let shown = Shown::Document(document(vec![linking]));
         assert_eq!(shown.text(), body);
         assert_eq!(shown.notes(), Vec::<String>::new());
+    }
+
+    fn linker(seed: u8, kind: KindOf, label: &str, by: &[&str]) -> Linker {
+        let mut row = crate::app::testing::row(
+            &crate::domain::id::DocumentId::from_bytes([seed; 16]),
+            label,
+            "s",
+        );
+        row.kind = kind;
+        Linker {
+            row,
+            by: by.iter().map(|how| (*how).to_owned()).collect(),
+        }
+    }
+
+    #[test]
+    fn what_links_a_document_follows_its_text_and_entries_are_counted() {
+        let mut shown = document(vec![version(b"left", "+++\nname = \"lantern\"\n")]);
+        shown.linked_from = vec![
+            linker(1, KindOf::Topic, "atlas", &["part_of"]),
+            linker(2, KindOf::Fact, "lantern/old", &["link", "ended_by"]),
+            linker(3, KindOf::Entry, "2026-09-07-wired", &["link"]),
+            linker(4, KindOf::Entry, "2026-09-05-cut", &["link"]),
+        ];
+        shown.linked_from[1].row.ended = Some("false".to_owned());
+        assert_eq!(
+            Shown::Document(shown).text(),
+            "+++\nname = \"lantern\"\n\
+             ==== linked from\n\
+             01010101  atlas  s  part_of\n\
+             02020202  lantern/old  s  link,ended_by  ended false\n\
+             2 entries\n"
+        );
     }
 
     #[test]

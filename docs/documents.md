@@ -197,6 +197,16 @@ document. An entry's links are citations of what was true on its date and
 are not checked. A page shows every link to a document that has ended
 struck through, in an entry too.
 
+A document is linked from each other document that links it or holds
+its id in a field other than the topics it is filed under and its
+machine: a topic's `part_of` and `uses`, a followup's `entry`, `about`
+and `touching`, and `ended_by`. A fork links what its heads that are not
+ended link, as it is filed where they file it. `show` lists
+those that are not ended, and with `--ended` the rest, and counts the
+entries among them; a document's page lists them all, the entries apart.
+A topic's page lists none, since its parts and what is filed on it have
+tabs of their own.
+
 ## What a session reaches
 
 `context` resolves a directory to topics. The directory is compared in the

@@ -322,10 +322,14 @@ pub enum ChangeCommand {
 
 #[derive(Subcommand)]
 pub enum ReadCommand {
-    /// Print a document as it stands, every head of a fork, or one version by its id
+    /// Print a document as it stands, every head of a fork, or one version by its id, with
+    /// the documents linking it
     Show {
         #[arg(add = complete::documents())]
         target: String,
+        /// Ended documents linking it too
+        #[arg(long)]
+        ended: bool,
     },
     /// Every version of a document
     History {

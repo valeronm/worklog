@@ -1,3 +1,5 @@
+use std::cmp::Reverse;
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use serde::ser::SerializeStruct;
@@ -5,17 +7,18 @@ use serde::{Serialize, Serializer};
 use toml::Value;
 
 use crate::app::draft::{draft_for, draft_label, opened, shown_as};
-use crate::app::heads::{ended_for, ended_of, is_forked, kind_of, row_head};
+use crate::app::heads::{ended_for, ended_of, holding_heads, is_forked, kind_of, row_head, texts};
+use crate::app::index::Topics;
 use crate::app::lookup::{Lookup, names_no_document};
-use crate::app::rows::Reference;
+use crate::app::rows::{self, Reference, Row};
 use crate::app::{Failure, ReadDeps};
 use crate::domain::document::{Document, Unreadable};
 use crate::domain::draft::Draft;
 use crate::domain::id::{DocumentId, VersionId, is_id_prefix};
 use crate::domain::ports::NotRead;
-use crate::domain::schema::KindOf;
 use crate::domain::schema::address::Found;
 use crate::domain::schema::translate::referred;
+use crate::domain::schema::{Content, KindOf};
 use crate::domain::version::{Header, ReadError, Stamp, Version};
 
 /// A file of the document that does not read as a version.
@@ -169,6 +172,17 @@ pub struct ShownDocument {
     /// One when live, several when forked, in head order.
     pub heads: Vec<ShownVersion>,
     pub unreadable: Vec<Unread>,
+    /// What `linked_from` gives; `show` leaves it empty.
+    pub linked_from: Vec<Linker>,
+}
+
+/// A document whose heads, as `holding_heads` picks them, link the one shown or hold its id
+/// under one of its kind's `pointing_keys`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Linker {
+    pub row: Row,
+    /// `link` for a `[[link]]`, then each key holding the id, each once.
+    pub by: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -390,6 +404,80 @@ fn shown_version(lookup: &Lookup, version: &Version, head: bool) -> Result<Shown
     })
 }
 
+fn links_to(lookup: &Lookup, head: &Header, target: &DocumentId) -> Result<bool, Failure> {
+    for (text, stored) in &head.links.0 {
+        if lookup.linked_now(text, stored.as_ref())?.as_ref() == Some(target) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn pointing(
+    lookup: &Lookup,
+    document: &Document,
+    kind: KindOf,
+    target: &DocumentId,
+    ended: bool,
+) -> Result<Vec<String>, Failure> {
+    let heads = holding_heads(document, kind, ended);
+    let mut by = Vec::new();
+    for head in &heads {
+        if links_to(lookup, head, target)? {
+            by.push("link".to_owned());
+            break;
+        }
+    }
+    let holds =
+        |key: &str| (heads.iter()).any(|head| texts(&head.fields, key).contains(&target.as_str()));
+    by.extend(
+        kind.pointing_keys()
+            .filter(|key| holds(key))
+            .map(str::to_owned),
+    );
+    Ok(by)
+}
+
+/// The documents linking `target`, the ended ones too when `ended`: entries last and the
+/// newest first, the rest by label.
+pub fn linked_from(
+    deps: &ReadDeps,
+    target: &DocumentId,
+    ended: bool,
+) -> Result<Vec<Linker>, Failure> {
+    let lookup = Lookup::new(deps.store);
+    let topics = Topics::load(&lookup)?;
+    let (mut matched, mut ways) = (Vec::new(), BTreeMap::new());
+    for document in lookup.everything()? {
+        if document.id() == target {
+            continue;
+        }
+        let Some(kind) = kind_of(&document) else {
+            continue;
+        };
+        let by = pointing(&lookup, &document, kind, target, ended)?;
+        if !by.is_empty() {
+            ways.insert(document.id().clone(), by);
+            matched.push(document);
+        }
+    }
+    let (mut rest, mut entries) = (Vec::new(), Vec::new());
+    for shown in rows::shown(&topics, &matched, ended) {
+        let by = ways.remove(&shown.row.document).unwrap_or_default();
+        let linker = Linker { row: shown.row, by };
+        match shown.record.content {
+            Content::Entry(entry) => entries.push((entry.date, linker)),
+            _ => rest.push(linker),
+        }
+    }
+    rows::by_label(&mut rest, |linker| &linker.row);
+    entries.sort_by(|(a, first), (b, second)| {
+        (Reverse(*a), &first.row.label).cmp(&(Reverse(*b), &second.row.label))
+    });
+    rest.extend(entries.into_iter().map(|(_, linker)| linker));
+    Ok(rest)
+}
+
 fn is_head(document: &Document, version: &Header) -> bool {
     document.heads().iter().any(|head| head.id == version.id)
 }
@@ -436,6 +524,7 @@ pub fn show(deps: &ReadDeps, address: &str) -> Result<Shown, Failure> {
                 ended: speaking.as_ref().and_then(ended_for),
                 former: lookup.former_addresses(&id)?,
                 unreadable: unread(&document),
+                linked_from: Vec::new(),
                 document: id,
                 label,
                 heads,
@@ -640,8 +729,9 @@ mod tests {
     use super::*;
     use crate::app::draft::checkout;
     use crate::app::testing::{
-        ENDED, ENDED_FACT, REMOVED, TOPIC, World, fact, fact_fields, fork, head, head_id, refused,
-        stored, to, to_ended, topic, topic_fields, world, world_with_atlas, written_at,
+        ENDED, ENDED_FACT, REMOVED, TOPIC, World, entry, entry_fields, fact, fact_fields, followup,
+        fork, head, head_id, part_of, refused, stored, to, to_ended, topic, topic_fields, world,
+        world_with_atlas, written_at,
     };
     use crate::domain::draft::Draft;
     use crate::domain::id::VersionId;
@@ -1729,5 +1819,147 @@ mod tests {
         );
         assert_ne!(diff.sides[0].before, diff.sides[1].before);
         assert!(diff.after.ends_with("resolved\n"), "{}", diff.after);
+    }
+
+    fn linkers_of(world: &World, address: &str, ended: bool) -> Vec<Linker> {
+        let target = shown_document(world, address).document;
+        linked_from(&world.deps().read(), &target, ended).unwrap()
+    }
+
+    fn linkers(world: &World, address: &str) -> Vec<(String, Vec<String>)> {
+        (linkers_of(world, address, false).into_iter())
+            .map(|linker| (linker.row.label, linker.by))
+            .collect()
+    }
+
+    fn linking_fact(
+        world: &World,
+        topic: &DocumentId,
+        name: &str,
+        rest: &str,
+        target: (&str, Option<&DocumentId>),
+    ) -> DocumentId {
+        let id = fact(world, topic, name, "");
+        let body = format!("See [[{}]].\n", target.0);
+        world.amend_linking(&id, &fact_fields(topic, name, "s", rest), &body, &[target]);
+        id
+    }
+
+    fn by(how: &[&str]) -> Vec<String> {
+        how.iter().map(|how| (*how).to_owned()).collect()
+    }
+
+    fn linking_entry(world: &World, date: &str, name: &str, target: &DocumentId) -> DocumentId {
+        let id = entry(world, date, name, &[]);
+        let fields = entry_fields(world, date, name, &[]);
+        world.amend_linking(&id, &fields, "See [[it]].\n", &[("it", Some(target))]);
+        id
+    }
+
+    #[test]
+    fn a_document_is_linked_from_what_links_it_or_is_about_it_and_not_from_what_is_filed_on_it() {
+        let (world, lantern) = world();
+        let atlas = topic(&world, "atlas", &part_of(&[&lantern]));
+        linking_fact(
+            &world,
+            &lantern,
+            "relay-pin",
+            "",
+            ("lantern", Some(&lantern)),
+        );
+        linking_fact(&world, &atlas, "spare", "", ("lantern", None));
+        let fields = topic_fields("lantern", "");
+        world.amend_linking(
+            &lantern,
+            &fields,
+            "See [[lantern]].\n",
+            &[("lantern", Some(&lantern))],
+        );
+        let about = followup(
+            &world,
+            &[&atlas],
+            "check",
+            &format!("about = \"{lantern}\"\ntouching = \"{atlas}\"\n"),
+        );
+        entry(&world, "2026-09-05", "filed", &[&lantern]);
+        linking_entry(&world, "2026-09-06", "cited", &lantern);
+        let found: BTreeMap<_, _> = linkers(&world, "lantern").into_iter().collect();
+        assert_eq!(
+            found,
+            [
+                ("atlas".to_owned(), by(&["part_of"])),
+                (about.short().to_owned(), by(&["about"])),
+                ("lantern/relay-pin".to_owned(), by(&["link"])),
+                ("atlas/spare".to_owned(), by(&["link"])),
+                ("2026-09-06-cited".to_owned(), by(&["link"])),
+            ]
+            .into_iter()
+            .collect()
+        );
+        assert_eq!(
+            linkers(&world, "atlas"),
+            [(about.short().to_owned(), by(&["touching"]))]
+        );
+        assert_eq!(linkers(&world, "desk"), []);
+        assert_eq!(shown_document(&world, "lantern").linked_from, []);
+    }
+
+    #[test]
+    fn an_ended_document_linking_one_is_listed_only_with_the_ended_ones() {
+        let (world, lantern) = world();
+        linking_fact(
+            &world,
+            &lantern,
+            "relay-pin",
+            ENDED_FACT,
+            ("lantern", Some(&lantern)),
+        );
+        assert_eq!(linkers(&world, "lantern"), []);
+        let linked = linkers_of(&world, "lantern", true);
+        assert_eq!(linked.len(), 1);
+        assert_eq!(linked[0].row.label, "lantern/relay-pin");
+        assert_eq!(linked[0].row.ended.as_deref(), Some("false"));
+    }
+
+    fn forked_topic(world: &World, name: &str, left: &str, right: &str) {
+        let root = head(world, &topic(world, name, ""));
+        for (rest, body) in [(left, "left\n"), (right, "right\n")] {
+            let version = after(&[&root], &topic_fields(name, rest), body);
+            world.store.put(&version).unwrap();
+        }
+    }
+
+    #[test]
+    fn a_fork_links_a_document_through_its_unended_heads_alone() {
+        let (world, lantern) = world();
+        let linking = part_of(&[&lantern]);
+        forked_topic(&world, "atlas", &format!("{linking}{ENDED}"), "");
+        assert_eq!(linkers_of(&world, "lantern", true), []);
+        forked_topic(&world, "compass", &linking, "");
+        assert_eq!(
+            linkers(&world, "lantern"),
+            [("compass".to_owned(), by(&["part_of"]))]
+        );
+    }
+
+    #[test]
+    fn entries_come_after_the_rest_the_newest_first_and_by_name_within_a_day() {
+        let (world, lantern) = world();
+        linking_entry(&world, "2026-09-05", "older", &lantern);
+        linking_entry(&world, "2026-09-07", "wired", &lantern);
+        linking_entry(&world, "2026-09-07", "cut", &lantern);
+        linking_fact(&world, &lantern, "spare", "", ("lantern", Some(&lantern)));
+        let labels: Vec<String> = (linkers(&world, "lantern").into_iter())
+            .map(|(label, _)| label)
+            .collect();
+        assert_eq!(
+            labels,
+            [
+                "lantern/spare",
+                "2026-09-07-cut",
+                "2026-09-07-wired",
+                "2026-09-05-older"
+            ]
+        );
     }
 }

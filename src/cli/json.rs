@@ -852,6 +852,7 @@ mod tests {
             "ended": null,
             "heads": sides,
             "unreadable": [],
+            "linked_from": [],
         });
         (of_forked, expected)
     }
@@ -903,6 +904,29 @@ mod tests {
         (of_linking, linked)
     }
 
+    fn linked(world: &World, lantern: &DocumentId, compass: &DocumentId) -> (Shown, Value) {
+        let deps = world.deps();
+        let mut of_linked = show::show(&deps.read(), lantern.as_str()).unwrap();
+        let mut expected = serde_json::to_value(&of_linked).unwrap();
+        expected["linked_from"] = json!([{
+            "row": {
+                "document": compass,
+                "kind": "topic",
+                "label": "compass",
+                "name": "compass",
+                "summary": "s",
+                "topics": [],
+                "forked": false,
+                "ended": null,
+            },
+            "by": ["link"],
+        }]);
+        if let Shown::Document(document) = &mut of_linked {
+            document.linked_from = show::linked_from(&deps.read(), lantern, false).unwrap();
+        }
+        (of_linked, expected)
+    }
+
     fn referring(world: &World, lantern: &DocumentId) -> (Shown, Value) {
         let machine = world.machine();
         let driver = world.put(
@@ -945,6 +969,7 @@ mod tests {
                 "links": [],
             }],
             "unreadable": [],
+            "linked_from": [],
         });
         let of_referring = show::show(&world.deps().read(), driver.as_str()).unwrap();
         (of_referring, expected)
@@ -973,44 +998,8 @@ mod tests {
         (of_old, old)
     }
 
-    fn shown() -> Vec<(Shown, Value)> {
-        let Damaged {
-            world,
-            lantern,
-            gadget,
-            unreadable,
-        } = damaged();
-        let deps = world.deps();
-        let label = gadget.short();
-        let unknown = json!({
-            "type": "document",
-            "document": gadget,
-            "kind": "gadget",
-            "reads_as": null,
-            "label": label,
-            "former": [],
-            "forked": false,
-            "ended": null,
-            "heads": [version(&world, &gadget)],
-            "unreadable": unreadable,
-        });
-        let of_unknown = show::show(&deps.read(), label).unwrap();
-
-        let hash = head_id(&world, &gadget);
-        let mut one = json!({
-            "type": "version",
-            "document": gadget,
-            "label": label,
-            "document_ended": null,
-        });
-        let rest = version(&world, &gadget);
-        let fields = rest.as_object().expect("an object").clone();
-        one.as_object_mut().expect("an object").extend(fields);
-        one["sides"] = json!([{"against": null, "held": true, "before": ""}]);
-        let of_version = show::show(&deps.read(), hash.short()).unwrap();
-
-        let root = head_id(&world, &lantern);
-        let retired = world.amend(&lantern, &topic_fields("lantern", RETIRED), "\n");
+    fn retired(world: &World, lantern: &DocumentId, root: &VersionId) -> (Shown, Value) {
+        let retired = world.amend(lantern, &topic_fields("lantern", RETIRED), "\n");
         let ended = json!({
             "type": "document",
             "document": lantern,
@@ -1042,9 +1031,13 @@ mod tests {
                 "links": [],
             }],
             "unreadable": [],
+            "linked_from": [],
         });
-        let of_ended = show::show(&deps.read(), "lantern").unwrap();
+        let of_ended = show::show(&world.deps().read(), "lantern").unwrap();
+        (of_ended, ended)
+    }
 
+    fn unread(world: &World) -> (Shown, Value) {
         let lost = VersionId::of(b"lost");
         world
             .store
@@ -1063,18 +1056,69 @@ mod tests {
                 "version": lost,
                 "why": {"type": "corrupt", "text": "the bytes do not hash to the file's name"},
             }],
+            "linked_from": [],
         });
-        let of_unread = show::show(&deps.read(), atlas().short()).unwrap();
+        let of_unread = show::show(&world.deps().read(), atlas().short()).unwrap();
+        (of_unread, unread)
+    }
+
+    fn shown() -> Vec<(Shown, Value)> {
+        let Damaged {
+            world,
+            lantern,
+            gadget,
+            unreadable,
+        } = damaged();
+        let deps = world.deps();
+        let label = gadget.short();
+        let unknown = json!({
+            "type": "document",
+            "document": gadget,
+            "kind": "gadget",
+            "reads_as": null,
+            "label": label,
+            "former": [],
+            "forked": false,
+            "ended": null,
+            "heads": [version(&world, &gadget)],
+            "unreadable": unreadable,
+            "linked_from": [],
+        });
+        let of_unknown = show::show(&deps.read(), label).unwrap();
+
+        let hash = head_id(&world, &gadget);
+        let mut one = json!({
+            "type": "version",
+            "document": gadget,
+            "label": label,
+            "document_ended": null,
+        });
+        let rest = version(&world, &gadget);
+        let fields = rest.as_object().expect("an object").clone();
+        one.as_object_mut().expect("an object").extend(fields);
+        one["sides"] = json!([{"against": null, "held": true, "before": ""}]);
+        let of_version = show::show(&deps.read(), hash.short()).unwrap();
+
+        let root = head_id(&world, &lantern);
+        let ended = retired(&world, &lantern, &root);
+        let unread = unread(&world);
+        let (old, forked) = (old_version(&world, &lantern, &root), forked(&world));
+        let linking = linking(&world, &lantern);
+        let Shown::Version(compared) = &linking.0 else {
+            panic!("expected a version");
+        };
+        let compass = compared.document.clone();
 
         vec![
-            old_version(&world, &lantern, &root),
-            forked(&world),
-            linking(&world, &lantern),
+            old,
+            forked,
+            linking,
+            linked(&world, &lantern, &compass),
             referring(&world, &lantern),
             (of_unknown, unknown),
             (of_version, one),
-            (of_ended, ended),
-            (of_unread, unread),
+            ended,
+            unread,
         ]
     }
 

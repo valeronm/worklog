@@ -148,14 +148,10 @@ pub(super) fn label_of(content: &Content, topic_name: Option<&Name>, id: &Docume
     }
 }
 
-pub(super) fn held_under<'d>(
-    document: &'d Document,
-    kind: KindOf,
-    key: &str,
-    ended: bool,
-) -> Vec<&'d str> {
+// A fork's unended heads hold what it holds; an ended document holds what its row head does.
+pub(super) fn holding_heads(document: &Document, kind: KindOf, ended: bool) -> Vec<&Header> {
     let heads = readable_heads(document);
-    let holding: Vec<&Read<'d>> = if !all_ended(&heads) {
+    let holding: Vec<&Read> = if !all_ended(&heads) {
         (heads.iter())
             .filter(|(_, record)| record.ending.is_none())
             .collect()
@@ -166,7 +162,18 @@ pub(super) fn held_under<'d>(
     };
     (holding.into_iter())
         .filter(|(_, record)| record.content.kind() == kind)
-        .flat_map(|(head, _)| texts(&head.fields, key))
+        .map(|(head, _)| *head)
+        .collect()
+}
+
+pub(super) fn held_under<'d>(
+    document: &'d Document,
+    kind: KindOf,
+    key: &str,
+    ended: bool,
+) -> Vec<&'d str> {
+    (holding_heads(document, kind, ended).into_iter())
+        .flat_map(|head| texts(&head.fields, key))
         .collect()
 }
 

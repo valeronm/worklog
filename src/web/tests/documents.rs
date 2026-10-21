@@ -2,7 +2,8 @@ use super::{forked_into, has, lacks, main_of, ok, stamp};
 use crate::app::show;
 use crate::app::show::Shown;
 use crate::app::testing::{
-    DONE, ENDED, fact, fact_fields, fork, topic, topic_fields, world, world_with_atlas,
+    DONE, ENDED, ENDED_FACT, entry, entry_fields, fact, fact_fields, fork, topic, topic_fields,
+    world, world_with_atlas,
 };
 use crate::domain::id::{DocumentId, VersionId};
 use crate::domain::version::ReadError;
@@ -381,4 +382,48 @@ fn a_reason_this_worklog_does_not_know_is_escaped_in_the_title_of_a_link() {
              title=\"ended sold &amp; &lt;gone&gt; &quot;x&quot;\">atlas</a>.</p>"
         ),
     );
+}
+
+#[test]
+fn a_document_lists_what_links_it_with_the_entries_apart_and_a_topic_page_does_not() {
+    let (world, lantern) = world();
+    let relay = fact(&world, &lantern, "relay-pin", "");
+    let spare = fact(&world, &lantern, "spare", "");
+    let to_both: [(&str, Option<&DocumentId>); 2] = [
+        ("lantern", Some(&lantern)),
+        ("lantern/relay-pin", Some(&relay)),
+    ];
+    let fields = fact_fields(&lantern, "spare", "s", "");
+    world.amend_linking(&spare, &fields, "See [[lantern/relay-pin]].\n", &to_both);
+    let old = fact(&world, &lantern, "old", "");
+    let fields = fact_fields(&lantern, "old", "s", ENDED_FACT);
+    world.amend_linking(&old, &fields, "See [[lantern/relay-pin]].\n", &to_both[1..]);
+    let day = entry(&world, "2026-09-05", "wired", &[]);
+    let fields = entry_fields(&world, "2026-09-05", "wired", &[]);
+    world.amend_linking(&day, &fields, "See [[lantern/relay-pin]].\n", &to_both[1..]);
+
+    let html = ok(&world, &format!("/doc/{relay}"));
+    let linked = html
+        .find("<h2>Linked from</h2>")
+        .expect("a section of linkers");
+    let cited = html
+        .find("<h2>Linked from entries</h2>")
+        .expect("a section of entries");
+    let at = |what: &str| html.find(what).unwrap_or_else(|| panic!("{what}"));
+    let old_at = at(&format!(
+        "<li><span class=\"label\">link</span> <a class=\"title ended\" href=\"/doc/{old}\" \
+         title=\"ended false\">lantern/old</a> <span class=\"mark\">ended false</span>"
+    ));
+    let spare_at = at(&format!(
+        "<li><span class=\"label\">link</span> <a class=\"title\" href=\"/doc/{spare}\">\
+         lantern/spare</a>"
+    ));
+    let day_at = at(&format!(
+        "<li><span class=\"label\">link</span> <a class=\"title\" href=\"/doc/{day}\">\
+         2026-09-05-wired</a>"
+    ));
+    assert!(linked < old_at && old_at < spare_at && spare_at < cited && cited < day_at);
+
+    let topic_page = ok(&world, &format!("/doc/{lantern}"));
+    lacks(&topic_page, "Linked from");
 }

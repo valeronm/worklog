@@ -38,6 +38,14 @@
 {% for note in d.notes %}<p class="notice">{{ note }}</p>
 {% endfor -%}
 {% for h in d.heads %}{% call head(h, d.forked) %}{% endcall %}{% endfor %}
+{% if !d.linked_from.is_empty() -%}
+<h2>Linked from</h2>
+{% call items(d.linked_from) %}{% endcall %}
+{% endif -%}
+{% if !d.cited_by.is_empty() -%}
+<h2>Linked from entries</h2>
+{% call items(d.cited_by) %}{% endcall %}
+{% endif -%}
 {% endmacro %}
 
 {% macro items(rows) %}
