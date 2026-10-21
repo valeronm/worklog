@@ -11,6 +11,7 @@ use crate::domain::ports::{
 use crate::domain::schema::{Date, Directory, KindOf, SchemaError};
 use crate::domain::version::Kind;
 
+pub mod activity;
 pub mod amend;
 pub mod bulk;
 pub mod check;
@@ -246,6 +247,11 @@ pub struct DraftRef {
     pub location: String,
 }
 
+/// A day written `YYYY-MM-DD`; anything else is a usage failure.
+pub(crate) fn day_given(text: &str) -> Result<Date, Failure> {
+    Date::parse(text).map_err(|error| Failure::Usage(error.to_string()))
+}
+
 impl ReadDeps<'_> {
     pub fn today(&self) -> Result<Date, Failure> {
         Ok(Date::parse(&self.clock.now().day())?)
@@ -293,7 +299,7 @@ mod tests {
             ("facts", |deps| list::facts(deps, None, false).map(drop)),
             ("ideas", |deps| list::ideas(deps, None, false).map(drop)),
             ("entries", |deps| {
-                list::entries(deps, Some("lantern"), None, false).map(drop)
+                list::entries(deps, Some("lantern"), None, None, false).map(drop)
             }),
             ("followups", |deps| {
                 list::followups(deps, None, true).map(drop)

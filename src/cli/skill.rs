@@ -15,7 +15,7 @@ mod tests {
 
     const HELP: &str = "help";
 
-    const SETUP: [&str; 8] = [
+    const NOT_FOR_A_SESSION: [&str; 9] = [
         "init",
         "serve",
         "agents",
@@ -23,6 +23,7 @@ mod tests {
         "usage",
         "completions",
         "upgrade",
+        "activity",
         HELP,
     ];
 
@@ -298,7 +299,7 @@ mod tests {
 
     #[test]
     fn a_command_the_skill_is_excused_from_is_a_command() {
-        assert_eq!(not_commands(&root(), &SETUP), [""; 0]);
+        assert_eq!(not_commands(&root(), &NOT_FOR_A_SESSION), [""; 0]);
         assert_eq!(not_commands(&root(), &["init", "polish"]), ["polish"]);
         assert_eq!(not_commands(&root(), &["install"]), ["install"]);
     }
@@ -308,7 +309,7 @@ mod tests {
         let mut every = BTreeSet::new();
         for sub in root().get_subcommands() {
             let name = sub.get_name();
-            if SETUP.contains(&name) {
+            if NOT_FOR_A_SESSION.contains(&name) {
                 continue;
             }
             let nested: Vec<&str> = (sub.get_subcommands().map(Command::get_name))

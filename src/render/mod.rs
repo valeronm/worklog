@@ -1,5 +1,6 @@
 //! What the command line and the pages show the same way.
 
+pub mod calendar;
 pub mod diff;
 
 use crate::app::check::Check;

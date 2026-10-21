@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% import "macros.html" as m %}
+{% block title %}Stats{% endblock %}
+{% block content %}
+<h1>Stats</h1>
+<p class="chips topics-chosen">{% for t in topics %}<a href="{{ t.link.href }}"{% if t.current %} aria-current="true"{% endif %}>{{ t.link.text }}{% if let Some(count) = t.count %} <span class="count">{{ count }}</span>{% endif %}</a>{% endfor %}</p>
+<section class="activity">
+<div class="weeks"><div>
+<div class="months" style="grid-template-columns: repeat({{ week_count }}, var(--day))">{% for m in months %}<span style="grid-column: {{ m.week + 1 }} / span {{ month_gap }}">{{ m.name }}</span>{% endfor %}</div>
+<div class="days">{% for day in days %}{% if let Some(d) = day %}{% if let Some(href) = d.href %}<a class="l{{ d.level }}" href="{{ href }}" title="{{ d.title }}" aria-label="{{ d.title }}"></a>{% else %}<span class="l0" title="{{ d.title }}"></span>{% endif %}{% else %}<span></span>{% endif %}{% endfor %}</div>
+</div></div>
+<p class="muted">{{ total }}{% if let Some(topic) = under %} under {% call m::link(topic) %}{% endcall %}{% endif %} · {% for s in spans %}{% if !loop.first %} {% endif %}{% if s.current %}<strong>{{ s.link.text }}</strong>{% else %}{% call m::link(s.link) %}{% endcall %}{% endif %}{% endfor %}</p>
+</section>
+{% endblock %}

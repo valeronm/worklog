@@ -97,13 +97,14 @@ fn nested(topics: &[TopicRow]) -> Vec<Step> {
     walk.steps
 }
 
-const UNDER_THE_TOPICS: [Place; 8] = [
+const UNDER_THE_TOPICS: [Place; 9] = [
     Place::Facts,
     Place::Ideas,
     Place::Entries,
     Place::Followups,
     Place::Search,
     Place::Log,
+    Place::Stats,
     Place::Check,
     Place::Forks,
 ];

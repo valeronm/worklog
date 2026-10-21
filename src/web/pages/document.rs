@@ -3,7 +3,7 @@
 use askama::Template;
 
 use super::home::TopicLine;
-use super::links::{Link, Nav, Place, Stamped, Text, doc_href, history_href, marks};
+use super::links::{Link, Nav, Place, Stamped, Text, doc_href, history_href, marks, with_query};
 use super::listing::{Item, entry_items, fact_items, followup_items, leave_out};
 use crate::app::FollowupRow;
 use crate::app::list::{ClaimRow, EntryRow, FactRow, TopicRow};
@@ -68,6 +68,8 @@ pub struct Sheet {
     pub label: String,
     pub kind: Option<String>,
     pub history: String,
+    // A topic's stats page.
+    pub stats: Option<String>,
     pub forked: bool,
     pub marks: Vec<String>,
     pub former: Vec<String>,
@@ -91,6 +93,7 @@ impl From<&ShownDocument> for Sheet {
             label: document.label.clone(),
             kind: document.kind.clone(),
             history: history_href(&document.document),
+            stats: None,
             forked: document.forked,
             marks: marks(document.forked, document.ended.as_deref()),
             former: document.former.clone(),
@@ -293,13 +296,17 @@ impl TopicPage {
             },
             current: tab == section,
         });
+        let id = document.document.to_string();
+        let under = |place: Place| with_query(place.route(), &[("topic", Some(&id))]);
         TopicPage {
             nav: Nav::at(Some(Place::Topics)),
-            document: Sheet::from(document),
+            document: Sheet {
+                stats: Some(under(Place::Stats)),
+                ..Sheet::from(document)
+            },
             tabs: tabs.collect(),
             section: section.name(),
-            listing: (section.listing())
-                .map(|listing| format!("{}?topic={}", listing.route(), document.document)),
+            listing: section.listing().map(under),
             body,
         }
     }

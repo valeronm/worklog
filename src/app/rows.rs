@@ -96,7 +96,7 @@ pub(super) fn members(
     lookup.holders(kind, key, &topics, ended)
 }
 
-fn memberships(document: &Document, kind: KindOf) -> BTreeSet<DocumentId> {
+pub(super) fn memberships(document: &Document, kind: KindOf) -> BTreeSet<DocumentId> {
     let held = membership_key(kind).map(|key| held_under(document, kind, key, false));
     (held.into_iter().flatten())
         .filter_map(|text| DocumentId::parse(text).ok())

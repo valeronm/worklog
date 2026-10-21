@@ -90,7 +90,7 @@ fn a_topic_is_its_document_over_one_of_its_sections_with_a_count_for_each() {
         &html,
         &format!(
             "<p class=\"meta\"><span class=\"kind\">topic</span>\
-             <a href=\"/history/{lantern}\">history</a></p>"
+             <a href=\"/history/{lantern}\">history</a> <a href=\"/stats?topic={lantern}\">stats</a></p>"
         ),
     );
     has(
@@ -253,7 +253,7 @@ fn a_topic_that_is_forked_or_ended_is_marked_as_its_document_is() {
     has(
         &ended,
         &format!(
-            "<a href=\"/history/{atlas}\">history</a> \
+            "<a href=\"/history/{atlas}\">history</a> <a href=\"/stats?topic={atlas}\">stats</a> \
              <span class=\"mark\">ended retired</span></p>"
         ),
     );
@@ -264,7 +264,7 @@ fn a_topic_that_is_forked_or_ended_is_marked_as_its_document_is() {
     has(
         &forked,
         &format!(
-            "<a href=\"/history/{lantern}\">history</a> <span class=\"mark\">forked</span></p>"
+            "<a href=\"/history/{lantern}\">history</a> <a href=\"/stats?topic={lantern}\">stats</a> <span class=\"mark\">forked</span></p>"
         ),
     );
     assert_eq!(forked.matches("<article class=\"head\">").count(), 2);

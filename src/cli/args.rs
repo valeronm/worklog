@@ -363,6 +363,15 @@ pub enum ReadCommand {
         #[arg(long)]
         ended: bool,
     },
+    /// How many entries each day holds over the last year, or over one year, by week
+    Activity {
+        /// A topic, for the entries under it and its parts
+        #[arg(add = complete::topics())]
+        topic: Option<String>,
+        /// A calendar year in place of the weeks up to today
+        #[arg(long)]
+        year: Option<i32>,
+    },
     /// What a session starting in a directory is opened with
     Context {
         /// The working directory when not given
@@ -430,6 +439,9 @@ pub enum ListCommand {
     Entries {
         #[arg(add = complete::topics())]
         topic: Option<String>,
+        /// Only those dated this day, `YYYY-MM-DD`
+        #[arg(long)]
+        on: Option<String>,
         /// At most this many
         #[arg(short)]
         n: Option<usize>,
@@ -529,6 +541,9 @@ mod tests {
             "worklog ideas lantern --ended",
             "worklog entries",
             "worklog entries lantern -n 3 --ended",
+            "worklog entries lantern --on 2026-10-08",
+            "worklog activity",
+            "worklog activity lantern --year 2025",
             "worklog followups",
             "worklog followups lantern --ended",
             "worklog forks",

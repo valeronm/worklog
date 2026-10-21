@@ -5,9 +5,8 @@ use serde::Serialize;
 
 use crate::app::lookup::Lookup;
 use crate::app::rows::{Reference, reading};
-use crate::app::{Failure, ReadDeps};
+use crate::app::{Failure, ReadDeps, day_given};
 use crate::domain::id::DocumentId;
-use crate::domain::schema::Date;
 use crate::domain::schema::address::Found;
 use crate::domain::session::Session;
 use crate::domain::usage::{Agent, Invocation, Kept};
@@ -86,10 +85,7 @@ pub fn usage(
         Some(address) => machine_named(deps, &lookup, address)?,
         None => (None, None),
     };
-    let since = since
-        .map(|day| Date::parse(day).map_err(|error| Failure::Usage(error.to_string())))
-        .transpose()?
-        .map(|day| day.to_string());
+    let since = since.map(day_given).transpose()?.map(|day| day.to_string());
     let runs = match its_runs {
         Some(runs) if since.is_none() && agent.is_none() => runs,
         _ => deps.usage.read(&Kept {

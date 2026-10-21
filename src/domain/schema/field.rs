@@ -2,6 +2,7 @@
 
 use std::fmt;
 
+use chrono::{Datelike as _, NaiveDate};
 use serde::{Serialize, Serializer};
 use toml::Value;
 use toml::value::Datetime;
@@ -11,7 +12,7 @@ use crate::domain::id::DocumentId;
 use crate::domain::version::Fields;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Date(toml::value::Date);
+pub struct Date(NaiveDate);
 
 impl Date {
     /// Takes `YYYY-MM-DD`.
@@ -22,19 +23,43 @@ impl Date {
             .ok_or_else(|| SchemaError::NotADate(text.to_owned()))
     }
 
+    // TOML takes only a day the calendar has.
     fn of(datetime: &Datetime) -> Option<Date> {
         let alone = datetime.time.is_none() && datetime.offset.is_none();
-        datetime.date.filter(|_| alone).map(Date)
+        let date = datetime.date.filter(|_| alone)?;
+        NaiveDate::from_ymd_opt(date.year.into(), date.month.into(), date.day.into()).map(Date)
     }
 
     pub(crate) fn value(self) -> Value {
-        Value::Datetime(self.0.into())
+        Value::Datetime(self.toml().into())
+    }
+
+    fn toml(self) -> toml::value::Date {
+        let day = self.0;
+        // `of_calendar` keeps the year to four digits, and a month and a day fit a byte.
+        let small = |part: u32| u8::try_from(part).unwrap_or(u8::MAX);
+        toml::value::Date {
+            year: u16::try_from(day.year()).unwrap_or(u16::MAX),
+            month: small(day.month()),
+            day: small(day.day()),
+        }
+    }
+
+    #[must_use]
+    pub fn on_calendar(self) -> NaiveDate {
+        self.0
+    }
+
+    /// `None` for a year outside the four digits a date is written with.
+    #[must_use]
+    pub fn of_calendar(day: NaiveDate) -> Option<Date> {
+        (0..=9999).contains(&day.year()).then_some(Date(day))
     }
 }
 
 impl fmt::Display for Date {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
+        self.toml().fmt(f)
     }
 }
 
@@ -415,5 +440,21 @@ mod tests {
             toml::to_string(&written).unwrap(),
             "confirmed = 2026-10-09\n"
         );
+    }
+
+    #[test]
+    fn a_date_goes_to_the_calendar_and_back_when_the_calendar_has_it() {
+        let late = Date::parse("2026-10-09").unwrap();
+        let day = late.on_calendar();
+        assert_eq!(day, NaiveDate::from_ymd_opt(2026, 10, 9).unwrap());
+        assert_eq!(Date::of_calendar(day), Some(late));
+        assert_eq!(
+            Date::parse("2026-02-30"),
+            Err(SchemaError::NotADate("2026-02-30".to_owned()))
+        );
+        for far in [10_000, -1] {
+            let day = NaiveDate::from_ymd_opt(far, 1, 1).unwrap();
+            assert_eq!(Date::of_calendar(day), None, "{far}");
+        }
     }
 }

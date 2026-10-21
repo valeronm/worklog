@@ -11,7 +11,7 @@ use crate::app::rows::{
     Filings, FollowupRow, Reference, Row, by_label, documents, followup_rows, reading, row, shown,
 };
 use crate::app::rules::claims_of;
-use crate::app::{Failure, ReadDeps};
+use crate::app::{Failure, ReadDeps, day_given};
 use crate::domain::document::Document;
 use crate::domain::id::{DocumentId, VersionId};
 use crate::domain::schema::{Content, Date, KindOf};
@@ -169,19 +169,22 @@ fn fact_rows(
 }
 
 /// Newest date first, then by name; `limit` cuts after the ordering. Refuses an address that
-/// is not one topic, and includes the entries of its parts.
+/// is not one topic, and includes the entries of its parts. `on` is `YYYY-MM-DD` and keeps
+/// the entries dated that day; anything else is a usage failure.
 pub fn entries(
     deps: &ReadDeps,
     topic: Option<&str>,
+    on: Option<&str>,
     limit: Option<usize>,
     ended: bool,
 ) -> Result<Vec<EntryRow>, Failure> {
+    let on = on.map(day_given).transpose()?;
     let (lookup, topics, topic) = reading(deps, topic)?;
     let documents = documents(&lookup, &topics, KindOf::Entry, topic.as_ref(), ended)?;
     let mut rows: Vec<EntryRow> = shown(&topics, &documents, ended)
         .into_iter()
         .filter_map(|shown| match shown.record.content {
-            Content::Entry(entry) => Some(EntryRow {
+            Content::Entry(entry) if on.is_none_or(|on| on == entry.date) => Some(EntryRow {
                 row: shown.row,
                 date: entry.date,
             }),
@@ -873,7 +876,7 @@ mod tests {
         entry(&world, "2026-10-09", "m-driver", &[&lantern]);
         let deps = world.deps();
 
-        let all = entries(&deps.read(), None, None, false).unwrap();
+        let all = entries(&deps.read(), None, None, None, false).unwrap();
         assert_eq!(
             labels(&all, |e| &e.row),
             [
@@ -884,13 +887,29 @@ mod tests {
             ]
         );
         assert_eq!(all[0].date, Date::parse("2026-10-09").unwrap());
-        let two = entries(&deps.read(), Some("lantern"), Some(2), false).unwrap();
+        let two = entries(&deps.read(), Some("lantern"), None, Some(2), false).unwrap();
         assert_eq!(
             labels(&two, |e| &e.row),
             ["2026-10-09-m-driver", "2026-10-08-a-driver"]
         );
-        let under_atlas = entries(&deps.read(), Some("atlas"), None, false).unwrap();
+        let under_atlas = entries(&deps.read(), Some("atlas"), None, None, false).unwrap();
         assert_eq!(labels(&under_atlas, |e| &e.row), ["2026-10-08-a-driver"]);
+        let on = entries(
+            &deps.read(),
+            Some("lantern"),
+            Some("2026-10-08"),
+            None,
+            false,
+        )
+        .unwrap();
+        assert_eq!(
+            labels(&on, |e| &e.row),
+            ["2026-10-08-a-driver", "2026-10-08-b-driver"]
+        );
+        assert!(matches!(
+            entries(&deps.read(), None, Some("yesterday"), None, false),
+            Err(Failure::Usage(_))
+        ));
     }
 
     #[test]

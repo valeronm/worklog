@@ -5,6 +5,7 @@ mod home;
 mod listings;
 mod requests;
 mod search;
+mod stats;
 mod topics;
 mod versions;
 

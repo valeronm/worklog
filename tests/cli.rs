@@ -3056,7 +3056,7 @@ enum Source {
     Triggers,
 }
 
-const SOURCED: [(&str, &[&str], Source); 36] = [
+const SOURCED: [(&str, &[&str], Source); 37] = [
     (
         "new followup topics",
         &["new", "followup", "--topics", ""],
@@ -3113,6 +3113,7 @@ const SOURCED: [(&str, &[&str], Source); 36] = [
         &["search", "relay", "--topic", ""],
         Source::Topics,
     ),
+    ("activity topic", &["activity", ""], Source::Topics),
     ("usage machine", &["usage", "--machine", ""], Source::Topics),
     ("topics topic", &["topics", ""], Source::Topics),
     ("facts topic", &["facts", ""], Source::Topics),

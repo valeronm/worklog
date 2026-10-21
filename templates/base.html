@@ -61,7 +61,7 @@ ul.items a.title:hover { color: var(--accent-ink); }
 .found { font: .78rem/1.6 var(--mono); color: var(--muted); margin: .4rem 0 0 .2rem; padding-left: .7rem; border-left: 2px solid var(--line); }
 .chips { display: inline-flex; flex-wrap: wrap; gap: .3rem; vertical-align: middle; }
 .chips a { display: inline-block; font: 500 .72rem/1 var(--mono); color: var(--accent-ink); background: var(--accent-wash); border-radius: 999px; padding: .28rem .6rem; }
-.chips a:hover { color: var(--chip-hover-ink); background: var(--chip-hover); }
+.chips a:hover, .chips a[aria-current] { color: var(--chip-hover-ink); background: var(--chip-hover); }
 .what { color: var(--muted); margin-top: .2rem; }
 mark { background: var(--found); color: inherit; border-radius: 2px; }
 .mark { display: inline-block; font: 500 .74rem/1 var(--mono); padding: .3rem .55rem; border-radius: 999px; background: var(--due-wash); color: var(--due); white-space: nowrap; vertical-align: .1em; }
@@ -81,6 +81,24 @@ li.due .label { background: var(--due-wash); color: var(--due); }
 .tabs a:hover { color: var(--ink); background: var(--panel); }
 .tabs .label { padding: .2rem .5rem; margin: 0 0 0 .3rem; }
 .tabs + h2 { margin-top: 1.2rem; }
+
+.topics-chosen { display: flex; margin: 0 0 1.5rem; }
+.topics-chosen .count { opacity: .65; margin-left: .15rem; }
+.activity { --day: 11px; --gap: 3px; margin: 0 0 2rem; }
+.activity .weeks { overflow-x: auto; direction: rtl; padding-bottom: .3rem; }
+.activity .weeks > div { direction: ltr; width: max-content; margin-right: auto; }
+.activity .months, .activity .days { display: grid; column-gap: var(--gap); }
+.activity .months { font: .72rem/1 var(--mono); color: var(--muted); margin-bottom: .35rem; }
+.activity .days { grid-auto-flow: column; grid-template-rows: repeat(7, var(--day)); grid-auto-columns: var(--day); row-gap: var(--gap); }
+.activity .days > * { border-radius: 2px; }
+.activity .days a:hover { outline: 1px solid var(--ink); }
+.activity .l0 { background: var(--code); }
+.activity .l1 { background: color-mix(in srgb, var(--accent) 30%, var(--code)); }
+.activity .l2 { background: color-mix(in srgb, var(--accent) 55%, var(--code)); }
+.activity .l3 { background: color-mix(in srgb, var(--accent) 78%, var(--code)); }
+.activity .l4 { background: var(--accent); }
+.activity p { margin: .6rem 0 0; font-size: .88rem; }
+.activity p strong { color: var(--ink); font-weight: 600; }
 
 table { border-collapse: collapse; width: 100%; font-size: .95rem; }
 th { text-align: left; font: 600 .74rem/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); padding: 0 .75rem .5rem 0; border-bottom: 1px solid var(--line); }

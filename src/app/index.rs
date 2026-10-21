@@ -50,6 +50,10 @@ impl Topics {
         Ok(Topics { entries, parts })
     }
 
+    pub(super) fn ids(&self) -> impl Iterator<Item = &DocumentId> {
+        self.entries.keys()
+    }
+
     pub(super) fn name(&self, id: &DocumentId) -> Option<&Name> {
         self.entries.get(id).map(|entry| &entry.name)
     }
@@ -112,6 +116,19 @@ impl Topics {
             .collect();
         covered.insert(id.clone());
         covered
+    }
+
+    /// `ids` and every topic they are part of, through any number of steps.
+    pub(super) fn wholes(&self, ids: BTreeSet<DocumentId>) -> BTreeSet<DocumentId> {
+        let mut found = BTreeSet::new();
+        let mut open: Vec<DocumentId> = ids.into_iter().collect();
+        while let Some(id) = open.pop() {
+            if !found.contains(&id) {
+                open.extend(self.part_of(&id).iter().cloned());
+                found.insert(id);
+            }
+        }
+        found
     }
 
     pub(super) fn direct_parts(&self, id: &DocumentId) -> Vec<DocumentId> {

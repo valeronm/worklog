@@ -20,6 +20,7 @@ pub enum Place {
     Followups,
     Search,
     Log,
+    Stats,
     Check,
     Forks,
 }
@@ -36,7 +37,8 @@ impl Place {
             Place::Ideas => Some(Place::Followups),
             Place::Followups => Some(Place::Search),
             Place::Search => Some(Place::Log),
-            Place::Log => Some(Place::Check),
+            Place::Log => Some(Place::Stats),
+            Place::Stats => Some(Place::Check),
             Place::Check => Some(Place::Forks),
             Place::Forks => None,
         }
@@ -46,13 +48,14 @@ impl Place {
         std::iter::successors(Some(Place::FIRST), |place| place.following())
     }
 
-    const IN_THE_NAVIGATION: [Place; 8] = [
+    const IN_THE_NAVIGATION: [Place; 9] = [
         Place::Topics,
         Place::Entries,
         Place::Facts,
         Place::Ideas,
         Place::Followups,
         Place::Log,
+        Place::Stats,
         Place::Check,
         Place::Forks,
     ];
@@ -66,6 +69,7 @@ impl Place {
             Place::Followups => ("Follow-ups", "/followups"),
             Place::Search => ("Search", "/search"),
             Place::Log => ("Log", "/log"),
+            Place::Stats => ("Stats", "/stats"),
             Place::Check => ("Check", "/check"),
             Place::Forks => ("Forks", "/forks"),
         }
@@ -173,6 +177,19 @@ impl Nav {
             places: Place::links(&Place::IN_THE_NAVIGATION, current),
         }
     }
+}
+
+/// `route` with each parameter given a value, in the order given, each value encoded.
+pub fn with_query(route: &str, parameters: &[(&str, Option<&str>)]) -> String {
+    let mut href = route.to_owned();
+    let mut sign = '?';
+    for (key, value) in parameters {
+        if let Some(value) = value {
+            let _ = write!(href, "{sign}{key}={}", encoded(value));
+            sign = '&';
+        }
+    }
+    href
 }
 
 pub fn encoded(text: &str) -> String {

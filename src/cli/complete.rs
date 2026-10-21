@@ -452,6 +452,7 @@ mod tests {
                 "diff target",
                 "log machine",
                 "search topic",
+                "activity topic",
                 "usage machine",
                 "topics topic",
                 "facts topic",

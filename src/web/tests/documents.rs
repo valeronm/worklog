@@ -117,7 +117,7 @@ fn a_forked_document_is_marked_and_shows_each_head_under_a_heading_naming_it() {
     has(
         &html,
         &format!(
-            "<a href=\"/history/{lantern}\">history</a> <span class=\"mark\">forked</span></p>"
+            "<a href=\"/history/{lantern}\">history</a> <a href=\"/stats?topic={lantern}\">stats</a> <span class=\"mark\">forked</span></p>"
         ),
     );
     assert_eq!(html.matches("<article class=\"head\">").count(), 2);
@@ -163,7 +163,7 @@ fn an_ended_document_shows_its_reason_on_the_head_that_ended_it() {
     has(
         &html,
         &format!(
-            "<a href=\"/history/{lantern}\">history</a> \
+            "<a href=\"/history/{lantern}\">history</a> <a href=\"/stats?topic={lantern}\">stats</a> \
              <span class=\"mark\">ended retired</span></p>"
         ),
     );
@@ -189,7 +189,7 @@ fn a_fork_is_marked_ended_only_when_the_document_is() {
     has(
         &html,
         &format!(
-            "<a href=\"/history/{lantern}\">history</a> <span class=\"mark\">forked</span></p>"
+            "<a href=\"/history/{lantern}\">history</a> <a href=\"/stats?topic={lantern}\">stats</a> <span class=\"mark\">forked</span></p>"
         ),
     );
     assert_eq!(html.matches("ended retired</span>").count(), 1);
@@ -212,7 +212,7 @@ fn a_fork_is_marked_ended_only_when_the_document_is() {
     has(
         &html,
         &format!(
-            "<a href=\"/history/{atlas}\">history</a> <span class=\"mark\">forked</span> \
+            "<a href=\"/history/{atlas}\">history</a> <a href=\"/stats?topic={atlas}\">stats</a> <span class=\"mark\">forked</span> \
              <span class=\"mark\">ended retired</span></p>"
         ),
     );

@@ -6,8 +6,8 @@ use super::{Environment, agents};
 use crate::app::followup::{NewFollowup, TriggerArg};
 use crate::app::search::Query;
 use crate::app::{
-    Deps, Failure, ReadDeps, amend, bulk, check, claim, context, draft, followup, fork, list, save,
-    search, setup, show, usage,
+    Deps, Failure, ReadDeps, activity, amend, bulk, check, claim, context, draft, followup, fork,
+    list, save, search, setup, show, usage,
 };
 use crate::domain::schema::Reason;
 use crate::domain::usage::Agent;
@@ -233,6 +233,9 @@ fn read(
             let directory = directory(environment, dir.as_deref())?;
             output(&context::due(deps, &directory)?, json)
         }
+        ReadCommand::Activity { topic, year } => {
+            output(&activity::activity(deps, topic.as_deref(), *year)?, json)
+        }
         ReadCommand::Check => output(&check::check(deps)?, json),
         ReadCommand::Usage {
             machine,
@@ -263,9 +266,15 @@ fn listed(deps: &ReadDeps, json: bool, command: &ListCommand) -> Result<Output, 
         ListCommand::Ideas { topic, ended } => {
             output(&list::ideas(deps, topic.as_deref(), *ended)?, json)
         }
-        ListCommand::Entries { topic, n, ended } => {
-            output(&list::entries(deps, topic.as_deref(), *n, *ended)?, json)
-        }
+        ListCommand::Entries {
+            topic,
+            on,
+            n,
+            ended,
+        } => output(
+            &list::entries(deps, topic.as_deref(), on.as_deref(), *n, *ended)?,
+            json,
+        ),
         ListCommand::Followups { about, ended } => {
             output(&list::followups(deps, about.as_deref(), *ended)?, json)
         }
@@ -790,6 +799,19 @@ mod tests {
         let wired = format!("2026-10-08  {}  2026-10-08-wiring  s\n", wiring.short());
         assert_eq!(fixture.text(&["entries", "lantern"]), wired);
         assert_eq!(fixture.text(&["entries", "-n", "1"]), wired);
+        assert_eq!(fixture.text(&["entries", "--on", "2026-10-08"]), wired);
+        assert_eq!(fixture.text(&["entries", "--on", "2026-10-06"]), "");
+        let grid = fixture.text(&["activity", "phone"]);
+        assert!(
+            grid.contains("1 entry from 2025-10-06 to 2026-10-09\n"),
+            "{grid}"
+        );
+        assert!(
+            fixture
+                .text(&["activity", "--year", "2026"])
+                .contains("2 entries from 2026-01-01"),
+            "{grid}"
+        );
         assert_eq!(
             refused(fixture.run(&["facts", "torch"])),
             "torch: names no document"

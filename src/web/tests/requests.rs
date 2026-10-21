@@ -207,6 +207,7 @@ fn each_page_has_one_heading_and_marks_where_it_is_in_the_navigation() {
         ("/entries", "Entries", true),
         ("/followups", "Follow-ups", true),
         ("/log", "Log", true),
+        ("/stats", "Stats", true),
         ("/check", "Check", true),
         ("/forks", "Forks", true),
         ("/nowhere", "404", false),

@@ -6,10 +6,10 @@ use crate::app::live::open;
 use crate::app::lookup::Lookup;
 use crate::app::rules::referencable;
 use crate::app::save::stepped;
-use crate::app::{Deps, DraftRef, Failure, Written, kind_named, text};
+use crate::app::{Deps, DraftRef, Failure, Written, day_given, kind_named, text};
 use crate::domain::draft::Draft;
 use crate::domain::id::DocumentId;
-use crate::domain::schema::{Content, Date, KindOf};
+use crate::domain::schema::{Content, KindOf};
 use crate::domain::version::Fields;
 
 pub enum TriggerArg<'a> {
@@ -49,7 +49,7 @@ fn trigger_fields(
 ) -> Result<Vec<(&'static str, Value)>, Failure> {
     match trigger {
         TriggerArg::LookAgain { on, why } => {
-            let on = Date::parse(on).map_err(|error| Failure::Usage(error.to_string()))?;
+            let on = day_given(on)?;
             let why = why.trim();
             if why.is_empty() {
                 return Err(Failure::Usage("a look-again date says why".to_owned()));

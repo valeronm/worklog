@@ -41,6 +41,7 @@ mod tests {
     use super::super::agents::{Initialized, Placed};
     use super::super::render::{Render, output};
     use super::*;
+    use crate::app::activity::{self, Activity};
     use crate::app::check::Check;
     use crate::app::context::Context;
     use crate::app::draft::DraftRow;
@@ -145,6 +146,7 @@ mod tests {
         a_topic_row_holds_its_row_and_the_labels_of_its_edges: Vec<TopicRow> = topics,
         a_fact_row_holds_its_date_and_an_ended_one_its_reason: Vec<FactRow> = facts,
         an_entry_row_holds_its_date: Vec<EntryRow> = entries,
+        an_activity_holds_its_span_and_the_days_holding_an_entry: Activity = activities,
         a_followup_row_holds_its_trigger_by_type_and_null_for_what_it_lacks: Vec<FollowupRow> =
             followup_rows,
         a_claim_row_holds_null_for_a_claim_on_no_directory: Vec<ClaimRow> = claims,
@@ -591,8 +593,37 @@ mod tests {
             "row": row(&wiring, "entry", "2026-10-08-wiring", &[to(&lantern, "lantern")]),
             "date": "2026-10-08",
         }]);
-        let listed = list::entries(&world.deps().read(), None, None, false).unwrap();
+        let listed = list::entries(&world.deps().read(), None, None, None, false).unwrap();
         vec![(listed, expected)]
+    }
+
+    fn activities() -> Vec<(Activity, Value)> {
+        let (world, lantern) = world();
+        entry(&world, "2026-10-08", "wiring", &[&lantern]);
+        let deps = world.deps();
+        let last = json!({
+            "from": "2025-10-06",
+            "to": "2026-10-09",
+            "year": null,
+            "days": [{"date": "2026-10-08", "entry_count": 1}],
+            "entry_count": 1,
+            "years": [2026],
+        });
+        let year = json!({
+            "from": "2025-01-01",
+            "to": "2025-12-31",
+            "year": 2025,
+            "days": [],
+            "entry_count": 0,
+            "years": [2026],
+        });
+        vec![
+            (activity::activity(&deps.read(), None, None).unwrap(), last),
+            (
+                activity::activity(&deps.read(), None, Some(2025)).unwrap(),
+                year,
+            ),
+        ]
     }
 
     fn followup_rows() -> Vec<(Vec<FollowupRow>, Value)> {

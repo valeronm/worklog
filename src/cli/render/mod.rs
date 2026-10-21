@@ -1,6 +1,7 @@
 //! A line a read prints separates its fields with two spaces; the one line a write command
 //! prints with one.
 
+mod activity;
 mod check;
 mod context;
 mod documents;

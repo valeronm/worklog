@@ -12,12 +12,12 @@ mod tests;
 use askama::Template;
 
 use crate::app::show::{self, Shown, ShownDocument};
-use crate::app::{Failure, ReadDeps, check, list, search};
+use crate::app::{Failure, ReadDeps, activity, check, list, search};
 use crate::domain::schema::KindOf;
 
 use pages::{
     CheckPage, DOC, DocumentPage, ErrorPage, ForksPage, HISTORY, Held, HistoryPage, Home, Listing,
-    LogPage, Place, Scope, SearchPage, Section, TopicPage, VersionPage, shown_link,
+    LogPage, Place, Scope, SearchPage, Section, StatsPage, TopicPage, VersionPage, shown_link,
 };
 use query::{Query, decoded};
 pub use server::Server;
@@ -136,7 +136,7 @@ fn topic_page(deps: &ReadDeps, document: &ShownDocument, query: &Query) -> Resul
         facts: &list::facts(deps, topic, false)?,
         ideas: &list::ideas(deps, topic, false)?,
         followups: &list::followups(deps, topic, false)?,
-        entries: &list::entries(deps, topic, None, false)?,
+        entries: &list::entries(deps, topic, None, None, false)?,
         claims: &list::claims_on(deps, &document.document)?,
     };
     Ok(TopicPage::new(document, &held, section).render()?)
@@ -197,6 +197,15 @@ fn logged(deps: &ReadDeps, query: &Query) -> Result<String, Problem> {
     Ok(LogPage::new(&search::log(deps, limit, None)?).render()?)
 }
 
+fn year(query: &Query) -> Result<Option<i32>, Problem> {
+    (query.get("year"))
+        .map(|year| {
+            (year.parse().ok())
+                .ok_or_else(|| Problem::BadRequest(format!("year: {year} is no year")))
+        })
+        .transpose()
+}
+
 // A form sends a field left empty.
 fn given(value: Option<&str>) -> Option<&str> {
     value.filter(|value| !value.is_empty())
@@ -213,6 +222,7 @@ fn route(deps: &ReadDeps, path: &str, query: &Query) -> Result<Page, Problem> {
         ));
     }
     let topic = given(query.get("topic"));
+    let on = given(query.get("on"));
     let ended = query.get("ended") == Some("1");
     // Asked after the listing, whose refusal of the target is the one to show.
     let scope = || -> Result<Scope, Problem> {
@@ -220,6 +230,7 @@ fn route(deps: &ReadDeps, path: &str, query: &Query) -> Result<Page, Problem> {
         Ok(Scope {
             topic,
             under: under.as_ref().map(shown_link),
+            on,
             ended,
         })
     };
@@ -228,10 +239,11 @@ fn route(deps: &ReadDeps, path: &str, query: &Query) -> Result<Page, Problem> {
     };
     let html = match place {
         Place::Topics => Home::new(&list::topics(deps, None, false)?).render()?,
+        Place::Stats => StatsPage::new(&activity::stats(deps, topic, year(query)?)?).render()?,
         Place::Facts => Listing::facts(&list::facts(deps, topic, ended)?, scope()?).render()?,
         Place::Ideas => Listing::ideas(&list::ideas(deps, topic, ended)?, scope()?).render()?,
         Place::Entries => {
-            Listing::entries(&list::entries(deps, topic, None, ended)?, scope()?).render()?
+            Listing::entries(&list::entries(deps, topic, on, None, ended)?, scope()?).render()?
         }
         Place::Followups => {
             Listing::followups(&list::followups(deps, topic, ended)?, scope()?).render()?

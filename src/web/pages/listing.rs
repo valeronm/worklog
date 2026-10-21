@@ -1,10 +1,8 @@
 //! The pages that are a list of documents, a row each.
 
-use std::fmt::Write as _;
-
 use askama::Template;
 
-use super::links::{Line, Link, Nav, Place, Text, doc_links, encoded};
+use super::links::{Line, Link, Nav, Place, Text, doc_links, with_query};
 use super::versions::document_link;
 use crate::app::check::{Check, Finding};
 use crate::app::list::{EntryRow, FactRow};
@@ -85,6 +83,7 @@ pub struct Scope<'q> {
     pub topic: Option<&'q str>,
     // The document `topic` names.
     pub under: Option<Link>,
+    pub on: Option<&'q str>,
     pub ended: bool,
 }
 
@@ -105,6 +104,7 @@ pub struct Listing {
     pub nav: Nav,
     pub title: &'static str,
     pub count: String,
+    pub on: Option<String>,
     pub under: Option<Link>,
     pub ended_switch: Link,
     pub rows: Vec<Item>,
@@ -120,22 +120,18 @@ impl Listing {
         if let Some(under) = &scope.under {
             leave_out(&mut rows, &under.href);
         }
-        let mut href = place.route().to_owned();
-        let mut sign = '?';
-        if let Some(topic) = scope.topic {
-            let _ = write!(href, "{sign}topic={}", encoded(topic));
-            sign = '&';
-        }
-        let text = if scope.ended {
-            "unended only"
+        let (text, ended) = if scope.ended {
+            ("unended only", None)
         } else {
-            let _ = write!(href, "{sign}ended=1");
-            "ended too"
+            ("ended too", Some("1"))
         };
+        let parameters = [("topic", scope.topic), ("on", scope.on), ("ended", ended)];
+        let href = with_query(place.route(), &parameters);
         Listing {
             nav: Nav::at(Some(place)),
             title: place.title(),
             count: counted(rows.len(), one, several),
+            on: scope.on.map(str::to_owned),
             under: scope.under,
             ended_switch: Link::plain(text.to_owned(), href),
             rows,

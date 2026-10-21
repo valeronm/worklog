@@ -32,7 +32,7 @@
 
 {% macro sheet(d) %}
 <h1>{{ d.label }}</h1>
-<p class="meta">{% if let Some(kind) = d.kind %}<span class="kind">{{ kind }}</span>{% endif %}<a href="{{ d.history }}">history</a>{% call marks(d.marks) %}{% endcall %}</p>
+<p class="meta">{% if let Some(kind) = d.kind %}<span class="kind">{{ kind }}</span>{% endif %}<a href="{{ d.history }}">history</a>{% if let Some(stats) = d.stats %} <a href="{{ stats }}">stats</a>{% endif %}{% call marks(d.marks) %}{% endcall %}</p>
 {% if !d.former.is_empty() %}<p class="muted">formerly {% for name in d.former %}{% if !loop.first %}, {% endif %}{{ name }}{% endfor %}</p>
 {% endif -%}
 {% for note in d.notes %}<p class="notice">{{ note }}</p>
