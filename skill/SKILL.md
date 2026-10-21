@@ -328,7 +328,8 @@ since one of them is stale.
 
 Cross-references are `[[name]]`: `[[lantern]]`,
 `[[lantern/relay-pin-is-fixed]]`, `[[2026-09-04-lamp-driver]]`, or the
-start of an id for a followup. A link is resolved when its document is
+start of an id for a followup. A fact is linked with its topic, from
+inside that topic too. A link is resolved when its document is
 saved and follows its target through a rename; one written before its
 target exists resolves once the target is stored. Link to say where
 something was decided, not instead of saying it here. A link inside a code

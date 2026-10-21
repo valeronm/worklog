@@ -191,6 +191,11 @@ fork hold one text with different ids, the version that closes the fork
 resolves it again. A link inside a code span or a fenced block is quoted,
 not made.
 
+A bare name is a topic's address in every document, a fact's own topic's
+facts included. A save refuses a new bare link that no topic holds when a
+fact of a topic the document is filed under does, and names the address
+meant; a link a head already holds is not checked again.
+
 `check` reads the links of each topic, fact and followup that is not
 ended, and gives a notice for one that leads nowhere or to an ended
 document. An entry's links are citations of what was true on its date and

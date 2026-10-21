@@ -6,7 +6,7 @@ use toml::Value;
 
 use crate::app::draft::{draft_for, names, spelled};
 use crate::app::heads::{
-    Read, heads_not_ended, read_or_skip, readable_heads, row_head, texts, topic_edges,
+    Read, filed_on, heads_not_ended, read_or_skip, readable_heads, row_head, texts, topic_edges,
 };
 use crate::app::lookup::{Lookup, forked, no_head_reads, unreadable, with_article};
 use crate::app::rules::{closing_edge, fits, holds_topic_open, name_is_free_as};
@@ -14,7 +14,7 @@ use crate::app::{Deps, Failed, Failure, Written, counted, kind_named};
 use crate::domain::document::{Document, State};
 use crate::domain::draft::Draft;
 use crate::domain::id::{DocumentId, VersionId};
-use crate::domain::schema::address::Found;
+use crate::domain::schema::address::{Address, Found};
 use crate::domain::schema::graph::Edges;
 use crate::domain::schema::kind::Reference;
 use crate::domain::schema::{Content, KindOf, Record, links, step, translate};
@@ -52,9 +52,9 @@ pub fn save(deps: &Deps, address: &str) -> Result<Written, Failure> {
 
 /// Stores `next` as the document's next version, or its first, once it passes the checks
 /// its step calls for: the references no head that is not ended held, the name in its scope,
-/// a topic's cycle and an open followup's trigger, or for an ended topic what still depends
-/// on it. Refuses a forked or
-/// unreadable document, one of another kind, and a version equal to the only head.
+/// a topic's cycle, an open followup's trigger and the bare links no head held, or for an
+/// ended topic what still depends on it. Refuses a forked or unreadable document, one of
+/// another kind, and a version equal to the only head.
 pub(super) fn admit(
     deps: &Deps,
     lookup: &Lookup,
@@ -287,6 +287,7 @@ impl<'a, 'b> Target<'a, 'b> {
     ) -> Result<Admitted, Failure> {
         self.admits(fork)?;
         let fields = next.fields();
+        let links = self.linked(&fields, body)?;
         if next.ending.is_some() {
             if next.content.kind() == KindOf::Topic {
                 self.dependents()?;
@@ -296,6 +297,7 @@ impl<'a, 'b> Target<'a, 'b> {
             name_is_free_as(self.lookup, self.document.id(), &self.what, &next.content)?;
             self.closes_no_cycle(&next.content)?;
             self.keeps_a_trigger(&next.content)?;
+            self.bare_links_name_a_topic(&next.content, &links)?;
         }
         if fork == Fork::Refused
             && let [head] = self.document.heads().as_slice()
@@ -310,7 +312,7 @@ impl<'a, 'b> Target<'a, 'b> {
         let id = self.document.id();
         Ok(Admitted {
             label: self.lookup.label_of(&next.content, id)?,
-            version: self.composed(deps, fields, body, label)?,
+            version: self.composed(deps, fields, links, body, label)?,
         })
     }
 
@@ -410,6 +412,38 @@ impl<'a, 'b> Target<'a, 'b> {
         }
     }
 
+    // A bare name is a topic's address whatever document holds the link; one a head already
+    // holds, resolved or not, is left as it is.
+    fn bare_links_name_a_topic(&self, content: &Content, links: &Links) -> Result<(), Failure> {
+        let heads = self.document.heads();
+        let held = |text: &str| heads.iter().any(|head| head.links.0.contains_key(text));
+        for (text, found) in &links.0 {
+            let Ok(Address::Topic(name)) = Address::parse(text) else {
+                continue;
+            };
+            if found.is_some() || held(text) {
+                continue;
+            }
+            let mut meant = Vec::new();
+            for topic in filed_on(content) {
+                let Some(topic) = self.lookup.topic_name(topic)? else {
+                    continue;
+                };
+                let address = format!("{topic}/{name}");
+                if self.lookup.linked(&address)?.is_some() {
+                    meant.push(format!("[[{address}]]"));
+                }
+            }
+            if !meant.is_empty() {
+                return Err(self.refusal(format!(
+                    "[[{text}]] names no topic; a fact is linked as {}",
+                    meant.join(" or ")
+                )));
+            }
+        }
+        Ok(())
+    }
+
     fn linked(&self, fields: &Fields, body: &str) -> Result<Links, Failure> {
         let summary = fields
             .get("summary")
@@ -437,10 +471,10 @@ impl<'a, 'b> Target<'a, 'b> {
         &self,
         deps: &Deps,
         fields: Fields,
+        links: Links,
         body: &str,
         label: &str,
     ) -> Result<Version, Failure> {
-        let links = self.linked(&fields, body)?;
         let (written, machine) = (deps.clock.now(), deps.read().machine()?);
         let heads = self.document.heads();
         let envelope = Envelope::following(&heads, written.clone(), machine.clone(), label)
@@ -481,7 +515,7 @@ mod tests {
     use crate::app::draft::{self, New};
     use crate::app::testing::{
         ENDED, ENDED_FACT, TOPIC, World, entry, fact, fact_fields, fork, head, head_id, record,
-        refused, stored, topic, topic_fields, world,
+        refused, stored, topic, topic_fields, world, world_with_atlas,
     };
     use crate::domain::draft::Draft;
     use crate::domain::ports::{Drafts, DraftsRead, Ids, Store, StoreRead};
@@ -922,6 +956,57 @@ mod tests {
                 ("lantern/relay-pin".to_owned(), Some(relay)),
             ]
         );
+    }
+
+    #[test]
+    fn a_new_bare_link_naming_no_topic_but_a_fact_of_its_own_topic_is_refused() {
+        let (world, lantern) = world();
+        let deps = world.deps();
+        fact(&world, &lantern, "relay-pin", "");
+        let dimmer = new_fact(&world, "lantern/dimmer");
+        edit(&world, &dimmer, |draft| {
+            "Wired to [[relay-pin]].\n".clone_into(&mut draft.body);
+        });
+        let text = refused(save(&deps, "lantern/dimmer"));
+        assert!(
+            text.contains(
+                "[[relay-pin]] names no topic; a fact is linked as [[lantern/relay-pin]]"
+            ),
+            "{text}"
+        );
+        assert!(open(&world, &dimmer));
+
+        topic(&world, "relay-pin", "");
+        save(&deps, "lantern/dimmer").unwrap();
+    }
+
+    #[test]
+    fn a_bare_link_a_head_holds_or_that_names_no_fact_of_its_topic_is_stored() {
+        let (world, lantern, _) = world_with_atlas();
+        let deps = world.deps();
+        let spare = fact(&world, &lantern, "spare", "");
+        world.amend_linking(
+            &spare,
+            &fact_fields(&lantern, "spare", "s", ""),
+            "See [[spare]].\n",
+            &[("spare", None)],
+        );
+        draft::checkout(&deps, "lantern/spare").unwrap();
+        edit(&world, &spare, |draft| {
+            draft.body.push_str("Not [[unknown]].\n");
+        });
+        save(&deps, "lantern/spare").unwrap();
+        let what = New::Entry {
+            name: "wired",
+            date: None,
+        };
+        let entry = draft::new(&deps, &what).unwrap().document;
+        set(&world, &entry, "summary", "Wired the relay");
+        set(&world, &entry, "topics", list(&["atlas"]));
+        edit(&world, &entry, |draft| {
+            "Cites [[spare]].\n".clone_into(&mut draft.body);
+        });
+        save(&deps, "2026-10-09-wired").unwrap();
     }
 
     #[test]

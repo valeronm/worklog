@@ -129,6 +129,16 @@ pub(super) fn place(topic: &str, directory: Option<&Directory>) -> String {
     }
 }
 
+pub(super) fn filed_on(content: &Content) -> &[DocumentId] {
+    match content {
+        Content::Topic(_) => &[],
+        Content::Fact(fact) => std::slice::from_ref(&fact.topic),
+        Content::Entry(entry) => &entry.topics,
+        Content::Followup(followup) => &followup.topics,
+        Content::Claim(claim) => std::slice::from_ref(&claim.topic),
+    }
+}
+
 pub(super) fn labeling_topic(content: &Content) -> Option<&DocumentId> {
     match content {
         Content::Fact(fact) => Some(&fact.topic),

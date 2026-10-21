@@ -3,7 +3,9 @@ use std::rc::Rc;
 
 use serde::Serialize;
 
-use crate::app::heads::{ended_for, held_under, is_forked, label_of, labeling_topic, row_head};
+use crate::app::heads::{
+    ended_for, filed_on, held_under, is_forked, label_of, labeling_topic, row_head,
+};
 use crate::app::index::Topics;
 use crate::app::lookup::Lookup;
 use crate::app::{Failure, ReadDeps};
@@ -65,14 +67,7 @@ pub(super) struct Shown<'d> {
 pub(super) fn row<'d>(topics: &Topics, document: &'d Document) -> Option<Shown<'d>> {
     let (head, record) = row_head(document)?;
     let id = document.id().clone();
-    let labels = |ids: &[DocumentId]| topics.references(ids);
-    let shown = match &record.content {
-        Content::Topic(_) => Vec::new(),
-        Content::Fact(fact) => labels(std::slice::from_ref(&fact.topic)),
-        Content::Entry(entry) => labels(&entry.topics),
-        Content::Followup(followup) => labels(&followup.topics),
-        Content::Claim(claim) => labels(std::slice::from_ref(&claim.topic)),
-    };
+    let shown = topics.references(filed_on(&record.content));
     let summary = record.content.summary().unwrap_or_default().to_owned();
     let topic_name = labeling_topic(&record.content).and_then(|topic| topics.name(topic));
     let row = Row {
