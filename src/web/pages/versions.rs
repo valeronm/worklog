@@ -3,7 +3,7 @@
 use askama::Template;
 
 use super::document::Head;
-use super::links::{Line, Link, Nav, Place, Stamped, Text, history_href, marks, version_link};
+use super::links::{Layout, Line, Link, Place, Stamped, Text, history_href, marks, version_link};
 use crate::app::list::{ForkHead, ForkRow};
 use crate::app::search::Logged;
 use crate::app::show::{Compared, History, Side};
@@ -15,7 +15,7 @@ use crate::web::markdown::{marked, summary_html};
 #[derive(Template)]
 #[template(path = "history.html")]
 pub struct HistoryPage {
-    pub nav: Nav,
+    pub layout: Layout,
     pub document: Link,
     pub notes: Vec<String>,
     pub rows: Vec<Stamped>,
@@ -31,7 +31,7 @@ impl HistoryPage {
             })
             .collect();
         HistoryPage {
-            nav: Nav::at(None),
+            layout: Layout::at(None),
             document: Link::to(&history.document, &history.label, history.ended.as_deref()),
             notes: unread_notes(&history.unreadable),
             rows,
@@ -59,7 +59,7 @@ pub struct LogRow {
 #[derive(Template)]
 #[template(path = "log.html")]
 pub struct LogPage {
-    pub nav: Nav,
+    pub layout: Layout,
     pub count: String,
     pub rows: Vec<LogRow>,
 }
@@ -78,7 +78,7 @@ impl LogPage {
             ),
         });
         LogPage {
-            nav: Nav::at(Some(Place::Log)),
+            layout: Layout::at(Some(Place::Log)),
             count: counted(versions.len(), "newest version", "newest versions"),
             rows: rows.collect(),
         }
@@ -113,7 +113,7 @@ impl From<&ForkRow> for Fork {
 #[derive(Template)]
 #[template(path = "forks.html")]
 pub struct ForksPage {
-    pub nav: Nav,
+    pub layout: Layout,
     pub count: String,
     pub rows: Vec<Fork>,
 }
@@ -121,7 +121,7 @@ pub struct ForksPage {
 impl ForksPage {
     pub fn new(forks: &[ForkRow]) -> ForksPage {
         ForksPage {
-            nav: Nav::at(Some(Place::Forks)),
+            layout: Layout::at(Some(Place::Forks)),
             count: counted(forks.len(), "forked document", "forked documents"),
             rows: forks.iter().map(Fork::from).collect(),
         }
@@ -182,7 +182,7 @@ impl Changes {
 #[derive(Template)]
 #[template(path = "version.html")]
 pub struct VersionPage {
-    pub nav: Nav,
+    pub layout: Layout,
     pub document: Link,
     pub history: String,
     pub is_head: bool,
@@ -194,7 +194,7 @@ impl VersionPage {
     pub fn new(compared: &Compared) -> VersionPage {
         let version = &compared.version;
         VersionPage {
-            nav: Nav::at(None),
+            layout: Layout::at(None),
             document: document_link(compared),
             history: history_href(&compared.document),
             is_head: version.head,

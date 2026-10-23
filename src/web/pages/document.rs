@@ -3,7 +3,7 @@
 use askama::Template;
 
 use super::home::TopicLine;
-use super::links::{Link, Nav, Place, Stamped, Text, doc_href, history_href, marks, with_query};
+use super::links::{Layout, Link, Place, Stamped, Text, doc_href, history_href, marks, with_query};
 use super::listing::{Item, entry_items, fact_items, followup_items, leave_out};
 use crate::app::FollowupRow;
 use crate::app::list::{ClaimRow, EntryRow, FactRow, TopicRow};
@@ -108,14 +108,14 @@ impl From<&ShownDocument> for Sheet {
 #[derive(Template)]
 #[template(path = "document.html")]
 pub struct DocumentPage {
-    pub nav: Nav,
+    pub layout: Layout,
     pub document: Sheet,
 }
 
 impl DocumentPage {
     pub fn new(document: &ShownDocument) -> DocumentPage {
         DocumentPage {
-            nav: Nav::at(None),
+            layout: Layout::at(None),
             document: Sheet::from(document),
         }
     }
@@ -252,7 +252,7 @@ pub struct Tab {
 #[derive(Template)]
 #[template(path = "topic.html")]
 pub struct TopicPage {
-    pub nav: Nav,
+    pub layout: Layout,
     pub document: Sheet,
     pub tabs: Vec<Tab>,
     pub section: &'static str,
@@ -299,7 +299,7 @@ impl TopicPage {
         let id = document.document.to_string();
         let under = |place: Place| with_query(place.route(), &[("topic", Some(&id))]);
         TopicPage {
-            nav: Nav::at(Some(Place::Topics)),
+            layout: Layout::at(Some(Place::Topics)),
             document: Sheet {
                 stats: Some(under(Place::Stats)),
                 ..Sheet::from(document)

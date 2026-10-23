@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use askama::Template;
 
-use super::links::{Line, Link, Nav, NavLink, Place, doc_link, doc_links};
+use super::links::{Layout, Line, Link, NavLink, Place, doc_link, doc_links};
 use crate::app::list::TopicRow;
 use crate::domain::id::DocumentId;
 use crate::render::filed_counts;
@@ -112,7 +112,7 @@ const UNDER_THE_TOPICS: [Place; 9] = [
 #[derive(Template)]
 #[template(path = "home.html")]
 pub struct Home {
-    pub nav: Nav,
+    pub layout: Layout,
     pub steps: Vec<Step>,
     pub more: Vec<NavLink>,
 }
@@ -120,7 +120,7 @@ pub struct Home {
 impl Home {
     pub fn new(topics: &[TopicRow]) -> Home {
         Home {
-            nav: Nav::at(Some(Place::Topics)),
+            layout: Layout::at(Some(Place::Topics)),
             steps: nested(topics),
             more: Place::links(&UNDER_THE_TOPICS, None),
         }

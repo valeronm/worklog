@@ -2,7 +2,7 @@
 
 use askama::Template;
 
-use super::links::{Line, Link, Nav, Place, Text, doc_links, with_query};
+use super::links::{Layout, Line, Link, Place, Text, doc_links, with_query};
 use super::versions::document_link;
 use crate::app::check::{Check, Finding};
 use crate::app::list::{EntryRow, FactRow};
@@ -101,7 +101,7 @@ pub fn shown_link(shown: &Shown) -> Link {
 #[derive(Template)]
 #[template(path = "listing.html")]
 pub struct Listing {
-    pub nav: Nav,
+    pub layout: Layout,
     pub title: &'static str,
     pub count: String,
     pub on: Option<String>,
@@ -128,7 +128,7 @@ impl Listing {
         let parameters = [("topic", scope.topic), ("on", scope.on), ("ended", ended)];
         let href = with_query(place.route(), &parameters);
         Listing {
-            nav: Nav::at(Some(place)),
+            layout: Layout::at(Some(place)),
             title: place.title(),
             count: counted(rows.len(), one, several),
             on: scope.on.map(str::to_owned),
@@ -162,7 +162,7 @@ impl Listing {
 #[derive(Template)]
 #[template(path = "search.html")]
 pub struct SearchPage<'q> {
-    pub nav: Nav,
+    pub layout: Layout,
     pub asked: &'q Query<'q>,
     pub problem: Option<String>,
     pub count: Option<String>,
@@ -172,7 +172,7 @@ pub struct SearchPage<'q> {
 impl<'q> SearchPage<'q> {
     pub fn form(asked: &'q Query<'q>) -> SearchPage<'q> {
         SearchPage {
-            nav: Nav::at(None),
+            layout: Layout::at(None),
             asked,
             problem: None,
             count: None,
@@ -242,7 +242,7 @@ fn findings(found: &[Finding]) -> Vec<Found> {
 #[derive(Template)]
 #[template(path = "check.html")]
 pub struct CheckPage {
-    pub nav: Nav,
+    pub layout: Layout,
     pub problem_count: String,
     pub notice_count: String,
     pub forks: Link,
@@ -254,7 +254,7 @@ impl CheckPage {
     pub fn new(check: &Check) -> CheckPage {
         let summary = check_summary(check);
         CheckPage {
-            nav: Nav::at(Some(Place::Check)),
+            layout: Layout::at(Some(Place::Check)),
             problem_count: summary.problems,
             notice_count: summary.notices,
             forks: Link::plain(summary.forks, Place::Forks.route().to_owned()),

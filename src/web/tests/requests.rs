@@ -2,6 +2,7 @@ use super::{has, lacks, ok, page};
 use crate::app::testing::{fact, fact_fields, head, topic_fields, world};
 use crate::app::{Failure, ReadDeps, Stored};
 use crate::domain::ports::StoreError;
+use crate::domain::release;
 use crate::domain::testing::FailingStore;
 use crate::web::{failed, respond};
 
@@ -244,4 +245,15 @@ fn a_failure_met_before_any_page_is_a_page_too() {
     let page = failed(Failure::Store(StoreError::io("desk", "gone")));
     assert_eq!(page.status, 500);
     has(&page.html, "desk: gone");
+}
+
+#[test]
+fn every_page_ends_on_the_version_of_the_binary_serving_it() {
+    let (world, _) = world();
+
+    let html = ok(&world, "/");
+    has(
+        &html,
+        &format!("<footer>worklog {}</footer>", release::current()),
+    );
 }

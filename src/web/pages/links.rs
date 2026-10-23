@@ -6,6 +6,7 @@ use askama::Template;
 
 use crate::app::{Reference, Row};
 use crate::domain::id::{DocumentId, VersionId};
+use crate::domain::release::{self, Built};
 use crate::domain::version::Stamp;
 use crate::render::{ended, written};
 use crate::web::mark::EndedMark;
@@ -163,18 +164,20 @@ pub struct NavLink {
     pub current: bool,
 }
 
-pub struct Nav {
+pub struct Layout {
     pub home: &'static str,
     pub search: &'static str,
     pub places: Vec<NavLink>,
+    pub version: Built,
 }
 
-impl Nav {
-    pub(super) fn at(current: Option<Place>) -> Nav {
-        Nav {
+impl Layout {
+    pub(super) fn at(current: Option<Place>) -> Layout {
+        Layout {
             home: Place::Topics.route(),
             search: Place::Search.route(),
             places: Place::links(&Place::IN_THE_NAVIGATION, current),
+            version: release::current(),
         }
     }
 }
@@ -284,7 +287,7 @@ impl Stamped {
 #[derive(Template)]
 #[template(path = "error.html")]
 pub struct ErrorPage {
-    pub nav: Nav,
+    pub layout: Layout,
     pub status: u16,
     pub message: String,
 }
@@ -292,7 +295,7 @@ pub struct ErrorPage {
 impl ErrorPage {
     pub fn new(status: u16, message: String) -> ErrorPage {
         ErrorPage {
-            nav: Nav::at(None),
+            layout: Layout::at(None),
             status,
             message,
         }

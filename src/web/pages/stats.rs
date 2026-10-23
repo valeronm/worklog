@@ -2,7 +2,7 @@
 
 use askama::Template;
 
-use super::links::{Link, Nav, Place, with_query};
+use super::links::{Layout, Link, Place, with_query};
 use crate::app::activity::Stats;
 use crate::app::counted;
 use crate::render::calendar::{Cell, MONTH_GAP, Month, calendar};
@@ -25,7 +25,7 @@ pub struct Choice {
 #[derive(Template)]
 #[template(path = "stats.html")]
 pub struct StatsPage {
-    pub nav: Nav,
+    pub layout: Layout,
     pub topics: Vec<Choice>,
     pub week_count: usize,
     pub months: Vec<Month>,
@@ -96,7 +96,7 @@ impl StatsPage {
         }));
         let entries = counted(activity.entry_count, "entry", "entries");
         StatsPage {
-            nav: Nav::at(Some(Place::Stats)),
+            layout: Layout::at(Some(Place::Stats)),
             topics,
             week_count: shown.weeks.len(),
             months: shown.months,

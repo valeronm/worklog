@@ -57,8 +57,9 @@ ul.items li { padding: .6rem .5rem; margin: 0 -.5rem; border-bottom: 1px solid v
 ul.items li:hover { background: var(--panel); }
 ul.items a.title { color: var(--ink); font-weight: 500; }
 ul.items a.title:hover { color: var(--accent-ink); }
-.details { display: block; font: .78rem/1.6 var(--mono); color: var(--muted); margin-top: .15rem; }
-.found { font: .78rem/1.6 var(--mono); color: var(--muted); margin: .4rem 0 0 .2rem; padding-left: .7rem; border-left: 2px solid var(--line); }
+.details, .found, footer { font: .78rem/1.6 var(--mono); color: var(--muted); }
+.details { display: block; margin-top: .15rem; }
+.found { margin: .4rem 0 0 .2rem; padding-left: .7rem; border-left: 2px solid var(--line); }
 .chips { display: inline-flex; flex-wrap: wrap; gap: .3rem; vertical-align: middle; }
 .chips a { display: inline-block; font: 500 .72rem/1 var(--mono); color: var(--accent-ink); background: var(--accent-wash); border-radius: 999px; padding: .28rem .6rem; }
 .chips a:hover, .chips a[aria-current] { color: var(--chip-hover-ink); background: var(--chip-hover); }
@@ -136,6 +137,8 @@ pre.diff .added { background: var(--add); }
 pre.diff .removed { background: var(--del); }
 pre.diff .hunk, pre.diff .note { color: var(--muted); }
 
+footer { margin-top: 3rem; padding-top: .8rem; border-top: 1px solid var(--line); }
+
 form button { font: inherit; font-size: .9rem; color: var(--panel); background: var(--accent); border: 0; border-radius: 999px; padding: .4rem 1rem; cursor: pointer; }
 main > form { margin-bottom: 1.5rem; }
 main > form input { width: min(24rem, 100%); }
@@ -156,14 +159,15 @@ ul.items span.title { font-weight: 500; }
 </head>
 <body>
 <nav>
-  <a class="brand" href="{{ nav.home }}">worklog</a>
-{%- for place in nav.places %}
+  <a class="brand" href="{{ layout.home }}">worklog</a>
+{%- for place in layout.places %}
   <a href="{{ place.href }}"{% if place.current %} aria-current="page"{% endif %}>{{ place.text }}</a>
 {%- endfor %}
-  <form action="{{ nav.search }}" method="get"><input type="search" name="q" aria-label="Search" placeholder="Search" value="{% block query %}{% endblock %}"></form>
+  <form action="{{ layout.search }}" method="get"><input type="search" name="q" aria-label="Search" placeholder="Search" value="{% block query %}{% endblock %}"></form>
 </nav>
 <main>
 {% block content %}{% endblock %}
 </main>
+<footer>worklog {{ layout.version }}</footer>
 </body>
 </html>
