@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::fs::{self, File};
 use std::io::Read as _;
 use std::path::PathBuf;
@@ -66,16 +67,17 @@ impl DraftsRead for FsDrafts {
 
     fn list(&self) -> Result<Vec<Listed>, StoreError> {
         let mut drafts = Vec::new();
-        for name in files(&self.dir)? {
-            let Some(document) = name
-                .strip_suffix(TEXT)
-                .and_then(|stem| DocumentId::parse(stem).ok())
-            else {
-                continue;
-            };
+        for document in self.documents()? {
             drafts.extend(self.listed(&document)?);
         }
         Ok(drafts)
+    }
+
+    fn documents(&self) -> Result<BTreeSet<DocumentId>, StoreError> {
+        let documents = files(&self.dir)?.into_iter().filter_map(|name| {
+            (name.strip_suffix(TEXT)).and_then(|stem| DocumentId::parse(stem).ok())
+        });
+        Ok(documents.collect())
     }
 
     fn location(&self, document: &DocumentId) -> String {
@@ -161,11 +163,14 @@ mod tests {
         let refused = drafts.read(&draft.document).unwrap_err();
         assert!(refused.to_string().contains("origin.toml"), "{refused}");
         assert!(drafts.list().is_err());
+        let held = BTreeSet::from([draft.document.clone()]);
+        assert_eq!(drafts.documents().unwrap(), held);
 
         fs::write(&origin, kept).unwrap();
         fs::remove_file(drafts.text(&draft.document)).unwrap();
         assert_eq!(drafts.read(&draft.document).unwrap(), None);
         assert!(drafts.list().unwrap().is_empty());
+        assert!(drafts.documents().unwrap().is_empty());
     }
 
     #[test]

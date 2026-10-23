@@ -278,6 +278,10 @@ impl DraftsRead for MemoryDrafts {
         Ok(self.drafts.borrow().values().cloned().collect())
     }
 
+    fn documents(&self) -> Result<BTreeSet<DocumentId>, StoreError> {
+        Ok(self.drafts.borrow().keys().cloned().collect())
+    }
+
     fn location(&self, document: &DocumentId) -> String {
         format!("memory:{document}")
     }
@@ -956,10 +960,13 @@ pub fn drafts_contract(drafts: &dyn Drafts, ids: &dyn Ids) {
         .map(|listed| listed.draft)
         .collect();
     assert_eq!(listed, expected);
+    let documents = BTreeSet::from([lantern.clone(), atlas.clone()]);
+    assert_eq!(drafts.documents().expect("a read"), documents);
 
     drafts.delete(&lantern).expect("a delete");
     assert_eq!(drafts.read(&lantern).expect("a read"), None);
     assert_eq!(drafts.list().expect("a read").len(), 1);
+    assert_eq!(drafts.documents().expect("a read"), BTreeSet::from([atlas]));
 }
 
 #[cfg(test)]

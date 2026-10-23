@@ -4,7 +4,6 @@ use std::cmp::Reverse;
 use std::collections::BTreeSet;
 use std::rc::Rc;
 
-use crate::app::draft::drafted;
 use crate::app::heads::kind_of;
 use crate::app::index::Topics;
 use crate::app::lookup::{Lookup, Names, write_gate};
@@ -63,7 +62,7 @@ fn offered_from(
     let names = Names::of(lookup);
     let today = deps.today()?;
     let drafted = match wanted {
-        Wanted::Writable | Wanted::Reopenable => drafted(deps)?,
+        Wanted::Writable | Wanted::Reopenable => deps.drafts.documents()?,
         Wanted::Live | Wanted::Forked => BTreeSet::new(),
     };
     let mut found = Vec::new();

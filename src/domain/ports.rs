@@ -1,6 +1,7 @@
 //! What a use case needs from outside the domain, as traits the adapters under `wiring`
 //! implement and the tests stub.
 
+use std::collections::BTreeSet;
 use std::fmt;
 use std::rc::Rc;
 
@@ -107,6 +108,8 @@ pub trait DraftsRead {
     fn read(&self, document: &DocumentId) -> Result<Option<Draft>, StoreError>;
     /// Every draft, by its document's id.
     fn list(&self) -> Result<Vec<Listed>, StoreError>;
+    /// The documents with a draft, including one whose draft does not read.
+    fn documents(&self) -> Result<BTreeSet<DocumentId>, StoreError>;
     /// Where the draft of the document is or would be.
     fn location(&self, document: &DocumentId) -> String;
 }

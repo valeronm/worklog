@@ -1,5 +1,3 @@
-use std::collections::BTreeSet;
-
 use serde::Serialize;
 use toml::Value;
 
@@ -135,11 +133,6 @@ pub(super) fn open_draft(deps: &Deps, mut draft: Draft) -> Result<DraftRef, Fail
         document: draft.document,
         location,
     })
-}
-
-pub(super) fn drafted(deps: &ReadDeps) -> Result<BTreeSet<DocumentId>, Failure> {
-    let listed = deps.drafts.list()?;
-    Ok(listed.into_iter().map(|open| open.draft.document).collect())
 }
 
 pub(super) fn is_drafted(deps: &ReadDeps, id: &DocumentId) -> Result<bool, Failure> {
