@@ -63,27 +63,35 @@ pub fn host_name(deps: &ReadDeps) -> Result<HostName, Failure> {
 /// machine, sorted. Reads every version of the store.
 pub fn machines(deps: &ReadDeps) -> Result<Vec<String>, Failure> {
     let lookup = Lookup::new(deps.store);
-    let mut documents = lookup.everything()?;
-    for unknown in lookup.unknown()? {
-        documents.extend(unknown.documents);
-    }
-    let writers: BTreeSet<&DocumentId> = (documents.iter())
-        .flat_map(|document| document.history())
-        .map(|version| &version.envelope.machine)
-        .collect();
     let mut names = BTreeSet::new();
-    for id in writers {
-        let document = lookup.headers(id)?;
-        if kind_of(&document) != Some(KindOf::Topic) {
-            continue;
-        }
-        for (_, record) in unended_heads(&document) {
+    for id in machine_topics(&lookup)? {
+        for (_, record) in unended_heads(&*lookup.headers(&id)?) {
             if let Content::Topic(topic) = record.content {
                 names.insert(topic.name.to_string());
             }
         }
     }
     Ok(names.into_iter().collect())
+}
+
+/// The topics a stored version carries as its machine, ended or not. Reads every version of
+/// the store.
+pub(super) fn machine_topics(lookup: &Lookup) -> Result<BTreeSet<DocumentId>, Failure> {
+    let mut documents = lookup.everything()?;
+    for unknown in lookup.unknown()? {
+        documents.extend(unknown.documents);
+    }
+    let writers: BTreeSet<&DocumentId> = (documents.iter())
+        .flat_map(|document| document.headers())
+        .map(|version| &version.envelope.machine)
+        .collect();
+    let mut topics = BTreeSet::new();
+    for id in writers {
+        if kind_of(&*lookup.headers(id)?) == Some(KindOf::Topic) {
+            topics.insert(id.clone());
+        }
+    }
+    Ok(topics)
 }
 
 /// Whether the store holds no document, of a kind this worklog knows or not, that reads or

@@ -1,11 +1,14 @@
 //! What a shell offers for an argument that takes a document.
 
 use std::cmp::Reverse;
+use std::collections::BTreeSet;
 use std::rc::Rc;
 
+use crate::app::draft::drafted;
 use crate::app::heads::kind_of;
 use crate::app::index::Topics;
-use crate::app::lookup::{Lookup, Names};
+use crate::app::lookup::{Lookup, Names, write_gate};
+use crate::app::machines::machine_topics;
 use crate::app::rows::{Shown, row, urgency};
 use crate::app::{Failure, ReadDeps};
 use crate::domain::document::Document;
@@ -15,7 +18,10 @@ use crate::domain::schema::{Content, Date, KindOf};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Wanted {
     Live,
-    Ended,
+    /// Live, and passing `write_gate`.
+    Writable,
+    /// Ended, and passing `write_gate`.
+    Reopenable,
     /// Ended or not, and with a head that reads or with none.
     Forked,
 }
@@ -34,17 +40,41 @@ pub struct Offered {
 /// to it and to no other document. The live ones come kind by kind in the order of `kinds`,
 /// each kind as its listing orders it; the ended and the forked by label.
 pub fn offered(deps: &ReadDeps, kinds: &[KindOf], wanted: Wanted) -> Result<Vec<Offered>, Failure> {
+    offered_from(deps, &Lookup::new(deps.store), kinds, wanted)
+}
+
+/// The live topics a stored version carries as its machine, ordered as `offered` orders
+/// topics. Reads every version of the store.
+pub fn machines(deps: &ReadDeps) -> Result<Vec<Offered>, Failure> {
     let lookup = Lookup::new(deps.store);
-    let topics = Topics::load(&lookup)?;
-    let names = Names::of(&lookup);
+    let machines = machine_topics(&lookup)?;
+    let mut topics = offered_from(deps, &lookup, &[KindOf::Topic], Wanted::Live)?;
+    topics.retain(|topic| machines.contains(&topic.document));
+    Ok(topics)
+}
+
+fn offered_from(
+    deps: &ReadDeps,
+    lookup: &Lookup,
+    kinds: &[KindOf],
+    wanted: Wanted,
+) -> Result<Vec<Offered>, Failure> {
+    let topics = Topics::load(lookup)?;
+    let names = Names::of(lookup);
     let today = deps.today()?;
+    let drafted = match wanted {
+        Wanted::Writable | Wanted::Reopenable => drafted(deps)?,
+        Wanted::Live | Wanted::Forked => BTreeSet::new(),
+    };
     let mut found = Vec::new();
-    for (at, document) in gathered(&lookup, kinds, wanted)? {
+    for (at, document) in gathered(lookup, kinds, wanted)? {
         let shown = row(&topics, &document);
         let ended = shown.as_ref().map(|shown| shown.row.ended.is_some());
+        let writable = || write_gate(&document, drafted.contains(document.id()), "").is_ok();
         let kept = match wanted {
             Wanted::Live => ended == Some(false),
-            Wanted::Ended => ended == Some(true),
+            Wanted::Writable => ended == Some(false) && writable(),
+            Wanted::Reopenable => ended == Some(true) && writable(),
             Wanted::Forked => true,
         };
         if !kept {
@@ -56,7 +86,7 @@ pub fn offered(deps: &ReadDeps, kinds: &[KindOf], wanted: Wanted) -> Result<Vec<
             None => (id.short(), ""),
         };
         let place = match (wanted, &shown) {
-            (Wanted::Live, Some(shown)) => (at, listed(shown, today)),
+            (Wanted::Live | Wanted::Writable, Some(shown)) => (at, listed(shown, today)),
             _ => (0, (0, None, None, label.to_owned())),
         };
         let offered = Offered {
@@ -113,11 +143,13 @@ mod tests {
     use super::*;
     use crate::app::testing::{
         DONE, ENDED, ENDED_FACT, REMOVED, World, claim_fields, entry, fact, fact_fields, followup,
-        fork, found, topic, world,
+        fork, found, head, topic, world, written_at,
     };
+    use crate::domain::id::VersionId;
     use crate::domain::ports::Store;
     use crate::domain::schema::address::Found;
     use crate::domain::testing::first;
+    use crate::domain::version::ReadError;
 
     const NAMED: [KindOf; 4] = [KindOf::Topic, KindOf::Fact, KindOf::Entry, KindOf::Followup];
 
@@ -162,7 +194,7 @@ mod tests {
         let machine = world.machine();
         let ended_claim = format!("{}{REMOVED}", claim_fields(&machine, &lantern, ""));
         world.put("claim", &ended_claim, "\n");
-        let ended = |world: &World| addressed(world, &NAMED, Wanted::Ended);
+        let ended = |world: &World| addressed(world, &NAMED, Wanted::Reopenable);
 
         let named = vec![
             by_id(&ordered),
@@ -171,7 +203,7 @@ mod tests {
             by_name(&case, "phone/case"),
         ];
         assert_eq!(ended(&world), sorted(named));
-        let listed = offered(&world.deps().read(), &NAMED, Wanted::Ended).unwrap();
+        let listed = offered(&world.deps().read(), &NAMED, Wanted::Reopenable).unwrap();
         let addresses: Vec<&str> = (listed.iter().map(|ended| ended.address.as_str())).collect();
         assert_eq!(addresses[1..], ["lantern/fuse", "phone", "phone/case"]);
         assert_eq!(listed[0].summary, "Order a fuse");
@@ -310,6 +342,64 @@ mod tests {
     }
 
     #[test]
+    fn a_document_refusing_a_write_is_offered_live_but_neither_writable_nor_ended() {
+        let (world, lantern) = world();
+        let relay = fact(&world, &lantern, "relay", "");
+        fork(
+            &world,
+            &relay,
+            &fact_fields(&lantern, "relay", "Pin four", ""),
+        );
+        let fuse = fact(&world, &lantern, "fuse", ENDED_FACT);
+        fork(
+            &world,
+            &fuse,
+            &fact_fields(&lantern, "fuse", "Pin four", ENDED_FACT),
+        );
+        let wick = fact(&world, &lantern, "wick", "");
+        crate::app::draft::checkout(&world.deps(), "lantern/wick").unwrap();
+        let case = fact(&world, &lantern, "case", "");
+        (world.store).plant_unreadable(&case, VersionId::of(b"damaged"), ReadError::Corrupt);
+        let cord = fact(&world, &lantern, "cord", ENDED_FACT);
+        let dimmer = fact(&world, &lantern, "dimmer", "");
+        let facts = |wanted: Wanted| addressed(&world, &[KindOf::Fact], wanted);
+
+        let live = vec![
+            by_name(&relay, "lantern/relay"),
+            by_name(&wick, "lantern/wick"),
+            by_name(&case, "lantern/case"),
+            by_name(&dimmer, "lantern/dimmer"),
+        ];
+        assert_eq!(facts(Wanted::Live), sorted(live));
+        assert_eq!(
+            facts(Wanted::Writable),
+            [by_name(&dimmer, "lantern/dimmer")]
+        );
+        assert_eq!(facts(Wanted::Reopenable), [by_name(&cord, "lantern/cord")]);
+    }
+
+    #[test]
+    fn the_machines_offered_are_the_live_topics_a_version_was_written_on() {
+        let (world, lantern) = world();
+        let phone = topic(&world, "phone", "");
+        topic(&world, "atlas", "");
+        let retired = topic(&world, "case", ENDED);
+        let relay = fact(&world, &lantern, "relay", "");
+        let root = head(&world, &relay);
+        let fields = toml::to_string(&root.fields).unwrap();
+        for (at, machine) in [(19, &phone), (20, &retired), (21, &relay)] {
+            let stamp = format!("2026-10-09T{at}:00:00+01:00");
+            written_at(&world, &root, &fields, &stamp, "\n", Some(machine));
+        }
+
+        let offered = machines(&world.deps().read()).unwrap();
+        let rows: Vec<(&str, &str)> = (offered.iter())
+            .map(|machine| (machine.address.as_str(), machine.summary.as_str()))
+            .collect();
+        assert_eq!(rows, [("desk", "s"), ("phone", "s")]);
+    }
+
+    #[test]
     fn the_live_come_kind_by_kind_each_as_its_listing_orders_it() {
         let (world, lantern) = world();
         fact(&world, &lantern, "relay", "");
@@ -368,7 +458,7 @@ mod tests {
             followup(&world, &[&lantern], "s", DONE);
         }
         let world = world.counted();
-        let offered = offered(&world.deps().read(), &NAMED, Wanted::Ended).unwrap();
+        let offered = offered(&world.deps().read(), &NAMED, Wanted::Reopenable).unwrap();
         assert_eq!(offered.len(), ended);
         let store = &world.store;
         assert_eq!(store.holdings.get(), 0);
@@ -390,7 +480,7 @@ mod tests {
         };
         assert_eq!(asked(&[KindOf::Topic], Wanted::Live), (1, 1));
         assert_eq!(asked(&[KindOf::Fact], Wanted::Live), (2, 2));
-        assert_eq!(asked(&[KindOf::Entry], Wanted::Ended), (2, 2));
+        assert_eq!(asked(&[KindOf::Entry], Wanted::Reopenable), (2, 2));
         assert_eq!(asked(&KindOf::ALL, Wanted::Forked), (1, 2));
         let before = world.store.prefixes.get();
         assert_eq!(asked(&[KindOf::Followup], Wanted::Live), (2, 18));

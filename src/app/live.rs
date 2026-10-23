@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::app::draft::refuse_open;
+use crate::app::draft::is_drafted;
 use crate::app::lookup::{Lookup, refuse_ended};
 use crate::app::save::{Admitted, stepped};
 use crate::app::{Deps, Failure, Written};
@@ -18,8 +18,8 @@ pub(super) struct Open {
 pub(super) fn open(deps: &Deps, lookup: &Lookup, address: &str) -> Result<Open, Failure> {
     let id = lookup.one(address)?;
     let label = lookup.label(&id)?;
-    refuse_open(&deps.read(), &id, &label)?;
-    let (head, record) = lookup.writable(&id, &label)?;
+    let drafted = is_drafted(&deps.read(), &id)?;
+    let (head, record) = lookup.writable(&id, drafted, &label)?;
     Ok(Open {
         id,
         label,

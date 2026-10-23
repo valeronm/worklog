@@ -166,7 +166,7 @@ pub enum DraftCommand {
     },
     /// Open a document as it stands as a draft to edit
     Checkout {
-        #[arg(add = complete::documents())]
+        #[arg(add = complete::writable())]
         target: String,
     },
     /// Check a draft and store it as the document's next version
@@ -257,7 +257,7 @@ pub enum ChangeCommand {
     /// End a document for a reason its kind has, with a note saying why
     #[command(after_help = reasons())]
     End {
-        #[arg(add = complete::documents())]
+        #[arg(add = complete::writable())]
         target: String,
         /// One of the reasons the document's kind ends for
         #[arg(add = complete::reasons())]
@@ -347,7 +347,7 @@ pub enum ReadCommand {
         #[arg(default_value_t = 20)]
         n: usize,
         /// Only what this machine topic wrote
-        #[arg(long, add = complete::topics())]
+        #[arg(long, add = complete::machines())]
         machine: Option<String>,
     },
     /// Documents whose name, summary or text holds the term, topics first
@@ -392,7 +392,7 @@ pub enum ReadCommand {
     /// How often each command was run, on this machine and on every machine that syncs here
     Usage {
         /// Only what this machine topic ran
-        #[arg(long, add = complete::topics())]
+        #[arg(long, add = complete::machines())]
         machine: Option<String>,
         /// Only from this day on, `YYYY-MM-DD`
         #[arg(long)]
@@ -463,7 +463,7 @@ pub enum ListCommand {
         #[arg(add = complete::topics())]
         topic: Option<String>,
         /// Another machine topic's placements
-        #[arg(long, add = complete::topics())]
+        #[arg(long, add = complete::machines())]
         machine: Option<String>,
     },
     /// Documents with more than one current version

@@ -1,8 +1,11 @@
+use std::collections::BTreeSet;
+
 use serde::Serialize;
 use toml::Value;
 
 use crate::app::heads::label_or_short;
-use crate::app::lookup::{Lookup, refuse_ended};
+use crate::app::live::open;
+use crate::app::lookup::{Lookup, draft_open};
 use crate::app::rules::{name_is_free, referencable};
 use crate::app::{Deps, DraftRef, Failed, Failure, ReadDeps, kind_named, text};
 use crate::domain::draft::{Draft, Listed};
@@ -134,12 +137,17 @@ pub(super) fn open_draft(deps: &Deps, mut draft: Draft) -> Result<DraftRef, Fail
     })
 }
 
-fn draft_open(what: &str) -> Failure {
-    Failure::Refused(format!("a draft of {what} is open"))
+pub(super) fn drafted(deps: &ReadDeps) -> Result<BTreeSet<DocumentId>, Failure> {
+    let listed = deps.drafts.list()?;
+    Ok(listed.into_iter().map(|open| open.draft.document).collect())
+}
+
+pub(super) fn is_drafted(deps: &ReadDeps, id: &DocumentId) -> Result<bool, Failure> {
+    Ok(deps.drafts.read(id)?.is_some())
 }
 
 pub(super) fn refuse_open(deps: &ReadDeps, id: &DocumentId, label: &str) -> Result<(), Failure> {
-    if deps.drafts.read(id)?.is_some() {
+    if is_drafted(deps, id)? {
         return Err(draft_open(label));
     }
     Ok(())
@@ -148,16 +156,13 @@ pub(super) fn refuse_open(deps: &ReadDeps, id: &DocumentId, label: &str) -> Resu
 /// Refuses a claim, an ended, forked or unreadable document, and one that has a draft open.
 pub fn checkout(deps: &Deps, address: &str) -> Result<DraftRef, Failure> {
     let lookup = Lookup::new(deps.read().store);
-    let id = lookup.one(address)?;
-    let label = lookup.label(&id)?;
-    refuse_open(&deps.read(), &id, &label)?;
-    let (head, record) = lookup.writable(&id, &label)?;
-    let kind = KindOf::of(&head.envelope.kind)?;
+    let target = open(deps, &lookup, address)?;
+    let kind = KindOf::of(&target.head.envelope.kind)?;
     if kind == KindOf::Claim {
-        return Err(Failure::at(&label, "a claim is never edited"));
+        return Err(Failure::at(&target.label, "a claim is never edited"));
     }
-    refuse_ended(&record, &label)?;
-    open_draft(deps, opened(&lookup, &head, kind)?)
+    target.unended()?;
+    open_draft(deps, opened(&lookup, &target.head, kind)?)
 }
 
 pub(super) fn opened(lookup: &Lookup, version: &Version, kind: KindOf) -> Result<Draft, Failure> {

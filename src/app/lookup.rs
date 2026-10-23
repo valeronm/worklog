@@ -24,6 +24,10 @@ pub(super) fn with_article(word: &str) -> String {
     format!("{article} {word}")
 }
 
+pub(super) fn draft_open(what: &str) -> Failure {
+    Failure::Refused(format!("a draft of {what} is open"))
+}
+
 pub(super) fn unreadable(what: &str) -> Failure {
     Failure::at(what, "holds a version this worklog cannot read")
 }
@@ -71,6 +75,30 @@ pub(super) fn not_a(kind: KindOf) -> String {
 
 fn read_or_refuse(head: &Header, what: &str) -> Result<Record, Failure> {
     Record::read(&head.envelope.kind, &head.fields).map_err(|error| Failure::at(what, error))
+}
+
+/// The head a write starts from, read: refuses a document with a draft open, one holding a
+/// version that does not read, one with no head or several, and a head that does not read.
+pub(super) fn write_gate<'d>(
+    document: &'d Document,
+    drafted: bool,
+    what: &str,
+) -> Result<(&'d Header, Record), Failure> {
+    if drafted {
+        return Err(draft_open(what));
+    }
+    if !document.unreadable().is_empty() {
+        return Err(unreadable(what));
+    }
+    one_head(document, what)
+}
+
+fn one_head<'d>(document: &'d Document, what: &str) -> Result<(&'d Header, Record), Failure> {
+    match document.state() {
+        State::Absent => Err(no_such_document(what)),
+        State::Forked(_) => Err(forked(what)),
+        State::Live(head) => Ok((head, read_or_refuse(head, what)?)),
+    }
 }
 
 /// A store handle with query access only.
@@ -304,12 +332,12 @@ impl<'a> Lookup<'a> {
     pub(super) fn writable(
         &self,
         id: &DocumentId,
+        drafted: bool,
         what: &str,
     ) -> Result<(Rc<Version>, Record), Failure> {
-        if !self.headers(id)?.unreadable().is_empty() {
-            return Err(unreadable(what));
-        }
-        self.only_head(id, what)
+        let document = self.headers(id)?;
+        let (head, record) = write_gate(&document, drafted, what)?;
+        Ok((self.version(id, &head.id, what)?, record))
     }
 
     pub(super) fn only_head(
@@ -318,14 +346,8 @@ impl<'a> Lookup<'a> {
         what: &str,
     ) -> Result<(Rc<Version>, Record), Failure> {
         let document = self.headers(id)?;
-        match document.state() {
-            State::Absent => Err(no_such_document(what)),
-            State::Forked(_) => Err(forked(what)),
-            State::Live(head) => {
-                let record = read_or_refuse(head, what)?;
-                Ok((self.version(id, &head.id, what)?, record))
-            }
-        }
+        let (head, record) = one_head(&document, what)?;
+        Ok((self.version(id, &head.id, what)?, record))
     }
 
     // A name is tried before an id prefix.
@@ -758,7 +780,10 @@ mod tests {
             "\n",
         );
         let lookup = Lookup::new(world.deps().read().store);
-        assert_eq!(lookup.writable(&lantern, "phone").unwrap().0.id, renamed);
+        assert_eq!(
+            lookup.writable(&lantern, false, "phone").unwrap().0.id,
+            renamed
+        );
         assert_eq!(lookup.find("phone").unwrap(), Found::One(lantern.clone()));
         assert_eq!(lookup.find("lantern").unwrap(), Found::One(lantern));
     }
@@ -815,12 +840,12 @@ mod tests {
         let _machine = topic(&world, "desk", "");
         let lantern = topic(&world, "lantern", "");
         let lookup = world.lookup();
-        let (version, record) = lookup.writable(&lantern, "lantern").unwrap();
+        let (version, record) = lookup.writable(&lantern, false, "lantern").unwrap();
         assert_eq!(version.envelope.document, lantern);
         assert_eq!(record.content.kind(), KindOf::Topic);
 
         let absent = DocumentId::from_bytes([0x42; 16]);
-        let Err(Failure::Refused(text)) = lookup.writable(&absent, "phone") else {
+        let Err(Failure::Refused(text)) = lookup.writable(&absent, false, "phone") else {
             panic!("an absent document must be refused");
         };
         assert!(text.contains("phone: no such document"), "{text}");
@@ -830,7 +855,8 @@ mod tests {
             let fork = after(&[&root], &topic_fields("lantern", ""), body);
             world.store.put(&fork).unwrap();
         }
-        let Err(Failure::Refused(text)) = world.lookup().writable(&lantern, "lantern") else {
+        let Err(Failure::Refused(text)) = world.lookup().writable(&lantern, false, "lantern")
+        else {
             panic!("a forked document must be refused");
         };
         assert!(
@@ -848,7 +874,7 @@ mod tests {
             .store
             .plant_unreadable(&lantern, VersionId::of(b"damaged"), ReadError::Corrupt);
         let lookup = world.lookup();
-        let Err(Failure::Refused(text)) = lookup.writable(&lantern, "lantern") else {
+        let Err(Failure::Refused(text)) = lookup.writable(&lantern, false, "lantern") else {
             panic!("a document holding an unreadable file must be refused");
         };
         assert!(

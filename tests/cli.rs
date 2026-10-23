@@ -3042,10 +3042,12 @@ impl Host {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum Source {
     Topics,
+    Machines,
     Facts,
     Entries,
     Followups,
     Documents,
+    Writable,
     Renamable,
     Movable,
     TopicsAndEntries,
@@ -3077,7 +3079,7 @@ const SOURCED: [(&str, &[&str], Source); 37] = [
         &["new", "followup", "--topics", "lantern", "--about", ""],
         Source::Documents,
     ),
-    ("checkout target", &["checkout", ""], Source::Documents),
+    ("checkout target", &["checkout", ""], Source::Writable),
     ("save target", &["save", ""], Source::Drafts),
     ("discard target", &["discard", ""], Source::Drafts),
     ("resolve target", &["resolve", ""], Source::Forked),
@@ -3090,7 +3092,7 @@ const SOURCED: [(&str, &[&str], Source); 37] = [
         Source::Movable,
     ),
     ("verify fact", &["verify", ""], Source::Facts),
-    ("end target", &["end", ""], Source::Documents),
+    ("end target", &["end", ""], Source::Writable),
     ("end reason", &["end", "lantern", ""], Source::Reasons),
     (
         "end by",
@@ -3107,14 +3109,18 @@ const SOURCED: [(&str, &[&str], Source); 37] = [
     ("show target", &["show", ""], Source::Documents),
     ("history target", &["history", ""], Source::Documents),
     ("diff target", &["diff", ""], Source::Drafts),
-    ("log machine", &["log", "--machine", ""], Source::Topics),
+    ("log machine", &["log", "--machine", ""], Source::Machines),
     (
         "search topic",
         &["search", "relay", "--topic", ""],
         Source::Topics,
     ),
     ("activity topic", &["activity", ""], Source::Topics),
-    ("usage machine", &["usage", "--machine", ""], Source::Topics),
+    (
+        "usage machine",
+        &["usage", "--machine", ""],
+        Source::Machines,
+    ),
     ("topics topic", &["topics", ""], Source::Topics),
     ("facts topic", &["facts", ""], Source::Topics),
     ("ideas topic", &["ideas", ""], Source::Topics),
@@ -3125,7 +3131,11 @@ const SOURCED: [(&str, &[&str], Source); 37] = [
         Source::TopicsAndEntries,
     ),
     ("where topic", &["where", ""], Source::Topics),
-    ("where machine", &["where", "--machine", ""], Source::Topics),
+    (
+        "where machine",
+        &["where", "--machine", ""],
+        Source::Machines,
+    ),
 ];
 
 const REASONS: &str = "retired\ttopic\nmerged\ttopic, entry\nfalse\tfact\nmoved\tfact\n\
@@ -3139,22 +3149,27 @@ fn each_argument_is_completed_from_the_list_its_command_takes_and_a_tab_writes_n
     let wiring = host.entry("wiring");
     host.ok(&["end", "lantern/fuse", "false", "It blew"]);
     host.forked_by(&["verify", "lantern/relay"]);
+    host.fact("fact", "lantern/cord");
+    host.forked_by(&["end", "lantern/cord", "false", "It frayed"]);
     host.ok(&["new", "topic", "phone"]);
 
     let topics = "atlas\tA thing\ndesk\tA machine\nlantern\tA thing\n";
-    let facts = "lantern/relay\tPin four\nlantern/dimmer\tPin four\n";
+    let unforked = "lantern/dimmer\tPin four\n";
+    let facts = format!("lantern/relay\tPin four\n{unforked}");
     let entries = format!("{wiring}\tPin four\n");
     let followups = format!("{open}\tOrder a fuse\n");
     let listed = |source: Source| match source {
         Source::Topics => topics.to_owned(),
-        Source::Facts => facts.to_owned(),
+        Source::Machines => "desk\tA machine\n".to_owned(),
+        Source::Facts => unforked.to_owned(),
         Source::Entries => entries.clone(),
         Source::Followups => followups.clone(),
         Source::Documents => format!("{topics}{facts}{entries}{followups}"),
-        Source::Renamable => format!("{topics}{facts}{entries}"),
-        Source::Movable => format!("{facts}{entries}{followups}"),
+        Source::Writable => format!("{topics}{unforked}{entries}{followups}"),
+        Source::Renamable => format!("{topics}{unforked}{entries}"),
+        Source::Movable => format!("{unforked}{entries}{followups}"),
         Source::TopicsAndEntries => format!("{topics}{entries}"),
-        Source::Forked => "lantern/relay\tPin four\n".to_owned(),
+        Source::Forked => "lantern/cord\tPin four\nlantern/relay\tPin four\n".to_owned(),
         Source::Ended => "lantern/fuse\tPin four\n".to_owned(),
         Source::Drafts => "phone\ttopic\n".to_owned(),
         Source::Reasons => REASONS.to_owned(),
@@ -3163,11 +3178,11 @@ fn each_argument_is_completed_from_the_list_its_command_takes_and_a_tab_writes_n
     let mut sources: Vec<Source> = SOURCED.iter().map(|(_, _, source)| *source).collect();
     sources.sort_unstable();
     sources.dedup();
-    assert_eq!(sources.len(), 13);
+    assert_eq!(sources.len(), 15);
     let mut lists: Vec<String> = sources.iter().map(|source| listed(*source)).collect();
     lists.sort();
     lists.dedup();
-    assert_eq!(lists.len(), 13, "two lists read the same on this host");
+    assert_eq!(lists.len(), 15, "two lists read the same on this host");
 
     let before = snapshot(&host);
     for (argument, words, source) in SOURCED {
@@ -3226,8 +3241,9 @@ fn a_forked_document_and_one_with_a_file_that_does_not_read_are_each_offered_onc
 
     let before = snapshot(&host);
     assert_eq!(
-        host.completed(&["verify", ""]),
-        "lantern/breaker\tPin four\nlantern/relay\tPin four\nlantern/dimmer\tPin four\n"
+        host.completed(&["show", ""]),
+        "desk\tA machine\nlantern\tA thing\n\
+         lantern/breaker\tPin four\nlantern/relay\tPin four\nlantern/dimmer\tPin four\n"
     );
     assert_eq!(
         host.completed(&["facts", ""]),

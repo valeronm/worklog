@@ -75,20 +75,28 @@ const FOLLOWUP: KindOf = KindOf::Followup;
 type Source = (&'static [KindOf], Wanted);
 
 const TOPICS: Source = (&[TOPIC], Wanted::Live);
-const FACTS: Source = (&[FACT], Wanted::Live);
+const FACTS: Source = (&[FACT], Wanted::Writable);
 const ENTRIES: Source = (&[ENTRY], Wanted::Live);
-const FOLLOWUPS: Source = (&[FOLLOWUP], Wanted::Live);
+const FOLLOWUPS: Source = (&[FOLLOWUP], Wanted::Writable);
 const DOCUMENTS: Source = (&[TOPIC, FACT, ENTRY, FOLLOWUP], Wanted::Live);
-const RENAMABLE: Source = (&[TOPIC, FACT, ENTRY], Wanted::Live);
-const MOVABLE: Source = (&[FACT, ENTRY, FOLLOWUP], Wanted::Live);
+const WRITABLE: Source = (&[TOPIC, FACT, ENTRY, FOLLOWUP], Wanted::Writable);
+const RENAMABLE: Source = (&[TOPIC, FACT, ENTRY], Wanted::Writable);
+const MOVABLE: Source = (&[FACT, ENTRY, FOLLOWUP], Wanted::Writable);
 const TOPICS_AND_ENTRIES: Source = (&[TOPIC, ENTRY], Wanted::Live);
 const FORKED: Source = (&KindOf::ALL, Wanted::Forked);
-const ENDED: Source = (&[TOPIC, FACT, ENTRY, FOLLOWUP], Wanted::Ended);
+const ENDED: Source = (&[TOPIC, FACT, ENTRY, FOLLOWUP], Wanted::Reopenable);
+
+fn candidates(offered: &[Offered]) -> Vec<CompletionCandidate> {
+    let candidate = |offered: &Offered| described(&offered.address, &offered.summary);
+    offered.iter().map(candidate).collect()
+}
 
 fn addresses(deps: &ReadDeps, (kinds, wanted): Source) -> Listed {
-    let candidate = |offered: &Offered| described(&offered.address, &offered.summary);
-    let offered = offer::offered(deps, kinds, wanted)?;
-    Ok(offered.iter().map(candidate).collect())
+    Ok(candidates(&offer::offered(deps, kinds, wanted)?))
+}
+
+fn machine_addresses(deps: &ReadDeps) -> Listed {
+    Ok(candidates(&offer::machines(deps)?))
 }
 
 fn draft_names(deps: &ReadDeps) -> Listed {
@@ -139,6 +147,10 @@ pub(super) fn topics() -> ArgValueCandidates {
     stored(TOPICS)
 }
 
+pub(super) fn machines() -> ArgValueCandidates {
+    from_store(machine_addresses)
+}
+
 pub(super) fn facts() -> ArgValueCandidates {
     stored(FACTS)
 }
@@ -153,6 +165,10 @@ pub(super) fn followups() -> ArgValueCandidates {
 
 pub(super) fn documents() -> ArgValueCandidates {
     stored(DOCUMENTS)
+}
+
+pub(super) fn writable() -> ArgValueCandidates {
+    stored(WRITABLE)
 }
 
 pub(super) fn renamable() -> ArgValueCandidates {
