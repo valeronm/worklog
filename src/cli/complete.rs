@@ -100,8 +100,11 @@ fn machine_addresses(deps: &ReadDeps) -> Listed {
 }
 
 fn draft_names(deps: &ReadDeps) -> Listed {
-    let candidate = |row: &draft::DraftRow| described(&row.label, &row.kind);
-    Ok(draft::drafts(deps)?.iter().map(candidate).collect())
+    let candidate = |row: &draft::DraftRow| match row {
+        draft::DraftRow::Open(open) => Some(described(&open.label, &open.kind)),
+        draft::DraftRow::Broken(_) => None,
+    };
+    Ok(draft::drafts(deps)?.iter().filter_map(candidate).collect())
 }
 
 fn reason_words() -> Vec<CompletionCandidate> {

@@ -730,8 +730,8 @@ mod tests {
     use crate::app::draft::checkout;
     use crate::app::testing::{
         ENDED, ENDED_FACT, REMOVED, TOPIC, World, entry, entry_fields, fact, fact_fields, followup,
-        fork, head, head_id, part_of, refused, stored, to, to_ended, topic, topic_fields, world,
-        world_with_atlas, written_at,
+        fork, head, head_id, open_row, part_of, refused, stored, to, to_ended, topic, topic_fields,
+        world, world_with_atlas, written_at,
     };
     use crate::domain::draft::Draft;
     use crate::domain::id::VersionId;
@@ -1590,9 +1590,9 @@ mod tests {
             .insert("name".to_owned(), toml::Value::from("Relay Pin"));
         world.drafts.write(&draft).unwrap();
         let listed = crate::app::draft::drafts(&deps.read()).unwrap();
-        assert_eq!(listed[0].label, "Relay Pin");
+        assert_eq!(open_row(&listed[0]).label, "Relay Pin");
 
-        let diff = diff(&deps.read(), &listed[0].label, None).unwrap();
+        let diff = diff(&deps.read(), &open_row(&listed[0]).label, None).unwrap();
         assert_eq!(diff.label, "Relay Pin");
         assert!(
             only_side(&diff).before.contains("name = \"lantern\""),
@@ -1617,7 +1617,7 @@ mod tests {
         draft.fields.remove("name");
         world.drafts.write(&draft).unwrap();
         let listed = crate::app::draft::drafts(&deps.read()).unwrap();
-        assert_eq!(listed[0].label, lantern.short());
+        assert_eq!(open_row(&listed[0]).label, lantern.short());
         assert_eq!(
             diff(&deps.read(), "lantern", None).unwrap().label,
             lantern.short()

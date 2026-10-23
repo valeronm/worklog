@@ -377,4 +377,6 @@ long ago it was last touched. Save or discard only a draft this session
 opened. Report the rest and leave them: one another session touched
 recently is that session's until shown otherwise, and one that is
 plainly abandoned is put to the user, who says whether it is finished or
-dropped.
+dropped. A line saying `does not read` is a draft whose files no longer
+read, whoever opened it: put it to the user, and `worklog discard <id>`
+removes it.

@@ -398,6 +398,7 @@ mod tests {
         draft::checkout(&world.deps(), "atlas").unwrap();
         let row = |document: &DocumentId, label: &str, opener: Value| {
             json!({
+                "type": "open",
                 "document": document,
                 "kind": "topic",
                 "label": label,
@@ -422,9 +423,21 @@ mod tests {
             row(&lantern, "lantern", json!({"type": "this_session"})),
             row(&atlas, "atlas", json!({"type": "no_session"})),
         ]);
+        world.drafts.break_draft(&atlas);
+        let broken = draft::drafts(&world.deps().read()).unwrap();
+        let with_broken = json!([
+            row(&lantern, "lantern", json!({"type": "this_session"})),
+            {
+                "type": "broken",
+                "document": atlas,
+                "path": format!("memory:{atlas}"),
+                "error": format!("memory:{atlas}: no opening fence"),
+            },
+        ]);
         vec![
             (at_a_terminal, expected),
             (in_the_session, this),
+            (broken, with_broken),
             (none, json!([])),
         ]
     }

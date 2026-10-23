@@ -103,11 +103,19 @@ pub trait Ids {
     fn mint(&self) -> Result<DocumentId, StoreError>;
 }
 
+/// A draft whose files do not read.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BrokenDraft {
+    pub document: DocumentId,
+    pub error: StoreError,
+}
+
 /// Drafts being edited on this machine, never synced.
 pub trait DraftsRead {
     fn read(&self, document: &DocumentId) -> Result<Option<Draft>, StoreError>;
-    /// Every draft, by its document's id.
-    fn list(&self) -> Result<Vec<Listed>, StoreError>;
+    /// Every draft, by its document's id; a draft that does not read is listed broken, and only
+    /// a directory that does not read fails the whole listing.
+    fn list(&self) -> Result<Vec<Result<Listed, BrokenDraft>>, StoreError>;
     /// The documents with a draft, including one whose draft does not read.
     fn documents(&self) -> Result<BTreeSet<DocumentId>, StoreError>;
     /// Where the draft of the document is or would be.

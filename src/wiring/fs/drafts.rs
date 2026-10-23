@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use crate::domain::draft::{Draft, Listed};
 use crate::domain::id::DocumentId;
-use crate::domain::ports::{Drafts, DraftsRead, StoreError};
+use crate::domain::ports::{BrokenDraft, Drafts, DraftsRead, StoreError};
 
 use super::clock::stamp_at;
 use super::{files, io_error, make_dir, optional};
@@ -65,10 +65,13 @@ impl DraftsRead for FsDrafts {
         Ok(self.listed(document)?.map(|listed| listed.draft))
     }
 
-    fn list(&self) -> Result<Vec<Listed>, StoreError> {
+    fn list(&self) -> Result<Vec<Result<Listed, BrokenDraft>>, StoreError> {
         let mut drafts = Vec::new();
         for document in self.documents()? {
-            drafts.extend(self.listed(&document)?);
+            match self.listed(&document) {
+                Ok(listed) => drafts.extend(listed.map(Ok)),
+                Err(error) => drafts.push(Err(BrokenDraft { document, error })),
+            }
         }
         Ok(drafts)
     }
@@ -149,11 +152,12 @@ mod tests {
         assert_eq!(edited.body, "second\n");
         assert_eq!(edited.parents, draft.parents);
         let modified = fs::metadata(&text).unwrap().modified().unwrap();
-        assert_eq!(drafts.list().unwrap()[0].touched, stamp_at(modified));
+        let listed = drafts.list().unwrap().remove(0).unwrap();
+        assert_eq!(listed.touched, stamp_at(modified));
     }
 
     #[test]
-    fn a_text_without_its_origin_is_refused_and_an_origin_alone_is_no_draft() {
+    fn a_text_without_its_origin_is_refused_and_listed_broken_and_an_origin_alone_is_no_draft() {
         let (_dir, drafts) = scratch();
         let draft = draft();
         drafts.write(&draft).unwrap();
@@ -162,7 +166,11 @@ mod tests {
         fs::remove_file(&origin).unwrap();
         let refused = drafts.read(&draft.document).unwrap_err();
         assert!(refused.to_string().contains("origin.toml"), "{refused}");
-        assert!(drafts.list().is_err());
+        let broken = BrokenDraft {
+            document: draft.document.clone(),
+            error: refused.clone(),
+        };
+        assert_eq!(drafts.list().unwrap(), [Err(broken)]);
         let held = BTreeSet::from([draft.document.clone()]);
         assert_eq!(drafts.documents().unwrap(), held);
 

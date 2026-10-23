@@ -234,7 +234,7 @@ pub fn context(deps: &ReadDeps, directory: &str) -> Result<Context, Failure> {
         open_count: waiting.len(),
         due,
         forks,
-        draft_count: deps.drafts.list()?.len(),
+        draft_count: deps.drafts.documents()?.len(),
         machine_needs_summary: topics.summary(machine) == Some(PLACEHOLDER),
         unclaimed: !directory.is_home() && !scope.in_directory,
     })

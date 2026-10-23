@@ -3193,6 +3193,21 @@ fn each_argument_is_completed_from_the_list_its_command_takes_and_a_tab_writes_n
 }
 
 #[test]
+fn a_draft_that_does_not_read_is_counted_listed_and_discarded() {
+    let host = Host::stocked();
+    let path = host.ok(&["checkout", "lantern"]);
+    fs::write(path.trim_end(), "name: lantern\n").unwrap();
+
+    assert!(host.ok(&["context"]).contains("1 draft left open"));
+    host.ok(&["new", "topic", "phone"]);
+    let listed = host.ok(&["drafts"]);
+    assert!(listed.contains("does not read"), "{listed}");
+    assert!(listed.contains("no opening fence"), "{listed}");
+    host.ok(&["discard", &host.id("lantern")]);
+    assert!(!host.ok(&["drafts"]).contains("does not read"));
+}
+
+#[test]
 fn a_shell_completes_a_prefix_a_comma_list_and_directories_but_never_files() {
     let host = Host::stocked();
     fs::write(host.home().join("projects.txt"), "").unwrap();

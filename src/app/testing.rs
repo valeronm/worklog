@@ -1,6 +1,7 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
+use crate::app::draft::{DraftRow, OpenDraft};
 use crate::app::heads::read_or_skip;
 use crate::app::lookup::{Lookup, Stored};
 use crate::app::rows::{Reference, Row};
@@ -487,5 +488,15 @@ impl StoreRead for Counting {
 impl Store for Counting {
     fn put(&self, version: &Version) -> Result<(), StoreError> {
         self.inner.put(version)
+    }
+}
+
+/// # Panics
+///
+/// When the draft does not read.
+pub fn open_row(row: &DraftRow) -> &OpenDraft {
+    match row {
+        DraftRow::Open(open) => open,
+        DraftRow::Broken(broken) => panic!("a draft that reads: {broken:?}"),
     }
 }

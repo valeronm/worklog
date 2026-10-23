@@ -8,6 +8,7 @@ use crate::app::rules::{name_is_free, referencable};
 use crate::app::{Deps, DraftRef, Failed, Failure, ReadDeps, kind_named, text};
 use crate::domain::draft::{Draft, Listed};
 use crate::domain::id::{DocumentId, is_id_prefix};
+use crate::domain::ports::BrokenDraft;
 use crate::domain::schema::address::{Address, Found};
 use crate::domain::schema::{Content, Date, Entry, Fact, KindOf, Name, Topic, step, translate};
 use crate::domain::session::Session;
@@ -114,7 +115,7 @@ pub fn new(deps: &Deps, what: &New) -> Result<DraftRef, Failure> {
     };
     let id = deps.ids.mint()?;
     name_is_free(&lookup, &id, &content)?;
-    for Listed { draft: open, .. } in deps.drafts.list()? {
+    for Listed { draft: open, .. } in deps.drafts.list()?.into_iter().flatten() {
         if spelled(&open.kind, &open.fields).as_deref() == Some(address.as_str()) {
             return Err(draft_open(&address));
         }
@@ -136,7 +137,7 @@ pub(super) fn open_draft(deps: &Deps, mut draft: Draft) -> Result<DraftRef, Fail
 }
 
 pub(super) fn is_drafted(deps: &ReadDeps, id: &DocumentId) -> Result<bool, Failure> {
-    Ok(deps.drafts.read(id)?.is_some())
+    Ok(deps.drafts.documents()?.contains(id))
 }
 
 pub(super) fn refuse_open(deps: &ReadDeps, id: &DocumentId, label: &str) -> Result<(), Failure> {
@@ -186,13 +187,28 @@ pub(super) fn shown_as(
 
 pub fn discard(deps: &Deps, address: &str) -> Result<(), Failure> {
     let lookup = Lookup::new(deps.read().store);
-    let draft = draft_for(&deps.read(), &lookup, address)?;
-    deps.drafts.delete(&draft.document)?;
+    let document = drafted_document(&deps.read(), &lookup, address)?;
+    deps.drafts.delete(&document)?;
     Ok(())
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct DraftRow {
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum DraftRow {
+    Open(OpenDraft),
+    Broken(BrokenRow),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct BrokenRow {
+    pub document: DocumentId,
+    #[serde(rename = "path")]
+    pub location: String,
+    pub error: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct OpenDraft {
     pub document: DocumentId,
     pub kind: String,
     pub label: String,
@@ -214,11 +230,20 @@ pub enum Opener {
 }
 
 pub fn drafts(deps: &ReadDeps) -> Result<Vec<DraftRow>, Failure> {
-    let mut open = deps.drafts.list()?;
-    open.sort_by(|a, b| a.draft.document.cmp(&b.draft.document));
+    let held = deps.drafts.list()?;
     let now = deps.clock.now().instant();
     let this = deps.host.session();
-    let row = |Listed { draft, touched }: Listed| {
+    let row = |held: Result<Listed, BrokenDraft>| {
+        let Listed { draft, touched } = match held {
+            Ok(listed) => listed,
+            Err(BrokenDraft { document, error }) => {
+                return DraftRow::Broken(BrokenRow {
+                    location: deps.drafts.location(&document),
+                    document,
+                    error: error.to_string(),
+                });
+            }
+        };
         let (label, location) = (draft_label(&draft), deps.drafts.location(&draft.document));
         let opener = match draft.opened_in {
             None => Opener::NoSession,
@@ -226,7 +251,7 @@ pub fn drafts(deps: &ReadDeps) -> Result<Vec<DraftRow>, Failure> {
             Some(Session { agent, id }) => Opener::OtherSession { agent, session: id },
         };
         let age_seconds = u64::try_from((now - touched.instant()) / 1_000_000_000).unwrap_or(0);
-        DraftRow {
+        DraftRow::Open(OpenDraft {
             document: draft.document,
             kind: draft.kind.to_string(),
             label,
@@ -234,18 +259,31 @@ pub fn drafts(deps: &ReadDeps) -> Result<Vec<DraftRow>, Failure> {
             opener,
             touched,
             age_seconds,
-        }
+        })
     };
-    Ok(open.into_iter().map(row).collect())
+    Ok(held.into_iter().map(row).collect())
+}
+
+/// Refuses an address that finds no draft or several, and one whose draft does not read.
+pub(super) fn draft_for(deps: &ReadDeps, lookup: &Lookup, address: &str) -> Result<Draft, Failure> {
+    let document = drafted_document(deps, lookup, address)?;
+    deps.drafts
+        .read(&document)?
+        .ok_or_else(|| Failure::at(address, "no draft"))
 }
 
 // The draft of a stored document the address finds is tried before a draft whose document's
-// id starts with the address or whose fields spell it.
-pub(super) fn draft_for(deps: &ReadDeps, lookup: &Lookup, address: &str) -> Result<Draft, Failure> {
+// id starts with the address or whose fields spell it. A draft that does not read has no fields
+// to spell an address.
+fn drafted_document(
+    deps: &ReadDeps,
+    lookup: &Lookup,
+    address: &str,
+) -> Result<DocumentId, Failure> {
     match lookup.find(address) {
         Ok(Found::One(id)) => {
-            if let Some(draft) = deps.drafts.read(&id)? {
-                return Ok(draft);
+            if deps.drafts.documents()?.contains(&id) {
+                return Ok(id);
             }
         }
         Ok(Found::Collision(_)) => {
@@ -254,14 +292,14 @@ pub(super) fn draft_for(deps: &ReadDeps, lookup: &Lookup, address: &str) -> Resu
         Ok(Found::None) | Err(Failure::Usage(_)) => {}
         Err(other) => return Err(other),
     }
-    let mut matching: Vec<Draft> = deps
-        .drafts
-        .list()?
-        .into_iter()
-        .map(|listed| listed.draft)
-        .filter(|draft| {
-            (is_id_prefix(address) && draft.document.as_str().starts_with(address))
-                || spelled(&draft.kind, &draft.fields).as_deref() == Some(address)
+    let by_id =
+        |document: &DocumentId| is_id_prefix(address) && document.as_str().starts_with(address);
+    let mut matching: Vec<DocumentId> = (deps.drafts.list()?.into_iter())
+        .filter_map(|held| match held {
+            Ok(Listed { draft, .. }) => (by_id(&draft.document)
+                || spelled(&draft.kind, &draft.fields).as_deref() == Some(address))
+            .then_some(draft.document),
+            Err(broken) => by_id(&broken.document).then_some(broken.document),
         })
         .collect();
     match matching.len() {
@@ -293,7 +331,7 @@ pub(super) fn spelled(kind: &Kind, fields: &Fields) -> Option<String> {
 mod tests {
     use super::*;
     use crate::app::testing::{
-        ENDED, ENDED_FACT, TOPIC, World, fact, head, head_id, refused, topic, world,
+        ENDED, ENDED_FACT, TOPIC, World, fact, head, head_id, open_row, refused, topic, world,
     };
     use crate::domain::ports::{Drafts, DraftsRead, Store};
     use crate::domain::testing::lamp_session;
@@ -605,6 +643,43 @@ mod tests {
     }
 
     #[test]
+    fn a_draft_that_does_not_read_is_listed_counted_and_discarded_by_id_and_by_its_document() {
+        let (world, lantern) = world();
+        let deps = world.deps();
+        checkout(&deps, "lantern").unwrap();
+        world.drafts.break_draft(&lantern);
+        let phone = new(&deps, &New::Topic { name: "phone" }).unwrap();
+        world.drafts.break_draft(&phone.document);
+        new(&deps, &New::Topic { name: "atlas" }).unwrap();
+
+        let rows = drafts(&deps.read()).unwrap();
+        let broken: Vec<&DocumentId> = (rows.iter())
+            .filter_map(|row| match row {
+                DraftRow::Broken(broken) => Some(&broken.document),
+                DraftRow::Open(_) => None,
+            })
+            .collect();
+        let mut expected = vec![&lantern, &phone.document];
+        expected.sort();
+        assert_eq!(broken, expected);
+        let opened = crate::app::context::context(&deps.read(), "/work").unwrap();
+        assert_eq!(opened.draft_count, 3);
+        let text = refused(checkout(&deps, "lantern"));
+        assert!(text.contains("a draft of lantern is open"), "{text}");
+        let Err(failure) = crate::app::save::save(&deps, "lantern") else {
+            panic!("a draft that does not read must not save");
+        };
+        assert!(
+            failure.to_string().contains("no opening fence"),
+            "{failure}"
+        );
+
+        discard(&deps, "lantern").unwrap();
+        discard(&deps, phone.document.short()).unwrap();
+        assert_eq!(world.drafts.documents().unwrap().len(), 1);
+    }
+
+    #[test]
     fn drafts_are_listed_by_document_id_with_their_labels() {
         let (world, lantern) = world();
         let deps = world.deps();
@@ -635,10 +710,11 @@ mod tests {
         expected.sort();
         let got: Vec<_> = rows
             .iter()
+            .map(open_row)
             .map(|row| (row.document.clone(), row.kind.as_str(), row.label.clone()))
             .collect();
         assert_eq!(got, expected);
-        for row in &rows {
+        for row in rows.iter().map(open_row) {
             assert_eq!(row.location, world.drafts.location(&row.document));
         }
     }
@@ -666,7 +742,7 @@ mod tests {
     fn a_listed_draft_s_age_runs_from_its_last_touch_to_now() {
         let (world, _) = world();
         let opened = checkout(&world.deps(), "lantern").unwrap();
-        let age = || drafts(&world.deps().read()).unwrap()[0].age_seconds;
+        let age = || open_row(&drafts(&world.deps().read()).unwrap()[0]).age_seconds;
         assert_eq!(age(), 12 * 60 + 41);
         world
             .drafts

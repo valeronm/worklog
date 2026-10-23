@@ -9,8 +9,8 @@ use super::document::{Document, State, Unreadable};
 use super::draft::{Draft, Listed};
 use super::id::{DocumentId, VersionId};
 use super::ports::{
-    Binary, Clock, Drafts, DraftsRead, Host, HostRead, Ids, NotRead, Refreshed, Releases, Store,
-    StoreError, StoreRead, Usage, UsageRead,
+    Binary, BrokenDraft, Clock, Drafts, DraftsRead, Host, HostRead, Ids, NotRead, Refreshed,
+    Releases, Store, StoreError, StoreRead, Usage, UsageRead,
 };
 use super::release::{Built, ReleaseVersion, sha256_hex};
 use super::session::Session;
@@ -251,31 +251,46 @@ pub const DRAFTED: &str = "2026-10-09T18:10:00+01:00";
 
 #[derive(Default)]
 pub struct MemoryDrafts {
-    drafts: RefCell<BTreeMap<DocumentId, Listed>>,
+    drafts: RefCell<BTreeMap<DocumentId, Result<Listed, StoreError>>>,
 }
 
 impl MemoryDrafts {
     /// # Panics
     ///
-    /// When `document` has no draft or `at` is not a stamp.
+    /// When `document` has no draft that reads or `at` is not a stamp.
     pub fn touch(&self, document: &DocumentId, at: &str) {
         let mut drafts = self.drafts.borrow_mut();
-        let listed = drafts.get_mut(document).expect("a draft");
-        listed.touched = Stamp::parse(at).expect("a stamp");
+        let held = drafts.get_mut(document).expect("a draft");
+        held.as_mut().expect("a draft that reads").touched = Stamp::parse(at).expect("a stamp");
+    }
+
+    /// Holds a draft of `document` that does not read, in place of any it had.
+    pub fn break_draft(&self, document: &DocumentId) {
+        let error = StoreError::io(self.location(document), "no opening fence");
+        self.drafts
+            .borrow_mut()
+            .insert(document.clone(), Err(error));
     }
 }
 
 impl DraftsRead for MemoryDrafts {
     fn read(&self, document: &DocumentId) -> Result<Option<Draft>, StoreError> {
-        Ok(self
-            .drafts
-            .borrow()
-            .get(document)
-            .map(|listed| listed.draft.clone()))
+        match self.drafts.borrow().get(document) {
+            None => Ok(None),
+            Some(Ok(listed)) => Ok(Some(listed.draft.clone())),
+            Some(Err(error)) => Err(error.clone()),
+        }
     }
 
-    fn list(&self) -> Result<Vec<Listed>, StoreError> {
-        Ok(self.drafts.borrow().values().cloned().collect())
+    fn list(&self) -> Result<Vec<Result<Listed, BrokenDraft>>, StoreError> {
+        let drafts = self.drafts.borrow();
+        let held = drafts.iter().map(|(document, held)| {
+            held.clone().map_err(|error| BrokenDraft {
+                document: document.clone(),
+                error,
+            })
+        });
+        Ok(held.collect())
     }
 
     fn documents(&self) -> Result<BTreeSet<DocumentId>, StoreError> {
@@ -293,9 +308,7 @@ impl Drafts for MemoryDrafts {
             draft: draft.clone(),
             touched: Stamp::parse(DRAFTED).expect("a stamp"),
         };
-        self.drafts
-            .borrow_mut()
-            .insert(draft.document.clone(), listed);
+        (self.drafts.borrow_mut()).insert(draft.document.clone(), Ok(listed));
         Ok(self.location(&draft.document))
     }
 
@@ -957,7 +970,7 @@ pub fn drafts_contract(drafts: &dyn Drafts, ids: &dyn Ids) {
     let mut expected = vec![edited, topic];
     expected.sort_by(|a, b| a.document.cmp(&b.document));
     let listed: Vec<Draft> = (drafts.list().expect("a read").into_iter())
-        .map(|listed| listed.draft)
+        .map(|listed| listed.expect("a draft that reads").draft)
         .collect();
     assert_eq!(listed, expected);
     let documents = BTreeSet::from([lantern.clone(), atlas.clone()]);

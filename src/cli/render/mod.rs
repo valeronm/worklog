@@ -179,9 +179,17 @@ impl Render for Made {
 impl Render for Vec<DraftRow> {
     fn text(&self) -> String {
         let fields: Vec<[String; 4]> = (self.iter())
-            .map(|row| {
-                let (opener, age) = (opener(&row.opener), age(row.age_seconds));
-                [row.label.clone(), opener, age, row.location.clone()]
+            .map(|row| match row {
+                DraftRow::Open(row) => {
+                    let (opener, age) = (opener(&row.opener), age(row.age_seconds));
+                    [row.label.clone(), opener, age, row.location.clone()]
+                }
+                DraftRow::Broken(row) => [
+                    row.document.short().to_owned(),
+                    "does not read".to_owned(),
+                    String::new(),
+                    row.error.clone(),
+                ],
             })
             .collect();
         let widest = |at: usize| {
@@ -232,6 +240,7 @@ fn age(seconds: u64) -> String {
 mod tests {
     use super::testing::{row, stamp};
     use super::*;
+    use crate::app::draft::{BrokenRow, OpenDraft};
     use crate::app::show::{Shown, ShownDocument, Unread};
     use crate::domain::id::VersionId;
     use crate::domain::testing::{atlas, lantern};
@@ -319,15 +328,22 @@ mod tests {
 
     #[test]
     fn a_draft_is_listed_by_its_label_its_opener_its_age_and_its_place() {
-        let row = |label: &str, opener: Opener, age_seconds: u64, location: &str| DraftRow {
-            document: lantern(),
-            kind: "topic".to_owned(),
-            label: label.to_owned(),
-            location: location.to_owned(),
-            opener,
-            touched: Stamp::parse("2026-09-04T10:00:00+00:00").unwrap(),
-            age_seconds,
+        let row = |label: &str, opener: Opener, age_seconds: u64, location: &str| {
+            DraftRow::Open(OpenDraft {
+                document: lantern(),
+                kind: "topic".to_owned(),
+                label: label.to_owned(),
+                location: location.to_owned(),
+                opener,
+                touched: Stamp::parse("2026-09-04T10:00:00+00:00").unwrap(),
+                age_seconds,
+            })
         };
+        let broken = DraftRow::Broken(BrokenRow {
+            document: lantern(),
+            location: "/desk/d.md".to_owned(),
+            error: "/desk/d.md: no opening fence".to_owned(),
+        });
         let other = Opener::OtherSession {
             agent: "Lamp".to_owned(),
             session: "7f3a91c0-55e2".to_owned(),
@@ -337,11 +353,16 @@ mod tests {
                 row("lantern", Opener::ThisSession, 240, "/desk/a.md"),
                 row("atlas", other, 2 * 86_400, "/desk/b.md"),
                 row("2026-09-04-lamp", Opener::NoSession, 30, "/desk/c.md"),
+                broken,
             ]
             .text(),
-            "lantern          this session   4 minutes ago  /desk/a.md\n\
-             atlas            Lamp 7f3a91c0  2 days ago     /desk/b.md\n\
-             2026-09-04-lamp  no session     just now       /desk/c.md\n"
+            format!(
+                "lantern          this session   4 minutes ago  /desk/a.md\n\
+                 atlas            Lamp 7f3a91c0  2 days ago     /desk/b.md\n\
+                 2026-09-04-lamp  no session     just now       /desk/c.md\n\
+                 {}         does not read                 /desk/d.md: no opening fence\n",
+                lantern().short()
+            )
         );
         assert_eq!(Vec::<DraftRow>::new().text(), "");
     }

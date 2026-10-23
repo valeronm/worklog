@@ -39,7 +39,7 @@ mod tests {
     use crate::app::save::save;
     use crate::app::show::{Shown, show};
     use crate::app::testing::{
-        ENDED, TOPIC, World, fork, found, head, refused, stored, topic, world,
+        ENDED, TOPIC, World, fork, found, head, open_row, refused, stored, topic, world,
     };
     use crate::domain::id::{DocumentId, VersionId};
     use crate::domain::ports::{Drafts, DraftsRead, Store, StoreRead};
@@ -175,7 +175,7 @@ mod tests {
         assert_eq!(shown.label, "lamp");
         let listed = drafts(&deps.read()).unwrap();
         assert_eq!(listed.len(), 1);
-        assert_eq!(listed[0].label, shown.label);
+        assert_eq!(open_row(&listed[0]).label, shown.label);
     }
 
     #[test]
