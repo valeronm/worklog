@@ -353,7 +353,7 @@ fn a_tab_s_count_is_the_length_of_the_listing_its_section_links_to() {
 }
 
 #[test]
-fn a_machine_topic_lists_its_claims_by_topic_under_a_tab_of_its_own() {
+fn a_topic_lists_the_claims_naming_it_on_either_side_under_a_tab_of_its_own() {
     let (mut world, lantern) = world();
     world.host.set_home(Some("/home/desk".to_owned()));
     world.host.remove("/home/desk/lamp");
@@ -386,10 +386,49 @@ fn a_machine_topic_lists_its_claims_by_topic_under_a_tab_of_its_own() {
     );
     has(&ok(&world, &format!("/doc/{desk}")), "Claims <span");
 
-    lacks(&ok(&world, &format!("/doc/{lantern}")), "Claims");
+    let phone = topic(&world, "phone", "");
+    let far = world.put("claim", &claim_fields(&phone, &lantern, "~/lamp"), "\n");
+    let on_lantern = ok(&world, &format!("/doc/{lantern}?show=claims"));
+    has(
+        &on_lantern,
+        &format!(
+            "<h2>Claims</h2>\n<ul class=\"items\">\
+             <li><a class=\"title\" href=\"/doc/{desk}\">desk</a>\
+             <span class=\"details\"><a href=\"/doc/{lamp}\">~/lamp</a> <span class=\"mark\">missing</span></span>\
+             <span class=\"details\"><a href=\"/doc/{here}\">~/lantern</a></span></li>\
+             <li><a class=\"title\" href=\"/doc/{phone}\">phone</a>\
+             <span class=\"details\"><a href=\"/doc/{far}\">~/lamp</a></span></li></ul>"
+        ),
+    );
+    has(&on_lantern, "Claims <span class=\"label\">2</span>");
+    has(
+        &ok(&world, &format!("/doc/{desk}?show=claims")),
+        "Claims <span class=\"label\">2</span>",
+    );
+
+    let globe = topic(&world, "globe", "");
+    lacks(&ok(&world, &format!("/doc/{globe}")), "Claims");
+    has(
+        &ok(&world, &format!("/doc/{globe}?show=claims")),
+        "<h2>Claims</h2>\n<p class=\"muted\">None.</p>",
+    );
+}
+
+#[test]
+fn a_topic_claiming_the_topic_that_claims_it_has_a_line_for_each_way() {
+    let (world, lantern) = world();
+    let phone = topic(&world, "phone", "");
+    let ours = world.put("claim", &claim_fields(&lantern, &phone, "~/phone"), "\n");
+    let theirs = world.put("claim", &claim_fields(&phone, &lantern, "~/lantern"), "\n");
     has(
         &ok(&world, &format!("/doc/{lantern}?show=claims")),
-        "<h2>Claims</h2>\n<p class=\"muted\">None.</p>",
+        &format!(
+            "<ul class=\"items\">\
+             <li><a class=\"title\" href=\"/doc/{phone}\">phone</a>\
+             <span class=\"details\"><a href=\"/doc/{ours}\">~/phone</a></span></li>\
+             <li><a class=\"title\" href=\"/doc/{phone}\">phone</a>\
+             <span class=\"details\"><a href=\"/doc/{theirs}\">~/lantern</a></span></li></ul>"
+        ),
     );
 }
 
@@ -474,7 +513,7 @@ fn topic_page_scans(size: usize) -> usize {
 
 #[test]
 fn a_topic_page_scans_the_store_the_same_whatever_the_topic_holds() {
-    let a_request = 18;
+    let a_request = 19;
     assert_eq!(topic_page_scans(1), 5 * a_request);
     assert_eq!(topic_page_scans(7), 5 * a_request);
 }

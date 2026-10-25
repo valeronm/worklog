@@ -153,21 +153,36 @@ pub(super) fn name_is_free_as(
     }
 }
 
-// A forked claim is given once for each distinct topic and directory its unended heads hold.
 pub(super) fn claims_of(
     lookup: &Lookup,
     machine: &DocumentId,
 ) -> Result<Vec<(Rc<Document>, Claim)>, Failure> {
-    let to_machine = |reference: &Reference| reference.role == Role::Machine;
-    let Some(key) = KindOf::Claim.key_where(to_machine) else {
+    claims_naming(lookup, Role::Machine, |claim| &claim.machine, machine)
+}
+
+pub(super) fn claims_placing(
+    lookup: &Lookup,
+    topic: &DocumentId,
+) -> Result<Vec<(Rc<Document>, Claim)>, Failure> {
+    claims_naming(lookup, Role::Filed, |claim| &claim.topic, topic)
+}
+
+// A forked claim is given once for each distinct topic and directory its unended heads hold.
+fn claims_naming(
+    lookup: &Lookup,
+    role: Role,
+    side: fn(&Claim) -> &DocumentId,
+    id: &DocumentId,
+) -> Result<Vec<(Rc<Document>, Claim)>, Failure> {
+    let Some(key) = KindOf::Claim.key_where(|reference: &Reference| reference.role == role) else {
         return Ok(Vec::new());
     };
     let mut claims = Vec::new();
-    for document in lookup.holders(KindOf::Claim, key, &[machine], false)? {
+    for document in lookup.holders(KindOf::Claim, key, &[id], false)? {
         let mut held: Vec<Claim> = Vec::new();
         for (_, record) in unended_heads(&document) {
             if let Content::Claim(claim) = record.content
-                && claim.machine == *machine
+                && side(&claim) == id
                 && !held.contains(&claim)
             {
                 held.push(claim);

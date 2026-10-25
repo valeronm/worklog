@@ -12,7 +12,7 @@
 {%- when Body::Parts(parts) -%}
 <ul class="topics">{% for t in parts %}<li>{% call m::topic(t) %}{% endcall %}</li>{% endfor %}</ul>
 {%- when Body::Claims(claims) -%}
-<ul class="items">{% for c in claims %}<li>{% call m::text(c.topic, "title") %}{% endcall %}{% for p in c.places %}<span class="details">{% call m::link(p.directory) %}{% endcall %}{% call m::marks(p.marks) %}{% endcall %}</span>{% endfor %}</li>{% endfor %}</ul>
+<ul class="items">{% for c in claims %}<li>{% call m::text(c.other, "title") %}{% endcall %}{% for p in c.places %}<span class="details">{% call m::link(p.directory) %}{% endcall %}{% call m::marks(p.marks) %}{% endcall %}</span>{% endfor %}</li>{% endfor %}</ul>
 {%- when Body::Rows(rows) -%}
 {% call m::items(rows) %}{% endcall %}
 {%- endmatch %}

@@ -10,11 +10,11 @@ use crate::app::lookup::Lookup;
 use crate::app::rows::{
     Filings, FollowupRow, Reference, Row, by_label, documents, followup_rows, reading, row, shown,
 };
-use crate::app::rules::claims_of;
+use crate::app::rules::{claims_of, claims_placing};
 use crate::app::{Failure, ReadDeps, day_given};
 use crate::domain::document::Document;
 use crate::domain::id::{DocumentId, VersionId};
-use crate::domain::schema::{Content, Date, KindOf};
+use crate::domain::schema::{Claim, Content, Date, KindOf};
 use crate::domain::version::Stamp;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -237,8 +237,8 @@ fn naming_entry(
 }
 
 /// The unended claims of this host's machine topic, or of the machine topic named; `topic`
-/// narrows to one topic with no rollup. By topic label, then directory, a claim with no
-/// directory first.
+/// narrows to one topic with no rollup. By topic label and id, then directory, a claim with
+/// no directory first.
 pub fn where_(
     deps: &ReadDeps,
     topic: Option<&str>,
@@ -250,32 +250,65 @@ pub fn where_(
         None => deps.machine()?,
     };
     let topic = topic.map(|address| lookup.one_topic(address)).transpose()?;
-    claim_rows(deps, &lookup, &machine, topic.as_ref())
+    let mut claims = claims_of(&lookup, &machine)?;
+    claims.retain(|(_, claim)| topic.as_ref().is_none_or(|topic| *topic == claim.topic));
+    let mut rows = claim_rows(deps, &lookup, claims)?;
+    by_label_of(&mut rows, |row| &row.topic);
+    Ok(rows)
 }
 
-/// The unended claims of `machine`, ordered as `where_` orders them; none when it is no
-/// machine topic.
-pub fn claims_on(deps: &ReadDeps, machine: &DocumentId) -> Result<Vec<ClaimRow>, Failure> {
-    claim_rows(deps, &Lookup::new(deps.store), machine, None)
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TopicClaims {
+    /// The claims of the topic as a machine, ordered as `where_` orders them.
+    pub held: Vec<ClaimRow>,
+    /// The claims placing the topic on another machine, by the machine's label and id, then
+    /// directory, a claim with no directory first.
+    pub placing: Vec<ClaimRow>,
+}
+
+/// The unended claims naming `topic`, as the machine they belong to or as the topic they place.
+pub fn claims_on(deps: &ReadDeps, topic: &DocumentId) -> Result<TopicClaims, Failure> {
+    let lookup = Lookup::new(deps.store);
+    let mut held = claim_rows(deps, &lookup, claims_of(&lookup, topic)?)?;
+    by_label_of(&mut held, |row| &row.topic);
+    let mut placing = claims_placing(&lookup, topic)?;
+    placing.retain(|(_, claim)| claim.machine != *topic);
+    let mut placing = claim_rows(deps, &lookup, placing)?;
+    by_label_of(&mut placing, |row| &row.machine);
+    Ok(TopicClaims { held, placing })
+}
+
+fn by_label_of(rows: &mut [ClaimRow], side: fn(&ClaimRow) -> &Reference) {
+    let key = |row: &ClaimRow| {
+        let side = side(row);
+        (
+            side.label.clone(),
+            side.document.clone(),
+            row.directory.clone(),
+            row.document.clone(),
+        )
+    };
+    rows.sort_by_key(key);
 }
 
 fn claim_rows(
     deps: &ReadDeps,
     lookup: &Lookup,
-    machine: &DocumentId,
-    topic: Option<&DocumentId>,
+    claims: Vec<(Rc<Document>, Claim)>,
 ) -> Result<Vec<ClaimRow>, Failure> {
-    // `None` for another machine's claims, whose directories this host cannot check.
-    let home = match deps.host.machine()? {
-        Some(here) if here == *machine => Some(deps.home()?),
-        _ => None,
+    let here = (deps.host.machine()?)
+        .filter(|here| claims.iter().any(|(_, claim)| claim.machine == *here));
+    // The home of this host's machine, whose claims alone have directories this host can check.
+    let here = match here {
+        Some(machine) => Some((machine, deps.home()?)),
+        None => None,
     };
     let mut rows = Vec::new();
-    for (document, claim) in claims_of(lookup, machine)? {
-        if topic.is_some_and(|topic| *topic != claim.topic) {
-            continue;
-        }
-        let exists = match (&home, &claim.directory) {
+    for (document, claim) in claims {
+        let home = (here.as_ref())
+            .filter(|(machine, _)| *machine == claim.machine)
+            .map(|(_, home)| home);
+        let exists = match (home, &claim.directory) {
             (Some(home), Some(directory)) => (directory.from_root(home.as_deref()))
                 .map(|path| deps.host.is_directory(&path))
                 .transpose()?,
@@ -290,13 +323,6 @@ fn claim_rows(
             forked: is_forked(&document),
         });
     }
-    rows.sort_by(|a, b| {
-        (&a.topic.label, &a.directory, &a.document).cmp(&(
-            &b.topic.label,
-            &b.directory,
-            &b.document,
-        ))
-    });
     Ok(rows)
 }
 

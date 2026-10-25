@@ -5,10 +5,10 @@ use askama::Template;
 use super::home::TopicLine;
 use super::links::{Layout, Link, Place, Stamped, Text, doc_href, history_href, marks, with_query};
 use super::listing::{Item, entry_items, fact_items, followup_items, leave_out};
-use crate::app::FollowupRow;
-use crate::app::list::{ClaimRow, EntryRow, FactRow, TopicRow};
+use crate::app::list::{ClaimRow, EntryRow, FactRow, TopicClaims, TopicRow};
 use crate::app::show::Linker;
 use crate::app::show::{FieldItem, ShownDocument, ShownField, ShownVersion};
+use crate::app::{FollowupRow, Reference};
 use crate::domain::schema::KindOf;
 use crate::render::{ended, unread_notes};
 use crate::web::markdown::{Markup, summary_html, to_html};
@@ -186,12 +186,13 @@ pub struct Held<'r> {
     pub ideas: &'r [FactRow],
     pub followups: &'r [FollowupRow],
     pub entries: &'r [EntryRow],
-    pub claims: &'r [ClaimRow],
+    pub claims: &'r TopicClaims,
 }
 
-/// A claimed topic with the claims placing it.
+/// The topic or the machine on the other side of claims naming the page's topic, with the
+/// claims.
 pub struct ClaimLine {
-    pub topic: Text,
+    pub other: Text,
     pub places: Vec<ClaimPlace>,
 }
 
@@ -201,16 +202,18 @@ pub struct ClaimPlace {
     pub marks: Vec<String>,
 }
 
-// The claims come sorted by topic.
-fn by_topic(claims: &[ClaimRow]) -> impl Iterator<Item = &[ClaimRow]> {
-    claims.chunk_by(|a, b| a.topic.document == b.topic.document)
+fn claim_lines(claims: &TopicClaims) -> Vec<ClaimLine> {
+    let mut lines = lines_by(&claims.held, |row| &row.topic);
+    lines.extend(lines_by(&claims.placing, |row| &row.machine));
+    lines
 }
 
-fn claim_lines(claims: &[ClaimRow]) -> Vec<ClaimLine> {
-    by_topic(claims)
-        .map(|of_topic| ClaimLine {
-            topic: Text::naming(&of_topic[0].topic),
-            places: (of_topic.iter())
+// The rows come sorted by `side`.
+fn lines_by(rows: &[ClaimRow], side: fn(&ClaimRow) -> &Reference) -> Vec<ClaimLine> {
+    rows.chunk_by(|a, b| side(a).document == side(b).document)
+        .map(|of_side| ClaimLine {
+            other: Text::naming(side(&of_side[0])),
+            places: (of_side.iter())
                 .map(|row| ClaimPlace {
                     directory: Link::to(
                         &row.document,
@@ -276,8 +279,7 @@ impl TopicPage {
             Section::Followups => rows(followup_items(held.followups)),
             Section::Entries => rows(entry_items(held.entries)),
         };
-        let claimed = by_topic(held.claims).count();
-        // Only a machine topic holds claims.
+        let claimed = claim_lines(held.claims).len();
         let shown = |tab: &Section| *tab != Section::Claims || claimed > 0 || *tab == section;
         let tabs = Section::ALL.into_iter().filter(shown).map(|tab| Tab {
             name: tab.name(),
