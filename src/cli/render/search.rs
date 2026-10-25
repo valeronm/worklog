@@ -1,7 +1,7 @@
 use std::fmt::Write as _;
 
 use super::{INDENT, Render, change_or_ending, line, row_line, written};
-use crate::app::search::{Hit, Logged};
+use crate::app::search::{Hit, Log};
 use crate::render::hit_lines;
 
 impl Render for Vec<Hit> {
@@ -31,10 +31,10 @@ impl Render for Vec<Hit> {
     }
 }
 
-impl Render for Vec<Logged> {
+impl Render for Log {
     fn text(&self) -> String {
         let mut text = String::new();
-        for version in self {
+        for version in &self.versions {
             let fields = [
                 &written(&version.written),
                 &version.machine.label,
@@ -53,7 +53,7 @@ mod tests {
     use super::super::output;
     use super::super::testing::{WRITTEN, row, stamp, to};
     use super::*;
-    use crate::app::search::Matched;
+    use crate::app::search::{Logged, Matched};
     use crate::app::show::{Unread, Why};
     use crate::domain::id::VersionId;
     use crate::domain::testing::{atlas, lantern};
@@ -108,7 +108,7 @@ mod tests {
         for json in [false, true] {
             assert_eq!(output(&hits, json).hits, Some(2));
             assert_eq!(output(&Vec::<Hit>::new(), json).hits, Some(0));
-            assert_eq!(output(&Vec::<Logged>::new(), json).hits, None);
+            assert_eq!(output(&log(Vec::new()), json).hits, None);
         }
     }
 
@@ -139,6 +139,14 @@ mod tests {
         );
     }
 
+    fn log(versions: Vec<Logged>) -> Log {
+        Log {
+            machine: None,
+            machines: Vec::new(),
+            versions,
+        }
+    }
+
     #[test]
     fn a_logged_version_is_a_line_naming_its_document_by_label_or_by_short_id() {
         let logged = |seed: &[u8], machine: &str, change: &str| Logged {
@@ -157,7 +165,7 @@ mod tests {
         renamed.row = Some(row(&lantern(), "lantern/relay", "Pin four"));
         let short = |seed: &[u8]| VersionId::of(seed).short().to_owned();
         assert_eq!(
-            vec![renamed, logged(b"right", "phone", "new")].text(),
+            log(vec![renamed, logged(b"right", "phone", "new")]).text(),
             format!(
                 "2026-10-09T18:22:41.118+01:00  desk  {}  lantern/relay  rename\n\
                  2026-10-09T18:22:41.118+01:00  phone  {}  a71a5000  new\n",
@@ -168,12 +176,12 @@ mod tests {
         let mut ended = logged(b"left", "desk", "end");
         ended.ended = Some("retired".to_owned());
         assert_eq!(
-            vec![ended].text(),
+            log(vec![ended]).text(),
             format!(
                 "2026-10-09T18:22:41.118+01:00  desk  {}  a71a5000  ended retired\n",
                 short(b"left")
             )
         );
-        assert_eq!(Vec::<Logged>::new().text(), "");
+        assert_eq!(log(Vec::new()).text(), "");
     }
 }

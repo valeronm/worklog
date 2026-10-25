@@ -419,6 +419,15 @@ impl<'a> Lookup<'a> {
         Ok(kind_of(&document) == Some(kind) && row_head(&document).is_some())
     }
 
+    /// Every document, of a kind this worklog knows or not.
+    pub(super) fn every_document(&self) -> Result<Vec<Rc<Document>>, Failure> {
+        let mut documents = self.everything()?;
+        for unknown in self.unknown()? {
+            documents.extend(unknown.documents);
+        }
+        Ok(documents)
+    }
+
     pub(super) fn everything(&self) -> Result<Vec<Rc<Document>>, Failure> {
         let mut documents = Vec::new();
         for kind in KindOf::ALL {

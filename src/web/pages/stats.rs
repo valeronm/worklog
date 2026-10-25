@@ -2,7 +2,7 @@
 
 use askama::Template;
 
-use super::links::{Layout, Link, Place, with_query};
+use super::links::{Choice, Layout, Link, Place, with_query};
 use crate::app::activity::Stats;
 use crate::app::counted;
 use crate::render::calendar::{Cell, MONTH_GAP, Month, calendar};
@@ -12,14 +12,6 @@ pub struct Square {
     pub title: String,
     // None for a day holding no entry.
     pub href: Option<String>,
-}
-
-/// A topic to count, a span to count over, or the whole store; `current` for the one shown.
-pub struct Choice {
-    pub link: Link,
-    pub current: bool,
-    // The entries a topic holds over the span.
-    pub count: Option<usize>,
 }
 
 #[derive(Template)]
@@ -50,11 +42,8 @@ fn square(cell: &Cell, topic: Option<&str>) -> Square {
 fn choice(text: String, topic: Option<&str>, year: Option<i32>, current: bool) -> Choice {
     let year = year.map(|year| year.to_string());
     let parameters = [("topic", topic), ("year", year.as_deref())];
-    Choice {
-        link: Link::plain(text, with_query(Place::Stats.route(), &parameters)),
-        current,
-        count: None,
-    }
+    let href = with_query(Place::Stats.route(), &parameters);
+    Choice::new(Link::plain(text, href), current)
 }
 
 impl StatsPage {

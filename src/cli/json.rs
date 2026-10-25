@@ -48,7 +48,7 @@ mod tests {
     use crate::app::followup::{Made, NewFollowup, TriggerArg};
     use crate::app::list::{ClaimRow, EntryRow, FactRow, ForkRow, TopicRow};
     use crate::app::machines::PLACEHOLDER;
-    use crate::app::search::{Hit, Logged, Query};
+    use crate::app::search::{Hit, Log, Query};
     use crate::app::show::{Diff, History, Shown};
     use crate::app::testing::{
         ENDED as RETIRED, ENDED_FACT, NOW, World, claim_fields, entry, fact, followup, fork, head,
@@ -152,7 +152,8 @@ mod tests {
         a_claim_row_holds_null_for_a_claim_on_no_directory: Vec<ClaimRow> = claims,
         a_fork_row_holds_its_heads_and_null_for_a_row_no_head_reads_as: Vec<ForkRow> = forks,
         a_hit_holds_its_row_and_the_lines_that_matched: Vec<Hit> = hits,
-        a_logged_version_holds_null_for_a_row_its_document_does_not_read_as: Vec<Logged> = logged,
+        a_log_holds_its_machine_the_machines_and_null_for_a_row_its_document_does_not_read_as: Log =
+            logged,
         a_shown_document_and_a_shown_version_are_told_apart_by_type: Shown = shown,
         a_history_holds_its_versions_and_why_each_unreadable_one_is: History = history,
         a_diff_holds_the_version_each_side_is_against_and_the_text_after: Diff = diffs,
@@ -804,7 +805,7 @@ mod tests {
         ]
     }
 
-    fn logged() -> Vec<(Vec<Logged>, Value)> {
+    fn logged() -> Vec<(Log, Value)> {
         let (world, lantern) = world();
         let gadget = world.put("gadget", "size = 4\n", "\n");
         let logged = |id: &DocumentId, version: &VersionId, row: Value| {
@@ -846,10 +847,18 @@ mod tests {
             ending,
             first(&gadget, Value::Null),
         ]);
-        vec![(
-            search::log(&world.deps().read(), 4, None).unwrap(),
-            expected,
-        )]
+        let desk = to(&world.machine(), "desk");
+        let log = |machine: Option<&str>| search::log(&world.deps().read(), 4, machine).unwrap();
+        vec![
+            (
+                log(None),
+                json!({ "machine": null, "machines": [desk], "versions": expected }),
+            ),
+            (
+                log(Some("desk")),
+                json!({ "machine": desk, "machines": [desk], "versions": expected }),
+            ),
+        ]
     }
 
     fn forked(world: &World) -> (Shown, Value) {

@@ -3,7 +3,7 @@
 {% block title %}Stats{% endblock %}
 {% block content %}
 <h1>Stats</h1>
-<p class="chips topics-chosen">{% for t in topics %}<a href="{{ t.link.href }}"{% if t.current %} aria-current="true"{% endif %}>{{ t.link.text }}{% if let Some(count) = t.count %} <span class="count">{{ count }}</span>{% endif %}</a>{% endfor %}</p>
+<p class="chips topics-chosen">{% call m::chips(topics) %}{% endcall %}</p>
 <section class="activity">
 <div class="weeks"><div>
 <div class="months" style="grid-template-columns: repeat({{ week_count }}, var(--day))">{% for m in months %}<span style="grid-column: {{ m.week + 1 }} / span {{ month_gap }}">{{ m.name }}</span>{% endfor %}</div>

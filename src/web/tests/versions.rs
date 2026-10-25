@@ -290,6 +290,78 @@ fn a_log_shows_a_hundred_versions_or_the_number_asked_for_up_to_five_hundred() {
 }
 
 #[test]
+fn a_log_offers_each_machine_and_shows_only_what_the_one_asked_for_wrote() {
+    let (world, lantern) = world();
+    let desk = world.machine();
+    let phone = topic(&world, "phone", "");
+    let root = head(&world, &lantern);
+    let from_phone = written_at(
+        &world,
+        &root,
+        &topic_fields("lantern", ""),
+        "2026-10-10T09:00:00+01:00",
+        "\n",
+        Some(&phone),
+    );
+
+    let all = ok(&world, "/log?n=50");
+    has(
+        &all,
+        "<p class=\"chips\"><a href=\"/log?n=50\" aria-current=\"true\">All</a>\
+         <a href=\"/log?machine=desk&#38;n=50\">desk</a>\
+         <a href=\"/log?machine=phone&#38;n=50\">phone</a></p>",
+    );
+
+    let html = ok(&world, "/log?machine=phone");
+    has(&html, "<p class=\"summary\">1 newest version</p>");
+    has(&html, &format!("<a href=\"/doc/{}\">", from_phone.id));
+    has(
+        &html,
+        "<a href=\"/log?machine=phone\" aria-current=\"true\">phone</a>",
+    );
+    lacks(&html, "aria-current=\"true\">All");
+    let from_desk = ok(&world, "/log?machine=desk");
+    lacks(&from_desk, &format!("<a href=\"/doc/{}\">", from_phone.id));
+    has(&from_desk, &format!("<a href=\"/doc/{desk}\">desk</a>"));
+
+    let by_id = ok(&world, &format!("/log?machine={}", &phone.to_string()[..8]));
+    has(
+        &by_id,
+        "<a href=\"/log?machine=phone\" aria-current=\"true\">phone</a>",
+    );
+
+    let globe = topic(&world, "globe", ENDED);
+    written_at(
+        &world,
+        &head(&world, &lantern),
+        &topic_fields("lantern", ""),
+        "2026-10-11T09:00:00+01:00",
+        "\n",
+        Some(&globe),
+    );
+    lacks(&ok(&world, "/log"), &format!("machine={globe}"));
+    has(
+        &ok(&world, &format!("/log?machine={globe}")),
+        &format!(
+            "<a href=\"/log?machine={globe}\" class=\"ended\" title=\"ended retired\" \
+             aria-current=\"true\">globe</a>"
+        ),
+    );
+
+    for (target, why) in [
+        ("/log?machine=atlas", "atlas"),
+        (
+            "/log?machine=lantern",
+            "lantern: no version was written on it",
+        ),
+    ] {
+        let page = page(&world, target);
+        assert_eq!(page.status, 404, "{}", page.html);
+        has(&page.html, why);
+    }
+}
+
+#[test]
 fn the_forks_are_each_forked_document_over_its_heads() {
     let (world, lantern, atlas) = world_with_atlas();
     has(

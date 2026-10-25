@@ -3,9 +3,12 @@
 use askama::Template;
 
 use super::document::Head;
-use super::links::{Layout, Line, Link, Place, Stamped, Text, history_href, marks, version_link};
+use super::links::{
+    Choice, Layout, Line, Link, Place, Stamped, Text, doc_link, history_href, marks, version_link,
+    with_query,
+};
 use crate::app::list::{ForkHead, ForkRow};
-use crate::app::search::Logged;
+use crate::app::search::Log;
 use crate::app::show::{Compared, History, Side};
 use crate::app::{Row, counted};
 use crate::render::diff::{Hunk, Mark, UNTERMINATED, hunks};
@@ -60,13 +63,35 @@ pub struct LogRow {
 #[template(path = "log.html")]
 pub struct LogPage {
     pub layout: Layout,
+    pub machines: Vec<Choice>,
     pub count: String,
     pub rows: Vec<LogRow>,
 }
 
 impl LogPage {
-    pub fn new(versions: &[Logged]) -> LogPage {
-        let rows = versions.iter().map(|logged| LogRow {
+    pub fn new(log: &Log, n: Option<&str>) -> LogPage {
+        let href = |machine: Option<&str>| {
+            with_query(Place::Log.route(), &[("machine", machine), ("n", n)])
+        };
+        let mut machines = vec![Choice::new(
+            Link::plain("All".to_owned(), href(None)),
+            log.machine.is_none(),
+        )];
+        machines.extend(log.machines.iter().map(|machine| {
+            // An ended topic's name may be held by one that is not ended.
+            let address = match machine.ended() {
+                None => machine.label.clone(),
+                Some(_) => machine.document.to_string(),
+            };
+            let link = Link {
+                href: href(Some(&address)),
+                ..doc_link(machine)
+            };
+            let current =
+                (log.machine.as_ref()).is_some_and(|asked| asked.document == machine.document);
+            Choice::new(link, current)
+        }));
+        let rows = log.versions.iter().map(|logged| LogRow {
             stamp: Stamped {
                 change: Some(change_or_ending(&logged.change, logged.ended.as_deref())),
                 ..Stamped::new(&logged.version, &logged.written, &logged.machine)
@@ -79,7 +104,8 @@ impl LogPage {
         });
         LogPage {
             layout: Layout::at(Some(Place::Log)),
-            count: counted(versions.len(), "newest version", "newest versions"),
+            machines,
+            count: counted(log.versions.len(), "newest version", "newest versions"),
             rows: rows.collect(),
         }
     }

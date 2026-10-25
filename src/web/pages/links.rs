@@ -129,6 +129,23 @@ impl Link {
     }
 }
 
+/// One of the links a page offers to itself under other parameters; `current` is the one shown.
+pub struct Choice {
+    pub link: Link,
+    pub current: bool,
+    pub count: Option<usize>,
+}
+
+impl Choice {
+    pub(super) fn new(link: Link, current: bool) -> Choice {
+        Choice {
+            link,
+            current,
+            count: None,
+        }
+    }
+}
+
 /// `ended` is what the page at `route` shows; the link leads to the other state.
 pub(super) fn ended_switch(route: &str, parameters: &[(&str, Option<&str>)], ended: bool) -> Link {
     let (text, switched) = if ended {

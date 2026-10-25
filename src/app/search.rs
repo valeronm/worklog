@@ -6,6 +6,7 @@ use regex::{Regex, RegexBuilder};
 use serde::Serialize;
 
 use crate::app::heads::{ended_of, label_or_short};
+use crate::app::machines::written_on;
 use crate::app::rows::{Reference, Row, by_label, documents, reading, row, shown};
 use crate::app::show::{Unread, Why};
 use crate::app::{Failure, ReadDeps};
@@ -38,6 +39,15 @@ pub struct Matched {
     pub text: String,
     /// The byte ranges of `text` the term matched, in order, apart and none of them empty.
     pub spans: Vec<Range<usize>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Log {
+    pub machine: Option<Reference>,
+    /// The topics not ended that a version was written on, and `machine` whether or not it
+    /// ended; by label.
+    pub machines: Vec<Reference>,
+    pub versions: Vec<Logged>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -159,13 +169,25 @@ fn matcher(query: &Query) -> Result<Regex, Failure> {
 /// Lists every held version of every kind, a fork's heads and the kinds this worklog does
 /// not know included; `row` is the row of the version's document as it stands now, `None`
 /// when no head of that document reads as a record. `machine` names a topic and keeps the
-/// versions written there; an address that is not one topic is refused.
-pub fn log(deps: &ReadDeps, limit: usize, machine: Option<&str>) -> Result<Vec<Logged>, Failure> {
-    let (lookup, topics, machine) = reading(deps, machine)?;
-    let mut documents = lookup.everything()?;
-    for unknown in lookup.unknown()? {
-        documents.extend(unknown.documents);
+/// versions written there; an address that is not one topic, or one no version was written
+/// on, is refused.
+pub fn log(deps: &ReadDeps, limit: usize, address: Option<&str>) -> Result<Log, Failure> {
+    let (lookup, topics, machine) = reading(deps, address)?;
+    let documents = lookup.every_document()?;
+    let writers = written_on(&lookup, &documents)?;
+    if let (Some(address), Some(id)) = (address, &machine)
+        && !writers.contains(id)
+    {
+        return Err(Failure::at(address, "no version was written on it"));
     }
+    let mut machines: Vec<Reference> = (writers.iter())
+        .map(|id| topics.reference(id))
+        .filter(|offered| offered.ended().is_none() || machine.as_ref() == Some(&offered.document))
+        .collect();
+    machines.sort_by(|a, b| (&a.label, &a.document).cmp(&(&b.label, &b.document)));
+    let asked = (machine.as_ref())
+        .and_then(|id| machines.iter().find(|offered| offered.document == *id))
+        .cloned();
     let mut versions: Vec<(&Header, &Document)> = Vec::new();
     for document in &documents {
         let written = document.history().into_iter().filter(|version| {
@@ -195,7 +217,11 @@ pub fn log(deps: &ReadDeps, limit: usize, machine: Option<&str>) -> Result<Vec<L
             row: of_document.clone(),
         }
     });
-    Ok(logged.collect())
+    Ok(Log {
+        machine: asked,
+        machines,
+        versions: logged.collect(),
+    })
 }
 
 #[cfg(test)]
@@ -582,7 +608,7 @@ mod tests {
     }
 
     fn logged(world: &World, limit: usize, machine: Option<&str>) -> Vec<Logged> {
-        log(&world.deps().read(), limit, machine).unwrap()
+        log(&world.deps().read(), limit, machine).unwrap().versions
     }
 
     #[test]
@@ -636,6 +662,47 @@ mod tests {
         assert!(only.iter().all(|entry| entry.machine.label == "phone"));
         let refused = log(&world.deps().read(), 5, Some("nowhere"));
         assert!(matches!(refused, Err(Failure::Refused(_))), "{refused:?}");
+        let refused = log(&world.deps().read(), 5, Some("lantern"));
+        assert_eq!(
+            refused,
+            Err(Failure::Refused(
+                "lantern: no version was written on it".to_owned()
+            ))
+        );
+    }
+
+    #[test]
+    fn the_log_offers_the_machines_not_ended_and_the_one_asked_for() {
+        let (world, lantern) = world();
+        let desk = world.machine();
+        let phone = topic(&world, "phone", "");
+        let globe = topic(&world, "globe", ENDED);
+        rewritten(&world, &lantern, "2026-10-10T09:00:00+00:00", &phone);
+        rewritten(&world, &lantern, "2026-10-11T09:00:00+00:00", &globe);
+        let offered = |machine: Option<&str>| {
+            let log = log(&world.deps().read(), usize::MAX, machine).unwrap();
+            let labels: Vec<String> = log.machines.iter().map(|m| m.label.clone()).collect();
+            (log.machine.map(|m| m.document), labels)
+        };
+        assert_eq!(
+            offered(None),
+            (None, vec!["desk".to_owned(), "phone".to_owned()])
+        );
+        assert_eq!(
+            offered(Some(&phone.to_string()[..8])),
+            (
+                Some(phone.clone()),
+                vec!["desk".to_owned(), "phone".to_owned()]
+            )
+        );
+        assert_eq!(
+            offered(Some(globe.as_ref())),
+            (
+                Some(globe.clone()),
+                vec!["desk".to_owned(), "globe".to_owned(), "phone".to_owned()]
+            )
+        );
+        assert_eq!(offered(Some("desk")).0, Some(desk));
     }
 
     #[test]
@@ -797,7 +864,7 @@ mod tests {
         let second = world.amend(&sketch, "name = \"two\"\n", "\n");
         let world = world.counted();
         let deps = world.deps();
-        let all = log(&deps.read(), usize::MAX, None).unwrap();
+        let all = log(&deps.read(), usize::MAX, None).unwrap().versions;
         assert_eq!(all.len(), 4);
         let mine: Vec<&Logged> = all
             .iter()

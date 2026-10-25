@@ -1256,10 +1256,13 @@ fn a_command_that_reads_the_store_prints_one_json_value() {
     assert_eq!(host.json(&["diff", version])["label"], "lantern");
     let history = host.json(&["history", "lantern/relay"]);
     assert_eq!(history["versions"].as_array().map(Vec::len), Some(1));
+    for (args, count) in [(&["log", "2"][..], 2), (&["log", "--machine", "desk"], 8)] {
+        let log = host.json(args);
+        let versions = log["versions"].as_array().map(Vec::len);
+        assert_eq!(versions, Some(count), "{args:?}");
+    }
     for (args, count) in [
-        (&["log", "2"][..], 2),
-        (&["log", "--machine", "desk"], 8),
-        (&["search", "pin"], 3),
+        (&["search", "pin"][..], 3),
         (
             &["search", "^pin", "--regex", "--topic", "atlas", "--ended"],
             0,

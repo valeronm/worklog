@@ -2,11 +2,13 @@
 //! and by any reader, of the summary a topic made for a host carries until one is written.
 
 use std::collections::BTreeSet;
+use std::rc::Rc;
 
 use crate::app::draft::usage;
 use crate::app::heads::{kind_of, unended_heads};
 use crate::app::lookup::{Lookup, held_by_several};
 use crate::app::{Failure, ReadDeps};
+use crate::domain::document::Document;
 use crate::domain::id::DocumentId;
 use crate::domain::schema::{Content, KindOf, Name};
 
@@ -77,10 +79,14 @@ pub fn machines(deps: &ReadDeps) -> Result<Vec<String>, Failure> {
 /// The topics a stored version carries as its machine, ended or not. Reads every version of
 /// the store.
 pub(super) fn machine_topics(lookup: &Lookup) -> Result<BTreeSet<DocumentId>, Failure> {
-    let mut documents = lookup.everything()?;
-    for unknown in lookup.unknown()? {
-        documents.extend(unknown.documents);
-    }
+    written_on(lookup, &lookup.every_document()?)
+}
+
+/// The topics a version of `documents` carries as its machine, ended or not.
+pub(super) fn written_on(
+    lookup: &Lookup,
+    documents: &[Rc<Document>],
+) -> Result<BTreeSet<DocumentId>, Failure> {
     let writers: BTreeSet<&DocumentId> = (documents.iter())
         .flat_map(|document| document.headers())
         .map(|version| &version.envelope.machine)

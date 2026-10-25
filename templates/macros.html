@@ -1,5 +1,7 @@
 {% macro open(class, href, mark) %}<a{% if let Some(mark) = mark %} class="{% if !class.is_empty() %}{{ class }} {% endif %}{{ mark.class() }}"{% else if !class.is_empty() %} class="{{ class }}"{% endif %} href="{{ href }}"{% if let Some(mark) = mark %} title="{{ mark.title() }}"{% endif %}>{% endmacro %}
 
+{% macro chips(choices) %}{% for c in choices %}<a href="{{ c.link.href }}"{% if let Some(mark) = c.link.mark %} class="{{ mark.class() }}" title="{{ mark.title() }}"{% endif %}{% if c.current %} aria-current="true"{% endif %}>{{ c.link.text }}{% if let Some(count) = c.count %} <span class="count">{{ count }}</span>{% endif %}</a>{% endfor %}{% endmacro %}
+
 {% macro link(l) %}{% call open("", l.href, l.mark) %}{% endcall %}{{ l.text }}</a>{% endmacro %}
 
 {% macro text(t, class) %}{% if let Some(to) = t.link() %}{% call open(class, to.href, to.mark) %}{% endcall %}{{ to.text }}</a>{% else if !class.is_empty() %}<span class="{{ class }}">{{ t.words() }}</span>{% else %}{{ t.words() }}{% endif %}{% endmacro %}

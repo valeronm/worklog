@@ -194,7 +194,8 @@ fn logged(deps: &ReadDeps, query: &Query) -> Result<String, Problem> {
             .filter(|n| (1..=MOST_LOGGED).contains(n))
             .ok_or_else(|| Problem::BadRequest(format!("n: a number from 1 to {MOST_LOGGED}")))?,
     };
-    Ok(LogPage::new(&search::log(deps, limit, None)?).render()?)
+    let log = search::log(deps, limit, given(query.get("machine")))?;
+    Ok(LogPage::new(&log, query.get("n")).render()?)
 }
 
 fn year(query: &Query) -> Result<Option<i32>, Problem> {

@@ -3,6 +3,7 @@
 {% block title %}Log{% endblock %}
 {% block content %}
 <h1>Log</h1>
+<p class="chips">{% call m::chips(machines) %}{% endcall %}</p>
 <p class="summary">{{ count }}</p>
 <table>
 <tr><th>Version</th><th>Written</th><th>Machine</th><th>Change</th><th>Document</th></tr>
