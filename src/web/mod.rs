@@ -238,7 +238,7 @@ fn route(deps: &ReadDeps, path: &str, query: &Query) -> Result<Page, Problem> {
         return Err(Problem::NotFound(format!("no page at {path}")));
     };
     let html = match place {
-        Place::Topics => Home::new(&list::topics(deps, None, false)?).render()?,
+        Place::Topics => Home::new(&list::topics(deps, None, ended)?, ended).render()?,
         Place::Stats => StatsPage::new(&activity::stats(deps, topic, year(query)?)?).render()?,
         Place::Facts => Listing::facts(&list::facts(deps, topic, ended)?, scope()?).render()?,
         Place::Ideas => Listing::ideas(&list::ideas(deps, topic, ended)?, scope()?).render()?,

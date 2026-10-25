@@ -2,7 +2,7 @@
 
 use askama::Template;
 
-use super::links::{Layout, Line, Link, Place, Text, doc_links, with_query};
+use super::links::{Layout, Line, Link, Place, Text, doc_links, ended_switch};
 use super::versions::document_link;
 use crate::app::check::{Check, Finding};
 use crate::app::list::{EntryRow, FactRow};
@@ -120,20 +120,14 @@ impl Listing {
         if let Some(under) = &scope.under {
             leave_out(&mut rows, &under.href);
         }
-        let (text, ended) = if scope.ended {
-            ("unended only", None)
-        } else {
-            ("ended too", Some("1"))
-        };
-        let parameters = [("topic", scope.topic), ("on", scope.on), ("ended", ended)];
-        let href = with_query(place.route(), &parameters);
+        let parameters = [("topic", scope.topic), ("on", scope.on)];
         Listing {
             layout: Layout::at(Some(place)),
             title: place.title(),
             count: counted(rows.len(), one, several),
             on: scope.on.map(str::to_owned),
             under: scope.under,
-            ended_switch: Link::plain(text.to_owned(), href),
+            ended_switch: ended_switch(place.route(), &parameters, scope.ended),
             rows,
         }
     }

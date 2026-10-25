@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use askama::Template;
 
-use super::links::{Layout, Line, Link, NavLink, Place, doc_link, doc_links};
+use super::links::{Layout, Line, Link, NavLink, Place, doc_link, doc_links, ended_switch};
 use crate::app::list::TopicRow;
 use crate::domain::id::DocumentId;
 use crate::render::filed_counts;
@@ -113,14 +113,16 @@ const UNDER_THE_TOPICS: [Place; 9] = [
 #[template(path = "home.html")]
 pub struct Home {
     pub layout: Layout,
+    pub ended_switch: Link,
     pub steps: Vec<Step>,
     pub more: Vec<NavLink>,
 }
 
 impl Home {
-    pub fn new(topics: &[TopicRow]) -> Home {
+    pub fn new(topics: &[TopicRow], ended: bool) -> Home {
         Home {
             layout: Layout::at(Some(Place::Topics)),
+            ended_switch: ended_switch(Place::Topics.route(), &[], ended),
             steps: nested(topics),
             more: Place::links(&UNDER_THE_TOPICS, None),
         }
@@ -157,7 +159,7 @@ mod tests {
     }
 
     fn outline(topics: &[TopicRow]) -> String {
-        let steps = Home::new(topics).steps;
+        let steps = Home::new(topics, false).steps;
         let words: Vec<String> = (steps.iter())
             .map(|step| match step {
                 Step::Open => "(".to_owned(),
@@ -261,7 +263,7 @@ mod tests {
                 row
             })
             .collect();
-        let home = Home::new(&topics);
+        let home = Home::new(&topics, false);
         let lines = (home.steps.iter())
             .filter(|step| matches!(step, Step::Topic(_)))
             .count();

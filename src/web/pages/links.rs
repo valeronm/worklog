@@ -129,6 +129,17 @@ impl Link {
     }
 }
 
+/// `ended` is what the page at `route` shows; the link leads to the other state.
+pub(super) fn ended_switch(route: &str, parameters: &[(&str, Option<&str>)], ended: bool) -> Link {
+    let (text, switched) = if ended {
+        ("unended only", None)
+    } else {
+        ("ended too", Some("1"))
+    };
+    let parameters = [parameters, &[("ended", switched)]].concat();
+    Link::plain(text.to_owned(), with_query(route, &parameters))
+}
+
 pub enum Text {
     Plain(String),
     Link(Link),

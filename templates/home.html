@@ -3,6 +3,7 @@
 {% block title %}Topics{% endblock %}
 {% block content %}
 <h1>Topics</h1>
+<p class="summary">{% call m::link(ended_switch) %}{% endcall %}</p>
 {% if steps.is_empty() %}<p class="muted">No topics.</p>{% endif %}
 {%- for step in steps -%}
 {%- match step -%}

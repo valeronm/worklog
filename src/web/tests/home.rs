@@ -67,6 +67,35 @@ fn home_nests_the_unended_topics_under_what_they_are_part_of_with_their_counts()
 }
 
 #[test]
+fn home_shows_the_ended_topics_too_when_asked() {
+    let (world, lantern) = world();
+    let globe = topic(
+        &world,
+        "globe",
+        &format!("{}{}", part_of(&[&lantern]), ENDED),
+    );
+    let live = main_of(&ok(&world, "/")).to_owned();
+    lacks(&live, "globe");
+    has(
+        &live,
+        "<p class=\"summary\"><a href=\"/?ended=1\">ended too</a></p>",
+    );
+
+    let html = ok(&world, "/?ended=1");
+    let main = main_of(&html);
+    has(
+        main,
+        &format!(
+            "<a class=\"title ended\" href=\"/doc/{globe}\" title=\"ended retired\">globe</a>"
+        ),
+    );
+    has(
+        main,
+        "<p class=\"summary\"><a href=\"/\">unended only</a></p>",
+    );
+}
+
+#[test]
 fn home_has_one_full_line_for_a_topic_however_many_topics_it_is_part_of() {
     let (world, _) = world();
     let mut above: Vec<DocumentId> = Vec::new();
