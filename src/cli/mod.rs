@@ -234,10 +234,7 @@ fn announce(
     if let Some(reach) = reach {
         fail(
             err,
-            &format_args!(
-                "{address}: the store is served without a login to {reach}, and a client that \
-                 stalls can block the server"
-            ),
+            &format_args!("{address}: the store is served without a login to {reach}"),
         );
     }
     writeln!(out, "http://{address}")?;
@@ -835,25 +832,17 @@ mod tests {
         ] {
             assert_eq!(announced(address), (line.to_owned(), String::new()));
         }
-        for (address, line) in [
-            ("192.168.7.20:4000", "http://192.168.7.20:4000\n"),
-            ("10.0.0.5:8080", "http://10.0.0.5:8080\n"),
-            ("[fe80::1]:8080", "http://[fe80::1]:8080\n"),
+        let reached = "whatever reaches this address";
+        let everywhere = "every network this host is on";
+        for (address, line, reach) in [
+            ("192.168.7.20:4000", "http://192.168.7.20:4000\n", reached),
+            ("10.0.0.5:8080", "http://10.0.0.5:8080\n", reached),
+            ("[fe80::1]:8080", "http://[fe80::1]:8080\n", reached),
+            ("0.0.0.0:8080", "http://0.0.0.0:8080\n", everywhere),
+            ("[::]:4000", "http://[::]:4000\n", everywhere),
         ] {
-            let note = format!(
-                "{NAME}: {address}: the store is served without a login to whatever \
-                 reaches this address, and a client that stalls can block the server\n"
-            );
-            assert_eq!(announced(address), (line.to_owned(), note));
-        }
-        for (address, line) in [
-            ("0.0.0.0:8080", "http://0.0.0.0:8080\n"),
-            ("[::]:4000", "http://[::]:4000\n"),
-        ] {
-            let note = format!(
-                "{NAME}: {address}: the store is served without a login to every network \
-                 this host is on, and a client that stalls can block the server\n"
-            );
+            let note =
+                format!("{NAME}: {address}: the store is served without a login to {reach}\n");
             assert_eq!(announced(address), (line.to_owned(), note));
         }
 
