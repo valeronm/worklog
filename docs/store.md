@@ -90,7 +90,7 @@ The header's keys:
 | `ancestors` | a list of version ids | every version behind this one, the parents included |
 | `written` | a TOML offset date-time, unquoted | when it was written, by the clock and at the offset of the writing host |
 | `machine` | a document id | the machine topic of the host that wrote it |
-| `change` | text | the command that wrote it, as one word; a command that gives a reason writes `: ` and the reason after the word |
+| `change` | text | one word: the command that wrote it, or the reason a document ended for; a version an older binary wrote may carry `: ` and a reason after the word |
 | `fields` | a table | the document's own fields, which `documents.md` lists by kind |
 | `links` | a table | each `[[target]]` of the body and the summary, with the id of the document it resolved to when the version was saved, or `""` for one that resolved to none |
 

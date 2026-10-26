@@ -156,7 +156,7 @@ fn changed(
             note: said,
             by,
         } => amend::end(deps, target, reason, &note(said), by.as_deref())?,
-        ChangeCommand::Reopen { target, why } => amend::reopen(deps, target, why)?,
+        ChangeCommand::Reopen { target } => amend::reopen(deps, target)?,
         ChangeCommand::Done {
             followup,
             note: said,

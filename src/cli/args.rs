@@ -272,7 +272,6 @@ pub enum ChangeCommand {
     Reopen {
         #[arg(add = complete::ended())]
         target: String,
-        why: String,
     },
     /// End a followup as done; the note is optional
     Done {
@@ -510,7 +509,7 @@ mod tests {
             "worklog verify lantern/relay",
             "worklog end lantern retired",
             "worklog end lantern/relay superseded note --by lantern/fuse",
-            "worklog reopen lantern why",
+            "worklog reopen lantern",
             "worklog done 0a1b",
             "worklog done 0a1b note",
             "worklog drop 0a1b",

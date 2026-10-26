@@ -63,11 +63,7 @@ pub fn end(
     admit(deps, &lookup, &target.id, &ended, &target.head.body, reason)
 }
 
-pub fn reopen(deps: &Deps, address: &str, why: &str) -> Result<Written, Failure> {
-    let why = why.trim();
-    if why.is_empty() {
-        return Err(Failure::Usage("a reopening says why".to_owned()));
-    }
+pub fn reopen(deps: &Deps, address: &str) -> Result<Written, Failure> {
     let lookup = Lookup::new(deps.read().store);
     let target = open(deps, &lookup, address)?;
     if let Content::Claim(_) = target.record.content {
@@ -87,7 +83,7 @@ pub fn reopen(deps: &Deps, address: &str, why: &str) -> Result<Written, Failure>
         &target.id,
         &reopened,
         &target.head.body,
-        &format!("reopen: {why}"),
+        "reopen",
     )
 }
 
@@ -226,23 +222,16 @@ mod tests {
     }
 
     #[test]
-    fn a_reopened_document_has_no_ending_and_says_why() {
+    fn a_reopened_document_has_no_ending() {
         let (world, lantern) = world();
         let relay = fact(&world, &lantern, "relay", "");
         let deps = world.deps();
-        let text = refused(reopen(&deps, "lantern/relay", "still true"));
+        let text = refused(reopen(&deps, "lantern/relay"));
         assert!(text.contains("is not ended"), "{text}");
         end(&deps, "lantern/relay", "false", "n", None).unwrap();
-        assert!(matches!(
-            reopen(&deps, "lantern/relay", " "),
-            Err(Failure::Usage(_))
-        ));
-        reopen(&deps, "lantern/relay", "still true on the desk").unwrap();
+        reopen(&deps, "lantern/relay").unwrap();
         assert!(record(&world, &relay).ending.is_none());
-        assert_eq!(
-            head(&world, &relay).envelope.change,
-            "reopen: still true on the desk"
-        );
+        assert_eq!(head(&world, &relay).envelope.change, "reopen");
     }
 
     #[test]
@@ -252,7 +241,7 @@ mod tests {
         let deps = world.deps();
         end(&deps, "lantern/relay", "false", "n", None).unwrap();
         fact(&world, &lantern, "relay", "");
-        let text = refused(reopen(&deps, relay.as_str(), "back"));
+        let text = refused(reopen(&deps, relay.as_str()));
         assert!(
             text.contains("lantern/relay: name: relay is taken by lantern/relay"),
             "{text}"
@@ -284,13 +273,13 @@ mod tests {
         let deps = world.deps();
         end(&deps, "lantern/relay", "false", "n", None).unwrap();
         end(&deps, "lantern", "retired", "n", None).unwrap();
-        let text = refused(reopen(&deps, relay.as_str(), "back"));
+        let text = refused(reopen(&deps, relay.as_str()));
         assert!(
             text.contains("lantern/relay: topic: lantern is ended"),
             "{text}"
         );
-        reopen(&deps, lantern.as_str(), "back").unwrap();
-        reopen(&deps, relay.as_str(), "back").unwrap();
+        reopen(&deps, lantern.as_str()).unwrap();
+        reopen(&deps, relay.as_str()).unwrap();
         assert!(record(&world, &relay).ending.is_none());
     }
 
@@ -302,7 +291,7 @@ mod tests {
         end(&deps, "lantern/relay", "false", "n", None).unwrap();
         let other = fact(&world, &lantern, "relay", "");
         fork(&world, &other, &fact_fields(&lantern, "relay", "s", ""));
-        let text = refused(reopen(&deps, relay.as_str(), "back"));
+        let text = refused(reopen(&deps, relay.as_str()));
         assert!(
             text.contains("lantern/relay: name: relay is taken by lantern/relay"),
             "{text}"
@@ -367,7 +356,7 @@ mod tests {
             .drafts
             .write(&Draft::of(&head(&world, &relay)))
             .unwrap();
-        let text = refused(reopen(&deps, relay.as_str(), "back"));
+        let text = refused(reopen(&deps, relay.as_str()));
         assert!(text.contains("is open"), "{text}");
     }
 
@@ -420,7 +409,7 @@ mod tests {
         let placed = claim::claim(&deps, "lantern", Some("~/lantern")).unwrap();
         claim::unclaim(&deps, "lantern", Some("~/lantern")).unwrap();
         claim::claim(&deps, "lantern", Some("~/lantern")).unwrap();
-        let text = refused(reopen(&deps, placed.document.as_str(), "again"));
+        let text = refused(reopen(&deps, placed.document.as_str()));
         assert!(
             text.contains("lantern at ~/lantern: a claim is never reopened; claim again"),
             "{text}"

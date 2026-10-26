@@ -99,7 +99,7 @@ draft of its document is open.
   idea, a followup, a claim or another topic still names it.
   An ended document still reads with `show`, is left out of listings
   unless `--ended` is given, and takes no change until `worklog
-  reopen <target> <why>` brings it back.
+  reopen <target>` brings it back.
   Ending a document leaves every live document that links it resting on
   something that is over; `show` lists them before it is ended. After an `end`, a `done` or a `drop`, run
   `worklog check`, and for each document it names as linking the ended

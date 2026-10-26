@@ -658,10 +658,7 @@ fn a_document_is_renamed_moved_verified_ended_and_reopened() {
     assert_stored(&ended, "atlas/fuse");
     let relay = host.row("atlas/relay-pin", "atlas/relay-pin  Pin four");
     assert_eq!(undated(&host.ok(&["facts"])), relay);
-    assert_stored(
-        &host.ok(&["reopen", "atlas/fuse", "Still wired"]),
-        "atlas/fuse",
-    );
+    assert_stored(&host.ok(&["reopen", "atlas/fuse"]), "atlas/fuse");
     assert_eq!(
         undated(&host.ok(&["facts"])),
         host.row("atlas/fuse", "atlas/fuse  Two amps") + &relay
@@ -1212,10 +1209,7 @@ fn a_command_that_changes_a_document_prints_its_stored_version_as_json() {
         &host.json(&["end", "atlas/fuse", "false", "It was three amps"]),
         "atlas/fuse",
     );
-    assert_written(
-        &host.json(&["reopen", "atlas/fuse", "Still wired"]),
-        "atlas/fuse",
-    );
+    assert_written(&host.json(&["reopen", "atlas/fuse"]), "atlas/fuse");
     assert_written(
         &host.json(&["trigger", &first, "2026-11-01", "The part arrives"]),
         &first,
@@ -3228,7 +3222,6 @@ fn a_shell_completes_a_prefix_a_comma_list_and_directories_but_never_files() {
         &["search", "pro"][..],
         &["new", "topic", "pro"],
         &["rename", "lantern", "pro"],
-        &["reopen", "lantern", "pro"],
     ] {
         assert_eq!(host.completed(words), "", "{words:?}");
     }

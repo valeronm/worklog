@@ -1219,7 +1219,7 @@ mod tests {
             checked(&world).problems,
             [finding("lantern", "part_of: atlas is ended")]
         );
-        let text = refused(amend::reopen(&deps, "atlas", "needed again"));
+        let text = refused(amend::reopen(&deps, "atlas"));
         assert!(
             text.contains("atlas: part_of: would make atlas part of itself"),
             "{text}"

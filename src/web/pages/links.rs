@@ -304,7 +304,7 @@ impl Stamped {
         }
     }
 
-    /// A reopening writes its reason into the change after a colon.
+    /// A version an older binary wrote may carry a reason after its change's word and a colon.
     pub fn change_cut(&self) -> Option<(&str, &str)> {
         let whole = self.change.as_deref()?;
         let (word, _) = whole.split_once(':')?;

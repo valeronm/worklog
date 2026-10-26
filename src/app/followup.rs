@@ -440,7 +440,7 @@ mod tests {
         .unwrap();
         assert_eq!(followup(&world, &held).trigger, None);
         crate::app::amend::end(&deps, held.as_str(), "done", "", None).unwrap();
-        crate::app::amend::reopen(&deps, held.as_str(), "ended by mistake").unwrap();
+        crate::app::amend::reopen(&deps, held.as_str()).unwrap();
         assert_eq!(followup(&world, &held).trigger, None);
     }
 
