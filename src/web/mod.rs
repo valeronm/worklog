@@ -40,7 +40,6 @@ enum Problem {
     NotAllowed(String),
     Misdirected,
     Broken(String),
-    Busy,
 }
 
 impl Problem {
@@ -54,10 +53,6 @@ impl Problem {
                 "the request names a host this server does not answer as".to_owned(),
             ),
             Problem::Broken(message) => (500, message),
-            Problem::Busy => (
-                503,
-                "too many responses are still being read; ask again".to_owned(),
-            ),
         }
     }
 
