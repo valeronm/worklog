@@ -4,11 +4,11 @@ use std::cmp::Reverse;
 use std::collections::BTreeSet;
 use std::rc::Rc;
 
-use crate::app::heads::kind_of;
+use crate::app::heads::{ended_for, kind_of, row_head};
 use crate::app::index::Topics;
 use crate::app::lookup::{Lookup, Names, write_gate};
 use crate::app::machines::machine_topics;
-use crate::app::rows::{Shown, row, urgency};
+use crate::app::rows::{Shown, row_at, urgency};
 use crate::app::{Failure, ReadDeps};
 use crate::domain::document::Document;
 use crate::domain::id::DocumentId;
@@ -70,21 +70,23 @@ fn offered_from(
     };
     let mut found = Vec::new();
     for (at, document) in gathered(lookup, kinds, wanted)? {
-        let shown = row(&topics, &document);
-        let ended = (shown.as_ref()).is_some_and(|shown| shown.row.ended.is_some());
+        let head = row_head(&document);
+        let reads = head.is_some();
+        let ended = (head.as_ref()).is_some_and(|(_, record)| ended_for(record).is_some());
         let writable = || write_gate(&document, drafted.contains(document.id()), "").is_ok();
         let kept = match wanted {
-            Wanted::Live => shown.is_some() && !ended,
-            Wanted::Writable => shown.is_some() && !ended && writable(),
+            Wanted::Live => reads && !ended,
+            Wanted::Writable => reads && !ended && writable(),
             Wanted::Reopenable => ended && writable(),
             Wanted::LiveOrEnded(ended_kinds) => {
-                shown.is_some() && (!ended || ended_kinds.contains(&kinds[at]))
+                reads && (!ended || ended_kinds.contains(&kinds[at]))
             }
             Wanted::Forked => true,
         };
         if !kept {
             continue;
         }
+        let shown = head.map(|head| row_at(&topics, &document, head));
         let id = document.id();
         let (label, summary) = match &shown {
             Some(shown) => (shown.row.label.as_str(), shown.row.summary.as_str()),

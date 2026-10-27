@@ -4,7 +4,7 @@ use std::rc::Rc;
 use serde::Serialize;
 
 use crate::app::heads::{
-    ended_for, filed_on, held_under, is_forked, label_of, labeling_topic, row_head,
+    Read, ended_for, filed_on, held_under, is_forked, label_of, labeling_topic, row_head,
 };
 use crate::app::index::Topics;
 use crate::app::lookup::Lookup;
@@ -65,7 +65,15 @@ pub(super) struct Shown<'d> {
 }
 
 pub(super) fn row<'d>(topics: &Topics, document: &'d Document) -> Option<Shown<'d>> {
-    let (head, record) = row_head(document)?;
+    Some(row_at(topics, document, row_head(document)?))
+}
+
+/// The head must be the one `row_head` gives for `document`.
+pub(super) fn row_at<'d>(
+    topics: &Topics,
+    document: &'d Document,
+    (head, record): Read<'d>,
+) -> Shown<'d> {
     let id = document.id().clone();
     let shown = topics.references(filed_on(&record.content));
     let summary = record.content.summary().unwrap_or_default().to_owned();
@@ -80,7 +88,7 @@ pub(super) fn row<'d>(topics: &Topics, document: &'d Document) -> Option<Shown<'
         forked: is_forked(document),
         ended: ended_for(&record),
     };
-    Some(Shown { row, head, record })
+    Shown { row, head, record }
 }
 
 pub(super) fn members(
