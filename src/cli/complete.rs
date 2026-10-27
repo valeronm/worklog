@@ -79,6 +79,7 @@ const FACTS: Source = (&[FACT], Wanted::Writable);
 const ENTRIES: Source = (&[ENTRY], Wanted::Live);
 const FOLLOWUPS: Source = (&[FOLLOWUP], Wanted::Writable);
 const DOCUMENTS: Source = (&[TOPIC, FACT, ENTRY, FOLLOWUP], Wanted::Live);
+const SHOWN: Source = (&[TOPIC, FACT, ENTRY, FOLLOWUP], Wanted::LiveOrEnded);
 const WRITABLE: Source = (&[TOPIC, FACT, ENTRY, FOLLOWUP], Wanted::Writable);
 const RENAMABLE: Source = (&[TOPIC, FACT, ENTRY], Wanted::Writable);
 const MOVABLE: Source = (&[FACT, ENTRY, FOLLOWUP], Wanted::Writable);
@@ -86,17 +87,22 @@ const TOPICS_AND_ENTRIES: Source = (&[TOPIC, ENTRY], Wanted::Live);
 const FORKED: Source = (&KindOf::ALL, Wanted::Forked);
 const ENDED: Source = (&[TOPIC, FACT, ENTRY, FOLLOWUP], Wanted::Reopenable);
 
-fn candidates(offered: &[Offered]) -> Vec<CompletionCandidate> {
-    let candidate = |offered: &Offered| described(&offered.address, &offered.summary);
+// clap keeps a hidden candidate only where no visible one, a flag included, starts with what
+// was typed.
+fn candidates(offered: &[Offered], hiding_ended: bool) -> Vec<CompletionCandidate> {
+    let candidate = |offered: &Offered| {
+        described(&offered.address, &offered.summary).hide(hiding_ended && offered.ended)
+    };
     offered.iter().map(candidate).collect()
 }
 
 fn addresses(deps: &ReadDeps, (kinds, wanted): Source) -> Listed {
-    Ok(candidates(&offer::offered(deps, kinds, wanted)?))
+    let offered = offer::offered(deps, kinds, wanted)?;
+    Ok(candidates(&offered, wanted == Wanted::LiveOrEnded))
 }
 
 fn machine_addresses(deps: &ReadDeps) -> Listed {
-    Ok(candidates(&offer::machines(deps)?))
+    Ok(candidates(&offer::machines(deps)?, false))
 }
 
 fn draft_names(deps: &ReadDeps) -> Listed {
@@ -168,6 +174,10 @@ pub(super) fn followups() -> ArgValueCandidates {
 
 pub(super) fn documents() -> ArgValueCandidates {
     stored(DOCUMENTS)
+}
+
+pub(super) fn shown() -> ArgValueCandidates {
+    stored(SHOWN)
 }
 
 pub(super) fn writable() -> ArgValueCandidates {
@@ -335,6 +345,36 @@ mod tests {
             pairs(addresses(&deps.read(), TOPICS_AND_ENTRIES)),
             of(&[&topics, &entries])
         );
+    }
+
+    #[test]
+    fn only_the_shown_source_hides_its_ended_candidates() {
+        let (world, lantern) = world();
+        fact(&world, &lantern, "relay", "");
+        fact(&world, &lantern, "fuse", ENDED_FACT);
+        let deps = world.deps();
+        let hidden = |source: Source| -> Vec<(String, bool)> {
+            let listed = addresses(&deps.read(), source).expect("candidates");
+            let flag =
+                |candidate: &CompletionCandidate| (pair(candidate).0, candidate.is_hide_set());
+            listed.iter().map(flag).collect()
+        };
+        let flagged = |rows: &[(&str, bool)]| -> Vec<(String, bool)> {
+            (rows.iter())
+                .map(|(value, hide)| ((*value).to_owned(), *hide))
+                .collect()
+        };
+
+        assert_eq!(
+            hidden(SHOWN),
+            flagged(&[
+                ("desk", false),
+                ("lantern", false),
+                ("lantern/relay", false),
+                ("lantern/fuse", true),
+            ])
+        );
+        assert_eq!(hidden(super::ENDED), flagged(&[("lantern/fuse", false)]));
     }
 
     #[test]

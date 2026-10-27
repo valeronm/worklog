@@ -324,7 +324,7 @@ pub enum ReadCommand {
     /// Print a document as it stands, every head of a fork, or one version by its id, with
     /// the documents linking it
     Show {
-        #[arg(add = complete::documents())]
+        #[arg(add = complete::shown())]
         target: String,
         /// Ended documents linking it too
         #[arg(long)]
@@ -332,7 +332,7 @@ pub enum ReadCommand {
     },
     /// Every version of a document
     History {
-        #[arg(add = complete::documents())]
+        #[arg(add = complete::shown())]
         target: String,
     },
     /// A draft against what it started from, a version against its parents, or two versions

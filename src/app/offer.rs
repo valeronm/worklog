@@ -21,6 +21,8 @@ pub enum Wanted {
     Writable,
     /// Ended, and passing `write_gate`.
     Reopenable,
+    /// Live or ended, with a head that reads.
+    LiveOrEnded,
     /// Ended or not, and with a head that reads or with none.
     Forked,
 }
@@ -33,11 +35,12 @@ pub struct Offered {
     pub address: String,
     /// Empty for a claim and for a document no head of which reads.
     pub summary: String,
+    pub ended: bool,
 }
 
 /// The documents of `kinds` that are as `wanted`, each with an address its command resolves
 /// to it and to no other document. The live ones come kind by kind in the order of `kinds`,
-/// each kind as its listing orders it; the ended and the forked by label.
+/// each kind as its listing orders it, then the ended by label; the forked by label.
 pub fn offered(deps: &ReadDeps, kinds: &[KindOf], wanted: Wanted) -> Result<Vec<Offered>, Failure> {
     offered_from(deps, &Lookup::new(deps.store), kinds, wanted)
 }
@@ -63,17 +66,18 @@ fn offered_from(
     let today = deps.today()?;
     let drafted = match wanted {
         Wanted::Writable | Wanted::Reopenable => deps.drafts.documents()?,
-        Wanted::Live | Wanted::Forked => BTreeSet::new(),
+        Wanted::Live | Wanted::LiveOrEnded | Wanted::Forked => BTreeSet::new(),
     };
     let mut found = Vec::new();
     for (at, document) in gathered(lookup, kinds, wanted)? {
         let shown = row(&topics, &document);
-        let ended = shown.as_ref().map(|shown| shown.row.ended.is_some());
+        let ended = (shown.as_ref()).is_some_and(|shown| shown.row.ended.is_some());
         let writable = || write_gate(&document, drafted.contains(document.id()), "").is_ok();
         let kept = match wanted {
-            Wanted::Live => ended == Some(false),
-            Wanted::Writable => ended == Some(false) && writable(),
-            Wanted::Reopenable => ended == Some(true) && writable(),
+            Wanted::Live => shown.is_some() && !ended,
+            Wanted::Writable => shown.is_some() && !ended && writable(),
+            Wanted::Reopenable => ended && writable(),
+            Wanted::LiveOrEnded => shown.is_some(),
             Wanted::Forked => true,
         };
         if !kept {
@@ -84,14 +88,16 @@ fn offered_from(
             Some(shown) => (shown.row.label.as_str(), shown.row.summary.as_str()),
             None => (id.short(), ""),
         };
-        let place = match (wanted, &shown) {
-            (Wanted::Live | Wanted::Writable, Some(shown)) => (at, listed(shown, today)),
-            _ => (0, (0, None, None, label.to_owned())),
+        let by_kind = wanted != Wanted::Forked;
+        let place = match &shown {
+            Some(shown) if by_kind && !ended => (false, at, listed(shown, today)),
+            _ => (by_kind && ended, 0, (0, None, None, label.to_owned())),
         };
         let offered = Offered {
             document: id.clone(),
             address: names.address(id, label)?,
             summary: summary.to_owned(),
+            ended,
         };
         found.push((place, offered));
     }
@@ -378,6 +384,32 @@ mod tests {
     }
 
     #[test]
+    fn live_or_ended_offers_the_live_as_listed_then_the_ended_by_label_each_marked() {
+        let (world, lantern) = world();
+        fact(&world, &lantern, "relay", "");
+        fact(&world, &lantern, "shade", ENDED_FACT);
+        fact(&world, &lantern, "fuse", ENDED_FACT);
+        fact(&world, &lantern, "dimmer", "idea = true\n");
+        crate::app::draft::checkout(&world.deps(), "lantern/relay").unwrap();
+        let unread = fact(&world, &lantern, "case", ENDED_FACT);
+        fork(&world, &unread, "name = 4\n");
+
+        let listed = offered(&world.deps().read(), &[KindOf::Fact], Wanted::LiveOrEnded).unwrap();
+        let rows: Vec<(&str, bool)> = (listed.iter())
+            .map(|offered| (offered.address.as_str(), offered.ended))
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                ("lantern/relay", false),
+                ("lantern/dimmer", false),
+                ("lantern/fuse", true),
+                ("lantern/shade", true),
+            ]
+        );
+    }
+
+    #[test]
     fn the_machines_offered_are_the_live_topics_a_version_was_written_on() {
         let (world, lantern) = world();
         let phone = topic(&world, "phone", "");
@@ -451,14 +483,17 @@ mod tests {
         );
     }
 
-    fn scans_for(ended: usize) -> usize {
+    fn scans_for(ended: usize, wanted: Wanted) -> usize {
         let (world, lantern) = world();
         for _ in 0..ended {
             followup(&world, &[&lantern], "s", DONE);
         }
         let world = world.counted();
-        let offered = offered(&world.deps().read(), &NAMED, Wanted::Reopenable).unwrap();
-        assert_eq!(offered.len(), ended);
+        let offered = offered(&world.deps().read(), &NAMED, wanted).unwrap();
+        assert_eq!(
+            offered.iter().filter(|offered| offered.ended).count(),
+            ended
+        );
         let store = &world.store;
         assert_eq!(store.holdings.get(), 0);
         store.scans()
@@ -488,6 +523,8 @@ mod tests {
 
     #[test]
     fn the_store_is_asked_the_same_whatever_the_number_of_documents_offered() {
-        assert_eq!(scans_for(1), scans_for(500));
+        for wanted in [Wanted::Reopenable, Wanted::LiveOrEnded] {
+            assert_eq!(scans_for(1, wanted), scans_for(500, wanted), "{wanted:?}");
+        }
     }
 }

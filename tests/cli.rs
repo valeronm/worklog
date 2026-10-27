@@ -3190,6 +3190,26 @@ fn each_argument_is_completed_from_the_list_its_command_takes_and_a_tab_writes_n
 }
 
 #[test]
+fn show_and_history_offer_an_ended_document_where_no_live_one_matches_what_was_typed() {
+    let host = Host::stocked();
+    host.ok(&["end", "lantern/fuse", "false", "It blew"]);
+    host.fact("fact", "lantern/fuselink");
+
+    for command in ["show", "history"] {
+        let completed = |typed: &str| host.completed(&[command, typed]);
+        assert!(!completed("").contains("lantern/fuse\t"), "{command}");
+        assert_eq!(completed("lantern/fuse"), "lantern/fuselink\tPin four\n");
+        host.ok(&["end", "lantern/fuselink", "false", "It blew"]);
+        assert_eq!(
+            completed("lantern/fuse"),
+            "lantern/fuse\tPin four\nlantern/fuselink\tPin four\n",
+            "{command}"
+        );
+        host.ok(&["reopen", "lantern/fuselink"]);
+    }
+}
+
+#[test]
 fn a_draft_that_does_not_read_is_counted_listed_and_discarded() {
     let host = Host::stocked();
     let path = host.ok(&["checkout", "lantern"]);
