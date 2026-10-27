@@ -79,7 +79,10 @@ const FACTS: Source = (&[FACT], Wanted::Writable);
 const ENTRIES: Source = (&[ENTRY], Wanted::Live);
 const FOLLOWUPS: Source = (&[FOLLOWUP], Wanted::Writable);
 const DOCUMENTS: Source = (&[TOPIC, FACT, ENTRY, FOLLOWUP], Wanted::Live);
-const SHOWN: Source = (&[TOPIC, FACT, ENTRY, FOLLOWUP], Wanted::LiveOrEnded);
+const SHOWN: Source = (
+    &[TOPIC, FACT, ENTRY, FOLLOWUP],
+    Wanted::LiveOrEnded(&[TOPIC, FACT, ENTRY]),
+);
 const WRITABLE: Source = (&[TOPIC, FACT, ENTRY, FOLLOWUP], Wanted::Writable);
 const RENAMABLE: Source = (&[TOPIC, FACT, ENTRY], Wanted::Writable);
 const MOVABLE: Source = (&[FACT, ENTRY, FOLLOWUP], Wanted::Writable);
@@ -98,7 +101,10 @@ fn candidates(offered: &[Offered], hiding_ended: bool) -> Vec<CompletionCandidat
 
 fn addresses(deps: &ReadDeps, (kinds, wanted): Source) -> Listed {
     let offered = offer::offered(deps, kinds, wanted)?;
-    Ok(candidates(&offered, wanted == Wanted::LiveOrEnded))
+    Ok(candidates(
+        &offered,
+        matches!(wanted, Wanted::LiveOrEnded(_)),
+    ))
 }
 
 fn machine_addresses(deps: &ReadDeps) -> Listed {
@@ -352,6 +358,7 @@ mod tests {
         let (world, lantern) = world();
         fact(&world, &lantern, "relay", "");
         fact(&world, &lantern, "fuse", ENDED_FACT);
+        let ordered = followup(&world, &[&lantern], "Order a fuse", DONE);
         let deps = world.deps();
         let hidden = |source: Source| -> Vec<(String, bool)> {
             let listed = addresses(&deps.read(), source).expect("candidates");
@@ -359,22 +366,22 @@ mod tests {
                 |candidate: &CompletionCandidate| (pair(candidate).0, candidate.is_hide_set());
             listed.iter().map(flag).collect()
         };
-        let flagged = |rows: &[(&str, bool)]| -> Vec<(String, bool)> {
-            (rows.iter())
-                .map(|(value, hide)| ((*value).to_owned(), *hide))
-                .collect()
-        };
+        let owned = |(value, hide): (&str, bool)| (value.to_owned(), hide);
 
         assert_eq!(
             hidden(SHOWN),
-            flagged(&[
+            [
                 ("desk", false),
                 ("lantern", false),
                 ("lantern/relay", false),
                 ("lantern/fuse", true),
-            ])
+            ]
+            .map(owned)
         );
-        assert_eq!(hidden(super::ENDED), flagged(&[("lantern/fuse", false)]));
+        assert_eq!(
+            hidden(super::ENDED),
+            [(ordered.short(), false), ("lantern/fuse", false)].map(owned)
+        );
     }
 
     #[test]

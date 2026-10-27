@@ -3195,18 +3195,29 @@ fn show_and_history_offer_an_ended_document_where_no_live_one_matches_what_was_t
     host.ok(&["end", "lantern/fuse", "false", "It blew"]);
     host.fact("fact", "lantern/fuselink");
 
-    for command in ["show", "history"] {
-        let completed = |typed: &str| host.completed(&[command, typed]);
-        assert!(!completed("").contains("lantern/fuse\t"), "{command}");
-        assert_eq!(completed("lantern/fuse"), "lantern/fuselink\tPin four\n");
-        host.ok(&["end", "lantern/fuselink", "false", "It blew"]);
+    let commands = ["show", "history"];
+    for command in commands {
+        assert!(
+            !host.completed(&[command, ""]).contains("lantern/fuse\t"),
+            "{command}"
+        );
         assert_eq!(
-            completed("lantern/fuse"),
+            host.completed(&[command, "lantern/fuse"]),
+            "lantern/fuselink\tPin four\n",
+            "{command}"
+        );
+    }
+    host.ok(&["end", "lantern/fuselink", "false", "It blew"]);
+    for command in commands {
+        assert_eq!(
+            host.completed(&[command, "lantern/fuse"]),
             "lantern/fuse\tPin four\nlantern/fuselink\tPin four\n",
             "{command}"
         );
-        host.ok(&["reopen", "lantern/fuselink"]);
     }
+    let ordered = host.followup("Order a fuse");
+    host.ok(&["done", &ordered]);
+    assert_eq!(host.completed(&["show", &ordered]), "");
 }
 
 #[test]
