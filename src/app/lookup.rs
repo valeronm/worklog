@@ -139,18 +139,18 @@ impl Held {
 // An id is no name.
 fn named(
     address: &Address,
-    holders: impl Fn(&Held) -> Result<Vec<Candidate>, Failure>,
+    chosen: impl Fn(&Held) -> Result<Found, Failure>,
 ) -> Result<Found, Failure> {
     let held = match address {
         Address::Topic(name) => Held::Topic(name.clone()),
-        Address::Fact { topic, name } => match choose(&holders(&Held::Topic(topic.clone()))?) {
+        Address::Fact { topic, name } => match chosen(&Held::Topic(topic.clone()))? {
             Found::One(topic) => Held::Fact(topic, name.clone()),
             other => return Ok(other),
         },
         Address::Entry { date, name } => Held::Entry(*date, name.clone()),
         Address::Id(_) => return Ok(Found::None),
     };
-    Ok(choose(&holders(&held)?))
+    chosen(&held)
 }
 
 /// Each kind is read whole the first time a name of it is asked for.
@@ -171,7 +171,7 @@ impl<'l, 'a> Names<'l, 'a> {
         }
     }
 
-    fn holders_of(&self, held: &Held) -> Result<Vec<Candidate>, Failure> {
+    fn chosen(&self, held: &Held) -> Result<Found, Failure> {
         let kind = held.kind();
         if self.read.borrow_mut().insert(kind.word()) {
             let mut holders = self.holders.borrow_mut();
@@ -181,12 +181,12 @@ impl<'l, 'a> Names<'l, 'a> {
                 }
             }
         }
-        Ok((self.holders.borrow().get(held).cloned()).unwrap_or_default())
+        Ok((self.holders.borrow().get(held)).map_or(Found::None, |held| choose(held)))
     }
 
     fn find(&self, address: &str) -> Result<Found, Failure> {
         match Address::parse(address) {
-            Ok(address) => named(&address, |held| self.holders_of(held)),
+            Ok(address) => named(&address, |held| self.chosen(held)),
             Err(_) => Ok(Found::None),
         }
     }
@@ -353,7 +353,7 @@ impl<'a> Lookup<'a> {
     // A name is tried before an id prefix.
     pub(super) fn find(&self, address: &str) -> Result<Found, Failure> {
         let parsed = Address::parse(address).map_err(|error| Failure::Usage(error.to_string()))?;
-        let named = named(&parsed, |held| self.holders_of(held))?;
+        let named = named(&parsed, |held| Ok(choose(&self.holders_of(held)?)))?;
         if named != Found::None {
             return Ok(named);
         }
