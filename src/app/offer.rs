@@ -496,7 +496,10 @@ mod tests {
             ended
         );
         let store = &world.store;
-        assert_eq!(store.holdings.get(), 0);
+        assert_eq!(
+            (store.holdings.get(), store.headers.get(), store.bodies()),
+            (0, 0, 0)
+        );
         store.scans()
     }
 
