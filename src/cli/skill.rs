@@ -149,30 +149,63 @@ mod tests {
         Some(Cli::parsed(args.chain(given)).err()?.kind())
     }
 
-    fn unbracketed_words(rest: &[String]) -> Vec<&String> {
+    fn bracketing(rest: &[String]) -> impl Iterator<Item = (&String, bool)> {
         let mut inside = false;
-        rest.iter()
-            .filter(|word| {
-                let bracketed = inside || word.starts_with('[');
-                inside = bracketed && !word.ends_with(']');
-                !bracketed
-            })
+        rest.iter().map(move |word| {
+            let bracketed = inside || word.starts_with('[');
+            inside = bracketed && !word.ends_with(']');
+            (word, bracketed)
+        })
+    }
+
+    fn unbracketed_words(rest: &[String]) -> Vec<&String> {
+        (bracketing(rest).filter(|(_, bracketed)| !bracketed))
+            .map(|(word, _)| word)
             .collect()
+    }
+
+    // Dropping a positional quoted as optional moves the words after it into its place, which
+    // the parse without it accepts.
+    fn required_in_brackets<'r>(command: &Command, rest: &'r [String]) -> Option<&'r str> {
+        let mut positionals = command.get_positionals().peekable();
+        let mut words = bracketing(rest);
+        while let Some((word, bracketed)) = words.next() {
+            let bare = unbracketed(word);
+            if bare.starts_with('-') {
+                if flag(command, bare).is_some_and(|arg| arg.get_action().takes_values()) {
+                    words.next();
+                }
+                continue;
+            }
+            let arg = positionals.peek()?;
+            if bracketed && arg.is_required_set() {
+                return Some(word);
+            }
+            let variadic = (arg.get_num_args()).is_some_and(|count| count.max_values() > 1);
+            if !variadic {
+                positionals.next();
+            }
+        }
+        None
     }
 
     fn misquoted(text: &str) -> Vec<String> {
         let root = root();
         let mut wrong = Vec::new();
         for Quoted { path, rest } in quoted(text, &root) {
-            if command(&root, &path).is_none() || rest.is_empty() {
+            let Some(named) = command(&root, &path).filter(|_| !rest.is_empty()) else {
                 continue;
-            }
+            };
             let whole: Vec<&String> = rest.iter().collect();
             if let Some(kind) = refusal(&path, &whole) {
                 wrong.push(format!("`{path}` is refused: {kind:?}"));
             } else if let Some(kind) = refusal(&path, &unbracketed_words(&rest)) {
                 wrong.push(format!(
                     "`{path}` is refused without what is quoted as optional: {kind:?}"
+                ));
+            } else if let Some(word) = required_in_brackets(named, &rest) {
+                wrong.push(format!(
+                    "`{path}` requires what is quoted as optional: {word}"
                 ));
             }
         }
@@ -400,10 +433,28 @@ mod tests {
     }
 
     #[test]
+    fn a_required_argument_quoted_as_optional_is_found() {
+        for (line, found) in [
+            (
+                "worklog diff [target] <other>",
+                "`diff` requires what is quoted as optional: [target]",
+            ),
+            (
+                "worklog trigger [followup] <date> <why>",
+                "`trigger` requires what is quoted as optional: [followup]",
+            ),
+        ] {
+            assert_eq!(misquoted(&format!("`{line}`")), [found], "{line}");
+        }
+    }
+
+    #[test]
     fn a_command_line_the_cli_takes_is_passed() {
         for line in [
             "worklog show",
+            "worklog diff <target> [other]",
             "worklog end <target> <reason> [note] [--by <document>]",
+            "worklog end [--by <document>] <target> <reason>",
             "worklog drop <followup> <note>",
             "worklog move <from> <to> <targets…>",
             "worklog move lantern atlas lantern/relay lantern/fuse",
