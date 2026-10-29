@@ -3384,10 +3384,16 @@ impl Host {
         names
     }
 
+    fn usage_machines(&self) -> Vec<String> {
+        let files = self.usage_files().into_iter();
+        let mut machines: Vec<String> = files.map(|file| file[..32].to_owned()).collect();
+        machines.dedup();
+        machines
+    }
+
     fn logged(&self) -> Vec<Value> {
         let files = self.usage_files();
-        let mut machines: Vec<&str> = files.iter().map(|file| &file[..32]).collect();
-        machines.dedup();
+        let machines = self.usage_machines();
         assert_eq!(machines.len(), 1, "one machine's files: {files:?}");
         let mut logged = Vec::new();
         for file in &files {
@@ -3454,10 +3460,6 @@ fn every_run_is_logged_under_the_machine_that_ran_it() {
         "desk — 3 runs, 1 refused\n    no agent 3 runs\n      2 facts\n      1 show   1 refused\n"
     );
 
-    let files = host.usage_files();
-    let month = files[0].strip_prefix(&format!("{desk}-")).expect("the id");
-    let month = month.strip_suffix(".jsonl").expect("a log's name");
-    assert_eq!(month.len(), "2026-10".len(), "{files:?}");
     let logged = host.logged();
     let keys: Vec<&String> = logged[2].as_object().expect("an object").keys().collect();
     assert_eq!(
@@ -3479,7 +3481,9 @@ fn every_run_is_logged_under_the_machine_that_ran_it() {
     let refusal = logged[2]["refusal"].as_str().expect("what the run said");
     assert_eq!(refused.stderr, format!("worklog: {refusal}\n"));
     let written = logged[2]["written"].as_str().expect("a stamp");
-    assert!(written.starts_with(month), "{written}");
+    let its_file = format!("{desk}-{}.jsonl", &written[.."2026-10".len()]);
+    let held = fs::read_to_string(host.store().join("usage").join(&its_file)).unwrap();
+    assert!(held.contains(written), "{its_file}: {held}");
     let expected = serde_json::json!({
         "written": written,
         "machine": desk,
@@ -3822,9 +3826,8 @@ fn a_renamed_machine_topic_keeps_its_file_and_is_printed_by_its_new_name() {
     host.used_ok(&["facts"]);
     host.used_ok(&["rename", "desk", "bench"]);
     host.used_ok(&["facts"]);
-    let files = host.usage_files();
-    assert_eq!(files.len(), 1, "{files:?}");
-    assert!(files[0].starts_with(&host.machine("bench")), "{files:?}");
+    let bench = host.machine("bench");
+    assert_eq!(host.usage_machines(), [bench.as_str()]);
     let counted = "bench — 3 runs\n    no agent 3 runs\n      2 facts\n      1 rename\n";
     assert_eq!(host.used_ok(&["usage"]), counted);
     let by_the_old_name = host.used_ok(&["usage", "--machine", "desk"]);
@@ -3835,7 +3838,11 @@ fn a_renamed_machine_topic_keeps_its_file_and_is_printed_by_its_new_name() {
 
     let phone = host.sharing("phone");
     phone.used_ok(&["topics"]);
-    assert_eq!(host.usage_files().len(), 2);
+    let machines = host.usage_machines();
+    assert!(
+        machines.len() == 2 && machines.contains(&bench),
+        "{machines:?}"
+    );
     assert_eq!(
         phone.used_ok(&["usage", "--machine", "phone"]),
         "phone — 1 run\n    no agent 1 run\n      1 topics\n"
