@@ -9,7 +9,7 @@ use crate::app::{Failure, ReadDeps, day_given};
 use crate::domain::id::DocumentId;
 use crate::domain::schema::address::Found;
 use crate::domain::session::Session;
-use crate::domain::usage::{Agent, Invocation, Kept};
+use crate::domain::usage::{Agent, Invocation, RunFilter};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Refusal {
@@ -88,7 +88,7 @@ pub fn usage(
     let since = since.map(day_given).transpose()?.map(|day| day.to_string());
     let runs = match its_runs {
         Some(runs) if since.is_none() && agent.is_none() => runs,
-        _ => deps.usage.read(&Kept {
+        _ => deps.usage.read(&RunFilter {
             machine,
             since,
             agent,
@@ -175,9 +175,9 @@ fn machine_named(deps: &ReadDeps, lookup: &Lookup, address: &str) -> Result<Name
     if let Ok(id) = DocumentId::parse(address)
         && lookup.find(address)? == Found::None
     {
-        let its_runs = Kept {
+        let its_runs = RunFilter {
             machine: Some(id.clone()),
-            ..Kept::default()
+            ..RunFilter::default()
         };
         let runs = deps.usage.read(&its_runs)?;
         if !runs.is_empty() {
@@ -444,11 +444,11 @@ mod tests {
     }
 
     #[derive(Default)]
-    struct Asked(RefCell<Vec<Kept>>);
+    struct Asked(RefCell<Vec<RunFilter>>);
 
     impl UsageRead for Asked {
-        fn read(&self, kept: &Kept) -> Result<Vec<Invocation>, StoreError> {
-            self.0.borrow_mut().push(kept.clone());
+        fn read(&self, filter: &RunFilter) -> Result<Vec<Invocation>, StoreError> {
+            self.0.borrow_mut().push(filter.clone());
             Ok(Vec::new())
         }
     }
@@ -466,8 +466,8 @@ mod tests {
             usage(&asking, machine, since, None).unwrap();
             log.0.into_inner()
         };
-        assert_eq!(asked(None, None), [Kept::default()]);
-        let narrowed = Kept {
+        assert_eq!(asked(None, None), [RunFilter::default()]);
+        let narrowed = RunFilter {
             machine: Some(world.machine()),
             since: Some("2026-09-03".to_owned()),
             agent: None,

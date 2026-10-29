@@ -21,7 +21,7 @@ const CLOSING: &str = "Durable facts and ideas, by name where they fit and count
      `worklog followups <topic>` for open work.\n";
 const NOT_SET_UP: &str = "worklog: this host is not set up; run `worklog init`\n";
 const RELEASES: &str = "WORKLOG_RELEASES";
-const HOME_OF_THE_TOOL: &str = "WORKLOG_HOME";
+const OVERRIDE: &str = "WORKLOG_HOME";
 const SESSIONS: [(&str, &str); 2] = [
     ("Claude Code", "CLAUDE_CODE_SESSION_ID"),
     ("Codex", "CODEX_THREAD_ID"),
@@ -103,8 +103,8 @@ impl Host {
         if !program.get_envs().any(|(name, _)| name == RELEASES) {
             program.env(RELEASES, self.unpublished());
         }
-        if !program.get_envs().any(|(name, _)| name == HOME_OF_THE_TOOL) {
-            program.env(HOME_OF_THE_TOOL, self.root.join("next"));
+        if !program.get_envs().any(|(name, _)| name == OVERRIDE) {
+            program.env(OVERRIDE, self.root.join("next"));
         }
         let output = program
             .env("HOME", self.home())
@@ -2159,7 +2159,7 @@ impl Host {
             program.env_remove(variable);
         }
         let child = program
-            .env(HOME_OF_THE_TOOL, self.root.join("next"))
+            .env(OVERRIDE, self.root.join("next"))
             .env("HOME", self.home())
             .env(RELEASES, self.unpublished())
             .env_remove("XDG_CONFIG_HOME")
@@ -3924,7 +3924,7 @@ fn copy_of_the_binary(to: &Path) {
         let mut copy = std::process::Command::new(to);
         copy.arg("--version")
             .env(RELEASES, &unpublished)
-            .env(HOME_OF_THE_TOOL, to.with_extension("home"))
+            .env(OVERRIDE, to.with_extension("home"))
             .output()
     };
     loop {
@@ -4369,7 +4369,7 @@ fn an_upgrade_and_the_refresh_it_has_the_new_binary_run_are_no_runs_the_usage_lo
 impl Host {
     fn run_under_home(&self, args: &[&str]) -> Ran {
         let mut program = Command::cargo_bin("worklog").expect("the binary");
-        program.env_remove(HOME_OF_THE_TOOL);
+        program.env_remove(OVERRIDE);
         self.run_as(program, &self.home(), args)
     }
 

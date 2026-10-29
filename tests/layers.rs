@@ -690,7 +690,7 @@ fn a_file_that_makes_the_network_reader_is_found() {
 const RUNS_A_PROGRAM: [&str; 4] = ["output", "spawn", "status", "assert"];
 
 // A binary run without `RELEASES` set reads its releases from the network, and one run
-// without `HOME_OF_THE_TOOL` set keeps its cache under the home directory.
+// without `OVERRIDE` set keeps its cache under the home directory.
 fn run_past_the_releases(text: &str) -> Vec<String> {
     let text = uncommented(text);
     let tokens = tokens(&text);
@@ -704,7 +704,7 @@ fn run_past_the_releases(text: &str) -> Vec<String> {
         let runs = body
             .windows(3)
             .any(|call| call[0] == "." && RUNS_A_PROGRAM.contains(&call[1]) && call[2] == "(");
-        for given in ["RELEASES", "HOME_OF_THE_TOOL"] {
+        for given in ["RELEASES", "OVERRIDE"] {
             if runs && !body.contains(&given) {
                 found.push(format!("`{}` runs a program without `{given}`", body[1]));
             }
@@ -719,14 +719,14 @@ fn every_scenario_runs_the_binary_with_its_releases_given() {
     assert_eq!(violations(&scenarios, run_past_the_releases), [""; 0]);
     let text = fs::read_to_string(&scenarios).expect("the scenarios");
     assert!(text.contains("\nconst RELEASES: &str = \"WORKLOG_RELEASES\";\n"));
-    assert!(text.contains("\nconst HOME_OF_THE_TOOL: &str = \"WORKLOG_HOME\";\n"));
+    assert!(text.contains("\nconst OVERRIDE: &str = \"WORKLOG_HOME\";\n"));
 }
 
 #[test]
 fn a_helper_that_runs_the_binary_without_its_releases_is_found() {
     for clean in [
-        "fn run_as(&self, mut program: Command) -> Ran {\n    program.env(RELEASES, self.unpublished());\n    program.env(HOME_OF_THE_TOOL, self.root.join(\"next\"));\n    program.output()\n}\n",
-        "fn spawned(&self) -> Child {\n    program\n        .env(RELEASES, dir)\n        .env(HOME_OF_THE_TOOL, dir)\n        .spawn()\n        .expect(\"the binary runs\")\n}\n",
+        "fn run_as(&self, mut program: Command) -> Ran {\n    program.env(RELEASES, self.unpublished());\n    program.env(OVERRIDE, self.root.join(\"next\"));\n    program.output()\n}\n",
+        "fn spawned(&self) -> Child {\n    program\n        .env(RELEASES, dir)\n        .env(OVERRIDE, dir)\n        .spawn()\n        .expect(\"the binary runs\")\n}\n",
         "fn run(&self, args: &[&str]) -> Ran {\n    self.run_in(&self.home(), args)\n}\n",
         "fn listed(list: fn(&Host) -> Ran, host: &Host) -> Ran {\n    list(host)\n}\n",
         "fn waited() {\n    // program.output() is run_as's.\n    let output = ran.output;\n}\n",
@@ -736,7 +736,7 @@ fn a_helper_that_runs_the_binary_without_its_releases_is_found() {
     let without = |name: &str| {
         [
             format!("`{name}` runs a program without `RELEASES`"),
-            format!("`{name}` runs a program without `HOME_OF_THE_TOOL`"),
+            format!("`{name}` runs a program without `OVERRIDE`"),
         ]
     };
     for (broken, found) in [
@@ -745,7 +745,7 @@ fn a_helper_that_runs_the_binary_without_its_releases_is_found() {
             without("bare").to_vec(),
         ),
         (
-            "fn run_as() {\n    program.env(RELEASES, dir).env(HOME_OF_THE_TOOL, dir).output();\n}\n\nfn served(program: &mut Command) -> Child {\n    program\n        . spawn ()\n        .unwrap()\n}\n",
+            "fn run_as() {\n    program.env(RELEASES, dir).env(OVERRIDE, dir).output();\n}\n\nfn served(program: &mut Command) -> Child {\n    program\n        . spawn ()\n        .unwrap()\n}\n",
             without("served").to_vec(),
         ),
         (
@@ -754,7 +754,7 @@ fn a_helper_that_runs_the_binary_without_its_releases_is_found() {
         ),
         (
             "fn run_as(&self, mut program: Command) -> Ran {\n    program.env(RELEASES, self.unpublished());\n    program.output()\n}\n",
-            vec!["`run_as` runs a program without `HOME_OF_THE_TOOL`".to_owned()],
+            vec!["`run_as` runs a program without `OVERRIDE`".to_owned()],
         ),
         (
             "fn exits(program: &mut Command) -> bool {\n    program.status().unwrap().success()\n}\n",

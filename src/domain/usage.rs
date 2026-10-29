@@ -49,14 +49,14 @@ impl Agent {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Kept {
+pub struct RunFilter {
     pub machine: Option<DocumentId>,
     /// `YYYY-MM-DD`, compared with the day a run's stamp is written with.
     pub since: Option<String>,
     pub agent: Option<Agent>,
 }
 
-impl Kept {
+impl RunFilter {
     #[must_use]
     pub fn keeps(&self, run: &Invocation) -> bool {
         self.machine
@@ -77,7 +77,7 @@ impl Kept {
 
 #[cfg(test)]
 mod tests {
-    use super::{DocumentId, Kept};
+    use super::{DocumentId, RunFilter};
     use crate::domain::testing::{atlas, lantern, ran};
 
     #[test]
@@ -86,33 +86,33 @@ mod tests {
         assert_eq!(ran(&lantern(), "show", "2027-01-31").month(), "2027-01");
     }
 
-    fn kept(machine: Option<DocumentId>, since: Option<&str>) -> Kept {
-        Kept {
+    fn filter(machine: Option<DocumentId>, since: Option<&str>) -> RunFilter {
+        RunFilter {
             machine,
             since: since.map(str::to_owned),
-            ..Kept::default()
+            ..RunFilter::default()
         }
     }
 
     #[test]
     fn a_reading_keeps_the_runs_of_its_machine_from_its_day_on() {
         let run = ran(&lantern(), "show", "2026-09-04");
-        assert!(Kept::default().keeps(&run));
-        assert!(kept(Some(lantern()), Some("2026-09-04")).keeps(&run));
-        assert!(!kept(Some(atlas()), None).keeps(&run));
-        assert!(!kept(None, Some("2026-09-05")).keeps(&run));
-        assert!(kept(None, Some("2026-08-31")).keeps(&run));
+        assert!(RunFilter::default().keeps(&run));
+        assert!(filter(Some(lantern()), Some("2026-09-04")).keeps(&run));
+        assert!(!filter(Some(atlas()), None).keeps(&run));
+        assert!(!filter(None, Some("2026-09-05")).keeps(&run));
+        assert!(filter(None, Some("2026-08-31")).keeps(&run));
     }
 
     #[test]
     fn a_month_of_a_machine_is_reached_unless_it_ends_before_the_day_or_is_another_s() {
-        assert!(Kept::default().reaches(&lantern(), "2026-09"));
-        assert!(kept(Some(lantern()), None).reaches(&lantern(), "2026-09"));
-        assert!(!kept(Some(atlas()), None).reaches(&lantern(), "2026-09"));
-        let from = kept(None, Some("2026-09-15"));
+        assert!(RunFilter::default().reaches(&lantern(), "2026-09"));
+        assert!(filter(Some(lantern()), None).reaches(&lantern(), "2026-09"));
+        assert!(!filter(Some(atlas()), None).reaches(&lantern(), "2026-09"));
+        let from = filter(None, Some("2026-09-15"));
         assert!(from.reaches(&lantern(), "2026-09"));
         assert!(from.reaches(&lantern(), "2027-01"));
         assert!(!from.reaches(&lantern(), "2026-08"));
-        assert!(!kept(Some(atlas()), Some("2026-09-15")).reaches(&lantern(), "2026-10"));
+        assert!(!filter(Some(atlas()), Some("2026-09-15")).reaches(&lantern(), "2026-10"));
     }
 }

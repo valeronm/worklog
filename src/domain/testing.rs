@@ -14,7 +14,7 @@ use super::ports::{
 };
 use super::release::{Built, ReleaseVersion, sha256_hex};
 use super::session::Session;
-use super::usage::{Invocation, Kept};
+use super::usage::{Invocation, RunFilter};
 use super::version::{Envelope, Fields, Header, Kind, Links, ReadError, Stamp, Version};
 
 pub struct FailingStore;
@@ -362,9 +362,13 @@ pub struct MemoryUsage {
 }
 
 impl UsageRead for MemoryUsage {
-    fn read(&self, kept: &Kept) -> Result<Vec<Invocation>, StoreError> {
+    fn read(&self, filter: &RunFilter) -> Result<Vec<Invocation>, StoreError> {
         let runs = self.runs.borrow();
-        Ok(runs.iter().filter(|run| kept.keeps(run)).cloned().collect())
+        Ok(runs
+            .iter()
+            .filter(|run| filter.keeps(run))
+            .cloned()
+            .collect())
     }
 }
 
@@ -1026,7 +1030,7 @@ mod tests {
     #[test]
     fn the_memory_usage_gives_back_the_runs_kept_in_the_order_recorded() {
         let usage = MemoryUsage::default();
-        assert_eq!(usage.read(&Kept::default()), Ok(Vec::new()));
+        assert_eq!(usage.read(&RunFilter::default()), Ok(Vec::new()));
         let runs = [
             ran(&lantern(), "show", "2026-09-04"),
             ran(&atlas(), "facts", "2026-09-05"),
@@ -1034,10 +1038,10 @@ mod tests {
         for run in &runs {
             usage.record(run).unwrap();
         }
-        assert_eq!(usage.read(&Kept::default()), Ok(runs.to_vec()));
-        let of_atlas = Kept {
+        assert_eq!(usage.read(&RunFilter::default()), Ok(runs.to_vec()));
+        let of_atlas = RunFilter {
             machine: Some(atlas()),
-            ..Kept::default()
+            ..RunFilter::default()
         };
         assert_eq!(usage.read(&of_atlas), Ok(runs[1..].to_vec()));
     }

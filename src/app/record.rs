@@ -16,8 +16,8 @@ pub struct Run<'a> {
     pub version: Built,
     pub command: &'a str,
     pub arguments: &'a [String],
-    /// The working directory, as an absolute path.
-    pub directory: &'a str,
+    /// An absolute path.
+    pub working_directory: &'a str,
 }
 
 /// Appends the run to this machine's log where the store holds the machine's topic. Refuses on
@@ -26,8 +26,8 @@ pub fn record(deps: &Deps, run: &Run, outcome: Outcome) -> Result<(), Failure> {
     let machine = deps.read().machine()?;
     // A directory that has not synced or mounted holds no file of the machine's topic, and a
     // line appended there creates files at the path the store belongs at.
-    let held = Lookup::new(deps.read().store).headers(&machine)?;
-    if held.history().is_empty() && held.unreadable().is_empty() {
+    let machine_topic = Lookup::new(deps.read().store).headers(&machine)?;
+    if machine_topic.history().is_empty() && machine_topic.unreadable().is_empty() {
         return Ok(());
     }
     Ok(deps.usage.record(&Invocation {
@@ -39,7 +39,7 @@ pub fn record(deps: &Deps, run: &Run, outcome: Outcome) -> Result<(), Failure> {
         exit: outcome.exit,
         refusal: outcome.refusal,
         hits: outcome.hits,
-        directory: deps.read().directory(run.directory)?.to_string(),
+        directory: deps.read().directory(run.working_directory)?.to_string(),
         arguments: run.arguments.to_vec(),
     })?)
 }
@@ -51,15 +51,15 @@ mod tests {
     use crate::domain::id::VersionId;
     use crate::domain::ports::UsageRead as _;
     use crate::domain::testing::{lamp_session, version};
-    use crate::domain::usage::Kept;
+    use crate::domain::usage::RunFilter;
     use crate::domain::version::{ReadError, Stamp};
 
-    fn run<'a>(command: &'a str, directory: &'a str) -> Run<'a> {
+    fn run<'a>(command: &'a str, working_directory: &'a str) -> Run<'a> {
         Run {
             version: version("1.2.3").into(),
             command,
             arguments: &[],
-            directory,
+            working_directory,
         }
     }
 
@@ -81,7 +81,7 @@ mod tests {
             version: version("1.2.3").into(),
             command: "show",
             arguments: &arguments,
-            directory: "/home/desk/link/case",
+            working_directory: "/home/desk/link/case",
         };
         record(&world.deps(), &run, outcome).unwrap();
         let logged = Invocation {
@@ -96,7 +96,7 @@ mod tests {
             directory: "~/projects/lantern/case".to_owned(),
             arguments,
         };
-        assert_eq!(world.usage.read(&Kept::default()), Ok(vec![logged]));
+        assert_eq!(world.usage.read(&RunFilter::default()), Ok(vec![logged]));
     }
 
     #[test]
@@ -111,7 +111,7 @@ mod tests {
         };
         ran("topics").unwrap();
         ran("facts").unwrap();
-        let logged = world.usage.read(&Kept::default()).unwrap();
+        let logged = world.usage.read(&RunFilter::default()).unwrap();
         assert_eq!(logged.len(), 2);
         assert_eq!(logged[1].session, Some(session));
         assert_eq!(logged[1].directory, "/srv");
@@ -132,7 +132,7 @@ mod tests {
             refused(ran(&world, "/srv")),
             "this host is not set up; run `worklog init`"
         );
-        assert_eq!(world.usage.read(&Kept::default()), Ok(Vec::new()));
+        assert_eq!(world.usage.read(&RunFilter::default()), Ok(Vec::new()));
     }
 
     #[test]
@@ -140,10 +140,10 @@ mod tests {
         let world = World::new();
         let ran = |world: &World| record(&world.deps(), &run("topics", "/srv"), Outcome::default());
         assert_eq!(ran(&world), Ok(()));
-        assert_eq!(world.usage.read(&Kept::default()), Ok(Vec::new()));
+        assert_eq!(world.usage.read(&RunFilter::default()), Ok(Vec::new()));
         assert_eq!(topic(&world, "desk", ""), world.machine());
         assert_eq!(ran(&world), Ok(()));
-        assert_eq!(world.usage.read(&Kept::default()).unwrap().len(), 1);
+        assert_eq!(world.usage.read(&RunFilter::default()).unwrap().len(), 1);
     }
 
     #[test]
@@ -152,7 +152,7 @@ mod tests {
         let damaged = VersionId::of(b"damaged");
         (world.store).plant_unreadable(&world.machine(), damaged, ReadError::Corrupt);
         record(&world.deps(), &run("topics", "/srv"), Outcome::default()).unwrap();
-        assert_eq!(world.usage.read(&Kept::default()).unwrap().len(), 1);
+        assert_eq!(world.usage.read(&RunFilter::default()).unwrap().len(), 1);
     }
 
     #[test]

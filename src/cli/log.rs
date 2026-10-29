@@ -52,7 +52,7 @@ fn write(line: &Line, environment: &Environment, deps: &Deps, outcome: Outcome) 
             version: environment.version,
             command: &line.command,
             arguments: &line.arguments,
-            directory: &directory.to_string_lossy(),
+            working_directory: &directory.to_string_lossy(),
         },
         outcome,
     );

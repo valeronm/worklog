@@ -9,7 +9,7 @@ use super::document::Document;
 use super::draft::{Draft, Listed};
 use super::id::{DocumentId, VersionId};
 use super::session::Session;
-use super::usage::{Invocation, Kept};
+use super::usage::{Invocation, RunFilter};
 use super::version::{Kind, ReadError, Stamp, Version};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -130,9 +130,9 @@ pub trait Drafts: DraftsRead {
 
 /// The runs every machine logged.
 pub trait UsageRead {
-    /// The lines that read and that `kept` keeps; a line filed under another machine or
+    /// The lines that read and that `filter` keeps; a line filed under another machine or
     /// month than its own may be left out.
-    fn read(&self, kept: &Kept) -> Result<Vec<Invocation>, StoreError>;
+    fn read(&self, filter: &RunFilter) -> Result<Vec<Invocation>, StoreError>;
 }
 
 pub trait Usage: UsageRead {

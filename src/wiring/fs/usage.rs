@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::domain::id::DocumentId;
 use crate::domain::ports::{StoreError, Usage, UsageRead};
 use crate::domain::session::Session;
-use crate::domain::usage::{Invocation, Kept};
+use crate::domain::usage::{Invocation, RunFilter};
 use crate::domain::version::Stamp;
 
 use super::{files, io_error};
@@ -90,7 +90,7 @@ impl FsUsage {
 }
 
 impl UsageRead for FsUsage {
-    fn read(&self, kept: &Kept) -> Result<Vec<Invocation>, StoreError> {
+    fn read(&self, filter: &RunFilter) -> Result<Vec<Invocation>, StoreError> {
         let names = match files(&self.dir) {
             Ok(names) => names,
             // Nothing can be appended under a file.
@@ -99,7 +99,7 @@ impl UsageRead for FsUsage {
         };
         let mut found = Vec::new();
         let reached = |name: &&String| {
-            filed(name).is_some_and(|(machine, month)| kept.reaches(&machine, month))
+            filed(name).is_some_and(|(machine, month)| filter.reaches(&machine, month))
         };
         for name in names.iter().filter(reached) {
             // One entry a sync left unreadable does not hide the runs in the others.
@@ -109,7 +109,7 @@ impl UsageRead for FsUsage {
             // A sync can deliver a line cut inside a character.
             let text = String::from_utf8_lossy(&bytes);
             let runs = text.lines().filter_map(read);
-            found.extend(runs.filter(|run| kept.keeps(run)));
+            found.extend(runs.filter(|run| filter.keeps(run)));
         }
         Ok(found)
     }
@@ -255,7 +255,7 @@ mod tests {
     }
 
     fn all(usage: &FsUsage) -> Result<Vec<Invocation>, StoreError> {
-        usage.read(&Kept::default())
+        usage.read(&RunFilter::default())
     }
 
     fn written(machine: &DocumentId, command: &str, day: &str) -> String {
@@ -347,12 +347,12 @@ mod tests {
             }
         }
         let read = |machine: Option<DocumentId>, since: Option<&str>| {
-            let kept = Kept {
+            let filter = RunFilter {
                 machine,
                 since: since.map(str::to_owned),
-                ..Kept::default()
+                ..RunFilter::default()
             };
-            usage.read(&kept).unwrap()
+            usage.read(&filter).unwrap()
         };
         let opened = |machine: Option<DocumentId>, since: Option<&str>| {
             let in_each = if machine.is_some() { 1 } else { 2 };
@@ -406,11 +406,11 @@ mod tests {
         assert_eq!(held("2026-09"), format!("{}\n", line(&late)));
 
         let from = |day: &str| {
-            let kept = Kept {
+            let filter = RunFilter {
                 since: Some(day.to_owned()),
-                ..Kept::default()
+                ..RunFilter::default()
             };
-            usage.read(&kept).unwrap()
+            usage.read(&filter).unwrap()
         };
         assert_eq!(from("2026-10-01"), std::slice::from_ref(&early));
         assert_eq!(from("2026-09-30"), [late, early]);

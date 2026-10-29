@@ -128,7 +128,9 @@ pub fn wire(
 // is logged under.
 fn session(variable: &dyn Fn(&str) -> Option<OsString>) -> Option<Session> {
     AGENTS.iter().find_map(|known| {
-        let id = fs::set(variable, known.session)?.into_string().ok()?;
+        let id = fs::set(variable, known.session_variable)?
+            .into_string()
+            .ok()?;
         Some(Session {
             agent: known.name.to_owned(),
             id,
@@ -162,8 +164,8 @@ struct Known {
     /// Under the user's home.
     home: &'static str,
     hooks: &'static str,
-    /// The variable the agent sets to its session's id for a command it runs.
-    session: &'static str,
+    /// Set by the agent to its session's id for a command it runs.
+    session_variable: &'static str,
     hook: Hook,
     rule: Option<Rule>,
     /// Under the agent's home, the file that lists the directories its sandbox lets a session
@@ -203,7 +205,7 @@ static AGENTS: [Known; 2] = [
         name: "Claude Code",
         home: ".claude",
         hooks: "settings.json",
-        session: "CLAUDE_CODE_SESSION_ID",
+        session_variable: "CLAUDE_CODE_SESSION_ID",
         hook: Hook {
             word: "claude",
             session: "session_id",
@@ -215,7 +217,7 @@ static AGENTS: [Known; 2] = [
         name: "Codex",
         home: ".codex",
         hooks: "hooks.json",
-        session: "CODEX_THREAD_ID",
+        session_variable: "CODEX_THREAD_ID",
         hook: Hook {
             word: "codex",
             session: "session_id",
@@ -417,7 +419,7 @@ mod tests {
 
     use super::*;
     use crate::domain::testing::{LANTERN, lantern, ran};
-    use crate::domain::usage::Kept;
+    use crate::domain::usage::RunFilter;
 
     fn scratch() -> (tempfile::TempDir, PathBuf) {
         let kept = tempfile::tempdir().unwrap();
@@ -501,7 +503,7 @@ mod tests {
         adapters.usage.record(&run).unwrap();
         let file = store.join(format!("usage/{LANTERN}-2026-09.jsonl"));
         assert!(file.is_file());
-        let all = Kept::default();
+        let all = RunFilter::default();
         assert_eq!(adapters.deps().read().usage.read(&all), Ok(vec![run]));
 
         let chosen = wired(&root, Some(root.join("elsewhere"))).unwrap().unwrap();
