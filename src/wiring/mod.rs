@@ -264,7 +264,6 @@ impl Agent {
         Ok(self.files.read_skill()?)
     }
 
-    /// Returns the file written.
     pub fn write_skill(&self, text: &str) -> Result<PathBuf, Failure> {
         Ok(self.files.write_skill(text)?)
     }
@@ -305,7 +304,7 @@ impl Agent {
         Ok(self.files.read_hooks()?)
     }
 
-    pub fn write_hooks(&self, text: &str) -> Result<(), Failure> {
+    pub fn write_hooks(&self, text: &str) -> Result<PathBuf, Failure> {
         Ok(self.files.write_hooks(text)?)
     }
 

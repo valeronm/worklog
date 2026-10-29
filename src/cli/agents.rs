@@ -73,8 +73,7 @@ impl Done {
 
     fn hooks(&mut self, agent: &Agent, planned: Option<&str>) -> Result<bool, Failure> {
         if let Some(text) = planned {
-            agent.write_hooks(text)?;
-            self.wrote(agent.hooks());
+            self.wrote(&agent.write_hooks(text)?);
         }
         Ok(planned.is_some())
     }

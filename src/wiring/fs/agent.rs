@@ -56,9 +56,7 @@ impl FsAgent {
     }
 
     pub fn write_skill(&self, text: &str) -> Result<PathBuf, StoreError> {
-        let file = self.skill_file();
-        self.in_home(&file, text)?;
-        Ok(file)
+        self.in_home(&self.skill_file(), text)
     }
 
     pub fn remove_skill(&self) -> Result<Option<PathBuf>, StoreError> {
@@ -70,24 +68,19 @@ impl FsAgent {
         read_optional(&self.hooks)
     }
 
-    pub fn write_hooks(&self, text: &str) -> Result<(), StoreError> {
+    pub fn write_hooks(&self, text: &str) -> Result<PathBuf, StoreError> {
         self.in_home(&self.hooks, text)
     }
 
     pub fn read_rule(&self) -> Result<Option<String>, StoreError> {
-        let Some(file) = &self.rule else {
-            return Ok(None);
-        };
-        read_optional(file)
+        self.rule.as_deref().map_or(Ok(None), read_optional)
     }
 
     /// Returns the file written, or `None` for an agent that takes no rule.
     pub fn write_rule(&self, text: &str) -> Result<Option<PathBuf>, StoreError> {
-        let Some(file) = &self.rule else {
-            return Ok(None);
-        };
-        self.in_home(file, text)?;
-        Ok(Some(file.clone()))
+        (self.rule.as_deref())
+            .map(|file| self.in_home(file, text))
+            .transpose()
     }
 
     pub fn remove_rule(&self) -> Result<Option<PathBuf>, StoreError> {
@@ -102,23 +95,19 @@ impl FsAgent {
     }
 
     pub fn read_config(&self) -> Result<Option<String>, StoreError> {
-        let Some(file) = &self.config else {
-            return Ok(None);
-        };
-        read_optional(file)
+        self.config.as_deref().map_or(Ok(None), read_optional)
     }
 
     /// Returns the file written, or `None` for an agent that has no config.
     pub fn write_config(&self, text: &str) -> Result<Option<PathBuf>, StoreError> {
-        let Some(file) = &self.config else {
-            return Ok(None);
-        };
-        self.in_home(file, text)?;
-        Ok(Some(file.clone()))
+        (self.config.as_deref())
+            .map(|file| self.in_home(file, text))
+            .transpose()
     }
 
-    fn in_home(&self, file: &Path, text: &str) -> Result<(), StoreError> {
-        replace_under(&self.home, file, text)
+    fn in_home(&self, file: &Path, text: &str) -> Result<PathBuf, StoreError> {
+        replace_under(&self.home, file, text)?;
+        Ok(file.to_path_buf())
     }
 }
 
