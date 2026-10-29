@@ -92,6 +92,11 @@ struct Scope<'a> {
     may_be_due: BTreeSet<DocumentId>,
 }
 
+struct OpenWork {
+    due: Vec<FollowupRow>,
+    waiting: Vec<FollowupRow>,
+}
+
 impl<'a> Scope<'a> {
     fn of(deps: &ReadDeps<'a>, directory: &str) -> Result<Scope<'a>, Failure> {
         let directory = deps.directory(directory)?;
@@ -145,10 +150,7 @@ impl<'a> Scope<'a> {
         })
     }
 
-    fn open_work(
-        &self,
-        followups: &Filed,
-    ) -> Result<(Vec<FollowupRow>, Vec<FollowupRow>), Failure> {
+    fn open_work(&self, followups: &Filed) -> Result<OpenWork, Failure> {
         let is_counted: BTreeSet<&DocumentId> = (self.counted.iter())
             .filter_map(|topic| followups.get(topic))
             .flatten()
@@ -158,7 +160,8 @@ impl<'a> Scope<'a> {
         let rows = shown(&self.topics, &work, false);
         let mut rows = followup_rows(&self.lookup, &self.topics, rows, self.today, &self.counted)?;
         rows.retain(|followup| followup.due || is_counted.contains(&followup.row.document));
-        Ok(rows.into_iter().partition(|followup| followup.due))
+        let (due, waiting) = rows.into_iter().partition(|followup| followup.due);
+        Ok(OpenWork { due, waiting })
     }
 }
 
@@ -218,7 +221,7 @@ pub fn context(deps: &ReadDeps, directory: &str) -> Result<Context, Failure> {
         });
     }
 
-    let (due, waiting) = scope.open_work(&filings.followups)?;
+    let OpenWork { due, waiting } = scope.open_work(&filings.followups)?;
     let open = due.iter().chain(&waiting);
     forks.extend(
         open.filter(|open| open.row.forked)
@@ -245,7 +248,7 @@ pub fn context(deps: &ReadDeps, directory: &str) -> Result<Context, Failure> {
 pub fn due(deps: &ReadDeps, directory: &str) -> Result<Vec<FollowupRow>, Failure> {
     let scope = Scope::of(deps, directory)?;
     let followups = filed_by_topic(&scope.lookup, KindOf::Followup, &scope.may_be_due)?;
-    Ok(scope.open_work(&followups)?.0)
+    Ok(scope.open_work(&followups)?.due)
 }
 
 type Parts<'l> = BTreeMap<&'l DocumentId, Vec<(DocumentId, String, BTreeSet<DocumentId>)>>;
