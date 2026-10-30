@@ -206,7 +206,7 @@ has not synced or mounted is not started a second time under its path.
 
 ## The host's config
 
-`init` writes the config once per host, as TOML:
+`init` or `join` writes the config once per host, as TOML:
 
 ```
 store = "/home/desk/sync/worklog"

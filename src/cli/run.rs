@@ -5,6 +5,7 @@ use super::render::{Output, Refusals, output, output_as};
 use super::{Environment, agents};
 use crate::app::followup::{NewFollowup, TriggerArg};
 use crate::app::search::Query;
+use crate::app::setup::{Bound, Joining};
 use crate::app::{
     Deps, Failure, ReadDeps, activity, amend, bulk, check, claim, context, draft, followup, fork,
     list, save, search, setup, show, usage,
@@ -53,17 +54,15 @@ fn trigger<'a>(when: &'a str, what: Option<&'a str>) -> Result<TriggerArg<'a>, F
 }
 
 fn initialized(
-    deps: &Deps,
     environment: &Environment,
     json: bool,
-    name: &str,
-    summary: Option<&str>,
     with_agents: bool,
+    bind: impl FnOnce() -> Result<Bound, Failure>,
 ) -> Result<Output, Failure> {
     let placing = with_agents
         .then(|| agents::Placing::on_this_host(environment))
         .transpose()?;
-    agents::initialized(placing, json, || setup::init(deps, name, summary))
+    agents::initialized(placing, json, bind)
 }
 
 fn opened(deps: &Deps, json: bool, new: &draft::New) -> Result<Output, Failure> {
@@ -298,16 +297,26 @@ pub(super) fn run(
             summary,
             agents: with_agents,
             ..
-        } => initialized(
-            deps,
-            environment,
-            json,
-            name,
-            summary.as_deref(),
-            *with_agents,
-        ),
+        } => initialized(environment, json, *with_agents, || {
+            setup::start(deps, name, summary.as_deref())
+        }),
         Command::Init { name: None, .. } => {
             unreachable!("an `init` given no name is asked for one before a command is run")
+        }
+        Command::Join {
+            name,
+            summary,
+            agents: with_agents,
+            ..
+        } => {
+            let joining = summary
+                .as_deref()
+                .map_or(Joining::Known, |summary| Joining::New {
+                    summary: Some(summary),
+                });
+            initialized(environment, json, *with_agents, || {
+                setup::join(deps, name, joining)
+            })
         }
         Command::Draft(command) => drafted(deps, json, command),
         Command::Change(command) => changed(deps, environment, json, command),

@@ -130,21 +130,35 @@ pub enum AgentsAction {
 
 #[derive(Subcommand)]
 pub enum Command {
-    /// Bind this host to its machine topic and record where the store is; done once per host
+    /// Start a new store and bind this host to its machine topic; done once per host
     ///
-    /// With no argument it asks for both on a terminal.
+    /// With no argument it asks on a terminal, and joins a store the directory already holds.
     Init {
-        /// The machine topic: an existing topic to bind to, or the name of a new one
+        /// The machine topic of the new store
         #[arg(requires = "store")]
         name: Option<String>,
-        /// The store directory
+        /// The store directory, missing or empty
         #[arg(long, value_hint = ValueHint::DirPath, requires = "name")]
         store: Option<PathBuf>,
-        /// What the machine is, for a topic that does not exist yet
+        /// What the machine is; without it the topic carries a placeholder until one is written
         #[arg(long, requires = "name")]
         summary: Option<String>,
         /// Also configure every coding agent on this host to use this tool
         #[arg(long, requires = "name")]
+        agents: bool,
+    },
+    /// Bind this host to a store another machine shares; done once per host
+    Join {
+        /// The machine topic: one the store holds, or with `--summary` a new one
+        name: String,
+        /// The store directory
+        #[arg(long, value_hint = ValueHint::DirPath)]
+        store: PathBuf,
+        /// What the machine is, for a machine topic new to the store
+        #[arg(long)]
+        summary: Option<String>,
+        /// Also configure every coding agent on this host to use this tool
+        #[arg(long)]
         agents: bool,
     },
     #[command(flatten)]
@@ -489,6 +503,9 @@ mod tests {
             "worklog init --json",
             "worklog init desk --store /atlas/store",
             "worklog init desk --store store --summary desk",
+            "worklog join desk --store /atlas/store",
+            "worklog join desk --store store --summary desk",
+            "worklog join desk --store store --agents",
             "worklog new topic lantern",
             "worklog new fact lantern/relay",
             "worklog new idea lantern/dimmer",
@@ -806,6 +823,30 @@ mod tests {
             init("worklog init desk --store kept"),
             (Some("desk".to_owned()), Some(PathBuf::from("kept")))
         );
+    }
+
+    #[test]
+    fn join_takes_its_name_and_its_store_both() {
+        let join = |line: &str| match parsed(line).unwrap().command {
+            Invoked::Run(Command::Join {
+                name,
+                store,
+                summary,
+                ..
+            }) => (name, store, summary),
+            _ => panic!("{line}: expected a join"),
+        };
+        assert_eq!(
+            join("worklog join desk --store kept"),
+            ("desk".to_owned(), PathBuf::from("kept"), None)
+        );
+        for half in [
+            "worklog join",
+            "worklog join desk",
+            "worklog join --store kept",
+        ] {
+            assert!(parsed(half).is_err(), "{half}");
+        }
     }
 
     #[test]

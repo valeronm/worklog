@@ -60,7 +60,7 @@ what a reader tolerates; what follows from it:
 ## A store from before 0.5.0
 
 0.5.0 keeps another store format and another host state than 0.4, and
-reads neither of them: `init` refuses a directory that holds a 0.4 store.
-The converter and the steps of the crossing are in the tree at the tag
-`v0.5.0`, as `crates/worklog-convert` and this file. A store converted
-there is read by every later release.
+reads neither of them: `init` and `join` refuse a directory that holds a
+0.4 store. The converter and the steps of the crossing are in the tree at
+the tag `v0.5.0`, as `crates/worklog-convert` and this file. A store
+converted there is read by every later release.

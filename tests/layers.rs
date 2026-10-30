@@ -1107,8 +1107,8 @@ fn a_web_file_that_names_a_write_use_case_is_found() {
             "names `app::bulk` as `bulk::move_to`",
         ),
         (
-            "setup::init(deps, name, None)?;",
-            "names `app::setup` as `setup::init`",
+            "setup::start(deps, name, None)?;",
+            "names `app::setup` as `setup::start`",
         ),
         (
             "use super::super::app::live;",

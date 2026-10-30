@@ -10,6 +10,7 @@ use crate::domain::session::Session;
 use crate::domain::version::Fields;
 
 const INIT: &str = "init";
+const JOIN: &str = "join";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Bound {
@@ -67,31 +68,79 @@ pub fn refuse_bound(deps: &Deps) -> Result<(), Failure> {
     }
 }
 
-/// Binds the host to the topic that is not ended and named `name`, making it with `summary`
-/// when there is none. Refuses a host already bound and a name several such topics hold; a
-/// malformed name, or a topic to make without a summary, is a usage failure.
-pub fn init(deps: &Deps, name: &str, summary: Option<&str>) -> Result<Bound, Failure> {
+/// What a host joining a store states of its machine topic.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Joining<'a> {
+    /// The store holds the topic.
+    Known,
+    /// The topic is new to the store; without a summary it carries `PLACEHOLDER`.
+    New { summary: Option<&'a str> },
+}
+
+/// Makes the machine topic `name` of a new store, with `summary` or `PLACEHOLDER`, and binds the
+/// host to it. Refuses a host already bound and a store that holds anything; a malformed name
+/// is a usage failure.
+pub fn start(deps: &Deps, name: &str, summary: Option<&str>) -> Result<Bound, Failure> {
     refuse_bound(deps)?;
-    let lookup = Lookup::new(deps.read().store);
     let name = Name::parse(name).map_err(usage)?;
-    if let Some(machine) = topic_named(&lookup, &name)? {
-        let label = lookup.label(&machine)?;
-        deps.host.bind(&machine)?;
-        return Ok(Bound {
-            document: machine,
-            label,
-            created: false,
-        });
+    let lookup = Lookup::new(deps.read().store);
+    if !lookup.holds_nothing()? {
+        return Err(Failure::Refused(
+            "the store holds documents; `worklog join` binds this host to it".to_owned(),
+        ));
     }
-    let Some(summary) = summary else {
-        return Err(Failure::Usage(format!(
-            "no topic is named {name}; making it takes `--summary`"
-        )));
-    };
+    made(deps, &lookup, &name, summary, INIT)
+}
+
+/// Binds the host to a store that holds documents: to the topic `name` it holds for
+/// `Joining::Known`, or to one it makes for `Joining::New`. Refuses a host already bound, a
+/// store holding nothing, a known machine whose topic the store lacks, a new machine whose
+/// topic it holds, and a name several topics hold; a malformed name is a usage failure.
+pub fn join(deps: &Deps, name: &str, joining: Joining) -> Result<Bound, Failure> {
+    refuse_bound(deps)?;
+    let name = Name::parse(name).map_err(usage)?;
+    let lookup = Lookup::new(deps.read().store);
+    if lookup.holds_nothing()? {
+        return Err(Failure::Refused(
+            "the store holds no documents; a shared store may not have synced yet, and \
+             `worklog init` starts a new one"
+                .to_owned(),
+        ));
+    }
+    match (topic_named(&lookup, &name)?, joining) {
+        (Some(held), Joining::Known) => bound_to(deps, &lookup, held),
+        (None, Joining::Known) => Err(Failure::Refused(format!(
+            "the store holds no topic named {name}; it may not have synced yet, and `--summary` \
+             makes a new machine topic"
+        ))),
+        (Some(_), Joining::New { .. }) => Err(Failure::Refused(format!(
+            "{name} is already in the store; without `--summary` this host is bound to it"
+        ))),
+        (None, Joining::New { summary }) => made(deps, &lookup, &name, summary, JOIN),
+    }
+}
+
+fn bound_to(deps: &Deps, lookup: &Lookup, machine: DocumentId) -> Result<Bound, Failure> {
+    let label = lookup.label(&machine)?;
+    deps.host.bind(&machine)?;
+    Ok(Bound {
+        document: machine,
+        label,
+        created: false,
+    })
+}
+
+fn made(
+    deps: &Deps,
+    lookup: &Lookup,
+    name: &Name,
+    summary: Option<&str>,
+    change: &str,
+) -> Result<Bound, Failure> {
     let machine = deps.ids.mint()?;
     let mut fields = Fields::new();
     fields.insert("name".to_owned(), text(name.as_str()));
-    fields.insert("summary".to_owned(), text(summary));
+    fields.insert("summary".to_owned(), text(summary.unwrap_or(PLACEHOLDER)));
     // A first version carries the machine topic of its writer, and this writer has none
     // until the version is stored.
     let host = Becoming {
@@ -103,7 +152,7 @@ pub fn init(deps: &Deps, name: &str, summary: Option<&str>) -> Result<Bound, Fai
         ..*deps
     };
     let kind = kind_named(KindOf::Topic);
-    stepped(&as_itself, &lookup, &machine, &kind, &fields, "\n", INIT)?.store(&as_itself)?;
+    stepped(&as_itself, lookup, &machine, &kind, &fields, "\n", change)?.store(&as_itself)?;
     deps.host.bind(&machine)?;
     Ok(Bound {
         document: machine,
@@ -112,16 +161,11 @@ pub fn init(deps: &Deps, name: &str, summary: Option<&str>) -> Result<Bound, Fai
     })
 }
 
-/// As `init`, for a caller with no summary to give: a topic it makes carries `PLACEHOLDER`.
-pub fn init_awaiting_summary(deps: &Deps, name: &str) -> Result<Bound, Failure> {
-    init(deps, name, Some(PLACEHOLDER))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::app::testing::{
-        ENDED, World, fork, found, head, refused, topic, topic_fields, world,
+        ENDED, World, fork, found, head, record, refused, topic, topic_fields, world,
     };
     use crate::domain::ports::{Store, StoreRead};
     use crate::domain::schema::SchemaError;
@@ -140,10 +184,16 @@ mod tests {
         world.store.of_kind(&topic).unwrap().len()
     }
 
+    fn sharing() -> (World, DocumentId) {
+        let (mut world, lantern) = world();
+        world.host.set_machine(None);
+        (world, lantern)
+    }
+
     #[test]
-    fn a_new_machine_topic_is_written_by_itself_and_the_host_is_bound_to_it() {
+    fn a_started_store_s_machine_topic_is_written_by_itself_and_the_host_is_bound_to_it() {
         let world = bare();
-        let bound = init(&world.deps(), "desk", Some("The desk")).unwrap();
+        let bound = start(&world.deps(), "desk", Some("The desk")).unwrap();
         assert_eq!(
             bound,
             Bound {
@@ -166,27 +216,117 @@ mod tests {
     }
 
     #[test]
-    fn a_topic_made_without_a_summary_carries_the_placeholder() {
+    fn a_machine_topic_made_without_a_summary_carries_the_placeholder() {
         let world = bare();
-        let bound = init_awaiting_summary(&world.deps(), "desk").unwrap();
-        assert!(bound.created);
-        assert_eq!(bound.label, "desk");
-        let stored = head(&world, &bound.document);
+        let started = start(&world.deps(), "desk", None).unwrap();
+        assert!(started.created);
         assert_eq!(
-            toml::to_string(&stored.fields).unwrap(),
-            format!("name = \"desk\"\ncreated = 2026-10-09\nsummary = \"{PLACEHOLDER}\"\n")
+            record(&world, &started.document).content.summary(),
+            Some(PLACEHOLDER)
         );
-        assert_eq!(world.host.machine(), Ok(Some(bound.document)));
+
+        let (world, _) = sharing();
+        let joined = join(&world.deps(), "atlas", Joining::New { summary: None }).unwrap();
+        assert!(joined.created);
+        assert_eq!(
+            record(&world, &joined.document).content.summary(),
+            Some(PLACEHOLDER)
+        );
+        assert_eq!(world.host.machine(), Ok(Some(joined.document)));
     }
 
     #[test]
-    fn a_topic_that_holds_the_name_is_bound_to_and_keeps_its_summary() {
-        let (mut world, lantern) = world();
-        world.host.set_machine(None);
-        let bound = init_awaiting_summary(&world.deps(), "lantern").unwrap();
-        assert_eq!((bound.document.clone(), bound.created), (lantern, false));
-        let stored = toml::to_string(&head(&world, &bound.document).fields).unwrap();
-        assert!(stored.contains("summary = \"s\""), "{stored}");
+    fn a_store_holding_documents_is_not_started() {
+        let (world, _) = sharing();
+        let before = topics(&world);
+        let text = refused(start(&world.deps(), "atlas", Some("The atlas")));
+        assert_eq!(
+            text,
+            "the store holds documents; `worklog join` binds this host to it"
+        );
+        assert_eq!(topics(&world), before);
+        assert_eq!(world.host.machine(), Ok(None));
+    }
+
+    #[test]
+    fn a_store_holding_nothing_is_not_joined() {
+        for machine in [
+            Joining::Known,
+            Joining::New {
+                summary: Some("The desk"),
+            },
+        ] {
+            let world = bare();
+            let text = refused(join(&world.deps(), "desk", machine));
+            assert_eq!(
+                text,
+                "the store holds no documents; a shared store may not have synced yet, and \
+                 `worklog init` starts a new one"
+            );
+            assert_eq!(topics(&world), 0);
+            assert_eq!(world.host.machine(), Ok(None));
+        }
+    }
+
+    #[test]
+    fn a_known_machine_is_bound_to_the_topic_that_holds_the_name_and_keeps_it() {
+        let (world, lantern) = sharing();
+        let before = topics(&world);
+        let bound = join(&world.deps(), "lantern", Joining::Known).unwrap();
+        assert_eq!(
+            bound,
+            Bound {
+                document: lantern.clone(),
+                label: "lantern".to_owned(),
+                created: false,
+            }
+        );
+        assert_eq!(world.host.machine(), Ok(Some(lantern.clone())));
+        assert_eq!(topics(&world), before);
+        assert_eq!(world.store.headers(&lantern).unwrap().history().len(), 1);
+        assert_eq!(record(&world, &lantern).content.summary(), Some("s"));
+    }
+
+    #[test]
+    fn a_known_machine_is_bound_to_a_forked_topic() {
+        let (world, lantern) = sharing();
+        fork(&world, &lantern, &topic_fields("lantern", ""));
+        let bound = join(&world.deps(), "lantern", Joining::Known).unwrap();
+        assert_eq!(
+            (bound.document.clone(), bound.created),
+            (lantern.clone(), false)
+        );
+        assert_eq!(world.host.machine(), Ok(Some(lantern)));
+    }
+
+    #[test]
+    fn a_known_machine_the_store_lacks_is_refused_as_not_synced() {
+        let (world, _) = sharing();
+        let before = topics(&world);
+        let text = refused(join(&world.deps(), "atlas", Joining::Known));
+        assert_eq!(
+            text,
+            "the store holds no topic named atlas; it may not have synced yet, and `--summary` \
+             makes a new machine topic"
+        );
+        assert_eq!(topics(&world), before);
+        assert_eq!(world.host.machine(), Ok(None));
+    }
+
+    #[test]
+    fn a_new_machine_the_store_holds_is_refused() {
+        let (world, _) = sharing();
+        let before = topics(&world);
+        let new = Joining::New {
+            summary: Some("The lantern"),
+        };
+        let text = refused(join(&world.deps(), "lantern", new));
+        assert_eq!(
+            text,
+            "lantern is already in the store; without `--summary` this host is bound to it"
+        );
+        assert_eq!(topics(&world), before);
+        assert_eq!(world.host.machine(), Ok(None));
     }
 
     #[test]
@@ -198,81 +338,40 @@ mod tests {
     }
 
     #[test]
-    fn a_host_is_bound_to_the_topic_that_holds_the_name() {
-        let (mut world, lantern) = world();
-        world.host.set_machine(None);
-        let before = topics(&world);
-        let bound = init(&world.deps(), "lantern", Some("ignored")).unwrap();
-        assert_eq!(
-            bound,
-            Bound {
-                document: lantern.clone(),
-                label: "lantern".to_owned(),
-                created: false,
-            }
-        );
-        assert_eq!(world.host.machine(), Ok(Some(lantern.clone())));
-        assert_eq!(topics(&world), before);
-        let held = world.store.headers(&lantern).unwrap();
-        assert_eq!(held.history().len(), 1);
-    }
-
-    #[test]
-    fn a_host_is_bound_to_a_forked_topic_without_a_summary() {
-        let (mut world, lantern) = world();
-        fork(&world, &lantern, &topic_fields("lantern", ""));
-        world.host.set_machine(None);
-        let bound = init(&world.deps(), "lantern", None).unwrap();
-        assert_eq!(bound.document, lantern);
-        assert!(!bound.created);
-        assert_eq!(world.host.machine(), Ok(Some(lantern)));
-    }
-
-    #[test]
-    fn a_host_already_set_up_is_refused() {
+    fn a_host_already_set_up_is_refused_by_both() {
         let (world, _) = world();
         let before = topics(&world);
-        let text = refused(init(&world.deps(), "atlas", Some("The atlas")));
-        assert_eq!(text, "this host is already set up as desk");
+        let refusals = [
+            refused(start(&world.deps(), "atlas", Some("The atlas"))),
+            refused(join(&world.deps(), "lantern", Joining::Known)),
+            refused(join(&world.deps(), "atlas", Joining::New { summary: None })),
+        ];
+        for text in refusals {
+            assert_eq!(text, "this host is already set up as desk");
+        }
         assert_eq!(topics(&world), before);
         assert_eq!(world.host.machine(), Ok(Some(first_minted())));
-
-        let world = bare();
-        init(&world.deps(), "desk", Some("The desk")).unwrap();
-        let text = refused(init(&world.deps(), "desk", None));
-        assert_eq!(text, "this host is already set up as desk");
     }
 
     #[test]
-    fn a_topic_to_make_takes_a_summary() {
-        let world = bare();
-        let Err(Failure::Usage(text)) = init(&world.deps(), "desk", None) else {
-            panic!("a new machine topic without a summary is a usage failure");
-        };
-        assert!(text.contains("--summary"), "{text}");
-        assert_eq!(topics(&world), 0);
-        assert_eq!(world.host.machine(), Ok(None));
-    }
-
-    #[test]
-    fn a_name_only_an_ended_topic_holds_makes_a_new_topic() {
+    fn a_name_only_ended_topics_hold_is_a_new_machine() {
         let mut world = World::new();
         topic(&world, "desk", "");
-        let ended = topic(&world, "phone", ENDED);
+        let ended = [topic(&world, "phone", ENDED), topic(&world, "phone", ENDED)];
         world.host.set_machine(None);
-        let Err(Failure::Usage(text)) = init(&world.deps(), "phone", None) else {
-            panic!("an ended topic is not one to bind to");
-        };
-        assert!(text.contains("--summary"), "{text}");
+        let text = refused(join(&world.deps(), "phone", Joining::Known));
+        assert!(text.contains("holds no topic named phone"), "{text}");
 
-        let bound = init(&world.deps(), "phone", Some("The phone")).unwrap();
+        let new = Joining::New {
+            summary: Some("The phone"),
+        };
+        let bound = join(&world.deps(), "phone", new).unwrap();
         assert!(bound.created);
-        assert_ne!(bound.document, ended);
+        assert!(!ended.contains(&bound.document));
         assert_eq!(bound.label, "phone");
-        assert_eq!(
-            head(&world, &bound.document).envelope.machine,
-            bound.document
-        );
+        let stored = head(&world, &bound.document);
+        assert_eq!(stored.envelope.machine, bound.document);
+        assert_eq!(stored.envelope.change, "join");
         assert_eq!(world.host.machine(), Ok(Some(bound.document)));
     }
 
@@ -281,48 +380,49 @@ mod tests {
         let (mut world, _) = world();
         topic(&world, "lantern", "");
         world.host.set_machine(None);
-        let text = refused(init(&world.deps(), "lantern", Some("The lantern")));
-        assert!(text.contains("is held by several documents"), "{text}");
-        assert_eq!(world.host.machine(), Ok(None));
+        for machine in [
+            Joining::Known,
+            Joining::New {
+                summary: Some("The lantern"),
+            },
+        ] {
+            let text = refused(join(&world.deps(), "lantern", machine));
+            assert!(text.contains("is held by several documents"), "{text}");
+            assert_eq!(world.host.machine(), Ok(None));
+        }
     }
 
     #[test]
-    fn a_name_that_is_none_is_a_usage_failure() {
+    fn a_name_that_is_none_is_a_usage_failure_to_both() {
         let world = bare();
-        let Err(Failure::Usage(text)) = init(&world.deps(), "Desk", Some("The desk")) else {
+        let not_a_name = SchemaError::NotAName("Desk".to_owned()).to_string();
+        let Err(Failure::Usage(text)) = start(&world.deps(), "Desk", Some("The desk")) else {
             panic!("a name the schema refuses is a usage failure");
         };
-        assert_eq!(text, SchemaError::NotAName("Desk".to_owned()).to_string());
+        assert_eq!(text, not_a_name);
+        let (world, _) = sharing();
+        let Err(Failure::Usage(text)) = join(&world.deps(), "Desk", Joining::Known) else {
+            panic!("a name the schema refuses is a usage failure");
+        };
+        assert_eq!(text, not_a_name);
         assert_eq!(world.host.machine(), Ok(None));
     }
 
     #[test]
-    fn a_name_two_ended_topics_hold_makes_a_new_topic() {
-        let mut world = World::new();
-        topic(&world, "desk", "");
-        let ended = [topic(&world, "phone", ENDED), topic(&world, "phone", ENDED)];
+    fn a_topic_that_held_the_name_before_is_not_a_known_machine() {
+        let (mut world, _) = world();
+        let renamed = topic(&world, "atlas", "former_names = [\"phone\"]\n");
         world.host.set_machine(None);
-        let bound = init(&world.deps(), "phone", Some("The phone")).unwrap();
-        assert!(bound.created);
-        assert!(!ended.contains(&bound.document));
-        assert_eq!(world.host.machine(), Ok(Some(bound.document)));
-    }
+        let text = refused(join(&world.deps(), "phone", Joining::Known));
+        assert!(text.contains("holds no topic named phone"), "{text}");
 
-    #[test]
-    fn a_topic_that_held_the_name_before_is_not_bound_to() {
-        let mut world = World::new();
-        topic(&world, "desk", "");
-        let renamed = topic(&world, "atlas", "former_names = [\"lantern\"]\n");
-        world.host.set_machine(None);
-        let Err(Failure::Usage(text)) = init(&world.deps(), "lantern", None) else {
-            panic!("a former name is not a topic to bind to");
+        let new = Joining::New {
+            summary: Some("The phone"),
         };
-        assert!(text.contains("--summary"), "{text}");
-
-        let bound = init(&world.deps(), "lantern", Some("The lantern")).unwrap();
+        let bound = join(&world.deps(), "phone", new).unwrap();
         assert!(bound.created);
         assert_ne!(bound.document, renamed);
-        assert_eq!(bound.label, "lantern");
+        assert_eq!(bound.label, "phone");
     }
 
     #[test]
@@ -333,23 +433,28 @@ mod tests {
         world.store.put(&held).unwrap();
         assert_eq!(found(&world, "7f3a"), Found::One(lantern()));
         world.host.set_machine(None);
-        let bound = init(&world.deps(), "7f3a", Some("The phone")).unwrap();
+        let new = Joining::New {
+            summary: Some("The phone"),
+        };
+        let bound = join(&world.deps(), "7f3a", new).unwrap();
         assert!(bound.created);
         assert_ne!(bound.document, lantern());
         assert_eq!(bound.label, "7f3a");
     }
 
     #[test]
-    fn a_topic_stored_by_a_host_that_did_not_bind_is_bound_to_the_next_time() {
+    fn a_start_whose_host_did_not_bind_is_finished_by_a_join() {
         let mut world = bare();
         world.host.set_binds(false);
-        let result = init(&world.deps(), "desk", Some("The desk"));
+        let result = start(&world.deps(), "desk", Some("The desk"));
         assert!(matches!(result, Err(Failure::Store(_))), "{result:?}");
         assert_eq!(topics(&world), 1);
         assert_eq!(world.host.machine(), Ok(None));
 
         world.host.set_binds(true);
-        let bound = init(&world.deps(), "desk", None).unwrap();
+        let again = refused(start(&world.deps(), "desk", Some("The desk")));
+        assert!(again.contains("`worklog join`"), "{again}");
+        let bound = join(&world.deps(), "desk", Joining::Known).unwrap();
         assert_eq!(
             bound,
             Bound {
@@ -365,7 +470,7 @@ mod tests {
     #[test]
     fn a_summary_that_is_none_is_refused_and_the_host_stays_unbound() {
         let world = bare();
-        let text = refused(init(&world.deps(), "desk", Some("")));
+        let text = refused(start(&world.deps(), "desk", Some("")));
         assert!(text.contains("summary"), "{text}");
         assert_eq!(topics(&world), 0);
         assert_eq!(world.host.machine(), Ok(None));

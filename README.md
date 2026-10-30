@@ -55,19 +55,21 @@ store. `init` on a terminal asks for both:
 worklog init
 ```
 
-Where the store holds the topic named, `init` binds the host to it; where
-it holds none, `init` makes the topic, and `context` reports that it needs
-a summary until one is written. A second host joins a store another
-machine made with its own machine topic. A directory holding no document
-is started as a store only on a yes, since a shared store may not have
-synced yet; a directory of other files is not taken.
+A directory that holds a store is joined: `init` lists its machine topics,
+binds the host to the one named, and makes a new one only on a yes, since
+a name the store lacks may not have synced yet. An empty or missing
+directory is started as a new store only on a yes, for the same reason. A
+directory of other files is not taken. A topic `init` makes reports that
+it needs a summary until one is written.
 
-Without a terminal, `init` takes both as arguments, with no default for
-either. `--summary` makes the topic where the store holds none, and
-starts a missing or empty directory without asking:
+Without a terminal, `init` starts a new store, in a directory that is
+missing or empty, and `join` binds the host to a store another machine
+shares. `join` binds to the machine topic named, which the store must
+hold; with `--summary` it makes that topic, which the store must not hold.
 
 ```
 worklog init desk --store ~/sync/worklog --summary "The desk machine"
+worklog join phone --store ~/sync/worklog --summary "The phone"
 ```
 
 Until a host is set up, every command that uses the store is refused, and
@@ -99,8 +101,8 @@ commands, and a SessionStart hook that opens every session with `worklog
 context`. `worklog agents install` places both for each agent it knows
 whose home directory exists: the skill under the agent's skills, and one
 hook merged into the agent's hooks file, the rest of which is kept. `init`
-offers it, and given arguments does it with `--agents` and otherwise
-writes neither.
+offers it, and `init` or `join` given arguments does it with `--agents` and
+otherwise writes neither.
 
 `worklog agents uninstall` takes both away and leaves whatever else the
 files hold. `worklog agents refresh` brings a skill and a hook up to the

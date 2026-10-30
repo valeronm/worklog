@@ -7,6 +7,7 @@ use super::agents::{self, Placing, initialized};
 use super::render::Output;
 use super::{Environment, NAME};
 use crate::app::machines::{self, HostName};
+use crate::app::setup::Joining;
 use crate::app::{Deps, Failure, ReadDeps, setup};
 use crate::wiring;
 
@@ -15,8 +16,9 @@ const DEFAULT_STORE: &str = "worklog";
 pub(super) fn no_terminal() -> Failure {
     Failure::Usage(format!(
         "`init` alone asks its questions on a terminal. A host is set up by its user, who gives \
-         the directory of the store; without a terminal that is \
-         `{NAME} init <NAME> --store <DIR>`"
+         the directory of the store; without a terminal, `{NAME} init <NAME> --store <DIR>` \
+         starts a new store and `{NAME} join <NAME> --store <DIR>` binds this host to a shared \
+         one"
     ))
 }
 
@@ -178,8 +180,7 @@ fn placing(environment: &Environment, terminal: &mut Terminal) -> Result<Option<
     }
 }
 
-/// Writes nothing before the last question is answered yes; a topic it makes carries
-/// `machines::PLACEHOLDER`.
+/// Writes nothing before the last question is answered yes.
 pub(super) fn init(
     deps: &Deps,
     environment: &Environment,
@@ -196,7 +197,10 @@ pub(super) fn init(
             store.display()
         ));
         if !terminal.consent("Start a new store there?", false)? {
-            return Err(Failure::at(store.display(), "no store was started"));
+            return Err(Failure::at(
+                store.display(),
+                format!("no store was started; run `{NAME} init` again once it has synced"),
+            ));
         }
     }
     let (name, held) = machine(&deps.read(), terminal)?;
@@ -218,7 +222,11 @@ pub(super) fn init(
     if !terminal.consent("Set this host up?", !unsynced)? {
         return Err(Failure::Refused("nothing was written".to_owned()));
     }
-    initialized(placing, json, || setup::init_awaiting_summary(deps, &name))
+    initialized(placing, json, || match (starting, held) {
+        (true, _) => setup::start(deps, &name, None),
+        (false, true) => setup::join(deps, &name, Joining::Known),
+        (false, false) => setup::join(deps, &name, Joining::New { summary: None }),
+    })
 }
 
 #[cfg(test)]
@@ -377,6 +385,7 @@ mod tests {
             );
             assert_eq!(printed(&asked), format!("{typed} created\n"));
             assert_eq!(summary_of(&world), machines::PLACEHOLDER);
+            assert_eq!(head(&world, &world.machine()).envelope.change, "join");
         }
     }
 
@@ -455,13 +464,16 @@ mod tests {
                                 machines may not have synced to this one yet.\n\
                                 Start a new store there? [y/N]: ";
 
+    const NOT_STARTED: &str =
+        "/home/desk/worklog: no store was started; run `worklog init` again once it has synced";
+
     #[test]
     fn a_store_holding_nothing_is_started_only_on_a_yes() {
         for typed in ["\n", "n\n", "NO\n"] {
             let world = empty(Some("desk"));
             let asked = asked(&world, typed);
             assert_eq!(asked.shown, NOTHING_HELD, "{typed:?}");
-            assert_eq!(refused(&asked), "/home/desk/worklog: no store was started");
+            assert_eq!(refused(&asked), NOT_STARTED);
             assert_eq!(world.host.machine(), Ok(None));
             assert_eq!(topics(&world), [""; 0]);
         }
@@ -528,10 +540,7 @@ mod tests {
         let world = empty(Some("desk"));
         let declined = asked(&world, "later\nn\n");
         assert_eq!(declined.shown, format!("{NOTHING_HELD}{YES_OR_NO}{start}"));
-        assert_eq!(
-            refused(&declined),
-            "/home/desk/worklog: no store was started"
-        );
+        assert_eq!(refused(&declined), NOT_STARTED);
         assert_eq!(topics(&world), [""; 0]);
 
         let home = Home::with(&[".codex"]);

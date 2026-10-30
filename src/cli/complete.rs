@@ -545,6 +545,7 @@ mod tests {
             directories,
             [
                 "init store",
+                "join store",
                 "claim dir",
                 "unclaim dir",
                 "context dir",

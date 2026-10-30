@@ -14,12 +14,14 @@ use crate::wiring;
 
 const SERVE: &str = "serve";
 const INIT: &str = "init";
+const JOIN: &str = "join";
 
 // A use of the store is a `Command` or `serve`, and binding a host to one is none; words that
 // name no command are a use refused.
 fn is_logged(command: &str) -> bool {
     let first = command.split(' ').next().unwrap_or_default();
-    let of_the_store = first != INIT && <Command as Subcommand>::has_subcommand(first);
+    let of_the_store =
+        !matches!(first, INIT | JOIN) && <Command as Subcommand>::has_subcommand(first);
     first == SERVE || of_the_store || !<Invoked as Subcommand>::has_subcommand(first)
 }
 
@@ -195,7 +197,7 @@ mod tests {
         let all = Cli::command();
         spelled_one_way(&all);
         walked_to_its_path(&all, &[]);
-        for name in [SERVE, INIT] {
+        for name in [SERVE, INIT, JOIN] {
             assert!(all.find_subcommand(name).is_some(), "{name}");
         }
         assert!(Cli::parsed([NAME, "topic"]).is_err());
@@ -209,7 +211,7 @@ mod tests {
             .collect();
         assert_eq!(
             unlogged,
-            [INIT, "agents", "refresh", "completions", "upgrade"]
+            [INIT, JOIN, "agents", "refresh", "completions", "upgrade"]
         );
     }
 
@@ -307,6 +309,7 @@ mod tests {
             ("new entry wiring --date 2026-10-09", "new entry"),
             ("new followup --topics lantern", "new followup"),
             ("init desk --store kept", "init"),
+            ("join desk --store kept", "join"),
             ("agents refresh", "agents refresh"),
             ("refresh", "refresh"),
             ("serve --bind 127.0.0.1:0", "serve"),
@@ -322,6 +325,7 @@ mod tests {
             ("new entry", true),
             ("", true),
             ("init", false),
+            ("join", false),
             ("agents refresh", false),
             ("refresh", false),
             ("completions", false),

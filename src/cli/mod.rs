@@ -147,7 +147,8 @@ fn adapters_for(
     let chosen = match command {
         Command::Init {
             store: Some(store), ..
-        } => Some(environment.placed(store)?),
+        }
+        | Command::Join { store, .. } => Some(environment.placed(store)?),
         _ => None,
     };
     let adapters = wiring::wire(environment.variable, chosen)?;
@@ -903,15 +904,27 @@ mod tests {
     }
 
     #[test]
-    fn an_init_that_is_refused_leaves_no_store_and_no_config() {
-        let scratch = tempfile::tempdir().unwrap();
-        let root = scratch.path();
-        let ran = run(root, &["init", "desk", "--store", "kept"]);
-        assert_eq!(ran.out, "");
-        assert!(ran.err.contains("--summary"), "{}", ran.err);
-        assert_eq!(ran.code, 2);
-        assert!(!root.join("home/kept").exists());
-        assert!(!root.join("next").exists());
+    fn a_setup_that_is_refused_leaves_no_store_and_no_config() {
+        let refused: [(&[&str], &str); 2] = [
+            (
+                &["init", "desk", "--store", "kept", "--summary", ""],
+                "`summary` is empty",
+            ),
+            (
+                &["join", "desk", "--store", "kept"],
+                "the store holds no documents",
+            ),
+        ];
+        for (line, reason) in refused {
+            let scratch = tempfile::tempdir().unwrap();
+            let root = scratch.path();
+            let ran = run(root, line);
+            assert_eq!(ran.out, "", "{line:?}");
+            assert!(ran.err.contains(reason), "{line:?}: {}", ran.err);
+            assert_eq!(ran.code, 1, "{line:?}");
+            assert!(!root.join("home/kept").exists(), "{line:?}");
+            assert!(!root.join("next").exists(), "{line:?}");
+        }
     }
 
     fn typing<'a>(root: &Path, answers: &str) -> Process<'a> {
@@ -936,8 +949,9 @@ mod tests {
             ran.err,
             format!(
                 "{NAME}: `init` alone asks its questions on a terminal. A host is set up by its \
-                 user, who gives the directory of the store; without a terminal that is \
-                 `{NAME} init <NAME> --store <DIR>`\n"
+                 user, who gives the directory of the store; without a terminal, `{NAME} init \
+                 <NAME> --store <DIR>` starts a new store and `{NAME} join <NAME> --store \
+                 <DIR>` binds this host to a shared one\n"
             )
         );
         assert!(!root.join("next").exists());
@@ -976,9 +990,10 @@ mod tests {
 
     #[test]
     fn init_alone_that_is_declined_leaves_no_store_and_no_config() {
+        let declined = "no store was started; run `worklog init` again once it has synced";
         for (answers, why) in [
-            ("kept\n\n", "no store was started"),
-            ("kept\nn\n", "no store was started"),
+            ("kept\n\n", declined),
+            ("kept\nn\n", declined),
             ("kept\ny\ndesk\nn\n", "nothing was written"),
             ("kept\ny\n", "nothing was written"),
             ("", "nothing was written"),

@@ -59,7 +59,12 @@ impl Host {
     }
 
     fn sharing(&self, name: &str) -> Host {
-        Host::new().created_on(name, &self.store())
+        let host = Host::new();
+        let store = self.store();
+        let store = store.to_str().unwrap();
+        let made = host.ok(&["join", name, "--store", store, "--summary", "A machine"]);
+        assert_eq!(made, format!("{name} created\n"));
+        host
     }
 
     fn created_on(self, name: &str, store: &Path) -> Host {
@@ -403,7 +408,7 @@ fn init_makes_the_machine_topic_and_a_second_init_is_refused() {
 }
 
 #[test]
-fn init_alone_with_no_terminal_is_a_usage_error_naming_the_form_with_arguments() {
+fn init_alone_with_no_terminal_is_a_usage_error_naming_both_forms_with_arguments() {
     let host = Host::new();
     let before = snapshot(&host);
     let alone = host.run(&["init"]);
@@ -411,8 +416,9 @@ fn init_alone_with_no_terminal_is_a_usage_error_naming_the_form_with_arguments()
         &alone,
         2,
         "worklog: `init` alone asks its questions on a terminal. A host is set up by its user, \
-         who gives the directory of the store; without a terminal that is `worklog init <NAME> \
-         --store <DIR>`\n",
+         who gives the directory of the store; without a terminal, `worklog init <NAME> --store \
+         <DIR>` starts a new store and `worklog join <NAME> --store <DIR>` binds this host to a \
+         shared one\n",
     );
     assert!(!host.root.join("next").exists());
     assert_eq!(snapshot(&host), before);
@@ -433,8 +439,15 @@ fn init_refuses_a_directory_of_other_files_and_writes_nothing() {
     fs::write(project.join("notes.md"), "a person's own").unwrap();
     let before = snapshot(&host);
 
-    let line = ["init", "desk", "--store", "projects/lantern"];
-    let refused = host.run(&[&line[..], &["--summary", "A machine"]].concat());
+    let line = [
+        "init",
+        "desk",
+        "--store",
+        "projects/lantern",
+        "--summary",
+        "A machine",
+    ];
+    let refused = host.run(&line);
     assert_refused(
         &refused,
         1,
@@ -466,8 +479,15 @@ fn init_makes_a_store_in_a_directory_of_dot_named_entries_alone() {
     let mixed = atlas.root.join("mixed");
     fs::create_dir_all(mixed.join(".stfolder")).unwrap();
     fs::write(mixed.join("notes.txt"), "a person's own").unwrap();
-    let line = ["init", "atlas", "--store", mixed.to_str().unwrap()];
-    let refused = atlas.run(&[&line[..], &["--summary", "A machine"]].concat());
+    let line = [
+        "init",
+        "atlas",
+        "--store",
+        mixed.to_str().unwrap(),
+        "--summary",
+        "A machine",
+    ];
+    let refused = atlas.run(&line);
     assert_refused(
         &refused,
         1,
@@ -486,9 +506,86 @@ fn a_second_host_is_bound_to_a_store_a_sync_tool_keeps_files_beside() {
     fs::write(desk.store().join(".stignore"), ".DS_Store\n").unwrap();
     let phone = Host::new();
     let store = desk.store();
-    let bound = phone.ok(&["init", "desk", "--store", store.to_str().unwrap()]);
+    let bound = phone.ok(&["join", "desk", "--store", store.to_str().unwrap()]);
     assert_eq!(bound, "desk bound\n");
     assert_eq!(phone.ok(&["topics"]), desk.ok(&["topics"]));
+}
+
+#[test]
+fn init_refuses_a_store_that_holds_documents_and_names_join() {
+    let desk = Host::set_up("desk");
+    desk.settled();
+    let phone = Host::new();
+    let phone_before = snapshot_without_cache(&phone);
+    let desk_before = snapshot(&desk);
+    let store = desk.store();
+    let line = [
+        "init",
+        "phone",
+        "--store",
+        store.to_str().unwrap(),
+        "--summary",
+        "A machine",
+    ];
+    let refused = phone.run(&line);
+    assert_refused(
+        &refused,
+        1,
+        "worklog: the store holds documents; `worklog join` binds this host to it\n",
+    );
+    assert_eq!(snapshot_without_cache(&phone), phone_before);
+    assert_eq!(snapshot(&desk), desk_before);
+    assert_refused(&phone.run(&["topics"]), 1, NOT_SET_UP);
+}
+
+#[test]
+fn init_without_a_summary_makes_the_machine_topic_with_the_placeholder() {
+    let host = Host::new();
+    assert_eq!(
+        host.ok(&["init", "desk", "--store", "kept"]),
+        "desk created\n"
+    );
+    assert_eq!(
+        host.ok(&["topics"]),
+        host.row("desk", "desk  (summary not yet written)")
+    );
+}
+
+#[test]
+fn join_refuses_a_store_that_does_not_fit_what_it_is_told_and_writes_nothing() {
+    let desk = Host::set_up("desk");
+    desk.settled();
+    let store = desk.store();
+    let store = store.to_str().unwrap();
+    let phone = Host::new();
+    let empty = phone.root.join("empty");
+    fs::create_dir(&empty).unwrap();
+    let phone_before = snapshot_without_cache(&phone);
+    let desk_before = snapshot(&desk);
+
+    let nothing = phone.run(&["join", "desk", "--store", empty.to_str().unwrap()]);
+    assert_refused(
+        &nothing,
+        1,
+        "worklog: the store holds no documents; a shared store may not have synced yet, and \
+         `worklog init` starts a new one\n",
+    );
+    let lacking = phone.run(&["join", "phone", "--store", store]);
+    assert_refused(
+        &lacking,
+        1,
+        "worklog: the store holds no topic named phone; it may not have synced yet, and \
+         `--summary` makes a new machine topic\n",
+    );
+    let held = phone.run(&["join", "desk", "--store", store, "--summary", "A machine"]);
+    assert_refused(
+        &held,
+        1,
+        "worklog: desk is already in the store; without `--summary` this host is bound to it\n",
+    );
+    assert_eq!(snapshot_without_cache(&phone), phone_before);
+    assert_eq!(snapshot(&desk), desk_before);
+    assert_refused(&phone.run(&["topics"]), 1, NOT_SET_UP);
 }
 
 #[test]
@@ -1000,7 +1097,7 @@ fn a_fork_is_resolved_through_a_draft() {
     let phone = Host::new();
     copy_tree(&desk.store(), &phone.store());
     assert_eq!(
-        phone.ok(&["init", "desk", "--store", phone.store().to_str().unwrap()]),
+        phone.ok(&["join", "desk", "--store", phone.store().to_str().unwrap()]),
         "desk bound\n"
     );
 
@@ -1300,7 +1397,7 @@ fn a_fork_is_listed_and_resolved_under_json() {
     desk.topic("lantern");
     let phone = Host::new();
     copy_tree(&desk.store(), &phone.store());
-    phone.ok(&["init", "desk", "--store", phone.store().to_str().unwrap()]);
+    phone.ok(&["join", "desk", "--store", phone.store().to_str().unwrap()]);
     desk.ok(&["rename", "lantern", "lamp"]);
     phone.ok(&["rename", "lantern", "torch"]);
     copy_tree(&phone.store(), &desk.store());
@@ -1342,8 +1439,7 @@ fn a_failure_under_json_is_text_on_stderr_and_nothing_on_stdout() {
 #[test]
 fn two_homes_on_one_store_are_two_machines_that_see_each_other() {
     let desk = Host::set_up("desk");
-    let phone = Host::new();
-    assert_eq!(phone.init("phone", &desk.store()), "phone created\n");
+    let phone = desk.sharing("phone");
 
     desk.topic("lantern");
     phone.topic("atlas");
@@ -2422,6 +2518,18 @@ impl Host {
         serde_json::from_str(&fs::read_to_string(self.hooks_of(home)).unwrap()).unwrap()
     }
 
+    fn assert_placed(&self, home: &str) {
+        let skill = fs::read_to_string(self.skill_of(home)).unwrap();
+        assert!(skill.contains("name: worklog"), "{skill}");
+        assert_eq!(self.session_hook(home), hook_command(home));
+    }
+
+    fn session_hook(&self, home: &str) -> String {
+        let hooks = self.hooks_json(home);
+        let command = &hooks["hooks"]["SessionStart"][0]["hooks"][0]["command"];
+        command.as_str().expect("a command").to_owned()
+    }
+
     fn placed(&self, homes: &[&str]) -> Vec<PathBuf> {
         (homes.iter())
             .flat_map(|home| {
@@ -2482,6 +2590,13 @@ fn snapshot(host: &Host) -> Vec<(PathBuf, Option<Vec<u8>>)> {
     found
 }
 
+// A read of a store writes the host's cache, and with it the directory that holds it.
+fn snapshot_without_cache(host: &Host) -> Vec<(PathBuf, Option<Vec<u8>>)> {
+    let mut found = snapshot(host);
+    found.retain(|(path, _)| path != Path::new("next") && !path.starts_with("next/cache"));
+    found
+}
+
 #[test]
 fn init_with_agents_installs_for_every_agent_present_and_prints_the_paths() {
     let host = Host::new().with_agents(&[".claude", ".codex"]);
@@ -2489,17 +2604,25 @@ fn init_with_agents_installs_for_every_agent_present_and_prints_the_paths() {
     let paths = host.placed(&[".claude", ".codex"]);
     assert_eq!(printed, format!("desk created\n{}", lines(&paths)));
     for home in [".claude", ".codex"] {
-        assert!(
-            fs::read_to_string(host.skill_of(home))
-                .unwrap()
-                .contains("name: worklog")
-        );
-        let hooks = host.hooks_json(home);
-        let command = hooks["hooks"]["SessionStart"][0]["hooks"][0]["command"]
-            .as_str()
-            .unwrap();
-        assert_eq!(command, hook_command(home));
+        host.assert_placed(home);
     }
+}
+
+#[test]
+fn join_with_agents_installs_for_the_agent_present_and_prints_the_paths() {
+    let desk = Host::set_up("desk");
+    let phone = Host::new().with_agents(&[".claude"]);
+    let store = desk.store();
+    let printed = phone.ok(&[
+        "join",
+        "desk",
+        "--store",
+        store.to_str().unwrap(),
+        "--agents",
+    ]);
+    let paths = phone.placed(&[".claude"]);
+    assert_eq!(printed, format!("desk bound\n{}", lines(&paths)));
+    phone.assert_placed(".claude");
 }
 
 #[test]
@@ -3038,7 +3161,7 @@ impl Host {
         let other = Host::new();
         copy_tree(&self.store(), &other.store());
         let store = other.store();
-        other.ok(&["init", "desk", "--store", store.to_str().unwrap()]);
+        other.ok(&["join", "desk", "--store", store.to_str().unwrap()]);
         self.ok(line);
         other.ok(line);
         copy_tree(&other.store(), &self.store());
@@ -3993,9 +4116,7 @@ impl Stale {
     }
 
     fn hook(&self) -> String {
-        let hooks = self.host.hooks_json(".claude");
-        let command = &hooks["hooks"]["SessionStart"][0]["hooks"][0]["command"];
-        command.as_str().expect("a command").to_owned()
+        self.host.session_hook(".claude")
     }
 
     fn fish_line(&self) -> String {

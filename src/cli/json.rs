@@ -1,5 +1,5 @@
-//! The form `--json` gives a result: the use case's own type, or for `agents` and `init` the
-//! command line's own, one value and a newline.
+//! The form `--json` gives a result: the use case's own type, or for `agents`, `init` and
+//! `join` the command line's own, one value and a newline.
 //!
 //! One convention holds for every value. A key is in snake case. An enum that carries data
 //! is an object whose `type` key holds the variant in snake case, and one that carries none
@@ -486,7 +486,7 @@ mod tests {
     fn bound() -> Vec<(Initialized, Value)> {
         let mut world = World::new();
         world.host.set_machine(None);
-        let bound = setup::init(&world.deps(), "desk", Some("A machine")).unwrap();
+        let bound = setup::start(&world.deps(), "desk", Some("A machine")).unwrap();
         let document = world.host.bound().expect("a host that init bound");
         let paths = vec!["/home/desk/.claude/settings.json".to_owned()];
         let expected = json!({

@@ -81,9 +81,9 @@ steps. `uses` runs one way: a session in the topic loads what it uses, and
 a read of the used topic does not cover the topic. A change that would let
 a topic reach itself through either list is refused.
 
-A machine's topic is an ordinary topic that a host was bound to by `init`.
-Every version that host writes carries its id, so renaming it rewrites
-nothing.
+A machine's topic is an ordinary topic that a host was bound to by `init`
+or `join`. Every version that host writes carries its id, so renaming it
+rewrites nothing.
 
 ## Fact
 

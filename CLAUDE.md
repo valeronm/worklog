@@ -143,13 +143,14 @@ leaves empty. The rest of that file is the user's and keeps its comments
 and layout. Nothing checks that Codex still reads that key, so a rename on
 its side leaves drafts unwritable to its edit tool without failing a test.
 
-`init` touches neither the skill nor the hooks file unless given
-`--agents` or told yes to the question it asks on a terminal. A refresh
-writes only where the thing already is, fish's completions directory
-included, which is what lets the installer and `upgrade` run it on every
-host. The rule is the exception: a refresh writes one that is missing for
-an agent holding the skill or the hook, since a host set up before the
-rule existed is upgraded and not installed again.
+`init` and `join` touch neither the skill nor the hooks file unless given
+`--agents`, or, for `init` on a terminal, told yes to the question it
+asks. A refresh writes only where the thing already is, fish's
+completions directory included, which is what lets the installer and
+`upgrade` run it on every host. The rule is the exception: a refresh
+writes one that is missing for an agent holding the skill or the hook,
+since a host set up before the rule existed is upgraded and not installed
+again.
 
 A usage line gets its session from the environment variable an agent sets
 for a command it runs, and for a session hook from the hook's input, which
