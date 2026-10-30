@@ -13,7 +13,7 @@ use crate::wiring;
 
 const DEFAULT_STORE: &str = "worklog";
 
-pub(super) fn no_terminal() -> Failure {
+fn no_terminal() -> Failure {
     Failure::Usage(format!(
         "`init` alone asks its questions on a terminal. A host is set up by its user, who gives \
          the directory of the store; without a terminal, `{NAME} init <NAME> --store <DIR>` \
@@ -22,13 +22,13 @@ pub(super) fn no_terminal() -> Failure {
     ))
 }
 
-pub(super) struct Terminal<'a> {
+struct Terminal<'a> {
     answers: &'a mut dyn BufRead,
     shown: &'a mut dyn Write,
 }
 
 impl<'a> Terminal<'a> {
-    pub(super) fn new(answers: &'a mut dyn BufRead, shown: &'a mut dyn Write) -> Terminal<'a> {
+    fn new(answers: &'a mut dyn BufRead, shown: &'a mut dyn Write) -> Terminal<'a> {
         Terminal { answers, shown }
     }
 
@@ -101,9 +101,7 @@ fn expanded(answer: &str, home: Option<&Path>) -> Result<PathBuf, Failure> {
     }
 }
 
-/// The directory typed, as an absolute path, with what `open` makes of it; an answer that names
-/// no directory or that `open` fails on is asked for again.
-pub(super) fn store<T>(
+fn store<T>(
     terminal: &mut Terminal,
     environment: &Environment,
     open: impl Fn(&Path) -> Result<T, Failure>,
@@ -181,7 +179,24 @@ fn placing(environment: &Environment, terminal: &mut Terminal) -> Result<Option<
 }
 
 /// Writes nothing before the last question is answered yes.
-pub(super) fn init(
+pub(super) fn asked(
+    json: bool,
+    environment: &Environment,
+    err: &mut dyn Write,
+) -> Result<Output, Failure> {
+    let answers = environment.terminal.ok_or_else(no_terminal)?;
+    if let Some(bound) = wiring::wire(environment.variable)? {
+        setup::refuse_bound(&bound.deps())?;
+    }
+    let mut answers = answers.borrow_mut();
+    let mut terminal = Terminal::new(&mut *answers, err);
+    let (chosen, adapters) = store(&mut terminal, environment, |chosen| {
+        wiring::wire_over(environment.variable, chosen)
+    })?;
+    init(&adapters.deps(), environment, json, &chosen, &mut terminal)
+}
+
+fn init(
     deps: &Deps,
     environment: &Environment,
     json: bool,

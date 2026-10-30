@@ -5,6 +5,7 @@ mod agents;
 mod args;
 mod complete;
 mod hook;
+mod host;
 mod json;
 mod log;
 mod prompt;
@@ -23,13 +24,13 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::Duration;
 
+use crate::app::Failure;
 use crate::app::record::Outcome;
-use crate::app::{Failure, setup};
 use crate::domain::ports::{Binary, Releases, StoreError};
 use crate::domain::release::{self, Built};
 use crate::domain::schema::Directory;
 use crate::{web, wiring};
-use args::{Cli, Command, HostCommand, InitArgs, Invoked, ReadCommand};
+use args::{Cli, Command, Invoked, ReadCommand};
 use render::{Output, Stopped};
 
 const NAME: &str = "worklog";
@@ -165,74 +166,6 @@ fn unbound(command: &Command, json: bool) -> Result<Output, Failure> {
         }
         _ => Err(not_set_up),
     }
-}
-
-// The store of an `init` given no argument is known only once its question is answered.
-fn asked(json: bool, environment: &Environment, err: &mut dyn Write) -> Result<Output, Failure> {
-    let answers = environment.terminal.ok_or_else(prompt::no_terminal)?;
-    if let Some(bound) = wiring::wire(environment.variable)? {
-        setup::refuse_bound(&bound.deps())?;
-    }
-    let mut answers = answers.borrow_mut();
-    let mut terminal = prompt::Terminal::new(&mut *answers, err);
-    let (store, adapters) = prompt::store(&mut terminal, environment, |store| {
-        wiring::wire_over(environment.variable, store)
-    })?;
-    prompt::init(&adapters.deps(), environment, json, &store, &mut terminal)
-}
-
-fn set_up(
-    command: &HostCommand,
-    json: bool,
-    environment: &Environment,
-    err: &mut dyn Write,
-) -> Result<Output, Failure> {
-    match command {
-        HostCommand::Init { given: None } => asked(json, environment, err),
-        HostCommand::Init {
-            given:
-                Some(InitArgs {
-                    name,
-                    store,
-                    summary,
-                    agents,
-                }),
-        } => {
-            let adapters = wiring::wire_over(environment.variable, &environment.placed(store)?)?;
-            let deps = adapters.deps();
-            initialized(environment, json, *agents, || {
-                setup::start(&deps, name, summary.as_deref())
-            })
-        }
-        HostCommand::Join {
-            name,
-            store,
-            summary,
-            agents,
-        } => {
-            let adapters = wiring::wire_over(environment.variable, &environment.placed(store)?)?;
-            let deps = adapters.deps();
-            let joining =
-                (summary.as_deref()).map_or(setup::Joining::Known, |summary| setup::Joining::New {
-                    summary: Some(summary),
-                });
-            initialized(environment, json, *agents, || {
-                setup::join(&deps, name, joining)
-            })
-        }
-    }
-}
-
-fn initialized(
-    environment: &Environment,
-    json: bool,
-    with_agents: bool,
-    bind: impl FnOnce() -> Result<setup::Bound, Failure>,
-) -> Result<Output, Failure> {
-    let placing = with_agents
-        .then(|| agents::Placing::on_this_host(environment))
-        .transpose()?;
-    agents::initialized(placing, json, bind)
 }
 
 // A log that stalls must not hold back the run's output.
@@ -373,7 +306,7 @@ where
     };
     let command = match &cli.command {
         Invoked::Host(command) => {
-            return finished(set_up(command, cli.json, environment, err), out, err);
+            return finished(host::run(command, cli.json, environment, err), out, err);
         }
         Invoked::Run(command) => command,
         Invoked::Serve { bind, hosts } => {
