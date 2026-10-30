@@ -268,6 +268,14 @@ impl Host {
             .unwrap_or_else(|| panic!("the file of version {version}"))
     }
 
+    // A sync replaces a file by a rename, which changes its directory's modification time.
+    fn damaged(&self, version: &str) {
+        let file = self.file_of(version);
+        let replacement = file.with_extension("partial");
+        fs::write(&replacement, "not a version\n").unwrap();
+        fs::rename(&replacement, &file).unwrap();
+    }
+
     // A document directory changed within the cache's settling time is read again whatever
     // the cache holds, so a scenario of what the cache answers backdates every one first.
     fn settled(&self) {
@@ -1279,7 +1287,7 @@ fn a_command_that_reads_the_store_prints_one_json_value() {
     let clean = host.json(&["check"]);
     assert_eq!(clean["problems"], Value::Array(Vec::new()), "{clean}");
     let stored = host.ok(&["history", &followup]);
-    fs::write(host.file_of(&stored[..12]), "not a version\n").unwrap();
+    host.damaged(&stored[..12]);
     let ran = host.run(&["check", "--json"]);
     assert_eq!((ran.stderr.as_str(), ran.code), ("", Some(1)));
     let found = one_value(&ran.stdout).unwrap_or_else(|| panic!("one value: {}", ran.stdout));
@@ -1368,7 +1376,7 @@ fn check_exits_one_on_a_problem_and_zero_without() {
 
     let files = host.version_files();
     assert_eq!(files.len(), 1);
-    fs::write(&files[0], "not a version\n").unwrap();
+    host.damaged(files[0].file_stem().unwrap().to_str().unwrap());
 
     let ran = host.run(&["check"]);
     assert_eq!(ran.stderr, "");
@@ -1712,7 +1720,7 @@ fn a_file_that_does_not_read_is_a_note_on_stderr_beside_the_document() {
     host.ok(&["rename", "lantern", "lamp"]);
     let listed = host.ok(&["history", "lamp"]);
     let first = listed.lines().nth(1).expect("two versions")[..12].to_owned();
-    fs::write(host.file_of(&first), "not a version\n").unwrap();
+    host.damaged(&first);
 
     let shown = host.run(&["show", "lamp"]);
     assert!(shown.stdout.starts_with("+++\n"), "{}", shown.stdout);
@@ -1924,6 +1932,7 @@ fn a_renamed_fact_keeps_its_old_name_and_its_topic_ends_once_the_fact_is_filed_e
 #[test]
 fn a_damaged_file_is_named_by_check_and_the_rest_of_the_store_still_reads() {
     let host = Host::stocked();
+    host.settled();
     let topics = host.ok(&["topics"]);
     let relay = host.ok(&["show", "lantern/relay"]);
     let facts = host.ok(&["facts"]);
@@ -1937,7 +1946,7 @@ fn a_damaged_file_is_named_by_check_and_the_rest_of_the_store_still_reads() {
     assert!(is_hex(version, 12), "{history}");
     assert_eq!(host.ok(&["check"]), "0 problems, 0 notices, 0 forks\n");
 
-    fs::write(host.file_of(version), "not a version\n").unwrap();
+    host.damaged(version);
 
     let checked = host.run(&["check"]);
     assert_eq!((checked.stderr.as_str(), checked.code), ("", Some(1)));
@@ -3277,9 +3286,10 @@ fn a_forked_document_and_one_with_a_file_that_does_not_read_are_each_offered_onc
     host.ok(&["rename", "lantern/fuse", "breaker"]);
     let listed = host.ok(&["history", "lantern/breaker"]);
     let first = listed.lines().nth(1).expect("two versions")[..12].to_owned();
-    fs::write(host.file_of(&first), "not a version\n").unwrap();
+    host.settled();
+    host.damaged(&first);
     let whole = host.ok(&["history", "atlas"]);
-    fs::write(host.file_of(&whole[..12]), "not a version\n").unwrap();
+    host.damaged(&whole[..12]);
 
     let before = snapshot(&host);
     assert_eq!(
