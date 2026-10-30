@@ -4,6 +4,7 @@ use serde::Serialize;
 
 use super::args::AgentsAction;
 use super::render::{Output, Render, Stopped, output};
+use super::sandbox::Edit;
 use super::skill::SKILL;
 use super::{Environment, NAME, hook, sandbox};
 use crate::app::Failure;
@@ -78,11 +79,9 @@ impl Done {
         Ok(planned.is_some())
     }
 
-    fn config(&mut self, agent: &Agent, planned: Option<&str>) -> Result<(), Failure> {
-        if let Some(text) = planned
-            && let Some(file) = agent.write_config(text)?
-        {
-            self.wrote(&file);
+    fn config(&mut self, agent: &Agent, planned: Option<&Edit>) -> Result<(), Failure> {
+        if let Some(Edit { config, text }) = planned {
+            self.wrote(&agent.write_config(config, text)?);
         }
         Ok(())
     }
@@ -90,7 +89,7 @@ impl Done {
     fn granted(
         &mut self,
         agent: &Agent,
-        planned: Option<&str>,
+        planned: Option<&Edit>,
         drafts: &Path,
     ) -> Result<(), Failure> {
         if planned.is_some() {
@@ -155,14 +154,14 @@ pub(super) fn present_names(environment: &Environment) -> Result<Vec<&'static st
 struct Planned {
     agent: Agent,
     hooks: Option<String>,
-    config: Option<String>,
+    config: Option<Edit>,
 }
 
 // Every agent's hooks file and config is read and edited in memory before the first write.
 fn planned(
     agents: Vec<Agent>,
     hooks: impl Fn(&Agent) -> Result<Option<String>, Failure>,
-    config: impl Fn(&Agent) -> Result<Option<String>, Failure>,
+    config: impl Fn(&Agent) -> Result<Option<Edit>, Failure>,
 ) -> Result<Vec<Planned>, Failure> {
     agents
         .into_iter()
@@ -207,7 +206,7 @@ impl Placing {
             if let Some(rule) = agent.write_rule()? {
                 done.wrote(&rule);
             }
-            done.granted(agent, config.as_deref(), &self.drafts)?;
+            done.granted(agent, config.as_ref(), &self.drafts)?;
             if !done.hooks(agent, hooks.as_deref())? {
                 done.notes.push(format!(
                     "{}: a SessionStart hook already runs {NAME} context",
@@ -252,7 +251,7 @@ struct Refreshed {
     /// existed.
     installed: bool,
     hooks: Option<String>,
-    config: Option<String>,
+    config: Option<Edit>,
 }
 
 impl Refreshing {
@@ -292,7 +291,7 @@ impl Refreshing {
             if let Some(rule) = agent.refresh_rule(refreshed.installed)? {
                 done.wrote(&rule);
             }
-            done.granted(agent, refreshed.config.as_deref(), &self.drafts)?;
+            done.granted(agent, refreshed.config.as_ref(), &self.drafts)?;
             done.hooks(agent, refreshed.hooks.as_deref())?;
         }
         Ok(())
@@ -315,7 +314,7 @@ fn uninstall_into(environment: &Environment, done: &mut Done) -> Result<(), Fail
         if let Some(rule) = agent.remove_rule()? {
             done.wrote(&rule);
         }
-        done.config(&agent, config.as_deref())?;
+        done.config(&agent, config.as_ref())?;
         done.hooks(&agent, hooks.as_deref())?;
     }
     Ok(())

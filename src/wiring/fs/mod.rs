@@ -12,7 +12,7 @@ mod releases;
 mod store;
 mod usage;
 
-pub use agent::{FsAgent, SKILL_DIRECTORY, replace_under};
+pub use agent::{FsAgent, SKILL_DIRECTORY, read_optional, remove_optional, replace_under};
 pub use binary::FsBinary;
 pub use clock::SystemClock;
 pub use config::Config;

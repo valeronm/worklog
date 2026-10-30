@@ -13,24 +13,14 @@ pub struct FsAgent {
     home: PathBuf,
     skill_dir: PathBuf,
     hooks: PathBuf,
-    rule: Option<PathBuf>,
-    config: Option<PathBuf>,
 }
 
 impl FsAgent {
-    pub fn new(
-        name: &'static str,
-        home: PathBuf,
-        hooks: &str,
-        rule: Option<&str>,
-        config: Option<&str>,
-    ) -> FsAgent {
+    pub fn new(name: &'static str, home: PathBuf, hooks: &str) -> FsAgent {
         FsAgent {
             name,
             skill_dir: home.join("skills").join(SKILL_DIRECTORY),
             hooks: home.join(hooks),
-            rule: rule.map(|rule| home.join(rule)),
-            config: config.map(|config| home.join(config)),
             home,
         }
     }
@@ -56,7 +46,7 @@ impl FsAgent {
     }
 
     pub fn write_skill(&self, text: &str) -> Result<PathBuf, StoreError> {
-        self.in_home(&self.skill_file(), text)
+        self.write(&self.skill_file(), text)
     }
 
     pub fn remove_skill(&self) -> Result<Option<PathBuf>, StoreError> {
@@ -69,43 +59,14 @@ impl FsAgent {
     }
 
     pub fn write_hooks(&self, text: &str) -> Result<PathBuf, StoreError> {
-        self.in_home(&self.hooks, text)
+        self.write(&self.hooks, text)
     }
 
-    pub fn read_rule(&self) -> Result<Option<String>, StoreError> {
-        self.rule.as_deref().map_or(Ok(None), read_optional)
+    pub fn file(&self, under_home: &str) -> PathBuf {
+        self.home.join(under_home)
     }
 
-    /// Returns the file written, or `None` for an agent that takes no rule.
-    pub fn write_rule(&self, text: &str) -> Result<Option<PathBuf>, StoreError> {
-        (self.rule.as_deref())
-            .map(|file| self.in_home(file, text))
-            .transpose()
-    }
-
-    pub fn remove_rule(&self) -> Result<Option<PathBuf>, StoreError> {
-        let Some(file) = &self.rule else {
-            return Ok(None);
-        };
-        Ok(optional(file, fs::remove_file(file))?.map(|()| file.clone()))
-    }
-
-    pub fn config(&self) -> Option<&Path> {
-        self.config.as_deref()
-    }
-
-    pub fn read_config(&self) -> Result<Option<String>, StoreError> {
-        self.config.as_deref().map_or(Ok(None), read_optional)
-    }
-
-    /// Returns the file written, or `None` for an agent that has no config.
-    pub fn write_config(&self, text: &str) -> Result<Option<PathBuf>, StoreError> {
-        (self.config.as_deref())
-            .map(|file| self.in_home(file, text))
-            .transpose()
-    }
-
-    fn in_home(&self, file: &Path, text: &str) -> Result<PathBuf, StoreError> {
+    pub fn write(&self, file: &Path, text: &str) -> Result<PathBuf, StoreError> {
         replace_under(&self.home, file, text)?;
         Ok(file.to_path_buf())
     }
@@ -119,8 +80,12 @@ pub fn replace_under(dir: &Path, file: &Path, text: &str) -> Result<(), StoreErr
     replace_file(file, text)
 }
 
-fn read_optional(path: &Path) -> Result<Option<String>, StoreError> {
+pub fn read_optional(path: &Path) -> Result<Option<String>, StoreError> {
     optional(path, fs::read_to_string(path))
+}
+
+pub fn remove_optional(path: &Path) -> Result<Option<PathBuf>, StoreError> {
+    Ok(optional(path, fs::remove_file(path))?.map(|()| path.to_path_buf()))
 }
 
 const LINK_HOPS: usize = 40;
@@ -156,49 +121,28 @@ mod tests {
     use super::*;
 
     fn agent(home: &Path) -> FsAgent {
-        FsAgent::new(
-            "Claude Code",
-            home.join(".claude"),
-            "settings.json",
-            None,
-            None,
-        )
+        FsAgent::new("Claude Code", home.join(".claude"), "settings.json")
     }
 
     #[test]
-    fn a_rule_is_written_read_and_removed_as_one_file_and_only_for_an_agent_that_takes_one() {
+    fn a_file_under_the_home_is_written_read_and_removed_alone() {
         let kept = tempfile::tempdir().unwrap();
         let home = kept.path().join(".codex");
         fs::create_dir(&home).unwrap();
-        let taking = FsAgent::new(
-            "Codex",
-            home.clone(),
-            "hooks.json",
-            Some("rules/lantern.rules"),
-            None,
-        );
-        assert_eq!(taking.read_rule(), Ok(None));
-        assert_eq!(taking.remove_rule(), Ok(None));
+        let agent = FsAgent::new("Codex", home.clone(), "hooks.json");
+        let file = agent.file("rules/lantern.rules");
+        assert_eq!(file, home.join("rules/lantern.rules"));
+        assert_eq!(read_optional(&file), Ok(None));
+        assert_eq!(remove_optional(&file), Ok(None));
 
-        let file = home.join("rules/lantern.rules");
-        assert_eq!(taking.write_rule("atlas"), Ok(Some(file.clone())));
-        assert_eq!(taking.read_rule(), Ok(Some("atlas".to_owned())));
+        assert_eq!(agent.write(&file, "atlas"), Ok(file.clone()));
+        assert_eq!(read_optional(&file), Ok(Some("atlas".to_owned())));
         fs::write(home.join("rules/default.rules"), "desk").unwrap();
-        assert_eq!(taking.remove_rule(), Ok(Some(file.clone())));
+        assert_eq!(remove_optional(&file), Ok(Some(file.clone())));
         assert!(!file.exists());
         assert_eq!(
             fs::read_to_string(home.join("rules/default.rules")).unwrap(),
             "desk"
-        );
-
-        let plain = agent(kept.path());
-        fs::create_dir(kept.path().join(".claude")).unwrap();
-        assert_eq!(plain.write_rule("atlas"), Ok(None));
-        assert_eq!(plain.read_rule(), Ok(None));
-        assert_eq!(plain.remove_rule(), Ok(None));
-        assert_eq!(
-            fs::read_dir(kept.path().join(".claude")).unwrap().count(),
-            0
         );
     }
 

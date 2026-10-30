@@ -5,7 +5,7 @@ use std::path::Path;
 use toml_edit::{Array, DocumentMut, Item, Table};
 
 use crate::app::Failure;
-use crate::wiring::Agent;
+use crate::wiring::{Agent, SandboxConfig};
 
 const TABLE: &str = "sandbox_workspace_write";
 const ROOTS: &str = "writable_roots";
@@ -72,25 +72,33 @@ fn edited(text: &str, root: &str, change: Change) -> Result<Option<String>, Stri
     Ok(Some(document.to_string()))
 }
 
-fn planned(agent: &Agent, drafts: &Path, change: Change) -> Result<Option<String>, Failure> {
-    let Some(file) = agent.config() else {
+/// An agent's sandbox config with the text it is to be written with.
+pub(super) struct Edit {
+    pub(super) config: SandboxConfig,
+    pub(super) text: String,
+}
+
+fn planned(agent: &Agent, drafts: &Path, change: Change) -> Result<Option<Edit>, Failure> {
+    let Some(config) = agent.config() else {
         return Ok(None);
     };
     let root = root(drafts)?;
-    let text = agent.read_config()?.unwrap_or_default();
-    edited(&text, root, change).map_err(|reason| Failure::at(file.display(), reason))
+    let held = agent.read_config(&config)?.unwrap_or_default();
+    let text = edited(&held, root, change)
+        .map_err(|reason| Failure::at(config.path().display(), reason))?;
+    Ok(text.map(|text| Edit { config, text }))
 }
 
 /// Reads the agent's config and writes nothing: its text with `drafts` among the writable
 /// roots, or `None` where it is there or the agent has no config; a refusal where the file is
 /// not TOML or its roots are not a table holding an array.
-pub(super) fn installed(agent: &Agent, drafts: &Path) -> Result<Option<String>, Failure> {
+pub(super) fn installed(agent: &Agent, drafts: &Path) -> Result<Option<Edit>, Failure> {
     planned(agent, drafts, add)
 }
 
 /// Reads the agent's config and writes nothing: its text with `drafts` taken out of the
 /// writable roots, or `None` where it is not there.
-pub(super) fn uninstalled(agent: &Agent, drafts: &Path) -> Result<Option<String>, Failure> {
+pub(super) fn uninstalled(agent: &Agent, drafts: &Path) -> Result<Option<Edit>, Failure> {
     planned(agent, drafts, remove)
 }
 

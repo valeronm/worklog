@@ -11,7 +11,7 @@ use crate::domain::ports::{Binary, Releases};
 use crate::domain::session::Session;
 use fs::{
     Config, DirReleases, FsAgent, FsBinary, FsDrafts, FsHost, FsStore, FsUsage, Paths, RandomIds,
-    SystemClock,
+    SystemClock, read_optional, remove_optional,
 };
 use net::GitHubReleases;
 
@@ -275,31 +275,39 @@ impl Agent {
         Ok(self.files.remove_skill()?)
     }
 
+    fn rule(&self) -> Option<(PathBuf, &'static str)> {
+        let rule = self.known.rule.as_ref()?;
+        Some((self.files.file(rule.file), rule.text))
+    }
+
     /// Writes the rule that lets the agent run this tool outside its sandbox and returns the
     /// file, or `None` for an agent that takes no rule.
     pub fn write_rule(&self) -> Result<Option<PathBuf>, Failure> {
-        let Some(rule) = &self.known.rule else {
+        let Some((file, text)) = self.rule() else {
             return Ok(None);
         };
-        Ok(self.files.write_rule(rule.text)?)
+        Ok(Some(self.files.write(&file, text)?))
     }
 
     /// Writes the rule where the one there is not the one this binary writes, and with
     /// `missing_too` where none is there, and returns the file then.
     pub fn refresh_rule(&self, missing_too: bool) -> Result<Option<PathBuf>, Failure> {
-        let Some(rule) = &self.known.rule else {
+        let Some((file, text)) = self.rule() else {
             return Ok(None);
         };
-        match self.files.read_rule()? {
-            Some(held) if held == rule.text => Ok(None),
+        match read_optional(&file)? {
+            Some(held) if held == text => Ok(None),
             None if !missing_too => Ok(None),
-            _ => self.write_rule(),
+            _ => Ok(Some(self.files.write(&file, text)?)),
         }
     }
 
     /// Removes the rule's file and returns it, or `None` when there was none.
     pub fn remove_rule(&self) -> Result<Option<PathBuf>, Failure> {
-        Ok(self.files.remove_rule()?)
+        let Some((file, _)) = self.rule() else {
+            return Ok(None);
+        };
+        Ok(remove_optional(&file)?)
     }
 
     pub fn read_hooks(&self) -> Result<Option<String>, Failure> {
@@ -311,16 +319,27 @@ impl Agent {
     }
 
     #[must_use]
-    pub fn config(&self) -> Option<&Path> {
-        self.files.config()
+    pub fn config(&self) -> Option<SandboxConfig> {
+        (self.known.config).map(|file| SandboxConfig(self.files.file(file)))
     }
 
-    pub fn read_config(&self) -> Result<Option<String>, Failure> {
-        Ok(self.files.read_config()?)
+    pub fn read_config(&self, config: &SandboxConfig) -> Result<Option<String>, Failure> {
+        Ok(read_optional(&config.0)?)
     }
 
-    pub fn write_config(&self, text: &str) -> Result<Option<PathBuf>, Failure> {
-        Ok(self.files.write_config(text)?)
+    pub fn write_config(&self, config: &SandboxConfig, text: &str) -> Result<PathBuf, Failure> {
+        Ok(self.files.write(&config.0, text)?)
+    }
+}
+
+/// An agent's sandbox config, which only this module builds.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SandboxConfig(PathBuf);
+
+impl SandboxConfig {
+    #[must_use]
+    pub fn path(&self) -> &Path {
+        &self.0
     }
 }
 
@@ -332,13 +351,7 @@ pub fn agents(variable: &dyn Fn(&str) -> Option<OsString>) -> Result<Vec<Agent>,
         return Err(Failure::at("$HOME", "not set"));
     };
     let agent = |known: &'static Known| Agent {
-        files: FsAgent::new(
-            known.name,
-            home.join(known.home),
-            known.hooks,
-            known.rule.as_ref().map(|rule| rule.file),
-            known.config,
-        ),
+        files: FsAgent::new(known.name, home.join(known.home), known.hooks),
         homes: homes.clone(),
         known,
     };
@@ -669,6 +682,20 @@ mod tests {
         assert_eq!(codex.remove_rule().unwrap(), Some(rule));
         assert!(!root.join(".claude").exists());
         assert_eq!(codex.homes(), [root.as_path()]);
+    }
+
+    #[test]
+    fn an_agent_that_takes_no_rule_and_has_no_config_is_written_neither() {
+        let (_kept, root) = scratch();
+        std::fs::create_dir(root.join(".claude")).unwrap();
+        let listed = agents(&with_home(Some(&root), None)).unwrap();
+        let claude = &listed[0];
+        assert_eq!(claude.name(), "Claude Code");
+        assert_eq!(claude.write_rule().unwrap(), None);
+        assert_eq!(claude.refresh_rule(true).unwrap(), None);
+        assert_eq!(claude.remove_rule().unwrap(), None);
+        assert!(claude.config().is_none());
+        assert_eq!(std::fs::read_dir(root.join(".claude")).unwrap().count(), 0);
     }
 
     #[test]
