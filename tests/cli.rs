@@ -532,7 +532,7 @@ fn init_refuses_a_store_that_holds_documents_and_names_join() {
     assert_refused(
         &refused,
         1,
-        "worklog: the store holds documents; `worklog join` binds this host to it\n",
+        "worklog: the store holds documents; `worklog join` binds this host to the store\n",
     );
     assert_eq!(snapshot_without_cache(&phone), phone_before);
     assert_eq!(snapshot(&desk), desk_before);
@@ -568,21 +568,21 @@ fn join_refuses_a_store_that_does_not_fit_what_it_is_told_and_writes_nothing() {
     assert_refused(
         &nothing,
         1,
-        "worklog: the store holds no documents; a shared store may not have synced yet, and \
-         `worklog init` starts a new one\n",
+        "worklog: the store holds no documents; a shared store may not have synced yet; \
+         `worklog init` starts a new store\n",
     );
     let lacking = phone.run(&["join", "phone", "--store", store]);
     assert_refused(
         &lacking,
         1,
-        "worklog: the store holds no topic named phone; it may not have synced yet, and \
+        "worklog: the store holds no topic named phone; it may not have synced yet; \
          `--summary` makes a new machine topic\n",
     );
     let held = phone.run(&["join", "desk", "--store", store, "--summary", "A machine"]);
     assert_refused(
         &held,
         1,
-        "worklog: desk is already in the store; without `--summary` this host is bound to it\n",
+        "worklog: desk is already in the store; without `--summary` this host is bound to desk\n",
     );
     assert_eq!(snapshot_without_cache(&phone), phone_before);
     assert_eq!(snapshot(&desk), desk_before);

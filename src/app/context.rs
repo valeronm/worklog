@@ -847,8 +847,10 @@ mod tests {
             "{text}"
         );
         world.host = FixedHost::new(None, None);
-        let text = refused(due(&world.deps().read(), "/work"));
-        assert!(text.contains("this host is not set up"), "{text}");
+        assert!(matches!(
+            due(&world.deps().read(), "/work"),
+            Err(Failure::NotSetUp)
+        ));
     }
 
     #[test]
@@ -1002,8 +1004,10 @@ mod tests {
         let (mut world, [lantern]) = world_of(["lantern"]);
         claim(&world, &lantern, "/work");
         world.host = FixedHost::new(None, None);
-        let text = refused(context(&world.deps().read(), "/work"));
-        assert!(text.contains("this host is not set up"), "{text}");
+        assert!(matches!(
+            context(&world.deps().read(), "/work"),
+            Err(Failure::NotSetUp)
+        ));
     }
 
     #[test]

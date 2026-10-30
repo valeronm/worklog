@@ -1,3 +1,5 @@
+use std::fmt;
+
 use crate::app::draft::usage;
 use crate::app::lookup::Lookup;
 use crate::app::machines::{PLACEHOLDER, topic_named};
@@ -77,6 +79,31 @@ pub enum Joining<'a> {
     New { summary: Option<&'a str> },
 }
 
+/// A store a setup refuses to bind the host to; its text holds no command.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Refusal {
+    HoldsDocuments,
+    HoldsNothing,
+    LacksTopic(Name),
+    HoldsTopic(Name),
+}
+
+impl fmt::Display for Refusal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Refusal::HoldsDocuments => f.write_str("the store holds documents"),
+            Refusal::HoldsNothing => {
+                f.write_str("the store holds no documents; a shared store may not have synced yet")
+            }
+            Refusal::LacksTopic(name) => write!(
+                f,
+                "the store holds no topic named {name}; it may not have synced yet"
+            ),
+            Refusal::HoldsTopic(name) => write!(f, "{name} is already in the store"),
+        }
+    }
+}
+
 /// Makes the machine topic `name` of a new store, with `summary` or `PLACEHOLDER`, and binds the
 /// host to it. Refuses a host already bound and a store that holds anything; a malformed name
 /// is a usage failure.
@@ -85,9 +112,7 @@ pub fn start(deps: &Deps, name: &str, summary: Option<&str>) -> Result<Bound, Fa
     let name = Name::parse(name).map_err(usage)?;
     let lookup = Lookup::new(deps.read().store);
     if !lookup.holds_nothing()? {
-        return Err(Failure::Refused(
-            "the store holds documents; `worklog join` binds this host to it".to_owned(),
-        ));
+        return Err(Failure::Setup(Refusal::HoldsDocuments));
     }
     made(deps, &lookup, &name, summary, INIT)
 }
@@ -101,21 +126,12 @@ pub fn join(deps: &Deps, name: &str, joining: Joining) -> Result<Bound, Failure>
     let name = Name::parse(name).map_err(usage)?;
     let lookup = Lookup::new(deps.read().store);
     if lookup.holds_nothing()? {
-        return Err(Failure::Refused(
-            "the store holds no documents; a shared store may not have synced yet, and \
-             `worklog init` starts a new one"
-                .to_owned(),
-        ));
+        return Err(Failure::Setup(Refusal::HoldsNothing));
     }
     match (topic_named(&lookup, &name)?, joining) {
         (Some(held), Joining::Known) => bound_to(deps, &lookup, held),
-        (None, Joining::Known) => Err(Failure::Refused(format!(
-            "the store holds no topic named {name}; it may not have synced yet, and `--summary` \
-             makes a new machine topic"
-        ))),
-        (Some(_), Joining::New { .. }) => Err(Failure::Refused(format!(
-            "{name} is already in the store; without `--summary` this host is bound to it"
-        ))),
+        (None, Joining::Known) => Err(Failure::Setup(Refusal::LacksTopic(name))),
+        (Some(_), Joining::New { .. }) => Err(Failure::Setup(Refusal::HoldsTopic(name))),
         (None, Joining::New { summary }) => made(deps, &lookup, &name, summary, JOIN),
     }
 }
@@ -179,6 +195,12 @@ mod tests {
         world
     }
 
+    fn lacks(name: &str) -> Result<Bound, Failure> {
+        Err(Failure::Setup(Refusal::LacksTopic(
+            Name::parse(name).unwrap(),
+        )))
+    }
+
     fn topics(world: &World) -> usize {
         let topic = Kind::parse("topic").unwrap();
         world.store.of_kind(&topic).unwrap().len()
@@ -239,10 +261,9 @@ mod tests {
     fn a_store_holding_documents_is_not_started() {
         let (world, _) = sharing();
         let before = topics(&world);
-        let text = refused(start(&world.deps(), "atlas", Some("The atlas")));
         assert_eq!(
-            text,
-            "the store holds documents; `worklog join` binds this host to it"
+            start(&world.deps(), "atlas", Some("The atlas")),
+            Err(Failure::Setup(Refusal::HoldsDocuments))
         );
         assert_eq!(topics(&world), before);
         assert_eq!(world.host.machine(), Ok(None));
@@ -257,11 +278,9 @@ mod tests {
             },
         ] {
             let world = bare();
-            let text = refused(join(&world.deps(), "desk", machine));
             assert_eq!(
-                text,
-                "the store holds no documents; a shared store may not have synced yet, and \
-                 `worklog init` starts a new one"
+                join(&world.deps(), "desk", machine),
+                Err(Failure::Setup(Refusal::HoldsNothing))
             );
             assert_eq!(topics(&world), 0);
             assert_eq!(world.host.machine(), Ok(None));
@@ -303,12 +322,7 @@ mod tests {
     fn a_known_machine_the_store_lacks_is_refused_as_not_synced() {
         let (world, _) = sharing();
         let before = topics(&world);
-        let text = refused(join(&world.deps(), "atlas", Joining::Known));
-        assert_eq!(
-            text,
-            "the store holds no topic named atlas; it may not have synced yet, and `--summary` \
-             makes a new machine topic"
-        );
+        assert_eq!(join(&world.deps(), "atlas", Joining::Known), lacks("atlas"));
         assert_eq!(topics(&world), before);
         assert_eq!(world.host.machine(), Ok(None));
     }
@@ -320,10 +334,11 @@ mod tests {
         let new = Joining::New {
             summary: Some("The lantern"),
         };
-        let text = refused(join(&world.deps(), "lantern", new));
         assert_eq!(
-            text,
-            "lantern is already in the store; without `--summary` this host is bound to it"
+            join(&world.deps(), "lantern", new),
+            Err(Failure::Setup(Refusal::HoldsTopic(
+                Name::parse("lantern").unwrap()
+            )))
         );
         assert_eq!(topics(&world), before);
         assert_eq!(world.host.machine(), Ok(None));
@@ -359,8 +374,7 @@ mod tests {
         topic(&world, "desk", "");
         let ended = [topic(&world, "phone", ENDED), topic(&world, "phone", ENDED)];
         world.host.set_machine(None);
-        let text = refused(join(&world.deps(), "phone", Joining::Known));
-        assert!(text.contains("holds no topic named phone"), "{text}");
+        assert_eq!(join(&world.deps(), "phone", Joining::Known), lacks("phone"));
 
         let new = Joining::New {
             summary: Some("The phone"),
@@ -413,8 +427,7 @@ mod tests {
         let (mut world, _) = world();
         let renamed = topic(&world, "atlas", "former_names = [\"phone\"]\n");
         world.host.set_machine(None);
-        let text = refused(join(&world.deps(), "phone", Joining::Known));
-        assert!(text.contains("holds no topic named phone"), "{text}");
+        assert_eq!(join(&world.deps(), "phone", Joining::Known), lacks("phone"));
 
         let new = Joining::New {
             summary: Some("The phone"),
@@ -452,8 +465,10 @@ mod tests {
         assert_eq!(world.host.machine(), Ok(None));
 
         world.host.set_binds(true);
-        let again = refused(start(&world.deps(), "desk", Some("The desk")));
-        assert!(again.contains("`worklog join`"), "{again}");
+        assert_eq!(
+            start(&world.deps(), "desk", Some("The desk")),
+            Err(Failure::Setup(Refusal::HoldsDocuments))
+        );
         let bound = join(&world.deps(), "desk", Joining::Known).unwrap();
         assert_eq!(
             bound,

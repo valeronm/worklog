@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use super::agents::{self, Placing};
 use super::host::initialized;
 use super::render::Output;
-use super::{Environment, NAME};
+use super::{Environment, NAME, said};
 use crate::app::machines::{self, HostName};
 use crate::app::setup::Joining;
 use crate::app::{Deps, Failure, ReadDeps, setup};
@@ -121,7 +121,7 @@ fn store<T>(
             .and_then(|placed| open(&placed).map(|opened| (placed, opened)));
         match opened {
             Ok(opened) => return Ok(opened),
-            Err(failure) => terminal.say(&failure.to_string()),
+            Err(failure) => terminal.say(&said(&failure)),
         }
     }
 }

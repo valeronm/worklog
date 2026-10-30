@@ -7,7 +7,7 @@ use clap::{CommandFactory as _, Subcommand as _};
 
 use super::args::{Cli, HostCommand, ToolCommand};
 use super::render::Output;
-use super::{Environment, exit_code};
+use super::{Environment, exit_code, said};
 use crate::app::record::{Outcome, Run, record};
 use crate::app::{Deps, Failure};
 use crate::wiring;
@@ -75,7 +75,7 @@ fn found_on_path(argv: &[OsString], environment: &Environment) -> bool {
 pub(super) fn failed(failure: &Failure) -> Outcome {
     Outcome {
         exit: exit_code(failure),
-        refusal: Some(failure.to_string()),
+        refusal: Some(said(failure)),
         hits: None,
     }
 }

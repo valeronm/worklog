@@ -172,16 +172,14 @@ pub enum Failure {
     /// The arguments name no valid operation.
     Usage(String),
     Store(StoreError),
+    /// The host has no machine topic; its text holds no command.
+    NotSetUp,
+    Setup(setup::Refusal),
 }
 
 impl Failure {
     pub fn at(what: impl fmt::Display, why: impl fmt::Display) -> Failure {
         Failure::Refused(format!("{what}: {why}"))
-    }
-
-    #[must_use]
-    pub fn not_set_up() -> Failure {
-        Failure::Refused("this host is not set up; run `worklog init`".to_owned())
     }
 }
 
@@ -190,6 +188,8 @@ impl fmt::Display for Failure {
         match self {
             Failure::Refused(text) | Failure::Usage(text) => f.write_str(text),
             Failure::Store(error) => error.fmt(f),
+            Failure::NotSetUp => f.write_str("this host is not set up"),
+            Failure::Setup(refusal) => refusal.fmt(f),
         }
     }
 }
@@ -259,7 +259,7 @@ impl ReadDeps<'_> {
 
     /// Refuses when the host is not set up.
     pub fn machine(&self) -> Result<DocumentId, Failure> {
-        self.host.machine()?.ok_or_else(Failure::not_set_up)
+        self.host.machine()?.ok_or(Failure::NotSetUp)
     }
 
     // Only a path from the root is one the host's file system reads, and `..` after a link
@@ -397,10 +397,7 @@ mod tests {
             deps(&bare).read().today().unwrap(),
             Date::parse("2026-10-09").unwrap()
         );
-        let Err(Failure::Refused(text)) = deps(&bare).read().machine() else {
-            panic!("a host with no machine topic must be refused");
-        };
-        assert_eq!(text, "this host is not set up; run `worklog init`");
+        assert_eq!(deps(&bare).read().machine(), Err(Failure::NotSetUp));
         assert_eq!(deps(&set_up).read().machine(), Ok(atlas()));
     }
 }

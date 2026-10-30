@@ -71,6 +71,9 @@ impl From<Failure> for Problem {
             Failure::Refused(text) => Problem::NotFound(text),
             Failure::Usage(text) => Problem::BadRequest(text),
             Failure::Store(error) => Problem::Broken(error.to_string()),
+            refused @ (Failure::NotSetUp | Failure::Setup(_)) => {
+                Problem::NotFound(refused.to_string())
+            }
         }
     }
 }

@@ -47,7 +47,7 @@ pub fn record(deps: &Deps, run: &Run, outcome: Outcome) -> Result<(), Failure> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::testing::{NOW, World, refused, topic};
+    use crate::app::testing::{NOW, World, topic};
     use crate::domain::id::VersionId;
     use crate::domain::ports::UsageRead as _;
     use crate::domain::testing::{lamp_session, version};
@@ -128,10 +128,7 @@ mod tests {
         };
         assert!(matches!(ran(&world, "projects"), Err(Failure::Usage(_))));
         world.host.set_machine(None);
-        assert_eq!(
-            refused(ran(&world, "/srv")),
-            "this host is not set up; run `worklog init`"
-        );
+        assert_eq!(ran(&world, "/srv"), Err(Failure::NotSetUp));
         assert_eq!(world.usage.read(&RunFilter::default()), Ok(Vec::new()));
     }
 

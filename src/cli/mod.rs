@@ -26,6 +26,7 @@ use std::time::Duration;
 
 use crate::app::Failure;
 use crate::app::record::Outcome;
+use crate::app::setup::Refusal;
 use crate::domain::ports::{Binary, Releases, StoreError};
 use crate::domain::release::{self, Built};
 use crate::domain::schema::Directory;
@@ -136,9 +137,27 @@ pub fn main() -> i32 {
 
 fn exit_code(failure: &Failure) -> i32 {
     match failure {
-        Failure::Refused(_) | Failure::Store(_) => 1,
+        Failure::Refused(_) | Failure::Store(_) | Failure::NotSetUp | Failure::Setup(_) => 1,
         Failure::Usage(_) => 2,
     }
+}
+
+fn said(failure: &Failure) -> String {
+    let next = match failure {
+        Failure::NotSetUp => format!("run `{NAME} init`"),
+        Failure::Setup(Refusal::HoldsDocuments) => {
+            format!("`{NAME} join` binds this host to the store")
+        }
+        Failure::Setup(Refusal::HoldsNothing) => format!("`{NAME} init` starts a new store"),
+        Failure::Setup(Refusal::LacksTopic(_)) => {
+            "`--summary` makes a new machine topic".to_owned()
+        }
+        Failure::Setup(Refusal::HoldsTopic(name)) => {
+            format!("without `--summary` this host is bound to {name}")
+        }
+        Failure::Refused(_) | Failure::Usage(_) | Failure::Store(_) => return failure.to_string(),
+    };
+    format!("{failure}; {next}")
 }
 
 fn adapters_for(
@@ -158,13 +177,12 @@ fn adapters_for(
 }
 
 fn unbound(command: &Command, json: bool) -> Result<Output, Failure> {
-    let not_set_up = Failure::not_set_up();
     match command {
         // A session opens with `context` unasked, on a host set up or not.
         Command::Read(ReadCommand::Context { .. }) => {
-            Ok(Output::note(not_set_up.to_string(), json))
+            Ok(Output::note(said(&Failure::NotSetUp), json))
         }
-        _ => Err(not_set_up),
+        _ => Err(Failure::NotSetUp),
     }
 }
 
@@ -218,7 +236,7 @@ fn announce(
 }
 
 fn wired(environment: &Environment) -> Result<wiring::Adapters, Failure> {
-    wiring::wire(environment.variable)?.ok_or_else(Failure::not_set_up)
+    wiring::wire(environment.variable)?.ok_or(Failure::NotSetUp)
 }
 
 // The server ends only with the process.
@@ -248,10 +266,7 @@ fn serve(
 ) -> i32 {
     let server = match listening(bind, hosts, environment, words) {
         Ok(server) => server,
-        Err(failure) => {
-            fail(err, &failure);
-            return exit_code(&failure);
-        }
+        Err(failure) => return finished(Err(failure), out, err),
     };
     let address = server.address();
     match announce(&address, bind, out, err) {
@@ -271,7 +286,9 @@ fn serve(
     };
     let ended = server.run(None, &|method, target| match settled() {
         Ok(adapters) => web::respond(&adapters.deps().read(), method, target),
-        Err(Failure::Refused(why)) => web::failed(Failure::Store(StoreError::io("serve", why))),
+        Err(failure @ (Failure::Refused(_) | Failure::NotSetUp)) => {
+            web::failed(Failure::Store(StoreError::io("serve", said(&failure))))
+        }
         Err(failure) => web::failed(failure),
     });
     if let Err(error) = ended {
@@ -344,7 +361,7 @@ fn finished(answer: Result<Output, Failure>, out: &mut dyn Write, err: &mut dyn 
     let output = match answer {
         Ok(output) => output,
         Err(failure) => {
-            fail(err, &failure);
+            fail(err, &said(&failure));
             return exit_code(&failure);
         }
     };
