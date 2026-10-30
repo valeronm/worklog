@@ -327,6 +327,8 @@ mod tests {
         ] {
             fs::write(dir.join(&other), &line).unwrap();
             assert_eq!(all(&usage).unwrap().len(), 1, "{other}");
+            // On a case-insensitive file system the uppercase name and the real one are one file.
+            fs::remove_file(dir.join(&other)).unwrap();
         }
         fs::write(dir.join(format!("{ATLAS}-2026-09.jsonl")), &line).unwrap();
         assert_eq!(all(&usage).unwrap().len(), 2);

@@ -50,9 +50,10 @@ jobs:
           cache: 'true'
 
       - name: Clippy and tests
+        # --no-fail-fast since no local run shows what fails here.
         run: |
           cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-          cargo test --workspace --locked
+          cargo test --workspace --locked --no-fail-fast
 
   build:
     needs: check

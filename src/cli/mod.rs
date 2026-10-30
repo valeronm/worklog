@@ -653,6 +653,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(target_os = "macos", ignore = "APFS refuses a non-UTF-8 file name")]
     fn a_working_directory_that_is_not_utf_8_is_logged_with_what_of_it_reads() {
         use std::os::unix::ffi::OsStringExt as _;
         let found = Found::new();

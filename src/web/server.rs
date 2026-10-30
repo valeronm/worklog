@@ -779,6 +779,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        target_os = "macos",
+        ignore = "on macOS a request past the bound is answered at once"
+    )]
     fn past_the_bound_on_open_connections_a_request_waits_for_one_to_close() {
         let (asked, answers) = mpsc::channel();
         let serving = Serving::start_with(&[], shrunk, move |server| {
