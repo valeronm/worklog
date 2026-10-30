@@ -29,7 +29,7 @@ use crate::domain::ports::{Binary, Releases, StoreError};
 use crate::domain::release::{self, Built};
 use crate::domain::schema::Directory;
 use crate::{web, wiring};
-use args::{Cli, Command, Invoked, ReadCommand};
+use args::{Cli, Command, HostCommand, InitArgs, Invoked, ReadCommand};
 use render::{Output, Stopped};
 
 const NAME: &str = "worklog";
@@ -144,14 +144,7 @@ fn adapters_for(
     command: &Command,
     environment: &Environment,
 ) -> Result<Option<wiring::Adapters>, Failure> {
-    let chosen = match command {
-        Command::Init {
-            store: Some(store), ..
-        }
-        | Command::Join { store, .. } => Some(environment.placed(store)?),
-        _ => None,
-    };
-    let adapters = wiring::wire(environment.variable, chosen)?;
+    let adapters = wiring::wire(environment.variable, None)?;
     Ok(match command {
         Command::Read(ReadCommand::Context {
             hook: Some(word), ..
@@ -183,10 +176,67 @@ fn asked(json: bool, environment: &Environment, err: &mut dyn Write) -> Result<O
     let mut answers = answers.borrow_mut();
     let mut terminal = prompt::Terminal::new(&mut *answers, err);
     let (store, adapters) = prompt::store(&mut terminal, environment, |store| {
-        wiring::wire(environment.variable, Some(store.to_path_buf()))?
-            .ok_or_else(Failure::not_set_up)
+        wired_over(environment, store.to_path_buf())
     })?;
     prompt::init(&adapters.deps(), environment, json, &store, &mut terminal)
+}
+
+fn wired_over(environment: &Environment, store: PathBuf) -> Result<wiring::Adapters, Failure> {
+    wiring::wire(environment.variable, Some(store))?.ok_or_else(Failure::not_set_up)
+}
+
+fn set_up(
+    command: &HostCommand,
+    json: bool,
+    environment: &Environment,
+    err: &mut dyn Write,
+) -> Result<Output, Failure> {
+    match command {
+        HostCommand::Init { given: None } => asked(json, environment, err),
+        HostCommand::Init {
+            given:
+                Some(InitArgs {
+                    name,
+                    store,
+                    summary,
+                    agents,
+                }),
+        } => {
+            let adapters = wired_over(environment, environment.placed(store)?)?;
+            let deps = adapters.deps();
+            initialized(environment, json, *agents, || {
+                setup::start(&deps, name, summary.as_deref())
+            })
+        }
+        HostCommand::Join {
+            name,
+            store,
+            summary,
+            agents,
+        } => {
+            let adapters = wired_over(environment, environment.placed(store)?)?;
+            let deps = adapters.deps();
+            let joining =
+                (summary.as_deref()).map_or(setup::Joining::Known, |summary| setup::Joining::New {
+                    summary: Some(summary),
+                });
+            initialized(environment, json, *agents, || {
+                setup::join(&deps, name, joining)
+            })
+        }
+    }
+}
+
+fn initialized(
+    environment: &Environment,
+    json: bool,
+    with_agents: bool,
+    bind: impl FnOnce() -> Result<setup::Bound, Failure>,
+) -> Result<Output, Failure> {
+    let placing = with_agents
+        .then(|| agents::Placing::on_this_host(environment))
+        .transpose()?;
+    agents::initialized(placing, json, bind)
 }
 
 // A log that stalls must not hold back the run's output.
@@ -198,10 +248,6 @@ fn ran(
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> i32 {
-    if let Command::Init { name: None, .. } = command {
-        let answer = asked(json, environment, err);
-        return finished(answer, out, err);
-    }
     let adapters = match adapters_for(command, environment) {
         Ok(Some(adapters)) => adapters,
         Ok(None) => return finished(unbound(command, json), out, err),
@@ -330,6 +376,9 @@ where
         }
     };
     let command = match &cli.command {
+        Invoked::Host(command) => {
+            return finished(set_up(command, cli.json, environment, err), out, err);
+        }
         Invoked::Run(command) => command,
         Invoked::Serve { bind, hosts } => {
             return serve(bind, hosts, environment, &words, out, err);

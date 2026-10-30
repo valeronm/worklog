@@ -13,15 +13,12 @@ use crate::app::{Deps, Failure};
 use crate::wiring;
 
 const SERVE: &str = "serve";
-const INIT: &str = "init";
-const JOIN: &str = "join";
 
 // A use of the store is a `Command` or `serve`, and binding a host to one is none; words that
 // name no command are a use refused.
 fn is_logged(command: &str) -> bool {
     let first = command.split(' ').next().unwrap_or_default();
-    let of_the_store =
-        !matches!(first, INIT | JOIN) && <Command as Subcommand>::has_subcommand(first);
+    let of_the_store = <Command as Subcommand>::has_subcommand(first);
     first == SERVE || of_the_store || !<Invoked as Subcommand>::has_subcommand(first)
 }
 
@@ -197,7 +194,7 @@ mod tests {
         let all = Cli::command();
         spelled_one_way(&all);
         walked_to_its_path(&all, &[]);
-        for name in [SERVE, INIT, JOIN] {
+        for name in [SERVE, "init", "join"] {
             assert!(all.find_subcommand(name).is_some(), "{name}");
         }
         assert!(Cli::parsed([NAME, "topic"]).is_err());
@@ -211,7 +208,14 @@ mod tests {
             .collect();
         assert_eq!(
             unlogged,
-            [INIT, JOIN, "agents", "refresh", "completions", "upgrade"]
+            [
+                "init",
+                "join",
+                "agents",
+                "refresh",
+                "completions",
+                "upgrade"
+            ]
         );
     }
 

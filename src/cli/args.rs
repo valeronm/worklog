@@ -5,7 +5,9 @@ use std::sync::LazyLock;
 use std::net::SocketAddr;
 
 use clap::error::ErrorKind;
-use clap::{CommandFactory as _, FromArgMatches as _, Parser, Subcommand, ValueEnum, ValueHint};
+use clap::{
+    Args, CommandFactory as _, FromArgMatches as _, Parser, Subcommand, ValueEnum, ValueHint,
+};
 
 use super::{NAME, complete};
 use crate::domain::release;
@@ -89,6 +91,8 @@ impl Cli {
 #[derive(Subcommand)]
 pub enum Invoked {
     #[command(flatten)]
+    Host(HostCommand),
+    #[command(flatten)]
     Run(Command),
     /// Serve the store as read-only pages until stopped, printing the address to open
     Serve {
@@ -129,23 +133,13 @@ pub enum AgentsAction {
 }
 
 #[derive(Subcommand)]
-pub enum Command {
+pub enum HostCommand {
     /// Start a new store and bind this host to its machine topic; done once per host
     ///
     /// With no argument it asks on a terminal, and joins a store the directory already holds.
     Init {
-        /// The machine topic of the new store
-        #[arg(requires = "store")]
-        name: Option<String>,
-        /// The store directory, missing or empty
-        #[arg(long, value_hint = ValueHint::DirPath, requires = "name")]
-        store: Option<PathBuf>,
-        /// What the machine is; without it the topic carries a placeholder until one is written
-        #[arg(long, requires = "name")]
-        summary: Option<String>,
-        /// Also configure every coding agent on this host to use this tool
-        #[arg(long, requires = "name")]
-        agents: bool,
+        #[command(flatten)]
+        given: Option<InitArgs>,
     },
     /// Bind this host to a store another machine shares; done once per host
     Join {
@@ -161,6 +155,27 @@ pub enum Command {
         #[arg(long)]
         agents: bool,
     },
+}
+
+// clap makes a field of an optional flattened struct required even when the struct is absent.
+#[derive(Args)]
+pub struct InitArgs {
+    /// The machine topic of the new store
+    #[arg(required = false, requires = "store")]
+    pub name: String,
+    /// The store directory, missing or empty
+    #[arg(long, value_hint = ValueHint::DirPath, required = false, requires = "name")]
+    pub store: PathBuf,
+    /// What the machine is; without it the topic carries a placeholder until one is written
+    #[arg(long, requires = "name")]
+    pub summary: Option<String>,
+    /// Also configure every coding agent on this host to use this tool
+    #[arg(long, requires = "name")]
+    pub agents: bool,
+}
+
+#[derive(Subcommand)]
+pub enum Command {
     #[command(flatten)]
     Draft(DraftCommand),
     #[command(flatten)]
@@ -722,7 +737,8 @@ mod tests {
     fn serve_listens_on_the_loopback_unless_told_and_takes_each_host_it_is_given() {
         let served = |line: &str| match parsed(line).unwrap().command {
             Invoked::Serve { bind, hosts } => (bind.to_string(), hosts),
-            Invoked::Run(_)
+            Invoked::Host(_)
+            | Invoked::Run(_)
             | Invoked::Agents { .. }
             | Invoked::Refresh
             | Invoked::Completions { .. }
@@ -805,7 +821,9 @@ mod tests {
         assert!(parsed("worklog agents").is_err());
         assert!(parsed("worklog agents remove").is_err());
         let init = |line: &str| match parsed(line).unwrap().command {
-            Invoked::Run(Command::Init { agents, .. }) => agents,
+            Invoked::Host(HostCommand::Init {
+                given: Some(InitArgs { agents, .. }),
+            }) => agents,
             _ => panic!("{line}: expected an init"),
         };
         assert!(!init("worklog init desk --store kept"));
@@ -815,20 +833,22 @@ mod tests {
     #[test]
     fn init_takes_its_name_with_its_store_or_neither() {
         let init = |line: &str| match parsed(line).unwrap().command {
-            Invoked::Run(Command::Init { name, store, .. }) => (name, store),
+            Invoked::Host(HostCommand::Init { given }) => {
+                given.map(|InitArgs { name, store, .. }| (name, store))
+            }
             _ => panic!("{line}: expected an init"),
         };
-        assert_eq!(init("worklog init"), (None, None));
+        assert_eq!(init("worklog init"), None);
         assert_eq!(
             init("worklog init desk --store kept"),
-            (Some("desk".to_owned()), Some(PathBuf::from("kept")))
+            Some(("desk".to_owned(), PathBuf::from("kept")))
         );
     }
 
     #[test]
     fn join_takes_its_name_and_its_store_both() {
         let join = |line: &str| match parsed(line).unwrap().command {
-            Invoked::Run(Command::Join {
+            Invoked::Host(HostCommand::Join {
                 name,
                 store,
                 summary,
