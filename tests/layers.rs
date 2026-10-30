@@ -1151,15 +1151,15 @@ fn a_web_file_that_names_the_wiring_is_found() {
             "names `crate::wiring` as `crate::wiring::self`",
         ),
         (
-            "let adapters = crate::wiring::wire(variable, None)?;",
+            "let adapters = crate::wiring::wire(variable)?;",
             "names `crate::wiring` as `crate::wiring::wire`",
         ),
         (
-            "use crate::*;\nlet adapters = wiring::wire(variable, None)?;",
+            "use crate::*;\nlet adapters = wiring::wire(variable)?;",
             "names `crate::wiring` as `wiring::wire`",
         ),
         (
-            "let adapters = super::wiring::wire(variable, None)?;",
+            "let adapters = super::wiring::wire(variable)?;",
             "names `crate::wiring` as `super::wiring::wire`",
         ),
     ] {

@@ -112,6 +112,11 @@ impl FsStore {
         Ok(store)
     }
 
+    #[must_use]
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
     fn document_dir(&self, id: &DocumentId) -> PathBuf {
         self.root.join(id.bucket()).join(id.as_str())
     }

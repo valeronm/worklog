@@ -99,7 +99,7 @@ pub(super) fn refused(argv: &[OsString], environment: &Environment, error: &clap
     let Some(line) = logged(argv, environment) else {
         return;
     };
-    let Ok(Some(adapters)) = wiring::wire(environment.variable, None) else {
+    let Ok(Some(adapters)) = wiring::wire(environment.variable) else {
         return;
     };
     let said = error.to_string();

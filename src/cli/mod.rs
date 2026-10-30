@@ -144,7 +144,7 @@ fn adapters_for(
     command: &Command,
     environment: &Environment,
 ) -> Result<Option<wiring::Adapters>, Failure> {
-    let adapters = wiring::wire(environment.variable, None)?;
+    let adapters = wiring::wire(environment.variable)?;
     Ok(match command {
         Command::Read(ReadCommand::Context {
             hook: Some(word), ..
@@ -170,19 +170,15 @@ fn unbound(command: &Command, json: bool) -> Result<Output, Failure> {
 // The store of an `init` given no argument is known only once its question is answered.
 fn asked(json: bool, environment: &Environment, err: &mut dyn Write) -> Result<Output, Failure> {
     let answers = environment.terminal.ok_or_else(prompt::no_terminal)?;
-    if let Some(bound) = wiring::wire(environment.variable, None)? {
+    if let Some(bound) = wiring::wire(environment.variable)? {
         setup::refuse_bound(&bound.deps())?;
     }
     let mut answers = answers.borrow_mut();
     let mut terminal = prompt::Terminal::new(&mut *answers, err);
     let (store, adapters) = prompt::store(&mut terminal, environment, |store| {
-        wired_over(environment, store.to_path_buf())
+        wiring::wire_over(environment.variable, store)
     })?;
     prompt::init(&adapters.deps(), environment, json, &store, &mut terminal)
-}
-
-fn wired_over(environment: &Environment, store: PathBuf) -> Result<wiring::Adapters, Failure> {
-    wiring::wire(environment.variable, Some(store))?.ok_or_else(Failure::not_set_up)
 }
 
 fn set_up(
@@ -202,7 +198,7 @@ fn set_up(
                     agents,
                 }),
         } => {
-            let adapters = wired_over(environment, environment.placed(store)?)?;
+            let adapters = wiring::wire_over(environment.variable, &environment.placed(store)?)?;
             let deps = adapters.deps();
             initialized(environment, json, *agents, || {
                 setup::start(&deps, name, summary.as_deref())
@@ -214,7 +210,7 @@ fn set_up(
             summary,
             agents,
         } => {
-            let adapters = wired_over(environment, environment.placed(store)?)?;
+            let adapters = wiring::wire_over(environment.variable, &environment.placed(store)?)?;
             let deps = adapters.deps();
             let joining =
                 (summary.as_deref()).map_or(setup::Joining::Known, |summary| setup::Joining::New {
@@ -289,7 +285,7 @@ fn announce(
 }
 
 fn wired(environment: &Environment) -> Result<wiring::Adapters, Failure> {
-    wiring::wire(environment.variable, None)?.ok_or_else(Failure::not_set_up)
+    wiring::wire(environment.variable)?.ok_or_else(Failure::not_set_up)
 }
 
 // The server ends only with the process.

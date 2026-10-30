@@ -143,7 +143,7 @@ fn offered(
     variable: &dyn Fn(&str) -> Option<OsString>,
     list: &dyn Fn(&ReadDeps) -> Listed,
 ) -> Vec<CompletionCandidate> {
-    let Ok(Some(adapters)) = wiring::wire(variable, None) else {
+    let Ok(Some(adapters)) = wiring::wire(variable) else {
         return Vec::new();
     };
     list(&adapters.recalling().deps().read()).unwrap_or_default()

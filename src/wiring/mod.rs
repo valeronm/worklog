@@ -85,43 +85,51 @@ fn hook_session(word: &str, given: &dyn Fn(&str) -> Option<String>) -> Option<Se
     })
 }
 
-/// The adapters over the store this host's config holds, or over `chosen`, the store a host
-/// with no config is about to be bound to; `None` for a host with neither, one that is not
-/// set up. Refuses a configured store that is not a directory unless a store is being chosen,
-/// and a `chosen` one that is a file, or a directory holding no store and something that is
-/// neither dot-named nor its usage log.
-pub fn wire(
+/// The adapters over the store this host's config holds; `None` for a host with no config,
+/// one that is not set up. Refuses a configured store that is not a directory.
+pub fn wire(variable: &dyn Fn(&str) -> Option<OsString>) -> Result<Option<Adapters>, Failure> {
+    let paths = Paths::resolved(variable)?;
+    let Some(held) = Config::read(&paths.config)? else {
+        return Ok(None);
+    };
+    let store = FsStore::open(held.store.clone())?;
+    let host = FsHost::bound(paths.config, paths.home, held, session(variable));
+    Ok(Some(assembled(paths.drafts, &paths.cache, store, host)))
+}
+
+/// The adapters for binding this host to `chosen`: over the store its config holds, unchecked,
+/// where it has one, and otherwise over `chosen`. A host with a config keeps its store and its
+/// machine topic, which is what a setup refuses before its first write. Refuses a `chosen`
+/// that is a file, or a directory holding no store and something that is neither dot-named
+/// nor its usage log.
+pub fn wire_over(
     variable: &dyn Fn(&str) -> Option<OsString>,
-    chosen: Option<PathBuf>,
-) -> Result<Option<Adapters>, Failure> {
+    chosen: &Path,
+) -> Result<Adapters, Failure> {
     let paths = Paths::resolved(variable)?;
     let session = session(variable);
-    let (root, store, host) = match (Config::read(&paths.config)?, chosen) {
-        (Some(held), chosen) => {
-            let root = held.store.clone();
-            let store = match chosen {
-                None => FsStore::open(root.clone())?,
-                Some(_) => FsStore::new(root.clone()),
-            }
-            .caching(&paths.cache);
-            let host = FsHost::bound(paths.config, paths.home, held, session);
-            (root, store, host)
-        }
-        (None, Some(chosen)) => (
-            chosen.clone(),
-            FsStore::chosen(chosen.clone())?.caching(&paths.cache),
-            FsHost::unbound(paths.config, paths.home, chosen, session),
-        ),
-        (None, None) => return Ok(None),
+    let (store, host) = if let Some(held) = Config::read(&paths.config)? {
+        let store = FsStore::new(held.store.clone());
+        let host = FsHost::bound(paths.config, paths.home, held, session);
+        (store, host)
+    } else {
+        let store = FsStore::chosen(chosen.to_path_buf())?;
+        let host = FsHost::unbound(paths.config, paths.home, chosen.to_path_buf(), session);
+        (store, host)
     };
-    Ok(Some(Adapters {
-        store,
-        drafts: FsDrafts::new(paths.drafts),
+    Ok(assembled(paths.drafts, &paths.cache, store, host))
+}
+
+fn assembled(drafts: PathBuf, cache: &Path, store: FsStore, host: FsHost) -> Adapters {
+    let usage = FsUsage::new(store.root().join(USAGE_DIRECTORY));
+    Adapters {
+        store: store.caching(cache),
+        drafts: FsDrafts::new(drafts),
         ids: RandomIds,
         clock: SystemClock,
         host,
-        usage: FsUsage::new(root.join(USAGE_DIRECTORY)),
-    }))
+        usage,
+    }
 }
 
 // The first agent whose variable is set is the one a command run by an agent inside another
@@ -440,19 +448,26 @@ mod tests {
         (kept, root)
     }
 
-    fn wired(root: &Path, chosen: Option<PathBuf>) -> Result<Option<Adapters>, Failure> {
-        let variable = |name: &str| match name {
+    fn home(root: &Path) -> impl Fn(&str) -> Option<OsString> + '_ {
+        |name: &str| match name {
             "WORKLOG_HOME" => Some(root.join("next").into_os_string()),
             _ => None,
-        };
-        wire(&variable, chosen)
+        }
+    }
+
+    fn wired(root: &Path) -> Result<Option<Adapters>, Failure> {
+        wire(&home(root))
+    }
+
+    fn wired_over(root: &Path, chosen: &Path) -> Result<Adapters, Failure> {
+        wire_over(&home(root), chosen)
     }
 
     #[test]
     fn a_host_with_no_config_has_adapters_only_over_a_store_it_is_given() {
         let (_kept, root) = scratch();
-        assert!(wired(&root, None).unwrap().is_none());
-        assert!(wired(&root, Some(root.join("store"))).unwrap().is_some());
+        assert!(wired(&root).unwrap().is_none());
+        assert!(wired_over(&root, &root.join("store")).is_ok());
         assert!(!root.join("store").exists());
         assert!(!root.join("next").exists());
     }
@@ -467,21 +482,18 @@ mod tests {
         };
         config.write(&root.join("next/config.toml")).unwrap();
 
-        let Err(Failure::Store(refused)) = wired(&root, None) else {
+        let Err(Failure::Store(refused)) = wired(&root) else {
             panic!("a store that is not there must be refused");
         };
         assert_eq!(
             refused.to_string(),
             format!("{}: this host's store is not a directory", store.display())
         );
-        assert!(
-            wired(&root, Some(root.join("elsewhere")))
-                .unwrap()
-                .is_some()
-        );
+        let chosen = wired_over(&root, &root.join("elsewhere")).unwrap();
+        assert_eq!(chosen.deps().read().host.machine(), Ok(Some(lantern())));
 
         std::fs::create_dir_all(&store).unwrap();
-        assert!(wired(&root, None).unwrap().is_some());
+        assert!(wired(&root).unwrap().is_some());
     }
 
     #[test]
@@ -489,9 +501,9 @@ mod tests {
         let (_kept, root) = scratch();
         std::fs::create_dir_all(root.join("next")).unwrap();
         std::fs::write(root.join("next/config.toml"), "store = 4\n").unwrap();
-        assert!(matches!(wired(&root, None), Err(Failure::Store(_))));
-        let chosen = Some(root.join("store"));
-        assert!(matches!(wired(&root, chosen), Err(Failure::Store(_))));
+        assert!(matches!(wired(&root), Err(Failure::Store(_))));
+        let chosen = wired_over(&root, &root.join("store"));
+        assert!(matches!(chosen, Err(Failure::Store(_))));
     }
 
     fn bound(root: &Path) -> PathBuf {
@@ -511,7 +523,7 @@ mod tests {
 
         let (_kept, root) = scratch();
         let store = bound(&root);
-        let adapters = wired(&root, None).unwrap().unwrap();
+        let adapters = wired(&root).unwrap().unwrap();
         let run = ran(&lantern(), "show", "2026-09-04");
         adapters.usage.record(&run).unwrap();
         let file = store.join(format!("usage/{LANTERN}-2026-09.jsonl"));
@@ -519,7 +531,7 @@ mod tests {
         let all = RunFilter::default();
         assert_eq!(adapters.deps().read().usage.read(&all), Ok(vec![run]));
 
-        let chosen = wired(&root, Some(root.join("elsewhere"))).unwrap().unwrap();
+        let chosen = wired_over(&root, &root.join("elsewhere")).unwrap();
         assert_eq!(chosen.deps().read().usage.read(&all).unwrap().len(), 1);
     }
 
@@ -533,7 +545,7 @@ mod tests {
             _ => None,
         };
         let run_by = |word: &str, given: &dyn Fn(&str) -> Option<String>| {
-            let adapters = wire(&variable, None).unwrap().unwrap();
+            let adapters = wire(&variable).unwrap().unwrap();
             let session = adapters
                 .run_by_hook(word, given)
                 .deps()
@@ -564,7 +576,7 @@ mod tests {
                 "WORKLOG_HOME" => Some(root.join("next").into_os_string()),
                 _ => (set.iter().find(|(key, _)| *key == name)).map(|(_, id)| OsString::from(id)),
             };
-            let adapters = wire(&variable, None).unwrap().unwrap();
+            let adapters = wire(&variable).unwrap().unwrap();
             let session = adapters.deps().read().host.session();
             session.map(|session| (session.agent, session.id))
         };
