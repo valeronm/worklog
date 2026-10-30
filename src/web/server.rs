@@ -726,7 +726,9 @@ mod tests {
     }
 
     const SMALL_BUFFER: usize = 4096;
-    const LARGE_PAGE: usize = 250_000;
+    // More than a client that does not read takes in, since macOS grows its receive buffer
+    // past the size set on it.
+    const LARGE_PAGE: usize = 800_000;
 
     // A socket the server accepts takes its buffer sizes from the listening one.
     fn shrunk(server: &mut Server) {
@@ -758,36 +760,53 @@ mod tests {
         let serving = Serving::start_with(&[], shrunk, move |server| {
             let world = with_a_large_page();
             server.run(Some(2), &|method, target| {
-                let page = respond(&world.deps().read(), method, target);
-                asked.send(page.html.len()).expect("a test still listening");
-                page
+                asked.send(()).expect("a test still listening");
+                respond(&world.deps().read(), method, target)
             })
         });
         let address = serving.address.clone();
 
         let slow = asking_and_not_reading(&address, "/facts?topic=atlas");
-        let size = answers
+        answers
             .recv_timeout(Duration::from_mins(1))
             .expect("the large page");
-        assert!(size > LARGE_PAGE, "{size}");
         let (head, body) = request(&address, "GET /facts?topic=lantern");
         assert!(head.starts_with("http/1.1 200 "), "{head}");
         has(&body, "lantern/relay-pin");
+        assert!(
+            matches!(
+                serving.ended.recv_timeout(Duration::from_millis(300)),
+                Err(mpsc::RecvTimeoutError::Timeout)
+            ),
+            "a client that does not read took in its whole page"
+        );
 
         drop(slow);
         serving.done();
     }
 
     #[test]
-    #[cfg_attr(
-        target_os = "macos",
-        ignore = "on macOS a request past the bound is answered at once"
-    )]
+    fn past_the_bound_a_slot_waits_for_one_to_be_freed() {
+        let slots = Arc::new(Slots::default());
+        let mut taken: Vec<Slot> = (0..CONNECTIONS).map(|_| Slots::take(&slots)).collect();
+        let (took, next) = mpsc::channel();
+        let waiting = Arc::clone(&slots);
+        thread::spawn(move || took.send(Slots::take(&waiting)));
+        assert!(
+            next.recv_timeout(Duration::from_millis(300)).is_err(),
+            "a slot taken past the bound"
+        );
+
+        drop(taken.pop());
+        next.recv_timeout(Duration::from_mins(1))
+            .expect("a slot once one was freed");
+    }
+
+    #[test]
     fn past_the_bound_on_open_connections_a_request_waits_for_one_to_close() {
         let (asked, answers) = mpsc::channel();
         let serving = Serving::start_with(&[], shrunk, move |server| {
-            let world = with_a_large_page();
-            let large = respond(&world.deps().read(), "GET", "/facts?topic=atlas").html;
+            let large = "x".repeat(LARGE_PAGE);
             server.run(Some(CONNECTIONS + 1), &|_, _| {
                 asked.send(()).expect("a test still listening");
                 Page {
@@ -875,9 +894,17 @@ mod tests {
                 })
             },
         );
-        let slow = asking_and_not_reading(&serving.address, "/facts?topic=atlas");
+        let mut slow = asking_and_not_reading(&serving.address, "/facts?topic=atlas");
         serving.done_within(Duration::from_secs(20));
-        drop(slow);
+        slow.set_read_timeout(Some(Duration::from_secs(10)))
+            .expect("a timeout");
+        let mut taken = Vec::new();
+        let _ = slow.read_to_end(&mut taken);
+        assert!(
+            taken.len() < LARGE_PAGE,
+            "a client that does not read took in its whole page: {} bytes",
+            taken.len()
+        );
     }
 
     #[test]
