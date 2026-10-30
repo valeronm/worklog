@@ -1229,6 +1229,9 @@ mod tests {
         std::fs::write(&skill, "old").unwrap();
         let fish = home.join(".config/fish/completions");
         std::fs::create_dir_all(&fish).unwrap();
+        let store = root.join("store");
+        let line = ["init", "desk", "--store", store.to_str().unwrap()];
+        assert_eq!(run_with(Some(&home), None, &line).code, 0);
         let refresh = |binary: Option<PathBuf>| run_with(Some(&home), binary, &["refresh"]);
 
         refused(&refresh(None), "the path of this binary is unknown");

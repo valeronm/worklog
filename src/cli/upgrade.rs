@@ -171,6 +171,13 @@ mod tests {
             let skill = host.skill();
             std::fs::create_dir_all(skill.parent().unwrap()).unwrap();
             std::fs::write(skill, "old").unwrap();
+            let store = host.root.join("store");
+            let set_up = Process {
+                home: Some(host.root.join("home")),
+                ..Process::nowhere()
+            };
+            let made = set_up.run(&["init", "desk", "--store", store.to_str().unwrap()]);
+            assert_eq!(made.code, 0, "{}", made.err);
             host
         }
 

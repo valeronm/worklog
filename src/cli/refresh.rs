@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use super::agents::{Done, Placed, Refreshing};
 use super::args::Shell;
 use super::render::{Output, Stopped};
-use super::{Environment, NAME, complete};
+use super::{Environment, NAME, complete, said, wired};
 use crate::app::Failure;
 use crate::wiring;
 
@@ -37,6 +37,9 @@ pub(super) fn refresh_into(environment: &Environment, done: &mut Done) -> Result
     if let Some((file, line)) = completions {
         wiring::write_completions(&file, &line)?;
         done.wrote(&file);
+    }
+    if let Err(failure) = wired(environment) {
+        done.notes.push(said(&failure));
     }
     Ok(())
 }

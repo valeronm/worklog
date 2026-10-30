@@ -2982,8 +2982,34 @@ fn completions_prints_the_line_a_shell_takes_them_from_this_binary_with() {
 }
 
 #[test]
+fn a_refresh_that_succeeds_notes_a_host_it_cannot_be_used_on_yet() {
+    assert_refused(&Host::new().run(&["refresh"]), 0, NOT_SET_UP);
+
+    let failing = Host::new().with_agents(&[".codex"]);
+    let skill = failing.skill_of(".codex");
+    fs::create_dir_all(skill.parent().unwrap()).unwrap();
+    fs::write(&skill, "old").unwrap();
+    let config = failing.config_of_codex();
+    fs::write(&config, "sandbox_workspace_write = 4\n").unwrap();
+    let refused = format!(
+        "worklog: {}: `sandbox_workspace_write` is not a table\n",
+        config.display()
+    );
+    assert_refused(&failing.run(&["refresh"]), 1, &refused);
+
+    let host = Host::set_up("desk");
+    fs::rename(host.store(), host.root.join("moved")).unwrap();
+    let gone = format!(
+        "worklog: {}: this host's store is not a directory; {} binds this host to it\n",
+        host.store().display(),
+        host.root.join("next/config.toml").display()
+    );
+    assert_refused(&host.run(&["refresh"]), 0, &gone);
+}
+
+#[test]
 fn refresh_writes_the_completions_where_fish_reads_them_and_only_where_fish_is() {
-    let host = Host::new().with_agents(&[".claude"]);
+    let host = Host::set_up("desk").with_agents(&[".claude"]);
     assert_eq!(host.ok(&["refresh"]), "");
     assert!(!host.home().join(".config").exists());
 
@@ -3031,7 +3057,7 @@ fn agents_refresh_leaves_the_completions_as_they_are() {
 
 #[test]
 fn refresh_follows_the_config_directory_the_environment_gives_fish() {
-    let host = Host::new();
+    let host = Host::set_up("desk");
     let under_home = host.fish();
     let given = host.root.join("config");
     fs::create_dir_all(given.join("fish/completions")).unwrap();
@@ -3076,7 +3102,7 @@ fn fish_left_out(renamed: &Path) -> String {
 
 #[test]
 fn refresh_under_another_file_name_writes_for_the_agents_and_no_completions() {
-    let host = Host::new().with_agents(&[".claude"]);
+    let host = Host::set_up("desk").with_agents(&[".claude"]);
     let completions = host.fish();
     let renamed = host.root.join("worklog-0.3.0");
     copy_of_the_binary(&renamed);
@@ -4107,7 +4133,7 @@ struct Stale {
 
 impl Stale {
     fn new() -> Stale {
-        let host = Host::new().with_agents(&[".claude"]);
+        let host = Host::set_up("desk").with_agents(&[".claude"]);
         let (skill, settings) = (host.skill_of(".claude"), host.hooks_of(".claude"));
         fs::create_dir_all(skill.parent().unwrap()).unwrap();
         fs::write(&skill, "old").unwrap();
@@ -4386,7 +4412,7 @@ fn an_upgrade_whose_new_binary_cannot_write_for_fish_says_what_that_binary_wrote
 
 #[test]
 fn a_binary_under_another_file_name_is_upgraded_on_a_host_with_fish() {
-    let host = Host::new().with_agents(&[".claude"]);
+    let host = Host::set_up("desk").with_agents(&[".claude"]);
     let completions = host.fish();
     let skill = host.skill_of(".claude");
     fs::create_dir_all(skill.parent().unwrap()).unwrap();
@@ -4428,7 +4454,7 @@ fn a_binary_under_another_file_name_is_upgraded_on_a_host_with_fish() {
 #[test]
 fn a_misnamed_binary_whose_hook_is_installed_is_upgraded_and_its_refresh_refused_by_the_hook_s_rule()
  {
-    let host = Host::new().with_agents(&[".claude"]);
+    let host = Host::set_up("desk").with_agents(&[".claude"]);
     let completions = host.fish();
     host.ok(&["agents", "install"]);
     let installed = host.install_as("worklog-0.3.0");
@@ -4542,7 +4568,7 @@ impl Host {
 #[test]
 fn refresh_takes_the_hook_the_tool_before_the_rebuild_left_as_its_own() {
     for spelled_with_home in [true, false] {
-        let host = Host::new().with_agents(&[".claude"]);
+        let host = Host::set_up("desk").with_agents(&[".claude"]);
         let home = if spelled_with_home {
             "$HOME".to_owned()
         } else {
@@ -4569,7 +4595,7 @@ fn refresh_takes_the_hook_the_tool_before_the_rebuild_left_as_its_own() {
 
 #[test]
 fn refresh_writes_its_skill_over_the_one_the_tool_before_the_rebuild_left() {
-    let host = Host::new().with_agents(&[".codex"]);
+    let host = Host::set_up("desk").with_agents(&[".codex"]);
     let left = host.home().join(".codex/skills/worklog/SKILL.md");
     fs::create_dir_all(left.parent().unwrap()).unwrap();
     fs::write(&left, "---\nname: worklog\ndescription: Lamp notes\n---\n").unwrap();
