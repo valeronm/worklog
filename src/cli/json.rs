@@ -38,7 +38,8 @@ pub(super) fn nothing() -> String {
 mod tests {
     use serde_json::{Value, json};
 
-    use super::super::agents::{Initialized, Placed};
+    use super::super::agents::Placed;
+    use super::super::host::Initialized;
     use super::super::render::{Render, output};
     use super::*;
     use crate::app::activity::{self, Activity};

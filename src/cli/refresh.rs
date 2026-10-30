@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use super::agents::{Done, Refreshing};
+use super::agents::{Done, Placed, Refreshing};
 use super::args::Shell;
 use super::render::{Output, Stopped};
 use super::{Environment, NAME, complete};
@@ -44,5 +44,5 @@ pub(super) fn refresh_into(environment: &Environment, done: &mut Done) -> Result
 pub(super) fn run(environment: &Environment, json: bool) -> Result<Output, Stopped> {
     let mut done = Done::default();
     let ended = refresh_into(environment, &mut done);
-    done.ended(ended, json)
+    done.ended(ended, json, |written| Placed { written })
 }

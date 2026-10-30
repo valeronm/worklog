@@ -3,7 +3,8 @@
 use std::io::{BufRead, ErrorKind, Write};
 use std::path::{Path, PathBuf};
 
-use super::agents::{self, Placing, initialized};
+use super::agents::{self, Placing};
+use super::host::initialized;
 use super::render::Output;
 use super::{Environment, NAME};
 use crate::app::machines::{self, HostName};

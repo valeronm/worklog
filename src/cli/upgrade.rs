@@ -1,6 +1,7 @@
+use super::agents::{self, Done};
 use super::render::{Output, Render, Stopped, output};
-use super::{Environment, agents, refresh};
-use crate::app::upgrade::{self, Checked, Outcome, Upgrade};
+use super::{Environment, refresh};
+use crate::app::upgrade::{self, Checked, Installed, Outcome, Upgrade};
 
 impl Render for Checked {
     fn text(&self) -> String {
@@ -31,23 +32,19 @@ pub(super) fn run(check: bool, environment: &Environment, json: bool) -> Result<
     }
     let binary = (environment.binary_at)(environment.binary()?);
     let (checked, tag) = upgrade::check(releases.as_ref(), environment.version)?;
-    let (written, notes, ended) = if checked.newer {
-        let installed = upgrade::install(releases.as_ref(), binary.as_ref(), &tag)?;
-        (installed.written, installed.notes, installed.ended)
+    let (done, ended) = if checked.newer {
+        let Installed {
+            written,
+            notes,
+            ended,
+        } = upgrade::install(releases.as_ref(), binary.as_ref(), &tag)?;
+        (Done { written, notes }, ended)
     } else {
-        let mut done = agents::Done::default();
+        let mut done = Done::default();
         let ended = refresh::refresh_into(environment, &mut done);
-        (done.written, done.notes, ended)
+        (done, ended)
     };
-    let mut made = output(&checked.upgrade(written), json);
-    made.notes.extend(notes);
-    match ended {
-        Ok(()) => Ok(made),
-        Err(failure) => Err(Stopped {
-            done: Some(made),
-            failure,
-        }),
-    }
+    done.ended(ended, json, |written| checked.upgrade(written))
 }
 
 #[cfg(test)]

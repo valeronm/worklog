@@ -3,42 +3,17 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 
 use super::args::AgentsAction;
+use super::json::Pinned;
 use super::render::{Output, Render, Stopped, output};
 use super::sandbox::Edit;
 use super::skill::SKILL;
 use super::{Environment, NAME, hook, sandbox};
 use crate::app::Failure;
-use crate::app::setup::Bound;
-use crate::domain::id::DocumentId;
 use crate::wiring::{self, Agent};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub(super) struct Placed {
     pub written: Vec<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub(super) struct Initialized {
-    pub document: DocumentId,
-    pub label: String,
-    pub created: bool,
-    pub written: Vec<String>,
-}
-
-impl Initialized {
-    pub(super) fn new(bound: Bound, written: Vec<String>) -> Initialized {
-        let Bound {
-            document,
-            label,
-            created,
-        } = bound;
-        Initialized {
-            document,
-            label,
-            created,
-            written,
-        }
-    }
 }
 
 pub(super) fn lines(written: &[String]) -> String {
@@ -51,13 +26,6 @@ pub(super) fn lines(written: &[String]) -> String {
 impl Render for Placed {
     fn text(&self) -> String {
         lines(&self.written)
-    }
-}
-
-impl Render for Initialized {
-    fn text(&self) -> String {
-        let how = if self.created { "created" } else { "bound" };
-        format!("{} {how}\n{}", self.label, lines(&self.written))
     }
 }
 
@@ -99,22 +67,23 @@ impl Done {
     }
 
     /// The notes are given under `json` too, since the value printed there carries none.
-    pub(super) fn output(self, bound: Option<Bound>, json: bool) -> Output {
-        let mut made = match bound {
-            Some(bound) => output(&Initialized::new(bound, self.written), json),
-            None => output(
-                &Placed {
-                    written: self.written,
-                },
-                json,
-            ),
-        };
-        made.notes = self.notes;
+    pub(super) fn output<T: Render + Serialize + Pinned>(
+        self,
+        json: bool,
+        value: impl FnOnce(Vec<String>) -> T,
+    ) -> Output {
+        let mut made = output(&value(self.written), json);
+        made.notes.extend(self.notes);
         made
     }
 
-    pub(super) fn ended(self, ended: Result<(), Failure>, json: bool) -> Result<Output, Stopped> {
-        let done = self.output(None, json);
+    pub(super) fn ended<T: Render + Serialize + Pinned>(
+        self,
+        ended: Result<(), Failure>,
+        json: bool,
+        value: impl FnOnce(Vec<String>) -> T,
+    ) -> Result<Output, Stopped> {
+        let done = self.output(json, value);
         match ended {
             Ok(()) => Ok(done),
             Err(failure) => Err(Stopped {
@@ -224,20 +193,6 @@ impl Placing {
     }
 }
 
-// Everything that can refuse an agent's install is settled before the host is bound.
-pub(super) fn initialized(
-    placing: Option<Placing>,
-    json: bool,
-    bind: impl FnOnce() -> Result<Bound, Failure>,
-) -> Result<Output, Failure> {
-    let bound = bind()?;
-    let done = placing
-        .map(|placing| placing.install())
-        .transpose()?
-        .unwrap_or_default();
-    Ok(done.output(Some(bound), json))
-}
-
 /// A refresh planned and not yet written: each hooks file and config was edited in memory.
 pub(super) struct Refreshing {
     refreshed: Vec<Refreshed>,
@@ -334,24 +289,17 @@ pub(super) fn run(
                 .and_then(|agents| agents.write_into(&mut done)),
             AgentsAction::Uninstall => uninstall_into(environment, &mut done),
         };
-    done.ended(ended, json)
+    done.ended(ended, json, |written| Placed { written })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::testing::atlas;
 
     #[test]
-    fn a_result_is_its_paths_one_to_a_line_and_init_puts_them_after_its_own_line() {
+    fn a_result_is_its_paths_one_to_a_line() {
         let written = vec!["/home/desk/a".to_owned(), "/home/desk/b".to_owned()];
-        assert_eq!(
-            Placed {
-                written: written.clone()
-            }
-            .text(),
-            "/home/desk/a\n/home/desk/b\n"
-        );
+        assert_eq!(Placed { written }.text(), "/home/desk/a\n/home/desk/b\n");
         assert_eq!(
             Placed {
                 written: Vec::new()
@@ -359,17 +307,5 @@ mod tests {
             .text(),
             ""
         );
-        let mut made = Initialized::new(
-            Bound {
-                document: atlas(),
-                label: "atlas".to_owned(),
-                created: true,
-            },
-            written,
-        );
-        assert_eq!(made.text(), "atlas created\n/home/desk/a\n/home/desk/b\n");
-        made.created = false;
-        made.written.clear();
-        assert_eq!(made.text(), "atlas bound\n");
     }
 }
