@@ -3,23 +3,19 @@
 use std::ffi::OsString;
 use std::path::Path;
 
-use clap::{CommandFactory as _, Subcommand};
+use clap::{CommandFactory as _, Subcommand as _};
 
-use super::args::{Cli, Command, Invoked};
+use super::args::{Cli, HostCommand, ToolCommand};
 use super::render::Output;
 use super::{Environment, exit_code};
 use crate::app::record::{Outcome, Run, record};
 use crate::app::{Deps, Failure};
 use crate::wiring;
 
-const SERVE: &str = "serve";
-
-// A use of the store is a `Command` or `serve`, and binding a host to one is none; words that
-// name no command are a use refused.
-fn is_logged(command: &str) -> bool {
-    let first = command.split(' ').next().unwrap_or_default();
-    let of_the_store = <Command as Subcommand>::has_subcommand(first);
-    first == SERVE || of_the_store || !<Invoked as Subcommand>::has_subcommand(first)
+// Binding a host to a store and placing this tool on the host are no use of the store; words
+// that name no command are a use refused.
+fn is_logged(first: &str) -> bool {
+    !(HostCommand::has_subcommand(first) || ToolCommand::has_subcommand(first))
 }
 
 struct Line {
@@ -194,9 +190,6 @@ mod tests {
         let all = Cli::command();
         spelled_one_way(&all);
         walked_to_its_path(&all, &[]);
-        for name in [SERVE, "init", "join"] {
-            assert!(all.find_subcommand(name).is_some(), "{name}");
-        }
         assert!(Cli::parsed([NAME, "topic"]).is_err());
     }
 
@@ -324,18 +317,18 @@ mod tests {
             assert!(Cli::parsed([&[NAME.to_owned()], &typed[..]].concat()).is_ok());
             assert_eq!(typed_command(&typed), command, "{line}");
         }
-        for (command, logged) in [
+        for (first, logged) in [
             ("facts", true),
-            ("new entry", true),
+            ("new", true),
             ("", true),
             ("init", false),
             ("join", false),
-            ("agents refresh", false),
+            ("agents", false),
             ("refresh", false),
             ("completions", false),
             ("upgrade", false),
         ] {
-            assert_eq!(is_logged(command), logged, "{command}");
+            assert_eq!(is_logged(first), logged, "{first}");
         }
     }
 

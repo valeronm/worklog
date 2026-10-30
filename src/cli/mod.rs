@@ -30,7 +30,7 @@ use crate::domain::ports::{Binary, Releases, StoreError};
 use crate::domain::release::{self, Built};
 use crate::domain::schema::Directory;
 use crate::{web, wiring};
-use args::{Cli, Command, Invoked, ReadCommand};
+use args::{Cli, Command, Invoked, ReadCommand, ToolCommand};
 use render::{Output, Stopped};
 
 const NAME: &str = "worklog";
@@ -312,16 +312,16 @@ where
         Invoked::Serve { bind, hosts } => {
             return serve(bind, hosts, environment, &words, out, err);
         }
-        Invoked::Agents { action } => {
+        Invoked::Tool(ToolCommand::Agents { action }) => {
             return ended(agents::run(*action, environment, cli.json), out, err);
         }
-        Invoked::Refresh => {
+        Invoked::Tool(ToolCommand::Refresh) => {
             return ended(refresh::run(environment, cli.json), out, err);
         }
-        Invoked::Completions { shell } => {
+        Invoked::Tool(ToolCommand::Completions { shell }) => {
             return finished(complete::registered(*shell, environment), out, err);
         }
-        Invoked::Upgrade { check } => {
+        Invoked::Tool(ToolCommand::Upgrade { check }) => {
             return ended(upgrade::run(*check, environment, cli.json), out, err);
         }
     };

@@ -103,6 +103,12 @@ pub enum Invoked {
         #[arg(long = "host", value_name = "NAME", value_parser = Server::host_name)]
         hosts: Vec<String>,
     },
+    #[command(flatten)]
+    Tool(ToolCommand),
+}
+
+#[derive(Subcommand)]
+pub enum ToolCommand {
     /// Configure the coding agents on this host to use this tool, or take that back
     Agents {
         #[command(subcommand)]
@@ -737,14 +743,7 @@ mod tests {
     fn serve_listens_on_the_loopback_unless_told_and_takes_each_host_it_is_given() {
         let served = |line: &str| match parsed(line).unwrap().command {
             Invoked::Serve { bind, hosts } => (bind.to_string(), hosts),
-            Invoked::Host(_)
-            | Invoked::Run(_)
-            | Invoked::Agents { .. }
-            | Invoked::Refresh
-            | Invoked::Completions { .. }
-            | Invoked::Upgrade { .. } => {
-                panic!("{line}: expected a serve")
-            }
+            _ => panic!("{line}: expected a serve"),
         };
         assert_eq!(
             served("worklog serve"),
@@ -811,7 +810,7 @@ mod tests {
             ("refresh", AgentsAction::Refresh),
             ("uninstall", AgentsAction::Uninstall),
         ] {
-            let Invoked::Agents { action: given } =
+            let Invoked::Tool(ToolCommand::Agents { action: given }) =
                 parsed(&format!("worklog agents {word}")).unwrap().command
             else {
                 panic!("{word}: expected agents");
@@ -872,7 +871,7 @@ mod tests {
     #[test]
     fn upgrade_replaces_the_binary_unless_it_is_only_to_check() {
         let check = |line: &str| match parsed(line).unwrap().command {
-            Invoked::Upgrade { check } => check,
+            Invoked::Tool(ToolCommand::Upgrade { check }) => check,
             _ => panic!("{line}: expected an upgrade"),
         };
         assert!(!check("worklog upgrade"));
