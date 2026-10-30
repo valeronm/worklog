@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fs;
 use std::io::{BufRead as _, BufReader, Read as _, Write as _};
@@ -2571,29 +2572,31 @@ fn init_line(extra: &[&'static str]) -> Vec<&'static str> {
     [&INIT[..], &["A machine"], extra].concat()
 }
 
-fn tree(root: &Path, dir: &Path, found: &mut Vec<(PathBuf, Option<Vec<u8>>)>) {
+type Snapshot = BTreeMap<PathBuf, Option<Vec<u8>>>;
+
+fn tree(root: &Path, dir: &Path, found: &mut Snapshot) {
     for entry in fs::read_dir(dir).unwrap() {
         let path = entry.unwrap().path();
         let relative = path.strip_prefix(root).unwrap().to_path_buf();
         if path.is_dir() {
-            found.push((relative, None));
+            found.insert(relative, None);
             tree(root, &path, found);
         } else {
-            found.push((relative, Some(fs::read(&path).unwrap())));
+            found.insert(relative, Some(fs::read(&path).unwrap()));
         }
     }
 }
 
-fn snapshot(host: &Host) -> Vec<(PathBuf, Option<Vec<u8>>)> {
-    let mut found = Vec::new();
+fn snapshot(host: &Host) -> Snapshot {
+    let mut found = Snapshot::new();
     tree(&host.root, &host.root, &mut found);
     found
 }
 
 // A read of a store writes the host's cache, and with it the directory that holds it.
-fn snapshot_without_cache(host: &Host) -> Vec<(PathBuf, Option<Vec<u8>>)> {
+fn snapshot_without_cache(host: &Host) -> Snapshot {
     let mut found = snapshot(host);
-    found.retain(|(path, _)| path != Path::new("next") && !path.starts_with("next/cache"));
+    found.retain(|path, _| path != Path::new("next") && !path.starts_with("next/cache"));
     found
 }
 
