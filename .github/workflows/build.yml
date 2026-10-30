@@ -29,12 +29,37 @@ jobs:
 
       - name: Static checks
         # get.sh is fetched straight into a shell, so it gets the same
-        # scrutiny as the code.
+        # scrutiny as the code. --locked fails a lockfile the tag build would
+        # refuse.
         run: |
           cargo fmt --all --check
           shellcheck packaging/get.sh
-          cargo clippy --workspace --all-targets --all-features -- -D warnings
-          cargo test --workspace
+          cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+          cargo test --workspace --locked
+
+  macos:
+    # Without this job, macOS code is first compiled by the tag build and
+    # never run.
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install the toolchain pinned in mise.toml
+        run: |
+          rust_version=$(sed -n 's/^rust = "\(.*\)"$/\1/p' mise.toml)
+          rustup toolchain install "$rust_version" --profile minimal --component clippy
+          rustup default "$rust_version"
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: ${{ hashFiles('mise.toml') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Clippy and tests
+        run: |
+          cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+          cargo test --workspace --locked
 
   build:
     needs: check
@@ -80,7 +105,7 @@ jobs:
           if-no-files-found: error
 
   release:
-    needs: build
+    needs: [build, macos]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-24.04
     permissions:

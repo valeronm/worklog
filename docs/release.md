@@ -10,7 +10,8 @@ latest release from the redirect and install from it.
    `Cargo.lock`, since the tag build uses `--locked`.
 2. `cargo fmt --all --check`, `cargo clippy --workspace --all-targets
    --all-features -- -D warnings` and `cargo test --workspace` green
-   locally; CI runs the same.
+   locally; CI runs the same, and clippy and the tests on macOS too,
+   which no local check covers.
 3. Push `main` first, then the tag:
 
    ```
