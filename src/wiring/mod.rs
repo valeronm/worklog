@@ -7,7 +7,7 @@ mod fs;
 mod net;
 
 use crate::app::{Deps, Failure};
-use crate::domain::ports::{Binary, Releases};
+use crate::domain::ports::{Binary, Releases, StoreError};
 use crate::domain::session::Session;
 use fs::{
     Config, DirReleases, FsAgent, FsBinary, FsDrafts, FsHost, FsStore, FsUsage, Paths, RandomIds,
@@ -86,37 +86,45 @@ fn hook_session(word: &str, given: &dyn Fn(&str) -> Option<String>) -> Option<Se
 }
 
 /// The adapters over the store this host's config holds; `None` for a host with no config,
-/// one that is not set up. Refuses a configured store that is not a directory.
+/// one that is not set up. Refuses a configured store that is not a directory, naming the
+/// config.
 pub fn wire(variable: &dyn Fn(&str) -> Option<OsString>) -> Result<Option<Adapters>, Failure> {
     let paths = Paths::resolved(variable)?;
     let Some(held) = Config::read(&paths.config)? else {
         return Ok(None);
     };
-    let store = FsStore::open(held.store.clone())?;
+    if !held.store.is_dir() {
+        return Err(Failure::Store(StoreError::io(
+            held.store.display(),
+            format!(
+                "this host's store is not a directory; {} binds this host to it",
+                paths.config.display()
+            ),
+        )));
+    }
+    let store = FsStore::new(held.store.clone());
     let host = FsHost::bound(paths.config, paths.home, held, session(variable));
     Ok(Some(assembled(paths.drafts, &paths.cache, store, host)))
 }
 
-/// The adapters for binding this host to `chosen`: over the store its config holds, unchecked,
-/// where it has one, and otherwise over `chosen`. A host with a config keeps its store and its
-/// machine topic, which is what a setup refuses before its first write. Refuses a `chosen`
-/// that is a file, or a directory holding no store and something that is neither dot-named
-/// nor its usage log.
+/// The adapters `wire` gives a host with a config, and otherwise those for binding this host
+/// to `chosen`. Refuses a `chosen` that is a file, or a directory holding no store and
+/// something that is neither dot-named nor its usage log.
 pub fn wire_over(
     variable: &dyn Fn(&str) -> Option<OsString>,
     chosen: &Path,
 ) -> Result<Adapters, Failure> {
+    if let Some(adapters) = wire(variable)? {
+        return Ok(adapters);
+    }
     let paths = Paths::resolved(variable)?;
-    let session = session(variable);
-    let (store, host) = if let Some(held) = Config::read(&paths.config)? {
-        let store = FsStore::new(held.store.clone());
-        let host = FsHost::bound(paths.config, paths.home, held, session);
-        (store, host)
-    } else {
-        let store = FsStore::chosen(chosen.to_path_buf())?;
-        let host = FsHost::unbound(paths.config, paths.home, chosen.to_path_buf(), session);
-        (store, host)
-    };
+    let store = FsStore::chosen(chosen.to_path_buf())?;
+    let host = FsHost::unbound(
+        paths.config,
+        paths.home,
+        chosen.to_path_buf(),
+        session(variable),
+    );
     Ok(assembled(paths.drafts, &paths.cache, store, host))
 }
 
@@ -473,27 +481,41 @@ mod tests {
     }
 
     #[test]
-    fn a_configured_store_that_is_gone_is_refused_except_to_one_choosing_a_store() {
+    fn a_configured_store_that_is_gone_is_refused_naming_the_config() {
         let (_kept, root) = scratch();
         let store = root.join("store");
+        let path = root.join("next/config.toml");
         let config = Config {
             store: store.clone(),
             machine: lantern(),
         };
-        config.write(&root.join("next/config.toml")).unwrap();
+        config.write(&path).unwrap();
 
+        let gone = format!(
+            "{}: this host's store is not a directory; {} binds this host to it",
+            store.display(),
+            path.display()
+        );
         let Err(Failure::Store(refused)) = wired(&root) else {
             panic!("a store that is not there must be refused");
         };
-        assert_eq!(
-            refused.to_string(),
-            format!("{}: this host's store is not a directory", store.display())
-        );
-        let chosen = wired_over(&root, &root.join("elsewhere")).unwrap();
-        assert_eq!(chosen.deps().read().host.machine(), Ok(Some(lantern())));
+        assert_eq!(refused.to_string(), gone);
+        let Err(Failure::Store(refused)) = wired_over(&root, &root.join("elsewhere")) else {
+            panic!("a store that is not there must be refused to one choosing a store");
+        };
+        assert_eq!(refused.to_string(), gone);
+        assert!(!root.join("elsewhere").exists());
+        std::fs::write(&store, "a file").unwrap();
+        let Err(Failure::Store(refused)) = wired(&root) else {
+            panic!("a store that is a file must be refused");
+        };
+        assert_eq!(refused.to_string(), gone);
 
+        std::fs::remove_file(&store).unwrap();
         std::fs::create_dir_all(&store).unwrap();
         assert!(wired(&root).unwrap().is_some());
+        let chosen = wired_over(&root, &root.join("elsewhere")).unwrap();
+        assert_eq!(chosen.deps().read().host.machine(), Ok(Some(lantern())));
     }
 
     #[test]

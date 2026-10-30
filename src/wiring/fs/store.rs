@@ -85,16 +85,6 @@ impl FsStore {
         self
     }
 
-    pub fn open(root: PathBuf) -> Result<FsStore, StoreError> {
-        if !root.is_dir() {
-            return Err(StoreError::io(
-                root.display(),
-                "this host's store is not a directory",
-            ));
-        }
-        Ok(FsStore::new(root))
-    }
-
     pub fn chosen(root: PathBuf) -> Result<FsStore, StoreError> {
         let store = FsStore::new(root);
         let root = &store.root;
@@ -498,25 +488,8 @@ mod tests {
     }
 
     #[test]
-    fn a_store_is_opened_only_on_a_directory() {
+    fn a_root_that_is_not_there_reads_as_a_store_holding_nothing() {
         let dir = tempfile::tempdir().unwrap();
-        let missing = dir.path().join("store");
-        let Err(refused) = FsStore::open(missing.clone()) else {
-            panic!("a store that is not there must be refused");
-        };
-        assert_eq!(
-            refused.to_string(),
-            format!(
-                "{}: this host's store is not a directory",
-                missing.display()
-            )
-        );
-        fs::write(&missing, "a file").unwrap();
-        assert!(FsStore::open(missing.clone()).is_err());
-        assert!(!missing.is_dir());
-
-        let opened = FsStore::open(dir.path().to_path_buf()).unwrap();
-        assert!(opened.kinds().unwrap().is_empty());
         assert!(
             FsStore::new(dir.path().join("atlas"))
                 .kinds()

@@ -764,8 +764,9 @@ mod tests {
 
         let gone = found.run(&["topics"]);
         let said = format!(
-            "{NAME}: {}: this host's store is not a directory\n",
-            store.display()
+            "{NAME}: {}: this host's store is not a directory; {} binds this host to it\n",
+            store.display(),
+            found.root.join("next/config.toml").display()
         );
         assert_eq!((gone.out.as_str(), gone.err, gone.code), ("", said, 1));
         assert_eq!(found.run(&["facts", "--no-such-flag"]).code, 2);
@@ -1056,6 +1057,20 @@ mod tests {
         assert_eq!(
             again.err,
             format!("{NAME}: this host is already set up as desk\n")
+        );
+        assert!(!root.join("home/elsewhere").exists());
+
+        let store = root.join("home/kept");
+        std::fs::rename(&store, root.join("moved")).unwrap();
+        let gone = typing(&root, "elsewhere\ny\natlas\n\n").run(&["init"]);
+        assert_eq!((gone.out.as_str(), gone.code), ("", 1));
+        assert_eq!(
+            gone.err,
+            format!(
+                "{NAME}: {}: this host's store is not a directory; {} binds this host to it\n",
+                store.display(),
+                root.join("next/config.toml").display()
+            )
         );
         assert!(!root.join("home/elsewhere").exists());
     }

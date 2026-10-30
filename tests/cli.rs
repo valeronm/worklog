@@ -1079,13 +1079,23 @@ fn a_store_that_is_gone_is_refused_and_not_read_as_empty() {
     let moved = host.root.join("moved");
     fs::rename(host.store(), &moved).unwrap();
     let gone = format!(
-        "worklog: {}: this host's store is not a directory\n",
-        host.store().display()
+        "worklog: {}: this host's store is not a directory; {} binds this host to it\n",
+        host.store().display(),
+        host.root.join("next/config.toml").display()
     );
-    for args in [&["topics"][..], &["new", "topic", "lantern"], &["context"]] {
+    let elsewhere = host.root.join("elsewhere");
+    let chosen = elsewhere.to_str().unwrap();
+    for args in [
+        &["topics"][..],
+        &["new", "topic", "lantern"],
+        &["context"],
+        &["init", "desk", "--store", chosen],
+        &["join", "desk", "--store", chosen],
+    ] {
         assert_refused(&host.run(args), 1, &gone);
     }
     assert!(!host.store().exists());
+    assert!(!elsewhere.exists());
 
     fs::rename(&moved, host.store()).unwrap();
     assert_eq!(host.ok(&["topics"]), host.row("desk", "desk  A machine"));
@@ -2448,8 +2458,9 @@ fn serve_is_refused_before_it_listens_on_a_host_or_an_address_it_cannot_serve() 
         &host.ends(&bind),
         1,
         &format!(
-            "worklog: {}: this host's store is not a directory\n",
-            host.store().display()
+            "worklog: {}: this host's store is not a directory; {} binds this host to it\n",
+            host.store().display(),
+            host.root.join("next/config.toml").display()
         ),
     );
     fs::rename(&away, host.store()).unwrap();
