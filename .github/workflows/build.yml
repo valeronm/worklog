@@ -21,17 +21,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install the toolchain pinned in mise.toml
-        # so CI builds with the version a developer builds with
-        run: |
-          rust_version=$(sed -n 's/^rust = "\(.*\)"$/\1/p' mise.toml)
-          rustup toolchain install "$rust_version" --profile minimal --component clippy,rustfmt
-          rustup default "$rust_version"
-
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: ./.github/actions/rust
         with:
-          key: ${{ hashFiles('mise.toml') }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          components: clippy,rustfmt
+          cache: 'true'
 
       - name: Static checks
         # get.sh is fetched straight into a shell, so it gets the same
@@ -51,16 +44,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install the toolchain pinned in mise.toml
-        run: |
-          rust_version=$(sed -n 's/^rust = "\(.*\)"$/\1/p' mise.toml)
-          rustup toolchain install "$rust_version" --profile minimal --component clippy
-          rustup default "$rust_version"
-
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: ./.github/actions/rust
         with:
-          key: ${{ hashFiles('mise.toml') }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          components: clippy
+          cache: 'true'
 
       - name: Clippy and tests
         run: |
@@ -87,11 +74,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install the toolchain pinned in mise.toml
-        run: |
-          rust_version=$(sed -n 's/^rust = "\(.*\)"$/\1/p' mise.toml)
-          rustup toolchain install "$rust_version" --profile minimal
-          rustup default "$rust_version"
+      - uses: ./.github/actions/rust
 
       - name: Build
         # --locked so a release is built from the lockfile that was tested.

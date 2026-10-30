@@ -1,0 +1,26 @@
+name: Rust toolchain
+description: Install the Rust toolchain pinned in mise.toml and restore the build cache
+inputs:
+  components:
+    description: rustup components, comma-separated
+    default: ''
+  cache:
+    description: Restore the build cache, and save it on main
+    default: 'false'
+runs:
+  using: composite
+  steps:
+    - name: Install the toolchain pinned in mise.toml
+      # so CI builds with the version a developer builds with
+      shell: bash
+      env:
+        COMPONENTS: ${{ inputs.components }}
+      run: |
+        rust_version=$(sed -n 's/^rust = "\(.*\)"$/\1/p' mise.toml)
+        rustup toolchain install "$rust_version" --profile minimal ${COMPONENTS:+--component "$COMPONENTS"}
+        rustup default "$rust_version"
+
+    - if: inputs.cache == 'true'
+      uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      with:
+        save-if: ${{ github.ref == 'refs/heads/main' }}
