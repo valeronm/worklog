@@ -8,6 +8,12 @@ on:
 permissions:
   contents: read
 
+# A run on main or a tag gets a group of its own, since a group drops its
+# pending run when another queues.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   check:
     runs-on: ubuntu-24.04
