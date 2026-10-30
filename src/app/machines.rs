@@ -103,10 +103,7 @@ pub(super) fn written_on(
 /// Whether the store holds no document, of a kind this worklog knows or not, that reads or
 /// not.
 pub fn holds_nothing(deps: &ReadDeps) -> Result<bool, Failure> {
-    let lookup = Lookup::new(deps.store);
-    Ok(lookup.everything()?.is_empty()
-        && lookup.unknown()?.is_empty()
-        && lookup.holding_unreadable()?.is_empty())
+    Lookup::new(deps.store).holds_nothing()
 }
 
 #[cfg(test)]
@@ -115,8 +112,10 @@ mod tests {
     use crate::app::testing::{
         ENDED, World, fact, head, refused, topic, topic_fields, world, written_at,
     };
+    use crate::domain::id::VersionId;
     use crate::domain::ports::Store;
     use crate::domain::testing::{first, lantern};
+    use crate::domain::version::ReadError;
 
     fn named(world: &mut World, name: Option<&str>) -> HostName {
         world.host.set_name(name.map(str::to_owned));
@@ -243,6 +242,15 @@ mod tests {
         assert_eq!(holds_nothing(&bare.deps().read()), Ok(true));
         let sketch = first(&lantern(), "sketch", "name = \"lantern\"", "\n");
         bare.store.put(&sketch).unwrap();
+        assert_eq!(holds_nothing(&bare.deps().read()), Ok(false));
+    }
+
+    #[test]
+    fn a_store_holding_only_a_file_that_does_not_read_holds_something() {
+        let bare = World::new();
+        let torn = VersionId::of(b"torn");
+        bare.store
+            .plant_unreadable(&lantern(), torn, ReadError::Corrupt);
         assert_eq!(holds_nothing(&bare.deps().read()), Ok(false));
     }
 }

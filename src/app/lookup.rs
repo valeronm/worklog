@@ -414,6 +414,10 @@ impl<'a> Lookup<'a> {
         Ok(self.seeded(self.store.unreadable()?))
     }
 
+    pub(super) fn holds_nothing(&self) -> Result<bool, Failure> {
+        Ok(self.store.kinds()?.is_empty() && self.store.unreadable()?.is_empty())
+    }
+
     pub(super) fn is_kind(&self, id: &DocumentId, kind: KindOf) -> Result<bool, Failure> {
         let document = self.headers(id)?;
         Ok(kind_of(&document) == Some(kind) && row_head(&document).is_some())
