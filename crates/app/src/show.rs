@@ -1,6 +1,12 @@
-use std::cmp::Reverse;
-use std::collections::BTreeMap;
-use std::rc::Rc;
+use alloc::borrow::ToOwned;
+use alloc::boxed::Box;
+use alloc::collections::BTreeMap;
+use alloc::format;
+use alloc::rc::Rc;
+use alloc::string::{String, ToString};
+use alloc::vec;
+use alloc::vec::Vec;
+use core::cmp::Reverse;
 
 use serde::ser::SerializeStruct;
 use serde::{Serialize, Serializer};
@@ -362,7 +368,7 @@ fn shown_fields(lookup: &Lookup, version: &Version) -> Result<Vec<ShownField>, F
             let refers = references.contains(&name.as_str());
             let items = match value {
                 Value::Array(items) => items.as_slice(),
-                one => std::slice::from_ref(one),
+                one => core::slice::from_ref(one),
             };
             Ok(ShownField {
                 name: name.clone(),

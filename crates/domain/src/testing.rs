@@ -1,9 +1,14 @@
 //! In-memory ports for tests of the layers above the domain, and the
 //! contract every implementation of a port is held to.
 
-use std::cell::{Cell, RefCell};
-use std::collections::{BTreeMap, BTreeSet};
-use std::rc::Rc;
+use alloc::borrow::ToOwned;
+use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::format;
+use alloc::rc::Rc;
+use alloc::string::{String, ToString};
+use alloc::vec;
+use alloc::vec::Vec;
+use core::cell::{Cell, RefCell};
 
 use super::document::{Document, State, Unreadable};
 use super::draft::{Draft, Listed};
@@ -873,7 +878,7 @@ fn reports_what_does_not_read(
     assert_eq!(alone.unreadable().len(), 1);
     assert_eq!(store.unreadable().expect("a read"), [alone]);
     let under = store.documents_under(phone.as_str()).expect("a read");
-    assert_eq!(under, std::slice::from_ref(&phone));
+    assert_eq!(under, core::slice::from_ref(&phone));
     let named = store.versions_under(lost.as_str()).expect("a read");
     assert_eq!(named, [(phone.clone(), lost.clone())]);
     for word in ["topic", "fact", "entry", "followup", "claim"] {
@@ -902,7 +907,7 @@ fn reports_what_does_not_read(
         store.unreadable().expect("a read"),
         by_id(store, &[lantern, &phone])
     );
-    assert_eq!(of_kind(store, "fact"), std::slice::from_ref(&beside));
+    assert_eq!(of_kind(store, "fact"), core::slice::from_ref(&beside));
     assert_eq!(holding(&["relay-pin"]), [beside]);
 }
 
@@ -916,7 +921,7 @@ fn finds_by_prefix(store: &dyn Store, head: &Version) {
     }
     assert_eq!(
         store.documents_under(lantern.as_str()).expect("a read"),
-        std::slice::from_ref(lantern)
+        core::slice::from_ref(lantern)
     );
     assert!(store.documents_under("").expect("a read").is_empty());
 

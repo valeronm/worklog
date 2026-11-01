@@ -1,3 +1,7 @@
+use alloc::borrow::ToOwned;
+use alloc::format;
+use alloc::vec::Vec;
+
 use toml::Value;
 
 use crate::live::{Open, open};
@@ -81,6 +85,7 @@ fn moved(target: &Open, from: &DocumentId, to: &DocumentId) -> Option<Fields> {
 mod tests {
     use super::*;
     use crate::testing::{World, fact, head, head_id, refused, world_with_atlas};
+    use alloc::string::{String, ToString};
     use worklog_domain::id::DocumentId;
     use worklog_domain::ports::Store;
 

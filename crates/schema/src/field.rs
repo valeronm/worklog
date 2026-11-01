@@ -1,6 +1,9 @@
 //! Typed values out of a table of fields, each refusal naming its key.
 
-use std::fmt;
+use alloc::borrow::ToOwned;
+use alloc::string::String;
+use alloc::vec::Vec;
+use core::fmt;
 
 use chrono::{Datelike as _, NaiveDate};
 use serde::{Serialize, Serializer};
@@ -292,6 +295,9 @@ impl Writer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::format;
+    use alloc::string::ToString;
+    use alloc::vec;
     use worklog_domain::testing::LANTERN;
 
     fn reader(toml: &str) -> Reader {

@@ -1,5 +1,9 @@
 //! The `[[target]]` references in a body.
 
+use alloc::borrow::ToOwned;
+use alloc::string::String;
+use alloc::vec::Vec;
+
 /// Backticks opening a line with more backticks after them are an
 /// inline span, not a fence.
 fn fence(line: &str) -> Option<char> {
@@ -22,16 +26,6 @@ fn past_closing(text: &str, run: usize) -> Option<&str> {
     None
 }
 
-#[cfg(test)]
-thread_local! {
-    static TRIED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-}
-
-#[cfg(test)]
-fn tried() -> usize {
-    TRIED.with(std::cell::Cell::get)
-}
-
 /// The link `text` opens with: its target, trimmed, and the bytes the link takes. A link is
 /// `[[`, then a target on one line that holds no `[` and more than spaces, then the first
 /// `]]`. `Err` is how many bytes to pass before a link can start again, in text that holds
@@ -39,7 +33,7 @@ fn tried() -> usize {
 /// empty text.
 pub fn link_at(text: &str) -> Result<(&str, usize), usize> {
     #[cfg(test)]
-    TRIED.with(|tried| tried.set(tried.get() + 1));
+    tests::TRIED.with(|tried| tried.set(tried.get() + 1));
     let Some(inner) = text.strip_prefix("[[") else {
         return Err(text.chars().next().map_or(0, char::len_utf8));
     };
@@ -102,7 +96,20 @@ pub fn links(body: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{link_at, links, tried};
+    extern crate std;
+
+    use alloc::format;
+    use core::cell::Cell;
+
+    use super::{link_at, links};
+
+    std::thread_local! {
+        pub(super) static TRIED: Cell<usize> = const { Cell::new(0) };
+    }
+
+    fn tried() -> usize {
+        TRIED.with(Cell::get)
+    }
 
     #[test]
     fn a_link_is_read_where_one_opens_and_what_to_pass_is_told_where_none_does() {

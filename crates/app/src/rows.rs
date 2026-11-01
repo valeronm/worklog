@@ -1,5 +1,8 @@
-use std::collections::{BTreeMap, BTreeSet};
-use std::rc::Rc;
+use alloc::borrow::ToOwned;
+use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::rc::Rc;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
 
 use serde::Serialize;
 
@@ -301,6 +304,8 @@ mod tests {
         Counting, ENDED, ENDED_FACT, REMOVED, TOPIC, World, entry, fact, fact_fields, followup,
         head, part_of, referred, to, to_ended, topic, topic_fields, world_with_atlas, written_at,
     };
+    use alloc::format;
+    use alloc::vec;
     use worklog_domain::ports::{Store, StoreRead};
     use worklog_domain::testing::first;
 
@@ -757,7 +762,7 @@ mod tests {
         let lookup = Lookup::new(Stored::new(&counting));
         let topics = Topics::load(&lookup).unwrap();
         assert_eq!(topics.covered(&lantern).len(), 2);
-        assert_eq!(topics.reach_from(std::slice::from_ref(&atlas)).len(), 2);
+        assert_eq!(topics.reach_from(core::slice::from_ref(&atlas)).len(), 2);
         assert_eq!(topics.label(&atlas), "atlas");
         let row = row(&topics, &document).unwrap().row;
         assert_eq!(row.label, "atlas/relay-pin");

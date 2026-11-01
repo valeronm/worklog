@@ -1,7 +1,9 @@
 //! Names in place of ids: a draft shows a reference as the name a
 //! session would type, and a save turns it back into the id.
 
-use std::convert::Infallible;
+use alloc::borrow::ToOwned;
+use alloc::string::{String, ToString};
+use core::convert::Infallible;
 
 use toml::Value;
 
@@ -87,6 +89,8 @@ pub fn to_ids(
 mod tests {
     use super::*;
     use crate::testing::fields;
+    use alloc::format;
+    use alloc::vec;
     use worklog_domain::testing::{ATLAS, LANTERN, atlas, lantern};
 
     fn name_of(id: &DocumentId) -> Option<String> {

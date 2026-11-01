@@ -1,6 +1,7 @@
 //! A span of days as the columns of weeks a grid shows them in, Monday first.
 
-use std::collections::BTreeMap;
+use alloc::collections::BTreeMap;
+use alloc::vec::Vec;
 
 use chrono::{Datelike as _, NaiveDate, Weekday};
 
@@ -86,7 +87,7 @@ pub fn calendar(activity: &Activity) -> Calendar {
     let mondays = from.week(Weekday::Mon).first_day().iter_weeks();
     for monday in mondays.take_while(|monday| *monday <= to) {
         let mut days = monday.iter_days();
-        weeks.push(std::array::from_fn(|_| days.next().and_then(cell)));
+        weeks.push(core::array::from_fn(|_| days.next().and_then(cell)));
         let month = usize::try_from(monday.max(from).month0()).ok();
         let name = month.and_then(|month| MONTHS.get(month));
         if let Some(name) = name.filter(|name| named.last().is_none_or(|last| last.name != **name))

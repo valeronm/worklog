@@ -1,4 +1,6 @@
-use std::fmt;
+use alloc::borrow::ToOwned;
+use alloc::string::{String, ToString};
+use core::fmt;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SchemaError {

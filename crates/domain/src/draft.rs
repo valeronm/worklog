@@ -2,7 +2,12 @@
 //! session edits them, and beside them what the edit started from and the
 //! session that opened it.
 
-use std::fmt::{self, Write as _};
+use alloc::borrow::ToOwned;
+use alloc::format;
+use alloc::string::{String, ToString};
+use alloc::vec;
+use alloc::vec::Vec;
+use core::fmt::{self, Write as _};
 
 use toml::Table;
 
@@ -160,7 +165,7 @@ mod tests {
         let draft = Draft::of(&version);
         assert_eq!(draft.document, lantern());
         assert_eq!(draft.kind.as_str(), "fact");
-        assert_eq!(draft.parents, std::slice::from_ref(&version.id));
+        assert_eq!(draft.parents, core::slice::from_ref(&version.id));
         assert_eq!(draft.fields, version.fields);
         assert_eq!(draft.body, "body\n");
         let fresh = Draft::first(lantern(), draft.kind.clone(), Fields::new(), String::new());

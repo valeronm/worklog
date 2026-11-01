@@ -1,3 +1,8 @@
+use alloc::borrow::ToOwned;
+use alloc::format;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+
 use serde::Serialize;
 use toml::Value;
 
@@ -33,7 +38,7 @@ pub enum New<'a> {
 const FACT_BODY: &str = "\n\n**Why:** \n\n**How to apply:** \n";
 const ENTRY_BODY: &str = "\n## What\n\n## Why\n\n## Changes\n\n## Notes\n";
 
-pub(super) fn usage(error: impl std::fmt::Display) -> Failure {
+pub(super) fn usage(error: impl core::fmt::Display) -> Failure {
     Failure::Usage(error.to_string())
 }
 
@@ -333,6 +338,7 @@ mod tests {
     use crate::testing::{
         ENDED, ENDED_FACT, TOPIC, World, fact, head, head_id, open_row, refused, topic, world,
     };
+    use alloc::vec;
     use worklog_domain::ports::{Drafts, DraftsRead, Store};
     use worklog_domain::testing::lamp_session;
     use worklog_domain::version::{Kind, ReadError};

@@ -2,6 +2,10 @@
 //! from a parent is allowed, how one is addressed. Nothing here asks a
 //! store anything.
 
+#![no_std]
+
+extern crate alloc;
+
 pub mod address;
 pub mod directory;
 pub mod ending;

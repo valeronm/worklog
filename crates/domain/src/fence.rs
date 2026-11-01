@@ -1,7 +1,9 @@
 //! The shape versions and drafts share: a TOML header between `+++`
 //! lines, then a body.
 
-use std::fmt;
+use alloc::format;
+use alloc::string::String;
+use core::fmt;
 
 const FENCE: &str = "+++";
 

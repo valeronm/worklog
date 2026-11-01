@@ -1,5 +1,9 @@
-use std::collections::{BTreeMap, BTreeSet};
-use std::rc::Rc;
+use alloc::borrow::ToOwned;
+use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::format;
+use alloc::rc::Rc;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
 
 use serde::Serialize;
 
@@ -260,7 +264,7 @@ fn cycle(topics: &Topics, id: &DocumentId) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use alloc::vec;
 
     use toml::Value;
 
@@ -532,7 +536,7 @@ mod tests {
         let why = Record::read(&unread.envelope.kind, &unread.fields).unwrap_err();
         let unread = finding("atlas", &format!("{}: {why}", unread.id.short()));
         let found = checked(&world);
-        assert_eq!(found.problems, std::slice::from_ref(&unread));
+        assert_eq!(found.problems, core::slice::from_ref(&unread));
         assert_eq!(found.fork_count, 1);
 
         let ended = after(

@@ -1,8 +1,10 @@
 //! What is read of machine topics: by a host about to be bound, of the store it was given,
 //! and by any reader, of the summary a topic made for a host carries until one is written.
 
-use std::collections::BTreeSet;
-use std::rc::Rc;
+use alloc::collections::BTreeSet;
+use alloc::rc::Rc;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
 
 use crate::draft::usage;
 use crate::heads::{kind_of, unended_heads};
@@ -112,6 +114,9 @@ mod tests {
     use crate::testing::{
         ENDED, World, fact, head, refused, topic, topic_fields, world, written_at,
     };
+    use alloc::borrow::ToOwned;
+    use alloc::format;
+    use alloc::vec;
     use worklog_domain::id::VersionId;
     use worklog_domain::ports::Store;
     use worklog_domain::testing::{first, lantern};

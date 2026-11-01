@@ -1,6 +1,10 @@
 //! The model and its rules. Nothing here reads a file, a clock or the
 //! environment: what a use case needs from outside arrives through a port.
 
+#![no_std]
+
+extern crate alloc;
+
 pub mod document;
 pub mod draft;
 pub mod fence;

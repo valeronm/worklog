@@ -1,6 +1,10 @@
 //! The directory a claim places its topic in.
 
-use std::fmt;
+use alloc::borrow::ToOwned;
+use alloc::format;
+use alloc::string::String;
+use alloc::vec::Vec;
+use core::fmt;
 
 use serde::Serialize;
 
@@ -119,6 +123,7 @@ impl fmt::Display for Directory {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::string::ToString;
 
     fn directory(text: &str) -> Directory {
         Directory::parse(text).unwrap()

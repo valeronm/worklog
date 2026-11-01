@@ -1,6 +1,10 @@
-use std::cmp::Reverse;
-use std::collections::BTreeMap;
-use std::ops::Range;
+use alloc::borrow::ToOwned;
+use alloc::collections::BTreeMap;
+use alloc::format;
+use alloc::string::String;
+use alloc::vec::Vec;
+use core::cmp::Reverse;
+use core::ops::Range;
 
 use regex::{Regex, RegexBuilder};
 use serde::Serialize;
@@ -98,7 +102,7 @@ pub fn search(deps: &ReadDeps, query: &Query) -> Result<Vec<Hit>, Failure> {
                     }),
                 ),
             };
-            let lines: Vec<Matched> = std::iter::once(row.summary.as_str())
+            let lines: Vec<Matched> = core::iter::once(row.summary.as_str())
                 .chain(body.lines())
                 .filter_map(|line| {
                     let found: Vec<Range<usize>> =
@@ -232,6 +236,8 @@ mod tests {
         ENDED, World, fact, fact_fields, fork, head, head_id, labels, stored, to, topic, world,
         written_at,
     };
+    use alloc::string::ToString;
+    use alloc::vec;
     use worklog_domain::id::DocumentId;
     use worklog_domain::ports::{Store, StoreRead};
     use worklog_domain::version::ReadError;

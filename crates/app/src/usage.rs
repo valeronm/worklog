@@ -1,5 +1,7 @@
-use std::cmp::Reverse;
-use std::collections::{BTreeMap, BTreeSet};
+use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+use core::cmp::Reverse;
 
 use serde::Serialize;
 
@@ -189,7 +191,9 @@ fn machine_named(deps: &ReadDeps, lookup: &Lookup, address: &str) -> Result<Name
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
+    use alloc::borrow::ToOwned;
+    use alloc::format;
+    use core::cell::RefCell;
 
     use super::*;
     use crate::amend::rename;
@@ -398,7 +402,7 @@ mod tests {
 
         assert_eq!(machines(world.machine().as_str()), [world.machine()]);
         assert_eq!(machines(world.machine().short()), [world.machine()]);
-        assert_eq!(machines(unheld.as_str()), std::slice::from_ref(&unheld));
+        assert_eq!(machines(unheld.as_str()), core::slice::from_ref(&unheld));
         assert_eq!(machines(atlas.as_str()), []);
         assert_eq!(refused(of(unheld.short())), "dededede: names no document");
         let other = DocumentId::from_bytes([0xab; 16]);

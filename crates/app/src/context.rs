@@ -1,6 +1,9 @@
-use std::cmp::Reverse;
-use std::collections::{BTreeMap, BTreeSet};
-use std::rc::Rc;
+use alloc::borrow::ToOwned;
+use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::rc::Rc;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+use core::cmp::Reverse;
 
 use serde::Serialize;
 
@@ -123,7 +126,7 @@ impl<'a> Scope<'a> {
             vias.push((id, via));
         }
         let mut counted: BTreeSet<DocumentId> = vias.iter().map(|(id, _)| id.clone()).collect();
-        for (id, from) in topics.reach_from(std::slice::from_ref(&machine)) {
+        for (id, from) in topics.reach_from(core::slice::from_ref(&machine)) {
             if vias.iter().all(|(loaded, _)| *loaded != id) {
                 let from = from.map(label);
                 vias.push((id.clone(), Via::Machine { from }));
@@ -374,6 +377,7 @@ mod tests {
         ENDED, ENDED_FACT, World, claim_fields, fact, followup, fork, head, labels, part_of,
         refused, to, topic, topic_fields, uses, world, world_of,
     };
+    use alloc::format;
     use worklog_domain::draft::Draft;
     use worklog_domain::ports::{Drafts, Store};
     use worklog_domain::testing::{FixedHost, after};
@@ -1222,7 +1226,7 @@ mod tests {
             idea_count: 0,
             open_count: 0,
         };
-        assert_eq!(of(&context, "lantern").parts, std::slice::from_ref(&part));
+        assert_eq!(of(&context, "lantern").parts, core::slice::from_ref(&part));
         assert_eq!(of(&context, "atlas").parts, [part]);
     }
 

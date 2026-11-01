@@ -1,9 +1,11 @@
 //! What a use case needs from outside the domain, as traits the adapters under `wiring`
 //! implement and the tests stub.
 
-use std::collections::BTreeSet;
-use std::fmt;
-use std::rc::Rc;
+use alloc::collections::BTreeSet;
+use alloc::rc::Rc;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+use core::fmt;
 
 use super::document::Document;
 use super::draft::{Draft, Listed};

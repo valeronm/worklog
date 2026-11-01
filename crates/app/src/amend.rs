@@ -1,3 +1,6 @@
+use alloc::borrow::ToOwned;
+use alloc::string::ToString;
+
 use crate::live::open;
 use crate::lookup::Lookup;
 use crate::save::admit;
@@ -94,6 +97,8 @@ mod tests {
         entry, fact, fact_fields, fork, found, head, record, refused, topic, world,
     };
     use crate::{claim, draft};
+    use alloc::format;
+    use alloc::vec::Vec;
     use worklog_domain::draft::Draft;
     use worklog_domain::ports::Drafts;
     use worklog_schema::address::Found;

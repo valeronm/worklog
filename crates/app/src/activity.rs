@@ -1,4 +1,6 @@
-use std::collections::{BTreeMap, BTreeSet};
+use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::format;
+use alloc::vec::Vec;
 
 use chrono::{Datelike as _, Days, NaiveDate, Weekday};
 use serde::Serialize;
@@ -167,6 +169,8 @@ pub fn stats(deps: &ReadDeps, topic: Option<&str>, year: Option<i32>) -> Result<
 mod tests {
     use super::*;
     use crate::testing::{entry, part_of, topic, world};
+    use alloc::borrow::ToOwned;
+    use alloc::string::{String, ToString};
 
     fn date(text: &str) -> Date {
         Date::parse(text).unwrap()

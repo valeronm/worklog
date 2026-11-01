@@ -1,6 +1,8 @@
-use std::borrow::Borrow;
-use std::fmt;
-use std::rc::Rc;
+use alloc::format;
+use alloc::rc::Rc;
+use alloc::vec::Vec;
+use core::borrow::Borrow;
+use core::fmt;
 
 use crate::Failure;
 use crate::heads::{all_ended, kind_of, readable_heads, unended_heads};

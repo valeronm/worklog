@@ -1,6 +1,10 @@
-use std::collections::{BTreeMap, BTreeSet};
-use std::fmt;
-use std::rc::Rc;
+use alloc::borrow::ToOwned;
+use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::format;
+use alloc::rc::Rc;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+use core::fmt;
 
 use toml::Value;
 
@@ -509,7 +513,7 @@ fn held<'v>(heads: &[&'v Header], key: &str) -> Vec<&'v str> {
 
 #[cfg(test)]
 mod tests {
-    use toml::Value;
+    use alloc::vec;
 
     use super::*;
     use crate::draft::{self, New};

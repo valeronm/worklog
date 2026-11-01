@@ -1,8 +1,12 @@
 //! One immutable file: the envelope a write stamps, the fields and links of
 //! the document as they stood, and the body.
 
-use std::collections::{BTreeMap, BTreeSet};
-use std::fmt;
+use alloc::borrow::ToOwned;
+use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::format;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+use core::fmt;
 
 use serde::{Serialize, Serializer};
 use toml::value::Datetime;
@@ -143,7 +147,7 @@ impl Stamp {
 }
 
 impl Ord for Stamp {
-    fn cmp(&self, other: &Stamp) -> std::cmp::Ordering {
+    fn cmp(&self, other: &Stamp) -> core::cmp::Ordering {
         self.instant()
             .cmp(&other.instant())
             .then_with(|| self.to_string().cmp(&other.to_string()))
@@ -151,7 +155,7 @@ impl Ord for Stamp {
 }
 
 impl PartialOrd for Stamp {
-    fn partial_cmp(&self, other: &Stamp) -> Option<std::cmp::Ordering> {
+    fn partial_cmp(&self, other: &Stamp) -> Option<core::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
@@ -206,7 +210,7 @@ pub struct Version {
     text: String,
 }
 
-impl std::ops::Deref for Version {
+impl core::ops::Deref for Version {
     type Target = Header;
 
     fn deref(&self) -> &Header {
@@ -463,6 +467,7 @@ impl Header {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::vec;
 
     #[test]
     fn stamps_order_by_the_moment_whatever_the_offset() {
@@ -479,7 +484,7 @@ mod tests {
         );
         assert_eq!(zulu.instant(), shifted.instant());
         assert_ne!(zulu, shifted);
-        assert_eq!(zulu.cmp(&zulu), std::cmp::Ordering::Equal);
+        assert_eq!(zulu.cmp(&zulu), core::cmp::Ordering::Equal);
     }
 
     const LANTERN: &str = "7f3a91c05be2446d8a10c3f29b7e6d54";

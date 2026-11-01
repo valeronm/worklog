@@ -1,5 +1,9 @@
 //! The five kinds of document and the fields each carries.
 
+use alloc::borrow::ToOwned;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+
 use serde::{Serialize, Serializer};
 
 use super::directory::Directory;
@@ -511,6 +515,8 @@ impl Record {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::format;
+    use alloc::vec;
     use worklog_domain::testing::{ATLAS, LANTERN};
 
     const DESK: &str = "de5c0000000000000000000000000002";

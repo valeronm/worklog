@@ -1,8 +1,9 @@
 //! How topics reach each other: upward through `part_of` and `uses`,
 //! and downward through `part_of` alone.
 
-use std::borrow::Borrow;
-use std::collections::VecDeque;
+use alloc::collections::VecDeque;
+use alloc::vec::Vec;
+use core::borrow::Borrow;
 
 use worklog_domain::id::DocumentId;
 
@@ -75,7 +76,7 @@ pub fn parts(
     topic: &DocumentId,
     parts_of: impl Fn(&DocumentId) -> Vec<DocumentId>,
 ) -> Vec<DocumentId> {
-    let mut reached = met(walk(std::slice::from_ref(topic), parts_of));
+    let mut reached = met(walk(core::slice::from_ref(topic), parts_of));
     reached.retain(|part| part != topic);
     reached
 }
@@ -83,7 +84,8 @@ pub fn parts(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::BTreeMap;
+    use alloc::collections::BTreeMap;
+    use alloc::vec;
 
     fn id(byte: u8) -> DocumentId {
         DocumentId::from_bytes([byte; 16])

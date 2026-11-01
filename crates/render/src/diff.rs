@@ -1,5 +1,9 @@
 //! Two texts as the lines that differ between them, in the hunks of a unified diff.
 
+use alloc::borrow::ToOwned;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+
 use similar::{ChangeTag, TextDiff};
 
 const CONTEXT_LINES: usize = 3;
@@ -79,6 +83,7 @@ pub fn hunks(before: &str, after: &str) -> Vec<Hunk> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::vec;
 
     fn line(mark: Mark, text: &str) -> Line {
         Line {

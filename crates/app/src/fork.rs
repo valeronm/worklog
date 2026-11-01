@@ -41,6 +41,10 @@ mod tests {
     use crate::testing::{
         ENDED, TOPIC, World, fork, found, head, open_row, refused, stored, topic, world,
     };
+    use alloc::borrow::ToOwned;
+    use alloc::format;
+    use alloc::string::{String, ToString};
+    use alloc::vec::Vec;
     use worklog_domain::id::{DocumentId, VersionId};
     use worklog_domain::ports::{Drafts, DraftsRead, Store, StoreRead};
     use worklog_domain::testing::after;

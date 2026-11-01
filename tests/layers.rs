@@ -1,5 +1,4 @@
-//! The domain and the schema touch nothing outside memory, and a convention
-//! nothing checks is one a routine edit falsifies.
+//! A convention nothing checks is one a routine edit falsifies.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -56,15 +55,84 @@ fn sources(path: &Path, found: &mut Vec<(String, String)>) {
     files(path, "rs", found);
 }
 
-fn reaches_nothing_in(name: &str, modules: &[&str]) {
-    let reached = violations(&layer(name), |text| modules_named(text, "std", modules));
-    assert_eq!(reached, [""; 0]);
+// The adapters and the web server reach the host.
+const WITH_STD: [&str; 2] = ["wiring", "web"];
+
+// A crate without `std` names none of `std`'s files, clock, environment or process, and
+// prints nothing.
+fn without_std() -> Vec<String> {
+    let mut names: Vec<String> = fs::read_dir(crates())
+        .expect("the crates")
+        .map(|entry| {
+            entry
+                .expect("a crate")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .filter(|name| !WITH_STD.contains(&name.as_str()))
+        .collect();
+    names.sort_unstable();
+    names
+}
+
+fn std_taken_back(text: &str) -> Vec<String> {
+    let code = uncommented(outside_tests(text));
+    (tokens(&code).windows(3))
+        .filter(|run| *run == ["extern", "crate", "std"])
+        .map(|_| "takes `std` back".to_owned())
+        .collect()
 }
 
 #[test]
-fn the_domain_and_the_schema_do_no_io() {
-    for name in ["domain", "schema"] {
-        reaches_nothing_in(name, &["fs", "env", "process", "io", "net", "time"]);
+fn every_crate_but_the_wiring_and_web_builds_without_std() {
+    let names = without_std();
+    assert!(names.len() > WITH_STD.len());
+    for name in names {
+        let root = layer(&name).join("lib.rs");
+        assert_eq!(violations(&root, std_kept), [""; 0]);
+        assert_eq!(violations(&layer(&name), std_taken_back), [""; 0]);
+    }
+}
+
+fn std_kept(text: &str) -> Vec<String> {
+    let code = uncommented(text);
+    let declared = (tokens(&code).windows(5)).any(|run| run == ["#", "!", "[", "no_std", "]"]);
+    if declared {
+        Vec::new()
+    } else {
+        vec!["does not declare `#![no_std]`".to_owned()]
+    }
+}
+
+#[test]
+fn a_crate_root_that_keeps_std_is_found() {
+    let declared = "//! The model.\n\n#![no_std]\n\nextern crate alloc;\n";
+    assert_eq!(std_kept(declared), [""; 0]);
+    for kept in [
+        "//! The model.\n\nextern crate alloc;\n",
+        "// #![no_std]\nextern crate alloc;\n",
+        "#![cfg_attr(not(test), no_std)]\n",
+    ] {
+        assert_eq!(std_kept(kept), ["does not declare `#![no_std]`"], "{kept}");
+    }
+}
+
+#[test]
+fn a_file_that_takes_std_back_is_found() {
+    for clean in [
+        "#[cfg(test)]\nmod tests {\n    extern crate std;\n}\n",
+        "// extern crate std;\nextern crate alloc;",
+    ] {
+        assert_eq!(std_taken_back(clean), [""; 0], "{clean}");
+    }
+    for broken in [
+        "extern crate std;",
+        "extern crate std as host;",
+        "#[cfg(test)]\nextern crate std;",
+        "#[cfg(test)]\nmod tried {\n    extern crate std;\n}\n",
+    ] {
+        assert_eq!(std_taken_back(broken), ["takes `std` back"], "{broken}");
     }
 }
 
@@ -146,11 +214,6 @@ fn a_result_that_writes_its_own_json_is_found() {
     }
 }
 
-#[test]
-fn the_app_reaches_the_host_only_through_ports() {
-    reaches_nothing_in("app", &["fs", "env", "process", "net", "time"]);
-}
-
 fn cargo(args: &[&str]) -> String {
     let ran = std::process::Command::new(env!("CARGO"))
         .current_dir(root())
@@ -191,15 +254,6 @@ fn dependencies(package: &serde_json::Value) -> &[serde_json::Value] {
 
 // chrono's `now` enables `Utc::now` without the rest of `clock`.
 const CLOCK: [&str; 2] = ["clock", "now"];
-
-// chrono's default features hold the clock.
-fn takes_a_clock(chrono: &serde_json::Value) -> bool {
-    let features = chrono["features"].as_array().expect("its features");
-    chrono["uses_default_features"] != false
-        || features
-            .iter()
-            .any(|feature| feature.as_str().is_some_and(|name| CLOCK.contains(&name)))
-}
 
 fn built_alone() -> Vec<String> {
     let config: toml::Table = fs::read_to_string(root().join(".cargo").join("config.toml"))
@@ -249,21 +303,11 @@ fn the_crates_built_alone_resolve_chrono_without_its_clock() {
 }
 
 #[test]
-fn the_crates_built_alone_are_those_that_take_chrono_without_its_clock() {
-    let mut clockless: Vec<String> = packages()
-        .iter()
-        .filter(|package| {
-            // Cargo's metadata gives a normal dependency no `kind`.
-            dependencies(package).iter().any(|dependency| {
-                dependency["name"] == "chrono"
-                    && dependency["kind"].is_null()
-                    && !takes_a_clock(dependency)
-            })
-        })
-        .map(|package| package_name(package).to_owned())
+fn the_crates_built_alone_are_those_without_std() {
+    let packages: Vec<String> = (without_std().iter())
+        .map(|name| format!("worklog-{name}"))
         .collect();
-    clockless.sort_unstable();
-    assert_eq!(built_alone(), clockless);
+    assert_eq!(built_alone(), packages);
 }
 
 fn tokens(text: &str) -> Vec<&str> {
@@ -1543,8 +1587,7 @@ fn code_that_opens_another_way_past_escaping_is_found() {
 }
 
 fn render_reach(text: &str) -> Vec<String> {
-    let mut found = modules_named(text, "std", &["fs", "env", "process", "net", "time"]);
-    found.extend(modules_named(text, DOMAIN_CRATE, &["ports"]));
+    let mut found = modules_named(text, DOMAIN_CRATE, &["ports"]);
     // A use case takes the ports, so a module that cannot name them runs none.
     for token in tokens(&uncommented(text)) {
         if matches!(token, "Deps" | "ReadDeps") {
@@ -1560,30 +1603,16 @@ fn what_both_renderers_share_reaches_the_domain_and_what_the_use_cases_return() 
 }
 
 #[test]
-fn a_shared_renderer_that_reaches_the_ports_or_the_host_is_found() {
+fn a_shared_renderer_that_reaches_the_ports_is_found() {
     for clean in [
         "use similar::{ChangeTag, TextDiff};\nuse worklog_domain::version::Stamp;",
-        "pub mod diff;\nlet app = 1; let process = web.cli;",
+        "pub mod diff;\nlet app = 1; let ports = web.cli;",
         "// The web's pages link them, over the Deps of a request.",
-        "let name = env!(\"CARGO_PKG_NAME\");",
         "use worklog_app::show::{Diff, Side};\nuse worklog_app::{FollowupRow, counted};",
     ] {
         assert_eq!(render_reach(clean), [""; 0], "{clean}");
     }
     for (broken, found) in [
-        ("use std::fs;", "names `std::fs` as `std::fs`"),
-        (
-            "use std::{fmt, env::var};",
-            "names `std::env` as `std::env::var`",
-        ),
-        (
-            "std::process::exit(1);",
-            "names `std::process` as `std::process::exit`",
-        ),
-        (
-            "use std::net::SocketAddr;",
-            "names `std::net` as `std::net::SocketAddr`",
-        ),
         ("use worklog_app::{Deps, show};", "names `Deps`"),
         ("use worklog_app::{ReadDeps, show};", "names `ReadDeps`"),
         (
@@ -1597,10 +1626,6 @@ fn a_shared_renderer_that_reaches_the_ports_or_the_host_is_found() {
         (
             "use worklog_domain::{id::VersionId, ports::{Clock, Host}};",
             "names `worklog_domain::ports` as `worklog_domain::ports::Clock`",
-        ),
-        (
-            "let now = std::time::SystemTime::now();",
-            "names `std::time` as `std::time::SystemTime::now`",
         ),
     ] {
         let named = render_reach(broken);

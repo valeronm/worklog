@@ -1,6 +1,11 @@
 //! How a document is named on a command line and in a link, and which
 //! document a name means when several hold it.
 
+use alloc::borrow::ToOwned;
+use alloc::format;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+
 use super::error::SchemaError;
 use super::field::{Date, Name, dated};
 use super::kind::{Content, Record};
@@ -122,6 +127,7 @@ pub fn choose(candidates: &[Candidate]) -> Found {
 mod tests {
     use super::*;
     use crate::testing::record;
+    use alloc::vec;
     use worklog_domain::testing::{LANTERN, lantern};
 
     fn name(text: &str) -> Name {

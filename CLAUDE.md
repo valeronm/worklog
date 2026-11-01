@@ -10,8 +10,12 @@ constraints that are not visible from the code or those docs.
 not prove the absence of every forbidden dependency. The compiler holds
 capability and visibility restrictions, and each layer's manifest holds
 what that layer can name: every layer is a crate under `crates/` but
-`cli`, which is the root package. Neither checks that `app` prints
-nothing.
+`cli`, which is the root package. Every crate under `crates/` but `wiring`
+and `web` builds without `std`, so the compiler holds that it names none of
+`std`'s files, clock, environment or process and prints nothing; a test
+module that needs `std` takes it back alone. Their dependencies still use
+`std`: building those crates alone keeps chrono's clock off, and no other
+dependency is checked.
 
 `domain` holds the model and its rules and reaches nothing outside memory:
 no file, clock, environment, process or random source. The boundary is

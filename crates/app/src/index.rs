@@ -1,4 +1,7 @@
-use std::collections::{BTreeMap, BTreeSet};
+use alloc::borrow::ToOwned;
+use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
 
 use crate::Failure;
 use crate::heads::{edges_of, ended_for, label_or_short, readable_heads, row_head_of};
@@ -181,6 +184,7 @@ impl Topics {
 mod tests {
     use super::*;
     use crate::testing::{ENDED, TOPIC, World, head, part_of, topic, uses, written_at};
+    use alloc::format;
     use worklog_domain::ports::Store;
 
     fn reach(topics: &Topics, from: &[DocumentId]) -> Vec<DocumentId> {
@@ -214,7 +218,7 @@ mod tests {
         );
         assert_eq!(topics.covered(&leaf), BTreeSet::from([leaf.clone()]));
         assert_eq!(topics.covered(&unknown), BTreeSet::from([unknown]));
-        assert_eq!(topics.direct_parts(&root), std::slice::from_ref(&middle));
+        assert_eq!(topics.direct_parts(&root), core::slice::from_ref(&middle));
         assert_eq!(topics.direct_parts(&leaf), []);
     }
 
@@ -251,7 +255,7 @@ mod tests {
         );
         let topics = Topics::load(&world.lookup()).unwrap();
         assert_eq!(
-            reach(&topics, std::slice::from_ref(&top)),
+            reach(&topics, core::slice::from_ref(&top)),
             [top.clone(), left.clone(), right.clone(), base.clone()]
         );
         assert_eq!(
@@ -259,7 +263,7 @@ mod tests {
             [left.clone(), top.clone(), base.clone(), right.clone()]
         );
         assert_eq!(
-            topics.reach_from(std::slice::from_ref(&top)),
+            topics.reach_from(core::slice::from_ref(&top)),
             [
                 (top.clone(), None),
                 (left.clone(), Some(top.clone())),
@@ -288,10 +292,10 @@ mod tests {
         );
         let topics = Topics::load(&world.lookup()).unwrap();
         assert_eq!(
-            reach(&topics, std::slice::from_ref(&top)),
-            std::slice::from_ref(&top)
+            reach(&topics, core::slice::from_ref(&top)),
+            core::slice::from_ref(&top)
         );
-        assert_eq!(reach(&topics, std::slice::from_ref(&middle)), []);
+        assert_eq!(reach(&topics, core::slice::from_ref(&middle)), []);
     }
 
     #[test]
@@ -309,7 +313,7 @@ mod tests {
         }
         let topics = Topics::load(&world.lookup()).unwrap();
         assert_eq!(
-            reach(&topics, std::slice::from_ref(&first)),
+            reach(&topics, core::slice::from_ref(&first)),
             [first.clone(), second.clone()]
         );
         assert_eq!(
@@ -347,9 +351,9 @@ mod tests {
         let topics = Topics::load(&world.lookup()).unwrap();
         assert!(!topics.is_ended(&fork_id));
         assert_eq!(topics.part_of(&fork_id), [one.clone(), two.clone()]);
-        assert_eq!(topics.uses(&fork_id), std::slice::from_ref(&three));
+        assert_eq!(topics.uses(&fork_id), core::slice::from_ref(&three));
         assert_eq!(topics.direct_parts(&three), []);
-        assert_eq!(topics.direct_parts(&two), std::slice::from_ref(&fork_id));
+        assert_eq!(topics.direct_parts(&two), core::slice::from_ref(&fork_id));
         assert_eq!(topics.name(&fork_id).unwrap().as_str(), "relay");
 
         written_at(

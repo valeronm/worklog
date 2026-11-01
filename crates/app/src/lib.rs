@@ -1,7 +1,14 @@
 //! One use case per command over the ports the domain declares.
 
-use std::cell::RefCell;
-use std::fmt;
+#![no_std]
+
+extern crate alloc;
+
+use alloc::borrow::ToOwned;
+use alloc::format;
+use alloc::string::{String, ToString};
+use core::cell::RefCell;
+use core::fmt;
 
 use serde::Serialize;
 use toml::Value;

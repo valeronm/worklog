@@ -1,6 +1,9 @@
 //! How a document ends: a reason from its kind's list, the day, what
 //! ended it, and a note.
 
+use alloc::borrow::ToOwned;
+use alloc::string::String;
+
 use super::error::SchemaError;
 use super::field::{Date, Reader, Writer};
 use worklog_domain::id::DocumentId;
@@ -111,6 +114,7 @@ impl Ending {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::vec::Vec;
 
     #[test]
     fn every_known_reason_parses_from_its_own_word() {

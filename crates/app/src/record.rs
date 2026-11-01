@@ -1,5 +1,8 @@
 //! Recording that a command ran, the one write that stores no version.
 
+use alloc::borrow::ToOwned;
+use alloc::string::{String, ToString};
+
 use crate::lookup::Lookup;
 use crate::{Deps, Failure};
 use worklog_domain::release::Built;
@@ -48,6 +51,8 @@ pub fn record(deps: &Deps, run: &Run, outcome: Outcome) -> Result<(), Failure> {
 mod tests {
     use super::*;
     use crate::testing::{NOW, World, topic};
+    use alloc::vec;
+    use alloc::vec::Vec;
     use worklog_domain::id::VersionId;
     use worklog_domain::ports::UsageRead as _;
     use worklog_domain::testing::{lamp_session, version};

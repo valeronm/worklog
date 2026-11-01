@@ -1,6 +1,8 @@
-use std::cmp::Reverse;
-use std::collections::BTreeSet;
-use std::rc::Rc;
+use alloc::collections::BTreeSet;
+use alloc::rc::Rc;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+use core::cmp::Reverse;
 
 use serde::Serialize;
 
@@ -364,6 +366,9 @@ mod tests {
         ENDED, ENDED_FACT, World, claim_fields, entry, fact, fact_fields, followup, head, labels,
         part_of, referred, refused, to, topic, topic_fields, world, written_at,
     };
+    use alloc::borrow::ToOwned;
+    use alloc::format;
+    use alloc::vec;
     use worklog_domain::id::VersionId;
     use worklog_domain::ports::{Store, StoreRead};
     use worklog_domain::testing::first;

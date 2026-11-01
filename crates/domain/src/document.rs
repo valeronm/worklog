@@ -1,7 +1,9 @@
 //! The versions of one document that are held, and what they say about
 //! which of them is current.
 
-use std::collections::BTreeSet;
+use alloc::collections::BTreeSet;
+use alloc::format;
+use alloc::vec::Vec;
 
 use toml::Value;
 
@@ -181,6 +183,7 @@ mod tests {
     use super::*;
     use crate::testing::{after, first, lantern};
     use crate::version::{Envelope, Header, Version};
+    use alloc::vec;
 
     const RELAY: &str = "name = \"relay\"\ntopics = [\"lantern\"]";
 

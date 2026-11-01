@@ -1,4 +1,9 @@
-use std::collections::BTreeSet;
+use alloc::borrow::ToOwned;
+use alloc::collections::BTreeSet;
+use alloc::format;
+use alloc::string::{String, ToString};
+use alloc::vec;
+use alloc::vec::Vec;
 
 use toml::Value;
 
@@ -132,10 +137,10 @@ pub(super) fn place(topic: &str, directory: Option<&Directory>) -> String {
 pub(super) fn filed_on(content: &Content) -> &[DocumentId] {
     match content {
         Content::Topic(_) => &[],
-        Content::Fact(fact) => std::slice::from_ref(&fact.topic),
+        Content::Fact(fact) => core::slice::from_ref(&fact.topic),
         Content::Entry(entry) => &entry.topics,
         Content::Followup(followup) => &followup.topics,
-        Content::Claim(claim) => std::slice::from_ref(&claim.topic),
+        Content::Claim(claim) => core::slice::from_ref(&claim.topic),
     }
 }
 

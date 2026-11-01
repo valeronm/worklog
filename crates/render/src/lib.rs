@@ -1,7 +1,16 @@
 //! What the command line and the pages show the same way.
 
+#![no_std]
+
+extern crate alloc;
+
 pub mod calendar;
 pub mod diff;
+
+use alloc::borrow::ToOwned;
+use alloc::format;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
 
 use worklog_app::check::Check;
 use worklog_app::search::Matched;

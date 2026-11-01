@@ -1,3 +1,5 @@
+use alloc::borrow::ToOwned;
+
 use crate::heads::place;
 use crate::lookup::Lookup;
 use crate::rules::claims_of;
@@ -77,6 +79,8 @@ mod tests {
     use super::*;
     use crate::heads::read_or_skip;
     use crate::testing::{ENDED, TOPIC, World, claim_fields, fork, head, refused, topic};
+    use alloc::format;
+    use alloc::string::{String, ToString};
     use worklog_domain::ports::StoreRead;
     use worklog_domain::version::{Kind, Version};
     use worklog_schema::Content;

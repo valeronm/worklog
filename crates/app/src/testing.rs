@@ -1,5 +1,10 @@
-use std::cell::Cell;
-use std::rc::Rc;
+use alloc::borrow::ToOwned;
+use alloc::format;
+use alloc::rc::Rc;
+use alloc::string::String;
+use alloc::vec;
+use alloc::vec::Vec;
+use core::cell::Cell;
 
 use crate::draft::{DraftRow, OpenDraft};
 use crate::heads::read_or_skip;

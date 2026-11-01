@@ -1,5 +1,8 @@
 //! One line per command run, in the log each machine keeps in the store.
 
+use alloc::string::String;
+use alloc::vec::Vec;
+
 use super::id::DocumentId;
 use super::session::Session;
 use super::version::Stamp;
@@ -79,6 +82,7 @@ impl RunFilter {
 mod tests {
     use super::{DocumentId, RunFilter};
     use crate::testing::{atlas, lantern, ran};
+    use alloc::borrow::ToOwned;
 
     #[test]
     fn the_month_a_line_was_written_in_names_its_file() {

@@ -1,6 +1,9 @@
 //! The step from a document's parent version to its next: what a draft
 //! may not carry, what never changes, and what the tool writes itself.
 
+use alloc::borrow::ToOwned;
+use alloc::format;
+
 use super::ending::Ending;
 use super::error::SchemaError;
 use super::field::Date;
@@ -89,7 +92,7 @@ pub fn next(
     if let Some((old, _)) = was.content.naming()
         && next.content.naming().is_some_and(|(new, _)| new != old)
     {
-        keep_names(&mut next.content, std::slice::from_ref(&was));
+        keep_names(&mut next.content, core::slice::from_ref(&was));
     }
     if let (Content::Fact(was), Content::Fact(is)) = (&was.content, &mut next.content)
         && (body_changed || was.summary != is.summary)
@@ -171,6 +174,8 @@ mod tests {
     use super::*;
     use crate::field::Name;
     use crate::testing::{fields, record};
+    use alloc::string::{String, ToString};
+    use alloc::vec::Vec;
     use worklog_domain::testing::{ATLAS, LANTERN};
 
     fn day(text: &str) -> Date {

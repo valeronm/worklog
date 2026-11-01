@@ -1,4 +1,5 @@
-use std::rc::Rc;
+use alloc::rc::Rc;
+use alloc::string::String;
 
 use crate::draft::is_drafted;
 use crate::lookup::{Lookup, refuse_ended};

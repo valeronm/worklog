@@ -1,7 +1,10 @@
 //! A published release of this binary: the version its tag names, the asset built for a
 //! target, and the checksum an asset must match.
 
-use std::fmt;
+use alloc::borrow::ToOwned;
+use alloc::format;
+use alloc::string::String;
+use core::fmt;
 
 use serde::{Serialize, Serializer};
 use sha2::{Digest, Sha256};
@@ -146,6 +149,7 @@ pub fn verify(bytes: &[u8], checksum: &str) -> Result<(), String> {
 mod tests {
     use super::*;
     use crate::testing::checksum_file;
+    use alloc::string::ToString;
 
     #[test]
     fn a_version_parses_with_or_without_the_tag_prefix_and_orders_by_part() {

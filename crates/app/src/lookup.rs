@@ -1,6 +1,10 @@
-use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet};
-use std::rc::Rc;
+use alloc::borrow::ToOwned;
+use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::format;
+use alloc::rc::Rc;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+use core::cell::RefCell;
 
 use crate::heads::{
     ended_for, is_holder, kind_of, label_of, label_or_short, labeling_topic, readable_heads,
@@ -226,7 +230,7 @@ fn hold(holders: &mut BTreeMap<Held, Vec<Candidate>>, id: &DocumentId, record: &
     let Some((current, former)) = record.content.naming() else {
         return;
     };
-    for name in std::iter::once(current).chain(former) {
+    for name in core::iter::once(current).chain(former) {
         let held = match &record.content {
             Content::Topic(_) => Held::Topic(name.clone()),
             Content::Fact(fact) => Held::Fact(fact.topic.clone(), name.clone()),
@@ -650,6 +654,7 @@ mod tests {
         Counting, ENDED, ENDED_FACT, TOPIC, World, claim_fields, entry, fact, fork, found, head,
         topic, topic_fields,
     };
+    use alloc::vec;
     use worklog_domain::ports::Store;
     use worklog_domain::testing::{after, first, lantern};
     use worklog_domain::version::ReadError;

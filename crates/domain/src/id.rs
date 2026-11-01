@@ -1,6 +1,9 @@
 //! The ids a version file is found by: its document's and its own.
 
-use std::fmt;
+use alloc::borrow::ToOwned;
+use alloc::format;
+use alloc::string::String;
+use core::fmt;
 
 use serde::Serialize;
 
@@ -141,6 +144,7 @@ impl fmt::Display for VersionId {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::string::ToString;
 
     const DOCUMENT: &str = "7f3a91c05be2446d8a10c3f29b7e6d54";
 

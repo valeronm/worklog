@@ -1,4 +1,7 @@
-use std::fmt;
+use alloc::borrow::ToOwned;
+use alloc::format;
+use alloc::string::{String, ToString};
+use core::fmt;
 
 use crate::draft::usage;
 use crate::lookup::Lookup;

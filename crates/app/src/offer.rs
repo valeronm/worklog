@@ -1,8 +1,11 @@
 //! What a shell offers for an argument that takes a document.
 
-use std::cmp::Reverse;
-use std::collections::BTreeSet;
-use std::rc::Rc;
+use alloc::borrow::ToOwned;
+use alloc::collections::BTreeSet;
+use alloc::rc::Rc;
+use alloc::string::String;
+use alloc::vec::Vec;
+use core::cmp::Reverse;
 
 use crate::heads::{ended_for, kind_of, row_head};
 use crate::index::Topics;
@@ -154,6 +157,9 @@ mod tests {
         DONE, ENDED, ENDED_FACT, REMOVED, World, claim_fields, entry, fact, fact_fields, followup,
         fork, found, head, topic, world, written_at,
     };
+    use alloc::format;
+    use alloc::string::ToString;
+    use alloc::vec;
     use worklog_domain::id::VersionId;
     use worklog_domain::ports::Store;
     use worklog_domain::testing::first;
