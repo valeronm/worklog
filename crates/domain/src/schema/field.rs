@@ -8,8 +8,8 @@ use toml::Value;
 use toml::value::Datetime;
 
 use super::error::SchemaError;
-use crate::domain::id::DocumentId;
-use crate::domain::version::Fields;
+use crate::id::DocumentId;
+use crate::version::Fields;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Date(NaiveDate);
@@ -30,7 +30,8 @@ impl Date {
         NaiveDate::from_ymd_opt(date.year.into(), date.month.into(), date.day.into()).map(Date)
     }
 
-    pub(crate) fn value(self) -> Value {
+    #[must_use]
+    pub fn value(self) -> Value {
         Value::Datetime(self.toml().into())
     }
 
@@ -291,7 +292,7 @@ impl Writer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::testing::LANTERN;
+    use crate::testing::LANTERN;
 
     fn reader(toml: &str) -> Reader {
         Reader::new(&toml.parse().unwrap())

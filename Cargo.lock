@@ -1328,12 +1328,23 @@ dependencies = [
  "rustix",
  "serde",
  "serde_json",
- "sha2",
  "similar",
  "tempfile",
  "toml",
  "toml_edit",
  "ureq",
+ "worklog-domain",
+]
+
+[[package]]
+name = "worklog-domain"
+version = "0.5.12"
+dependencies = [
+ "blake3",
+ "chrono",
+ "serde",
+ "sha2",
+ "toml",
 ]
 
 [[package]]

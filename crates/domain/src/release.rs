@@ -145,7 +145,7 @@ pub fn verify(bytes: &[u8], checksum: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::testing::checksum_file;
+    use crate::testing::checksum_file;
 
     #[test]
     fn a_version_parses_with_or_without_the_tag_prefix_and_orders_by_part() {

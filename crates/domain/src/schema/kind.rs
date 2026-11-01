@@ -6,8 +6,8 @@ use super::directory::Directory;
 use super::ending::{Ending, Reason};
 use super::error::SchemaError;
 use super::field::{Date, Name, Reader, Writer};
-use crate::domain::id::DocumentId;
-use crate::domain::version::{Fields, Kind};
+use crate::id::DocumentId;
+use crate::version::{Fields, Kind};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum KindOf {
@@ -511,8 +511,8 @@ impl Record {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::id::DocumentId;
-    use crate::domain::testing::{ATLAS, LANTERN};
+    use crate::id::DocumentId;
+    use crate::testing::{ATLAS, LANTERN};
 
     const DESK: &str = "de5c0000000000000000000000000002";
 

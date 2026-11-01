@@ -36,6 +36,13 @@ jobs:
           cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
           cargo test --workspace --locked
 
+      - name: Domain built alone
+        # A workspace build turns on every feature a member asks for, chrono's
+        # clock and the domain's `testing` among them.
+        run: |
+          cargo clippy -p worklog-domain --locked -- -D warnings
+          cargo check -p worklog-domain --all-targets --locked
+
   macos:
     # Without this job, macOS code is first compiled by the tag build and
     # never run.

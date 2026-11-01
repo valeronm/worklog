@@ -4,8 +4,51 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+fn root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf()
+}
+
 fn src() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("src")
+    root().join("src")
+}
+
+const CRATES: [&str; 1] = ["domain"];
+
+fn layer(name: &str) -> PathBuf {
+    if CRATES.contains(&name) {
+        root().join("crates").join(name).join("src")
+    } else {
+        src().join(name)
+    }
+}
+
+fn layer_root(name: &str) -> PathBuf {
+    layer(name).join(if CRATES.contains(&name) {
+        "lib.rs"
+    } else {
+        "mod.rs"
+    })
+}
+
+fn program_sources() -> Vec<(String, String)> {
+    let mut found = Vec::new();
+    sources(&src(), &mut found);
+    for name in CRATES {
+        sources(&layer(name), &mut found);
+    }
+    found
+}
+
+// A source's path from `src`, a crate's sources taking their layer's name: `domain/lib.rs`.
+fn within(path: &str) -> String {
+    let path = Path::new(path);
+    for name in CRATES {
+        if let Ok(file) = path.strip_prefix(layer(name)) {
+            return Path::new(name).join(file).display().to_string();
+        }
+    }
+    let file = path.strip_prefix(src()).expect("a source of the program");
+    file.display().to_string()
 }
 
 // A chain rustfmt breaks across lines matches only with all whitespace removed.
@@ -30,15 +73,15 @@ fn sources(path: &Path, found: &mut Vec<(String, String)>) {
     files(path, "rs", found);
 }
 
-fn reaches_nothing_in(layer: &str, forbidden: &[&str]) {
+fn reaches_nothing_in(name: &str, forbidden: &[&str]) {
     let mut found = Vec::new();
-    sources(&src().join(layer), &mut found);
+    sources(&layer(name), &mut found);
     assert!(!found.is_empty());
     for (path, text) in found {
         for needle in forbidden {
             assert!(
                 !text.contains(needle),
-                "{path} reaches outside `{layer}` through `{needle}`"
+                "{path} reaches outside `{name}` through `{needle}`"
             );
         }
     }
@@ -63,20 +106,20 @@ fn the_domain_does_no_io() {
 
 #[test]
 fn no_module_outside_the_schema_names_it() {
-    let src = src();
     let mut found = Vec::new();
-    for entry in fs::read_dir(src.join("domain")).expect("readable source directory") {
+    for entry in fs::read_dir(layer("domain")).expect("readable source directory") {
         let path = entry.expect("readable entry").path();
         if path.file_name().is_some_and(|name| name != "schema") {
             sources(&path, &mut found);
         }
     }
     let in_the_domain = found.len();
-    sources(&src.join("wiring").join("fs"), &mut found);
+    sources(&layer("wiring").join("fs"), &mut found);
     assert!(in_the_domain > 0 && found.len() > in_the_domain);
+    let parent = layer_root("domain").display().to_string();
     for (path, text) in found {
         // Declaring the module is the one mention its parent needs.
-        let text = if path.ends_with("domain/mod.rs") {
+        let text = if path == parent {
             text.replacen("pub mod schema;", "", 1)
         } else {
             text
@@ -100,13 +143,10 @@ fn json_named(file: &str, text: &str) -> Vec<String> {
 
 #[test]
 fn a_result_is_given_its_json_form_by_the_command_line_alone() {
-    let mut found = Vec::new();
-    sources(&src(), &mut found);
     let mut broken = Vec::new();
     let mut wording_a_line = Vec::new();
-    for (path, text) in found {
-        let file = Path::new(&path).strip_prefix(src()).expect("a file of it");
-        let file = file.display().to_string();
+    for (path, text) in program_sources() {
+        let file = within(&path);
         for what in json_named(&file, &text) {
             broken.push(format!("{file}: {what}"));
         }
@@ -154,8 +194,7 @@ let line = serde_json::to_string(&line);";
 
 #[test]
 fn a_result_s_json_carries_every_field_under_the_convention() {
-    let mut found = Vec::new();
-    sources(&src(), &mut found);
+    let found = program_sources();
     assert!(!found.is_empty());
     for (path, text) in found {
         let text = squeezed(&text);
@@ -191,7 +230,7 @@ fn json_written_by_hand(text: &str) -> Vec<String> {
 
 #[test]
 fn a_result_s_json_is_written_by_hand_for_these_alone() {
-    let mut by_hand = violations(&src().join("app"), json_written_by_hand);
+    let mut by_hand = violations(&app(), json_written_by_hand);
     by_hand.sort();
     assert_eq!(
         by_hand,
@@ -290,6 +329,10 @@ fn violations(root: &Path, rule: fn(&str) -> Vec<String>) -> Vec<String> {
 fn violations_in(root: &Path, extension: &str, rule: fn(&str) -> Vec<String>) -> Vec<String> {
     let mut found = Vec::new();
     files(root, extension, &mut found);
+    violations_among(found, rule)
+}
+
+fn violations_among(found: Vec<(String, String)>, rule: fn(&str) -> Vec<String>) -> Vec<String> {
     assert!(!found.is_empty());
     let mut broken = Vec::new();
     for (path, text) in found {
@@ -318,7 +361,7 @@ fn a_main_that_decides_anything_is_found() {
 
 #[test]
 fn the_command_line_names_no_store_in_its_tests_either() {
-    assert_eq!(violations(&src().join("cli"), store_port_named), [""; 0]);
+    assert_eq!(violations(&layer("cli"), store_port_named), [""; 0]);
 }
 
 #[test]
@@ -362,7 +405,7 @@ fn process_read(text: &str) -> Vec<String> {
 
 #[test]
 fn the_command_line_reads_its_process_where_it_starts_and_where_a_shell_asks() {
-    let cli = src().join("cli");
+    let cli = layer("cli");
     let mut found = Vec::new();
     sources(&cli, &mut found);
     let mut readers = Vec::new();
@@ -469,7 +512,7 @@ fn wiring_opened(text: &str) -> Vec<String> {
 
 #[test]
 fn the_wiring_keeps_its_adapters_to_itself() {
-    let wiring = src().join("wiring").join("mod.rs");
+    let wiring = layer_root("wiring");
     assert_eq!(violations(&wiring, wiring_opened), [""; 0]);
 }
 
@@ -544,12 +587,10 @@ fn network_reached(text: &str) -> Vec<String> {
 
 #[test]
 fn the_network_is_reached_by_one_module_the_wiring_alone_names() {
-    let reader = src().join("wiring").join("net.rs");
-    let mut found = Vec::new();
-    sources(&src(), &mut found);
+    let reader = layer("wiring").join("net.rs");
     let mut broken = Vec::new();
     let mut readers = 0;
-    for (path, text) in found {
+    for (path, text) in program_sources() {
         if Path::new(&path) == reader {
             readers += usize::from(tokens(&uncommented(&text)).contains(&"ureq"));
             continue;
@@ -629,15 +670,13 @@ fn network_reader_made(text: &str) -> Vec<String> {
 
 #[test]
 fn the_network_reader_is_made_where_the_process_starts_and_by_no_unit_test() {
-    let mut found = Vec::new();
-    sources(&src(), &mut found);
     let mut makers = Vec::new();
-    for (path, text) in found {
-        let file = Path::new(&path).strip_prefix(src()).expect("a file of it");
+    for (path, text) in program_sources() {
+        let file = within(&path);
         let (shipped, tests) = text.split_once(TEST_MODULE).unwrap_or((&text, ""));
         for (part, where_) in [(shipped, ""), (tests, " in its tests")] {
             for what in network_reader_made(part) {
-                makers.push(format!("{}{where_}: {what}", file.display()));
+                makers.push(format!("{file}{where_}: {what}"));
             }
         }
     }
@@ -715,7 +754,7 @@ fn run_past_the_releases(text: &str) -> Vec<String> {
 
 #[test]
 fn every_scenario_runs_the_binary_with_its_releases_given() {
-    let scenarios = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/cli.rs");
+    let scenarios = root().join("tests/cli.rs");
     assert_eq!(violations(&scenarios, run_past_the_releases), [""; 0]);
     let text = fs::read_to_string(&scenarios).expect("the scenarios");
     assert!(text.contains("\nconst RELEASES: &str = \"WORKLOG_RELEASES\";\n"));
@@ -770,7 +809,7 @@ fn outside_tests(text: &str) -> String {
 }
 
 fn app() -> PathBuf {
-    src().join("app")
+    layer("app")
 }
 
 const WRITES: [&str; 11] = [
@@ -841,16 +880,14 @@ fn log_reached(text: &str) -> Vec<String> {
 
 #[test]
 fn one_use_case_appends_to_the_usage_log() {
-    let mut found = Vec::new();
-    sources(&src(), &mut found);
     let mut reached = Vec::new();
-    for (path, text) in found {
+    for (path, text) in program_sources() {
         if module_of(&path) == TEST_SUPPORT {
             continue;
         }
-        let file = Path::new(&path).strip_prefix(src()).expect("a file of it");
+        let file = within(&path);
         for what in log_reached(&text) {
-            reached.push(format!("{}: {what}", file.display()));
+            reached.push(format!("{file}: {what}"));
         }
     }
     reached.sort();
@@ -1047,7 +1084,7 @@ fn wiring_named(text: &str) -> Vec<String> {
 }
 
 fn web() -> PathBuf {
-    src().join("web")
+    layer("web")
 }
 
 #[test]
@@ -1229,7 +1266,7 @@ fn escaping_turned_off(text: &str) -> Vec<String> {
 
 #[test]
 fn no_template_prints_a_value_unescaped() {
-    let templates = Path::new(env!("CARGO_MANIFEST_DIR")).join("templates");
+    let templates = root().join("templates");
     assert_eq!(
         violations_in(&templates, "html", escaping_turned_off),
         [""; 0]
@@ -1313,7 +1350,7 @@ fn unescaped_in_code(text: &str) -> Vec<String> {
 
 #[test]
 fn one_type_alone_is_printed_unescaped() {
-    let found = violations(&src(), unescaped_in_code);
+    let found = violations_among(program_sources(), unescaped_in_code);
     assert_eq!(found.len(), 1, "{found:?}");
     assert!(
         found[0].ends_with("web/markdown.rs: implements `HtmlSafe` for `Markup`"),
@@ -1376,7 +1413,7 @@ fn render_reach(text: &str) -> Vec<String> {
 
 #[test]
 fn what_both_renderers_share_reaches_the_domain_and_what_the_use_cases_return() {
-    assert_eq!(violations(&src().join("render"), render_reach), [""; 0]);
+    assert_eq!(violations(&layer("render"), render_reach), [""; 0]);
 }
 
 #[test]

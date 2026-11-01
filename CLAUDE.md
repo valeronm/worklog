@@ -8,8 +8,9 @@ constraints that are not visible from the code or those docs.
 
 `tests/layers.rs` checks source spellings for the boundaries below; it does
 not prove the absence of every forbidden dependency. The compiler holds
-capability and visibility restrictions. Neither checks that `app` prints
-nothing.
+capability and visibility restrictions, and the manifest of a layer built
+as a crate of its own, under `crates/`, what that layer can name. Neither
+checks that `app` prints nothing.
 
 `domain` holds the model and its rules and reaches nothing outside memory:
 no file, clock, environment, process or random source. The boundary is

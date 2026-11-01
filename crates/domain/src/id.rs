@@ -38,6 +38,7 @@ pub struct DocumentId(String);
 
 impl DocumentId {
     const LEN: usize = 32;
+    const BUCKET: usize = 2;
 
     pub fn parse(text: &str) -> Result<DocumentId, IdError> {
         if is_hex(text, Self::LEN) {
@@ -59,7 +60,13 @@ impl DocumentId {
 
     #[must_use]
     pub fn bucket(&self) -> &str {
-        &self.0[..2]
+        &self.0[..Self::BUCKET]
+    }
+
+    /// Whether `text` could be the `bucket` of some document's id.
+    #[must_use]
+    pub fn is_bucket(text: &str) -> bool {
+        is_hex(text, Self::BUCKET)
     }
 
     #[must_use]
@@ -156,6 +163,15 @@ mod tests {
                 Err(IdError::NotADocumentId(bad.to_owned())),
                 "{bad}"
             );
+        }
+    }
+
+    #[test]
+    fn a_bucket_is_two_lowercase_hex_characters() {
+        let id = DocumentId::parse(DOCUMENT).unwrap();
+        assert!(DocumentId::is_bucket(id.bucket()));
+        for bad in ["", "7", "7f3", "7F", "g0", ".s"] {
+            assert!(!DocumentId::is_bucket(bad), "{bad}");
         }
     }
 

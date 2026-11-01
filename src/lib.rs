@@ -9,18 +9,9 @@
 //! what the read use cases return as pages, and `render` holds what `cli` and `web` show the
 //! same way.
 
-#![allow(
-    clippy::missing_errors_doc,
-    reason = "every error type is an enum whose variants are the documentation"
-)]
-#![allow(
-    clippy::module_name_repetitions,
-    reason = "a `Version` in `version` and a `Document` in `document` read better than invented names"
-)]
-
 pub mod app;
 pub mod cli;
-pub mod domain;
+pub use worklog_domain as domain;
 pub mod render;
 pub mod web;
 pub mod wiring;

@@ -11,6 +11,16 @@ use crate::app::show::Linked;
 use crate::domain::id::DocumentId;
 use crate::domain::schema::links::link_at;
 
+#[cfg(test)]
+thread_local! {
+    static TRIED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+fn tried() -> usize {
+    TRIED.with(std::cell::Cell::get)
+}
+
 // Holds only what this module made: a template writes it without escaping it.
 pub struct Markup(String);
 
@@ -156,6 +166,8 @@ impl<'b> Rendering<'b, '_> {
         let mut rest = pending.as_str();
         let mut from = 0;
         while let Some(at) = rest[from..].find("[[").map(|at| at + from) {
+            #[cfg(test)]
+            TRIED.with(|tried| tried.set(tried.get() + 1));
             match link_at(&rest[at..]) {
                 Ok((target, taken)) => {
                     self.text(&rest[..at], &[]);
@@ -327,7 +339,6 @@ mod tests {
 
     use super::*;
     use crate::app::testing::{to, to_ended};
-    use crate::domain::schema::links::tried;
 
     fn atlas() -> DocumentId {
         DocumentId::from_bytes([0xa7; 16])

@@ -179,8 +179,8 @@ impl Document {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::testing::{after, first, lantern};
-    use crate::domain::version::{Envelope, Header, Version};
+    use crate::testing::{after, first, lantern};
+    use crate::version::{Envelope, Header, Version};
 
     const RELAY: &str = "name = \"relay\"\ntopics = [\"lantern\"]";
 

@@ -1,5 +1,5 @@
 use super::kind::Record;
-use crate::domain::version::{Fields, Kind};
+use crate::version::{Fields, Kind};
 
 pub(super) fn fields(toml: &str) -> Fields {
     toml.parse().expect("fields in TOML")

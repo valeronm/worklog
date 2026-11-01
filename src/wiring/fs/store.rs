@@ -6,7 +6,7 @@ use std::rc::Rc;
 use std::time::SystemTime;
 
 use crate::domain::document::{Document, State, Unreadable};
-use crate::domain::id::{DocumentId, VersionId, is_hex};
+use crate::domain::id::{DocumentId, VersionId};
 use crate::domain::ports::{NotRead, Store, StoreError, StoreRead};
 use crate::domain::version::{Header, Kind, ReadError, Version, read_body};
 
@@ -118,7 +118,9 @@ impl FsStore {
     fn documents(&self, prefix: &str) -> Result<Vec<DocumentId>, StoreError> {
         let mut found = Vec::new();
         for bucket in directories(&self.root)? {
-            if !is_hex(&bucket, 2) || !(bucket.starts_with(prefix) || prefix.starts_with(&bucket)) {
+            if !DocumentId::is_bucket(&bucket)
+                || !(bucket.starts_with(prefix) || prefix.starts_with(&bucket))
+            {
                 continue;
             }
             for name in directories(&self.root.join(&bucket))? {

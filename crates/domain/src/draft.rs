@@ -143,7 +143,7 @@ impl Draft {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::testing::{first, lantern};
+    use crate::testing::{first, lantern};
 
     fn draft() -> Draft {
         Draft::of(&first(

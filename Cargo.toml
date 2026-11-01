@@ -1,24 +1,46 @@
-[package]
-name = "worklog"
+[workspace]
+members = ["crates/domain"]
+# Every member, so a plain `cargo test` covers the crates as well as the root.
+default-members = [".", "crates/domain"]
+
+[workspace.package]
 version = "0.5.12"
 edition = "2024"
 license = "MIT"
-description = "Append-only versioned store of work done, durable facts, follow-ups and topics"
 repository = "https://github.com/valeronm/worklog"
 
-[lints.clippy]
+[workspace.lints.clippy]
 pedantic = { level = "warn", priority = -1 }
+# Every error type is an enum whose variants are the documentation.
+missing_errors_doc = "allow"
 
-[features]
-# In-memory ports for tests of the layers above the domain; never in a binary.
-testing = []
+[workspace.dependencies]
+worklog-domain = { path = "crates/domain" }
+blake3 = "1"
+# Without `clock`, which reads the time.
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+serde = { version = "1", features = ["derive"] }
+# preserve_order so a header keeps the order its keys were written in.
+toml = { version = "1.1.8", features = ["preserve_order"] }
+
+[package]
+name = "worklog"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Append-only versioned store of work done, durable facts, follow-ups and topics"
+repository.workspace = true
+
+[lints]
+workspace = true
 
 [dependencies]
+worklog-domain.workspace = true
 askama = "0.16"
-blake3 = "1"
+blake3.workspace = true
 clap = { version = "4", features = ["derive", "wrap_help"] }
 clap_complete = { version = "4", features = ["unstable-dynamic"] }
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+chrono = { workspace = true, features = ["clock"] }
 getrandom = "0.4"
 httparse = "1"
 # The cache of the store's parsed tree, read whole by every command.
@@ -26,14 +48,11 @@ postcard = { version = "1", default-features = false, features = ["use-std"] }
 pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
 regex = "1"
 rustix = { version = "1.1.4", features = ["system"] }
-serde = { version = "1", features = ["derive"] }
+serde.workspace = true
 # preserve_order so a value read back keeps the order its keys were printed in.
 serde_json = { version = "1", features = ["preserve_order"] }
-# The release checksums are shasum's, not the store's blake3.
-sha2 = "0.10"
 similar = "2"
-# preserve_order so a header keeps the order its keys were written in.
-toml = { version = "1.1.8", features = ["preserve_order"] }
+toml.workspace = true
 # Keeps the comments and layout of an agent's config it adds a writable root to.
 toml_edit = "0.25.17"
 # gzip off: the release assets are binaries, and the redirect it reads
@@ -41,6 +60,7 @@ toml_edit = "0.25.17"
 ureq = { version = "3", default-features = false, features = ["rustls"] }
 
 [dev-dependencies]
+worklog-domain = { workspace = true, features = ["testing"] }
 # A test shrinks its sockets' buffers, so a page of a few hundred kilobytes fills them.
 rustix = { version = "1.1.4", features = ["net"] }
 assert_cmd = "2"

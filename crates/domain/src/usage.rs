@@ -78,7 +78,7 @@ impl RunFilter {
 #[cfg(test)]
 mod tests {
     use super::{DocumentId, RunFilter};
-    use crate::domain::testing::{atlas, lantern, ran};
+    use crate::testing::{atlas, lantern, ran};
 
     #[test]
     fn the_month_a_line_was_written_in_names_its_file() {

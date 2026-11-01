@@ -4,7 +4,7 @@
 use std::borrow::Borrow;
 use std::collections::VecDeque;
 
-use crate::domain::id::DocumentId;
+use crate::id::DocumentId;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Edges {
