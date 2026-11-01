@@ -14,4 +14,4 @@ pub mod cli;
 pub use worklog_domain as domain;
 pub use worklog_render as render;
 pub mod web;
-pub mod wiring;
+pub use worklog_wiring as wiring;

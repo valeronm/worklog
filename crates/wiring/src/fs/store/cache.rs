@@ -8,9 +8,9 @@ use std::time::{Duration, SystemTime};
 
 use serde::{Deserialize, Serialize};
 
-use crate::domain::document::Document;
-use crate::domain::id::{DocumentId, VersionId};
-use crate::domain::version::{Envelope, FORMAT, Fields, Header, Kind, Links, Stamp};
+use worklog_domain::document::Document;
+use worklog_domain::id::{DocumentId, VersionId};
+use worklog_domain::version::{Envelope, FORMAT, Fields, Header, Kind, Links, Stamp};
 
 use super::super::replace;
 
@@ -279,9 +279,9 @@ mod tests {
     use std::fs;
 
     use super::*;
-    use crate::domain::document::Unreadable;
-    use crate::domain::testing::{after, atlas, desk, first, lantern, stamp};
-    use crate::domain::version::{ReadError, Version};
+    use worklog_domain::document::Unreadable;
+    use worklog_domain::testing::{after, atlas, desk, first, lantern, stamp};
+    use worklog_domain::version::{ReadError, Version};
 
     fn scratch() -> (tempfile::TempDir, Cache) {
         let dir = tempfile::tempdir().unwrap();

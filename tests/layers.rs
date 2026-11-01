@@ -12,7 +12,7 @@ fn src() -> PathBuf {
     root().join("src")
 }
 
-const CRATES: [&str; 3] = ["domain", "app", "render"];
+const CRATES: [&str; 4] = ["domain", "app", "render", "wiring"];
 
 fn layer(name: &str) -> PathBuf {
     if CRATES.contains(&name) {
@@ -20,14 +20,6 @@ fn layer(name: &str) -> PathBuf {
     } else {
         src().join(name)
     }
-}
-
-fn layer_root(name: &str) -> PathBuf {
-    layer(name).join(if CRATES.contains(&name) {
-        "lib.rs"
-    } else {
-        "mod.rs"
-    })
 }
 
 fn program_sources() -> Vec<(String, String)> {
@@ -99,7 +91,7 @@ fn no_module_outside_the_schema_names_it() {
     let in_the_domain = found.len();
     sources(&layer("wiring").join("fs"), &mut found);
     assert!(in_the_domain > 0 && found.len() > in_the_domain);
-    let parent = layer_root("domain").display().to_string();
+    let parent = layer("domain").join("lib.rs").display().to_string();
     for (path, text) in found {
         // Declaring the module is the one mention its parent needs.
         let text = if path == parent {
@@ -415,15 +407,9 @@ fn wiring_opened(text: &str) -> Vec<String> {
         if holds(&["pub", "mod", module]) {
             found.push(format!("declares `pub mod {module}`"));
         }
-        if holds(&[")", "mod", module]) {
-            found.push(format!("declares `mod {module}` to others"));
-        }
     }
     if holds(&["pub", "use"]) {
         found.push("has a `pub use`".to_owned());
-    }
-    if holds(&[")", "use"]) {
-        found.push("has a `pub use` to others".to_owned());
     }
     match adapters_fields(&tokens) {
         Some(fields) if fields.iter().any(|field| field_is_pub(field)) => {
@@ -474,12 +460,13 @@ fn field_is_pub(field: &[&str]) -> bool {
         };
         rest = &rest[close + 1..];
     }
-    rest.first() == Some(&"pub")
+    // A restricted `pub(…)` keeps the field inside the wiring crate.
+    rest.first() == Some(&"pub") && rest.get(1) != Some(&"(")
 }
 
 #[test]
 fn the_wiring_keeps_its_adapters_to_itself() {
-    let wiring = layer_root("wiring");
+    let wiring = layer("wiring").join("lib.rs");
     assert_eq!(violations(&wiring, wiring_opened), [""; 0]);
 }
 
@@ -490,18 +477,8 @@ fn a_wiring_that_lets_an_adapter_out_is_found() {
     for (from, to, found) in [
         ("mod fs;", "pub mod fs;", "declares `pub mod fs`"),
         ("mod fs;", "pub  mod\nfs;", "declares `pub mod fs`"),
-        (
-            "mod fs;",
-            "pub(crate) mod fs;",
-            "declares `mod fs` to others",
-        ),
         ("mod fs;", "", "does not declare `mod fs;`"),
         ("mod net;", "pub mod net;", "declares `pub mod net`"),
-        (
-            "mod net;",
-            "pub(super) mod\n    net;",
-            "declares `mod net` to others",
-        ),
         ("mod net;", "", "does not declare `mod net;`"),
         (
             "use net::GitHubReleases;",
@@ -509,11 +486,6 @@ fn a_wiring_that_lets_an_adapter_out_is_found() {
             "has a `pub use`",
         ),
         ("use fs::{", "pub use fs::{", "has a `pub use`"),
-        (
-            "use fs::{",
-            "pub(crate) use fs::{",
-            "has a `pub use` to others",
-        ),
         (
             "    host: FsHost,",
             "    pub host: FsHost,",
@@ -530,11 +502,6 @@ fn a_wiring_that_lets_an_adapter_out_is_found() {
             "`Adapters` has a `pub` field",
         ),
         (
-            "    store: FsStore,",
-            "    pub(crate) store: FsStore,",
-            "`Adapters` has a `pub` field",
-        ),
-        (
             "pub struct Adapters {",
             "pub struct Ports {",
             "has no `Adapters` with fields",
@@ -544,8 +511,15 @@ fn a_wiring_that_lets_an_adapter_out_is_found() {
         let broken = kept.replacen(from, to, 1);
         assert_eq!(wiring_opened(&broken), [found], "{broken}");
     }
-    let published = kept.replacen("    host: FsHost,", "    published: FsHost,", 1);
-    assert_eq!(wiring_opened(&published), [""; 0]);
+    for (from, to) in [
+        ("    host: FsHost,", "    published: FsHost,"),
+        ("    store: FsStore,", "    pub(crate) store: FsStore,"),
+        ("mod fs;", "pub(crate) mod fs;"),
+        ("use fs::{", "pub(crate) use fs::{"),
+    ] {
+        let kept = kept.replacen(from, to, 1);
+        assert_eq!(wiring_opened(&kept), [""; 0], "{kept}");
+    }
 }
 
 fn network_reached(text: &str) -> Vec<String> {
@@ -553,8 +527,8 @@ fn network_reached(text: &str) -> Vec<String> {
     let mut found = Vec::new();
     for path in paths(&text) {
         let named = path.join("::");
-        // From a file under `wiring`, `super` reaches its modules as `wiring` does.
-        if (path.windows(2)).any(|pair| pair == ["wiring", "net"] || pair == ["super", "net"]) {
+        // Inside the wiring, `crate` and `super` both reach its modules.
+        if (path.windows(2)).any(|pair| pair == ["crate", "net"] || pair == ["super", "net"]) {
             found.push(format!("names `wiring::net` as `{named}`"));
         }
         if path.contains(&"ureq") {
@@ -567,9 +541,11 @@ fn network_reached(text: &str) -> Vec<String> {
 #[test]
 fn the_network_is_reached_by_one_module_the_wiring_alone_names() {
     let reader = layer("wiring").join("net.rs");
+    let mut found = Vec::new();
+    sources(&layer("wiring"), &mut found);
     let mut broken = Vec::new();
     let mut readers = 0;
-    for (path, text) in program_sources() {
+    for (path, text) in found {
         if Path::new(&path) == reader {
             readers += usize::from(tokens(&uncommented(&text)).contains(&"ureq"));
             continue;
@@ -588,7 +564,7 @@ fn a_file_that_reaches_the_network_past_the_wiring_is_found() {
         "mod fs;\nmod net;\n\nuse fs::{DirReleases, FsBinary};\nuse net::GitHubReleases;",
         "None => Box::new(GitHubReleases::new()),",
         "use std::net::{SocketAddr, TcpListener};\nlet bound = std::net::TcpStream::connect(to);",
-        "// ureq reads them, in crate::wiring::net.\nlet request = 1; let net = wiring.net;",
+        "// ureq reads them, in crate::net.\nlet request = 1; let net = wiring.net;",
         "let releases = wiring::releases(environment.variable);",
     ] {
         assert_eq!(network_reached(clean), [""; 0], "{clean}");
@@ -606,12 +582,12 @@ fn a_file_that_reaches_the_network_past_the_wiring_is_found() {
             "names `ureq` as `ureq::get`",
         ),
         (
-            "use crate::wiring::net::GitHubReleases;",
-            "names `wiring::net` as `crate::wiring::net::GitHubReleases`",
+            "use crate::net::GitHubReleases;",
+            "names `wiring::net` as `crate::net::GitHubReleases`",
         ),
         (
-            "use crate::wiring::{self, net};",
-            "names `wiring::net` as `crate::wiring::net`",
+            "use crate::{fs, net};",
+            "names `wiring::net` as `crate::net`",
         ),
         (
             "let releases = super::net::GitHubReleases::new();",
@@ -622,8 +598,8 @@ fn a_file_that_reaches_the_network_past_the_wiring_is_found() {
             "names `wiring::net` as `super::super::net::GitHubReleases`",
         ),
         (
-            "let releases = wiring::net::GitHubReleases::new();",
-            "names `wiring::net` as `wiring::net::GitHubReleases::new`",
+            "let releases = crate::net::GitHubReleases::new();",
+            "names `wiring::net` as `crate::net::GitHubReleases::new`",
         ),
     ] {
         assert_eq!(network_reached(broken), [found], "{broken}");
@@ -665,7 +641,7 @@ fn the_network_reader_is_made_where_the_process_starts_and_by_no_unit_test() {
         makers,
         [
             "cli/mod.rs: calls `releases`",
-            "wiring/mod.rs: names `GitHubReleases`",
+            "wiring/lib.rs: names `GitHubReleases`",
             "wiring/net.rs: names `GitHubReleases`",
         ]
     );
@@ -873,7 +849,7 @@ fn one_use_case_appends_to_the_usage_log() {
             format!("app/record.rs: {APPENDS}"),
             format!("app/usage.rs: {READS}"),
             format!("app/usage.rs: {READS}"),
-            format!("wiring/mod.rs: {HANDS_ON}"),
+            format!("wiring/lib.rs: {HANDS_ON}"),
         ]
     );
 }

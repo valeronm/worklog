@@ -2,9 +2,9 @@ use std::cell::RefCell;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
-use crate::domain::id::DocumentId;
-use crate::domain::ports::{Host, HostRead, StoreError};
-use crate::domain::session::Session;
+use worklog_domain::id::DocumentId;
+use worklog_domain::ports::{Host, HostRead, StoreError};
+use worklog_domain::session::Session;
 
 use super::{Config, io_error};
 
@@ -131,7 +131,7 @@ impl Host for FsHost {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::testing::{atlas, lamp_session, lantern};
+    use worklog_domain::testing::{atlas, lamp_session, lantern};
 
     fn scratch() -> (tempfile::TempDir, PathBuf) {
         let dir = tempfile::tempdir().unwrap();

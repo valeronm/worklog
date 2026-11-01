@@ -4,11 +4,11 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::domain::id::DocumentId;
-use crate::domain::ports::{StoreError, Usage, UsageRead};
-use crate::domain::session::Session;
-use crate::domain::usage::{Invocation, RunFilter};
-use crate::domain::version::Stamp;
+use worklog_domain::id::DocumentId;
+use worklog_domain::ports::{StoreError, Usage, UsageRead};
+use worklog_domain::session::Session;
+use worklog_domain::usage::{Invocation, RunFilter};
+use worklog_domain::version::Stamp;
 
 use super::{files, io_error};
 
@@ -140,7 +140,7 @@ impl Usage for FsUsage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::testing::{ATLAS, LANTERN, atlas, lamp_session, lantern, ran};
+    use worklog_domain::testing::{ATLAS, LANTERN, atlas, lamp_session, lantern, ran};
 
     fn run() -> Invocation {
         Invocation {

@@ -6,14 +6,14 @@ use std::path::{Path, PathBuf};
 mod fs;
 mod net;
 
-use crate::app::{Deps, Failure};
-use crate::domain::ports::{Binary, Releases, StoreError};
-use crate::domain::session::Session;
 use fs::{
     Config, DirReleases, FsAgent, FsBinary, FsDrafts, FsHost, FsStore, FsUsage, Paths, RandomIds,
     SystemClock, read_optional, remove_optional,
 };
 use net::GitHubReleases;
+use worklog_app::{Deps, Failure};
+use worklog_domain::ports::{Binary, Releases, StoreError};
+use worklog_domain::session::Session;
 
 /// The last reading of the store a process made through its adapters, which adapters built
 /// `continuing` it start from.
@@ -157,7 +157,7 @@ fn session(variable: &dyn Fn(&str) -> Option<OsString>) -> Option<Session> {
 /// Whether `binary`, the file that is running, is the one `path`, the value of `PATH`, finds
 /// for `name`, the file name it was run by.
 #[must_use]
-pub(crate) fn found_on_path(binary: &Path, name: &OsStr, path: &OsStr) -> bool {
+pub fn found_on_path(binary: &Path, name: &OsStr, path: &OsStr) -> bool {
     // A link on the path is found by the file it leads to.
     let Ok(running) = std::fs::canonicalize(binary) else {
         return false;
@@ -172,7 +172,7 @@ pub(crate) fn found_on_path(binary: &Path, name: &OsStr, path: &OsStr) -> bool {
 pub const SKILL_DIRECTORY: &str = fs::SKILL_DIRECTORY;
 
 /// The directory of a store that holds its usage log and no document.
-pub const USAGE_DIRECTORY: &str = fs::USAGE_DIRECTORY;
+const USAGE_DIRECTORY: &str = fs::USAGE_DIRECTORY;
 
 #[derive(Debug, PartialEq, Eq)]
 struct Known {
@@ -268,7 +268,7 @@ impl Agent {
     }
 
     #[must_use]
-    pub(crate) fn homes(&self) -> Vec<&Path> {
+    pub fn homes(&self) -> Vec<&Path> {
         self.homes.iter().map(PathBuf::as_path).collect()
     }
 
@@ -376,7 +376,7 @@ pub fn agents(variable: &dyn Fn(&str) -> Option<OsString>) -> Result<Vec<Agent>,
 
 /// The user's home directory as given and, where a link leads elsewhere, as it resolves; empty
 /// where `HOME` is not set.
-pub(crate) fn homes(variable: &dyn Fn(&str) -> Option<OsString>) -> Result<Vec<PathBuf>, Failure> {
+pub fn homes(variable: &dyn Fn(&str) -> Option<OsString>) -> Result<Vec<PathBuf>, Failure> {
     let Some(home) = Paths::home(variable)?.map(PathBuf::from) else {
         return Ok(Vec::new());
     };
@@ -390,19 +390,19 @@ pub(crate) fn homes(variable: &dyn Fn(&str) -> Option<OsString>) -> Result<Vec<P
 }
 
 /// This host's drafts directory, wherever `WORKLOG_HOME` or `XDG_STATE_HOME` puts it.
-pub(crate) fn drafts(variable: &dyn Fn(&str) -> Option<OsString>) -> Result<PathBuf, Failure> {
+pub fn drafts(variable: &dyn Fn(&str) -> Option<OsString>) -> Result<PathBuf, Failure> {
     Ok(Paths::resolved(variable)?.drafts)
 }
 
 /// Codex grants no writable root that is missing.
-pub(crate) fn make_drafts(drafts: &Path) -> Result<(), Failure> {
+pub fn make_drafts(drafts: &Path) -> Result<(), Failure> {
     Ok(fs::make_dir(drafts)?)
 }
 
 /// The file fish reads the completions of `command` from, under `XDG_CONFIG_HOME` or the home
 /// directory's `.config` and not under the directory `WORKLOG_HOME` moves the rest to;
 /// `None` where neither is set or fish's completions directory is not there.
-pub(crate) fn fish_completions(
+pub fn fish_completions(
     variable: &dyn Fn(&str) -> Option<OsString>,
     command: &str,
 ) -> Result<Option<PathBuf>, Failure> {
@@ -413,7 +413,7 @@ pub(crate) fn fish_completions(
 }
 
 /// Refuses a `file` whose directory is not there; nothing here creates it.
-pub(crate) fn write_completions(file: &Path, text: &str) -> Result<(), Failure> {
+pub fn write_completions(file: &Path, text: &str) -> Result<(), Failure> {
     let dir = file.parent().unwrap_or(file);
     Ok(fs::replace_under(dir, file, text)?)
 }
@@ -428,7 +428,7 @@ fn release_directory(variable: &dyn Fn(&str) -> Option<OsString>) -> Option<DirR
 /// Where releases of this binary are published: the directory `WORKLOG_RELEASES` holds,
 /// and the network without one.
 #[must_use]
-pub(crate) fn releases(variable: &dyn Fn(&str) -> Option<OsString>) -> Box<dyn Releases> {
+pub fn releases(variable: &dyn Fn(&str) -> Option<OsString>) -> Box<dyn Releases> {
     match release_directory(variable) {
         Some(directory) => Box::new(directory),
         None => Box::new(GitHubReleases::new()),
@@ -438,7 +438,7 @@ pub(crate) fn releases(variable: &dyn Fn(&str) -> Option<OsString>) -> Box<dyn R
 /// The executable at `path`, the one this process runs from, whose own messages start with
 /// `command`.
 #[must_use]
-pub(crate) fn binary(path: &Path, command: &str) -> Box<dyn Binary> {
+pub fn binary(path: &Path, command: &str) -> Box<dyn Binary> {
     Box::new(FsBinary::new(path.to_path_buf(), command))
 }
 
@@ -447,8 +447,8 @@ mod tests {
     use std::path::Path;
 
     use super::*;
-    use crate::domain::testing::{LANTERN, lantern, ran};
-    use crate::domain::usage::RunFilter;
+    use worklog_domain::testing::{LANTERN, lantern, ran};
+    use worklog_domain::usage::RunFilter;
 
     fn scratch() -> (tempfile::TempDir, PathBuf) {
         let kept = tempfile::tempdir().unwrap();
@@ -541,7 +541,7 @@ mod tests {
 
     #[test]
     fn the_usage_log_of_the_adapters_is_under_the_store_they_are_over() {
-        use crate::domain::ports::Usage as _;
+        use worklog_domain::ports::Usage as _;
 
         let (_kept, root) = scratch();
         let store = bound(&root);

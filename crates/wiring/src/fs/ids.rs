@@ -1,5 +1,5 @@
-use crate::domain::id::DocumentId;
-use crate::domain::ports::{Ids, StoreError};
+use worklog_domain::id::DocumentId;
+use worklog_domain::ports::{Ids, StoreError};
 
 pub struct RandomIds;
 

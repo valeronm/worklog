@@ -5,10 +5,10 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::SystemTime;
 
-use crate::domain::document::{Document, State, Unreadable};
-use crate::domain::id::{DocumentId, VersionId};
-use crate::domain::ports::{NotRead, Store, StoreError, StoreRead};
-use crate::domain::version::{Header, Kind, ReadError, Version, read_body};
+use worklog_domain::document::{Document, State, Unreadable};
+use worklog_domain::id::{DocumentId, VersionId};
+use worklog_domain::ports::{NotRead, Store, StoreError, StoreRead};
+use worklog_domain::version::{Header, Kind, ReadError, Version, read_body};
 
 use super::{STAGING_PREFIX, USAGE_DIRECTORY, directories, files, io_error, make_dir, optional};
 
@@ -427,8 +427,8 @@ mod tests {
     use std::time::{Duration, SystemTime};
 
     use super::*;
-    use crate::domain::testing::{LANTERN, after, first, lantern, store_contract};
-    use crate::wiring::fs::RandomIds;
+    use crate::fs::RandomIds;
+    use worklog_domain::testing::{LANTERN, after, first, lantern, store_contract};
 
     const ATLAS: &str = "7fd0000000000000000000000000000c";
     const RELAY: &str = "name = \"relay\"";

@@ -1,7 +1,7 @@
 use std::ffi::OsString;
 use std::path::PathBuf;
 
-use crate::domain::ports::StoreError;
+use worklog_domain::ports::StoreError;
 
 const OVERRIDE: &str = "WORKLOG_HOME";
 const APP: &str = "worklog";

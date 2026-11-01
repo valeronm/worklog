@@ -3,9 +3,9 @@ use std::fs::{self, File};
 use std::io::Read as _;
 use std::path::PathBuf;
 
-use crate::domain::draft::{Draft, Listed};
-use crate::domain::id::DocumentId;
-use crate::domain::ports::{BrokenDraft, Drafts, DraftsRead, StoreError};
+use worklog_domain::draft::{Draft, Listed};
+use worklog_domain::id::DocumentId;
+use worklog_domain::ports::{BrokenDraft, Drafts, DraftsRead, StoreError};
 
 use super::clock::stamp_at;
 use super::{files, io_error, make_dir, optional};
@@ -114,8 +114,8 @@ impl Drafts for FsDrafts {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::testing::{LANTERN, drafts_contract, first, lantern};
-    use crate::wiring::fs::RandomIds;
+    use crate::fs::RandomIds;
+    use worklog_domain::testing::{LANTERN, drafts_contract, first, lantern};
 
     fn scratch() -> (tempfile::TempDir, FsDrafts) {
         let dir = tempfile::tempdir().unwrap();

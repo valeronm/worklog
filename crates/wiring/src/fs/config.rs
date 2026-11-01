@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 
 use toml::{Table, Value};
 
-use crate::domain::id::DocumentId;
-use crate::domain::ports::StoreError;
+use worklog_domain::id::DocumentId;
+use worklog_domain::ports::StoreError;
 
 use super::{optional, replace};
 
@@ -64,8 +64,8 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::testing::{LANTERN, lantern};
-    use crate::wiring::fs::{directories, files};
+    use crate::fs::{directories, files};
+    use worklog_domain::testing::{LANTERN, lantern};
 
     fn scratch() -> (tempfile::TempDir, PathBuf) {
         let dir = tempfile::tempdir().unwrap();

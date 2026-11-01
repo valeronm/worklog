@@ -2,7 +2,7 @@
 
 use ureq::Agent;
 
-use crate::domain::ports::{Releases, StoreError};
+use worklog_domain::ports::{Releases, StoreError};
 
 const REPO: &str = "valeronm/worklog";
 

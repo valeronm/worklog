@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-use crate::domain::ports::{Binary, Refreshed, StoreError};
-use crate::domain::release;
+use worklog_domain::ports::{Binary, Refreshed, StoreError};
+use worklog_domain::release;
 
 use super::{io_error, replace};
 

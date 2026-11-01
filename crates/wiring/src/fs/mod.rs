@@ -29,7 +29,7 @@ use std::io::{ErrorKind, Write as _};
 use std::os::unix::fs::OpenOptionsExt as _;
 use std::path::{Path, PathBuf};
 
-use crate::domain::ports::StoreError;
+use worklog_domain::ports::StoreError;
 
 // The store's ignore file carries the same prefix.
 const STAGING_PREFIX: &str = ".tmp-";

@@ -2,8 +2,8 @@ use std::time::SystemTime;
 
 use chrono::{DateTime, Local, SecondsFormat};
 
-use crate::domain::ports::Clock;
-use crate::domain::version::Stamp;
+use worklog_domain::ports::Clock;
+use worklog_domain::version::Stamp;
 
 pub struct SystemClock;
 

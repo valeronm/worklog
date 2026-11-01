@@ -1,0 +1,29 @@
+[package]
+name = "worklog-wiring"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+worklog-domain.workspace = true
+worklog-app.workspace = true
+blake3.workspace = true
+chrono = { workspace = true, features = ["clock"] }
+getrandom = "0.4"
+# The cache of the store's parsed tree, read whole by every command.
+postcard = { version = "1", default-features = false, features = ["use-std"] }
+rustix = { workspace = true, features = ["system"] }
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+# gzip off: the release assets are binaries, and the redirect it reads
+# for the tag carries no body.
+ureq = { version = "3", default-features = false, features = ["rustls"] }
+
+[dev-dependencies]
+worklog-domain = { workspace = true, features = ["testing"] }
+tempfile.workspace = true

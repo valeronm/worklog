@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::domain::ports::StoreError;
+use worklog_domain::ports::StoreError;
 
 use super::{io_error, optional, replace};
 

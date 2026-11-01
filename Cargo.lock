@@ -1316,13 +1316,9 @@ version = "0.5.12"
 dependencies = [
  "askama",
  "assert_cmd",
- "blake3",
- "chrono",
  "clap",
  "clap_complete",
- "getrandom 0.4.3",
  "httparse",
- "postcard",
  "pulldown-cmark",
  "rustix",
  "serde",
@@ -1331,10 +1327,10 @@ dependencies = [
  "tempfile",
  "toml",
  "toml_edit",
- "ureq",
  "worklog-app",
  "worklog-domain",
  "worklog-render",
+ "worklog-wiring",
 ]
 
 [[package]]
@@ -1365,6 +1361,24 @@ version = "0.5.12"
 dependencies = [
  "chrono",
  "similar",
+ "worklog-app",
+ "worklog-domain",
+]
+
+[[package]]
+name = "worklog-wiring"
+version = "0.5.12"
+dependencies = [
+ "blake3",
+ "chrono",
+ "getrandom 0.4.3",
+ "postcard",
+ "rustix",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml",
+ "ureq",
  "worklog-app",
  "worklog-domain",
 ]

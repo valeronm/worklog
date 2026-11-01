@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::domain::ports::{Releases, StoreError};
+use worklog_domain::ports::{Releases, StoreError};
 
 use super::io_error;
 
