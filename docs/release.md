@@ -9,11 +9,9 @@ latest release from the redirect and install from it.
 1. Bump `version` under `[workspace.package]` in the root `Cargo.toml`
    and commit it on `main` with `Cargo.lock`, since the tag build uses
    `--locked`.
-2. `cargo fmt --all --check`, `cargo clippy --workspace --all-targets
-   --all-features -- -D warnings`, `cargo test --workspace`, `cargo
-   clippy --workspace -- -D warnings` and `cargo alone -- -D warnings`
-   green locally; CI runs the same, and clippy and the tests on macOS
-   too, which no local check covers.
+2. The commands of the `check` job in `.github/workflows/build.yml`
+   green locally; CI runs them too, and clippy and the tests on macOS,
+   which no local check covers.
 3. Push `main` first, then the tag:
 
    ```

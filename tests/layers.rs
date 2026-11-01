@@ -12,42 +12,25 @@ fn src() -> PathBuf {
     root().join("src")
 }
 
-const CRATES: [&str; 5] = ["domain", "app", "render", "wiring", "web"];
-
 fn crates() -> PathBuf {
     root().join("crates")
 }
 
-fn crate_dir(name: &str) -> PathBuf {
-    crates().join(name)
-}
-
 fn layer(name: &str) -> PathBuf {
-    if CRATES.contains(&name) {
-        crate_dir(name).join("src")
-    } else {
-        src().join(name)
-    }
+    crates().join(name).join("src")
 }
 
 fn program_sources() -> Vec<(String, String)> {
     let mut found = Vec::new();
     sources(&src(), &mut found);
-    for name in CRATES {
-        sources(&layer(name), &mut found);
-    }
+    sources(&crates(), &mut found);
     found
 }
 
-// A source's path from `src`, a crate's sources taking their layer's name: `domain/lib.rs`.
-fn within(path: &str) -> String {
-    let path = Path::new(path);
-    for name in CRATES {
-        if let Ok(file) = path.strip_prefix(layer(name)) {
-            return Path::new(name).join(file).display().to_string();
-        }
-    }
-    let file = path.strip_prefix(src()).expect("a source of the program");
+fn from_root(path: &str) -> String {
+    let file = Path::new(path)
+        .strip_prefix(root())
+        .expect("a file of the repository");
     file.display().to_string()
 }
 
@@ -74,12 +57,8 @@ fn sources(path: &Path, found: &mut Vec<(String, String)>) {
 }
 
 fn reaches_nothing_in(name: &str, modules: &[&str]) {
-    let mut found = Vec::new();
-    sources(&layer(name), &mut found);
-    assert!(!found.is_empty());
-    for (path, text) in found {
-        assert_eq!(modules_named(&text, "std", modules), [""; 0], "{path}");
-    }
+    let reached = violations(&layer(name), |text| modules_named(text, "std", modules));
+    assert_eq!(reached, [""; 0]);
 }
 
 #[test]
@@ -112,7 +91,7 @@ fn no_module_outside_the_schema_names_it() {
 }
 
 // A line of the usage log is a format of the store, worded by the file that writes it.
-const WORDS_ITS_OWN_LINE: &str = "wiring/fs/usage.rs";
+const WORDS_ITS_OWN_LINE: &str = "crates/wiring/src/fs/usage.rs";
 
 #[test]
 fn a_result_is_given_its_json_form_by_the_command_line_alone() {
@@ -121,7 +100,7 @@ fn a_result_is_given_its_json_form_by_the_command_line_alone() {
     let naming: Vec<String> = found
         .iter()
         .filter(|(_, text)| text.contains("serde_json"))
-        .map(|(path, _)| within(path))
+        .map(|(path, _)| from_root(path))
         .collect();
     assert_eq!(naming, [WORDS_ITS_OWN_LINE]);
 }
@@ -194,34 +173,61 @@ fn the_app_reaches_the_host_only_through_ports() {
     reaches_nothing_in("app", &["fs", "env", "process", "net", "time"]);
 }
 
-fn manifest(path: &Path) -> toml::Table {
-    fs::read_to_string(path)
-        .expect("a readable manifest")
-        .parse()
-        .expect("a manifest in TOML")
+fn cargo(args: &[&str]) -> String {
+    let ran = std::process::Command::new(env!("CARGO"))
+        .current_dir(root())
+        .args(args)
+        .output()
+        .expect("cargo runs");
+    let stderr = String::from_utf8_lossy(&ran.stderr);
+    assert!(ran.status.success(), "{stderr}");
+    String::from_utf8(ran.stdout).expect("cargo prints text")
 }
 
-// chrono's `now` enables `Utc::now` without the rest of `clock`, and its default features hold both.
-fn takes_a_clock(entry: &toml::Value, shared: &toml::Value) -> bool {
-    let declared = if entry.get("workspace").is_some() {
-        shared
-    } else {
-        entry
+fn packages() -> Vec<serde_json::Value> {
+    let metadata = cargo(&[
+        "metadata",
+        "--offline",
+        "--locked",
+        "--no-deps",
+        "--format-version",
+        "1",
+    ]);
+    let mut metadata: serde_json::Value =
+        serde_json::from_str(&metadata).expect("cargo's metadata in JSON");
+    let serde_json::Value::Array(packages) = metadata["packages"].take() else {
+        panic!("cargo's metadata lists no packages");
     };
-    let defaults = [entry, declared]
-        .iter()
-        .find_map(|table| table.get("default-features")?.as_bool())
-        != Some(false);
-    let clock = [entry, declared]
-        .iter()
-        .filter_map(|table| table.get("features")?.as_array())
-        .flatten()
-        .any(|feature| matches!(feature.as_str(), Some("clock" | "now")));
-    defaults || clock
+    packages
+}
+
+fn package_name(package: &serde_json::Value) -> &str {
+    package["name"].as_str().expect("a package name")
+}
+
+fn dependencies(package: &serde_json::Value) -> &[serde_json::Value] {
+    package["dependencies"]
+        .as_array()
+        .expect("a package's dependencies")
+}
+
+// chrono's `now` enables `Utc::now` without the rest of `clock`.
+const CLOCK: [&str; 2] = ["clock", "now"];
+
+// chrono's default features hold the clock.
+fn takes_a_clock(chrono: &serde_json::Value) -> bool {
+    let features = chrono["features"].as_array().expect("its features");
+    chrono["uses_default_features"] != false
+        || features
+            .iter()
+            .any(|feature| feature.as_str().is_some_and(|name| CLOCK.contains(&name)))
 }
 
 fn built_alone() -> Vec<String> {
-    let config = manifest(&root().join(".cargo").join("config.toml"));
+    let config: toml::Table = fs::read_to_string(root().join(".cargo").join("config.toml"))
+        .expect("a readable config")
+        .parse()
+        .expect("a config in TOML");
     let alias = config["alias"]["alone"]
         .as_str()
         .expect("the `alone` alias");
@@ -237,8 +243,8 @@ fn built_alone() -> Vec<String> {
 
 #[test]
 fn the_crates_built_alone_resolve_chrono_without_its_clock() {
-    let mut tree = std::process::Command::new(env!("CARGO"));
-    tree.current_dir(root()).args([
+    let alone = built_alone();
+    let mut args = vec![
         "tree",
         "--offline",
         "--locked",
@@ -250,18 +256,15 @@ fn the_crates_built_alone_resolve_chrono_without_its_clock() {
         "0",
         "--format",
         "{f}",
-    ]);
-    for name in built_alone() {
-        tree.args(["--package", &name]);
+    ];
+    for name in &alone {
+        args.extend(["--package", name]);
     }
-    let resolved = tree.output().expect("cargo runs");
-    let stderr = String::from_utf8_lossy(&resolved.stderr);
-    assert!(resolved.status.success(), "{stderr}");
-    let features = String::from_utf8(resolved.stdout).expect("cargo prints text");
+    let features = cargo(&args);
     assert!(
         !features
             .split([',', '\n'])
-            .any(|feature| matches!(feature, "clock" | "now")),
+            .any(|feature| CLOCK.contains(&feature)),
         "chrono resolves with [{}]",
         features.trim()
     );
@@ -269,28 +272,20 @@ fn the_crates_built_alone_resolve_chrono_without_its_clock() {
 
 #[test]
 fn the_crates_built_alone_are_those_that_take_chrono_without_its_clock() {
-    let alone = built_alone();
-    let workspace = manifest(&root().join("Cargo.toml"));
-    let shared = &workspace["workspace"]["dependencies"]["chrono"];
-    // The root package takes the clock through the wiring.
-    let mut clockless: Vec<String> = fs::read_dir(crates())
-        .expect("the crates")
-        .map(|entry| manifest(&entry.expect("a crate").path().join("Cargo.toml")))
-        .filter(|member| {
-            let chrono = member
-                .get("dependencies")
-                .and_then(|deps| deps.get("chrono"));
-            chrono.is_some_and(|entry| !takes_a_clock(entry, shared))
+    let mut clockless: Vec<String> = packages()
+        .iter()
+        .filter(|package| {
+            // Cargo's metadata gives a normal dependency no `kind`.
+            dependencies(package).iter().any(|dependency| {
+                dependency["name"] == "chrono"
+                    && dependency["kind"].is_null()
+                    && !takes_a_clock(dependency)
+            })
         })
-        .map(|member| {
-            member["package"]["name"]
-                .as_str()
-                .expect("a package name")
-                .to_owned()
-        })
+        .map(|package| package_name(package).to_owned())
         .collect();
     clockless.sort_unstable();
-    assert_eq!(alone, clockless);
+    assert_eq!(built_alone(), clockless);
 }
 
 fn tokens(text: &str) -> Vec<&str> {
@@ -345,11 +340,11 @@ fn logic_in_main(text: &str) -> Vec<String> {
     }
 }
 
-fn violations(root: &Path, rule: fn(&str) -> Vec<String>) -> Vec<String> {
+fn violations(root: &Path, rule: impl Fn(&str) -> Vec<String>) -> Vec<String> {
     violations_in(root, "rs", rule)
 }
 
-fn violations_in(root: &Path, extension: &str, rule: fn(&str) -> Vec<String>) -> Vec<String> {
+fn violations_in(root: &Path, extension: &str, rule: impl Fn(&str) -> Vec<String>) -> Vec<String> {
     let mut found = Vec::new();
     files(root, extension, &mut found);
     assert!(!found.is_empty());
@@ -380,7 +375,7 @@ fn a_main_that_decides_anything_is_found() {
 
 #[test]
 fn the_command_line_names_no_store_in_its_tests_either() {
-    assert_eq!(violations(&layer("cli"), store_port_named), [""; 0]);
+    assert_eq!(violations(&src().join("cli"), store_port_named), [""; 0]);
 }
 
 #[test]
@@ -428,7 +423,7 @@ fn process_read(text: &str) -> Vec<String> {
 
 #[test]
 fn the_command_line_reads_its_process_where_it_starts_and_where_a_shell_asks() {
-    let cli = layer("cli");
+    let cli = src().join("cli");
     let mut found = Vec::new();
     sources(&cli, &mut found);
     let mut readers = Vec::new();
@@ -730,7 +725,7 @@ fn network_reader_made(text: &str) -> Vec<String> {
 fn the_network_reader_is_made_where_the_process_starts_and_by_no_unit_test() {
     let mut makers = Vec::new();
     for (path, text) in program_sources() {
-        let file = within(&path);
+        let file = from_root(&path);
         let (shipped, tests) = text.split_once(TEST_MODULE).unwrap_or((&text, ""));
         for (part, where_) in [(shipped, ""), (tests, " in its tests")] {
             for what in network_reader_made(part) {
@@ -743,9 +738,9 @@ fn the_network_reader_is_made_where_the_process_starts_and_by_no_unit_test() {
     assert_eq!(
         makers,
         [
-            "cli/mod.rs: calls `releases`",
-            "wiring/lib.rs: names `GitHubReleases`",
-            "wiring/net.rs: names `GitHubReleases`",
+            "crates/wiring/src/lib.rs: names `GitHubReleases`",
+            "crates/wiring/src/net.rs: names `GitHubReleases`",
+            "src/cli/mod.rs: calls `releases`",
         ]
     );
 }
@@ -939,7 +934,7 @@ fn one_use_case_appends_to_the_usage_log() {
         if module_of(&path) == TEST_SUPPORT {
             continue;
         }
-        let file = within(&path);
+        let file = from_root(&path);
         for what in log_reached(&text) {
             reached.push(format!("{file}: {what}"));
         }
@@ -948,11 +943,11 @@ fn one_use_case_appends_to_the_usage_log() {
     assert_eq!(
         reached,
         [
-            format!("app/lib.rs: {HANDS_ON}"),
-            format!("app/record.rs: {APPENDS}"),
-            format!("app/usage.rs: {READS}"),
-            format!("app/usage.rs: {READS}"),
-            format!("wiring/lib.rs: {HANDS_ON}"),
+            format!("crates/app/src/lib.rs: {HANDS_ON}"),
+            format!("crates/app/src/record.rs: {APPENDS}"),
+            format!("crates/app/src/usage.rs: {READS}"),
+            format!("crates/app/src/usage.rs: {READS}"),
+            format!("crates/wiring/src/lib.rs: {HANDS_ON}"),
         ]
     );
 }
@@ -1327,7 +1322,7 @@ fn escaping_turned_off(text: &str) -> Vec<String> {
 
 #[test]
 fn no_template_prints_a_value_unescaped() {
-    let templates = crate_dir("web").join("templates");
+    let templates = crates().join("web").join("templates");
     assert_eq!(
         violations_in(&templates, "html", escaping_turned_off),
         [""; 0]

@@ -12,6 +12,7 @@ use worklog_domain::version::Stamp;
 
 use super::{files, io_error};
 
+/// A directory under a store's root that holds no document.
 pub const USAGE_DIRECTORY: &str = "usage";
 
 const EXTENSION: &str = ".jsonl";

@@ -129,7 +129,7 @@ pub fn wire_over(
 }
 
 fn assembled(drafts: PathBuf, cache: &Path, store: FsStore, host: FsHost) -> Adapters {
-    let usage = FsUsage::new(store.root().join(USAGE_DIRECTORY));
+    let usage = FsUsage::new(store.root().join(fs::USAGE_DIRECTORY));
     Adapters {
         store: store.caching(cache),
         drafts: FsDrafts::new(drafts),
@@ -170,9 +170,6 @@ pub fn found_on_path(binary: &Path, name: &OsStr, path: &OsStr) -> bool {
 }
 
 pub const SKILL_DIRECTORY: &str = fs::SKILL_DIRECTORY;
-
-/// The directory of a store that holds its usage log and no document.
-const USAGE_DIRECTORY: &str = fs::USAGE_DIRECTORY;
 
 #[derive(Debug, PartialEq, Eq)]
 struct Known {

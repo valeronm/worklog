@@ -28,7 +28,7 @@ thread_local! {
 }
 
 #[cfg(test)]
-pub(crate) fn tried() -> usize {
+fn tried() -> usize {
     TRIED.with(std::cell::Cell::get)
 }
 
