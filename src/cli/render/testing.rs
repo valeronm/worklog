@@ -35,7 +35,7 @@ pub(super) fn followup(summary: &str, trigger: Option<TriggerShown>, due: bool) 
 }
 
 #[track_caller]
-pub(in crate::cli) fn assert_fits(text: &str) {
+pub(crate) fn assert_fits(text: &str) {
     assert_case_fits("the text", text);
 }
 

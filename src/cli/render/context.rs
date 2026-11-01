@@ -7,7 +7,7 @@ use worklog_app::{Row, counted};
 
 // An agent keeps only the start of a session hook's output longer than 10,000 characters,
 // and a character never takes fewer than a byte.
-pub(in crate::cli) const CONTEXT_BYTES: usize = 10_000;
+pub(crate) const CONTEXT_BYTES: usize = 10_000;
 
 // The topics and the due lines give way for the line of fork labels, which no `Step` shortens.
 const FORK_LABEL_BYTES: usize = 800;

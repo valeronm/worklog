@@ -178,7 +178,7 @@ impl Render for Vec<MachineUsage> {
 
 /// The usage counts as the refusals each command was answered, under the machine that ran
 /// it; a command refused nothing is left out.
-pub(in crate::cli) struct Refusals<'a>(pub(in crate::cli) &'a [MachineUsage]);
+pub(crate) struct Refusals<'a>(pub(crate) &'a [MachineUsage]);
 
 impl Render for Refusals<'_> {
     fn text(&self) -> String {
