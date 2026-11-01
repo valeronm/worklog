@@ -387,10 +387,14 @@ fn a_command_line_file_that_names_the_store_is_found() {
 
 const TEST_MODULE: &str = "#[cfg(test)]\nmod tests";
 
+fn outside_tests(text: &str) -> &str {
+    text.split(TEST_MODULE).next().unwrap_or_default()
+}
+
 const TERMINAL: [&str; 4] = ["stdin", "Stdin", "is_terminal", "IsTerminal"];
 
 fn process_read(text: &str) -> Vec<String> {
-    let text = text.split(TEST_MODULE).next().unwrap_or_default();
+    let text = outside_tests(text);
     let mut read = modules_named(text, "std", &["env"]);
     let code = uncommented(text);
     let mut terminal: Vec<&str> = tokens(&code)
@@ -476,38 +480,77 @@ fn a_command_line_file_that_reads_the_process_is_found() {
 const ADAPTERS: [&str; 2] = ["fs", "net"];
 
 fn wiring_opened(text: &str) -> Vec<String> {
-    let text = outside_tests(text);
+    let code = uncommented(outside_tests(text));
+    let tokens = tokens(&code);
+    let holds = |run: &[&str]| tokens.windows(run.len()).any(|window| window == run);
     let mut found = Vec::new();
     for module in ADAPTERS {
-        if !text.contains(&format!("mod{module};")) {
+        if !holds(&["mod", module, ";"]) {
             found.push(format!("does not declare `mod {module};`"));
         }
-        if text.contains(&format!("pubmod{module}")) {
+        if holds(&["pub", "mod", module]) {
             found.push(format!("declares `pub mod {module}`"));
         }
-        if text.contains(&format!(")mod{module}")) {
+        if holds(&[")", "mod", module]) {
             found.push(format!("declares `mod {module}` to others"));
         }
     }
-    for (needle, what) in [
-        ("pubuse", "has a `pub use`"),
-        (")use", "has a `pub use` to others"),
-    ] {
-        if text.contains(needle) {
-            found.push(what.to_owned());
-        }
+    if holds(&["pub", "use"]) {
+        found.push("has a `pub use`".to_owned());
     }
-    let fields = text
-        .split_once("structAdapters{")
-        .and_then(|(_, rest)| rest.split_once('}'));
-    match fields {
-        Some((fields, _)) if fields.split(',').any(|field| field.starts_with("pub")) => {
+    if holds(&[")", "use"]) {
+        found.push("has a `pub use` to others".to_owned());
+    }
+    match adapters_fields(&tokens) {
+        Some(fields) if fields.iter().any(|field| field_is_pub(field)) => {
             found.push("`Adapters` has a `pub` field".to_owned());
         }
         Some(_) => {}
         None => found.push("has no `Adapters` with fields".to_owned()),
     }
     found
+}
+
+// A comma inside an attribute or a type's brackets does not end a field.
+fn adapters_fields<'a>(tokens: &[&'a str]) -> Option<Vec<Vec<&'a str>>> {
+    let start = tokens
+        .windows(3)
+        .position(|window| window == ["struct", "Adapters", "{"])?
+        + 3;
+    let mut fields = vec![Vec::new()];
+    let mut depth = 0usize;
+    let mut previous = "";
+    for token in &tokens[start..] {
+        match *token {
+            "}" if depth == 0 => return Some(fields),
+            "," if depth == 0 => {
+                fields.push(Vec::new());
+                continue;
+            }
+            "(" | "[" | "<" | "{" => depth += 1,
+            ")" | "]" | "}" => depth = depth.saturating_sub(1),
+            ">" if previous != "-" => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+        fields.last_mut()?.push(*token);
+        previous = token;
+    }
+    None
+}
+
+fn field_is_pub(field: &[&str]) -> bool {
+    let mut rest = field;
+    while let ["#", "[", ..] = rest {
+        let mut depth = 0;
+        let Some(close) = rest.iter().position(|token| {
+            depth += i32::from(*token == "[") - i32::from(*token == "]");
+            depth == 0 && *token == "]"
+        }) else {
+            return false;
+        };
+        rest = &rest[close + 1..];
+    }
+    rest.first() == Some(&"pub")
 }
 
 #[test]
@@ -553,6 +596,16 @@ fn a_wiring_that_lets_an_adapter_out_is_found() {
             "`Adapters` has a `pub` field",
         ),
         (
+            "    host: FsHost,",
+            "    /// The host.\n    pub host: FsHost,",
+            "`Adapters` has a `pub` field",
+        ),
+        (
+            "    store: FsStore,",
+            "    #[allow(dead_code, reason = \"kept\")]\n    pub store: FsStore,",
+            "`Adapters` has a `pub` field",
+        ),
+        (
             "    store: FsStore,",
             "    pub(crate) store: FsStore,",
             "`Adapters` has a `pub` field",
@@ -567,6 +620,8 @@ fn a_wiring_that_lets_an_adapter_out_is_found() {
         let broken = kept.replacen(from, to, 1);
         assert_eq!(wiring_opened(&broken), [found], "{broken}");
     }
+    let published = kept.replacen("    host: FsHost,", "    published: FsHost,", 1);
+    assert_eq!(wiring_opened(&published), [""; 0]);
 }
 
 fn network_reached(text: &str) -> Vec<String> {
@@ -804,10 +859,6 @@ fn a_helper_that_runs_the_binary_without_its_releases_is_found() {
     }
 }
 
-fn outside_tests(text: &str) -> String {
-    squeezed(text.split(TEST_MODULE).next().unwrap_or_default())
-}
-
 fn app() -> PathBuf {
     layer("app")
 }
@@ -841,7 +892,7 @@ fn a_reference_is_made_by_the_lookup_and_the_topic_index_alone() {
         if module == TEST_SUPPORT {
             continue;
         }
-        for _ in outside_tests(&text).matches("Reference::to(") {
+        for _ in squeezed(outside_tests(&text)).matches("Reference::to(") {
             makers.push(module.clone());
         }
     }
@@ -856,7 +907,7 @@ const HANDS_ON: &str = "hands the log on";
 
 // The log is the field `usage` of whatever holds the ports.
 fn log_reached(text: &str) -> Vec<String> {
-    let text = uncommented(text.split(TEST_MODULE).next().unwrap_or_default());
+    let text = uncommented(outside_tests(text));
     let tokens = tokens(&text);
     let mut found = Vec::new();
     for at in 1..tokens.len() {
@@ -959,11 +1010,15 @@ fn a_read_takes_no_write_dependencies_and_decides_no_ending() {
             continue;
         }
         reads += 1;
-        let text = outside_tests(&text);
-        assert_eq!(write_dependencies_named(&text), [""; 0], "{path}");
-        assert_eq!(ending_read(&text), [""; 0], "{path}");
+        let shipped = outside_tests(&text);
+        assert_eq!(write_dependencies_named(shipped), [""; 0], "{path}");
+        assert_eq!(ending_read(shipped), [""; 0], "{path}");
+        let squeezed = squeezed(shipped);
         for needle in &forbidden {
-            assert!(!text.contains(needle.as_str()), "{path} holds `{needle}`");
+            assert!(
+                !squeezed.contains(needle.as_str()),
+                "{path} holds `{needle}`"
+            );
         }
     }
     assert!(reads > 0);
@@ -975,17 +1030,23 @@ fn a_read_that_names_write_dependencies_is_found() {
         "use crate::app::{ReadDeps, Failure};",
         "fn read(deps: &ReadDeps) {}",
         "// A write takes Deps.\nlet deps = read;",
+        "fn read() {}\n\n#[cfg(test)]\nmod tests {\n    fn wrote(deps: &Deps) {}\n}\n",
     ] {
-        assert_eq!(write_dependencies_named(clean), [""; 0], "{clean}");
+        assert_eq!(
+            write_dependencies_named(outside_tests(clean)),
+            [""; 0],
+            "{clean}"
+        );
     }
     for broken in [
         "fn read(deps: &Deps) { deps.drafts.write(draft)?; }",
         "use crate::app::{Deps as Writing, Failure};",
         "fn read(deps: &crate::app::Deps) { deps.host.bind(machine)?; }",
         "type Writing<'a> = crate::app::Deps<'a>;",
+        "//! A read of the store.\n\nfn read(deps: &Deps) {}",
     ] {
         assert_eq!(
-            write_dependencies_named(broken),
+            write_dependencies_named(outside_tests(broken)),
             ["names `Deps`"],
             "{broken}"
         );
