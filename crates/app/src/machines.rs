@@ -10,7 +10,7 @@ use crate::lookup::{Lookup, held_by_several};
 use crate::{Failure, ReadDeps};
 use worklog_domain::document::Document;
 use worklog_domain::id::DocumentId;
-use worklog_domain::schema::{Content, KindOf, Name};
+use worklog_schema::{Content, KindOf, Name};
 
 /// The summary of a machine topic made before anyone said what the machine is. A topic
 /// stored with it is recognized by this text alone.

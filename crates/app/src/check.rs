@@ -10,8 +10,8 @@ use crate::rules::{Misfit, closing_edge, fits, holds_topic_open, other_holders};
 use crate::{Failure, ReadDeps, counted};
 use worklog_domain::document::Document;
 use worklog_domain::id::DocumentId;
-use worklog_domain::schema::{Content, Directory, KindOf};
 use worklog_domain::version::{Header, ReadError};
+use worklog_schema::{Content, Directory, KindOf};
 
 /// What a store holds that a write would have refused to make, and what a person may want
 /// to look at.
@@ -274,9 +274,9 @@ mod tests {
     use crate::{amend, draft, fork as forks};
     use worklog_domain::id::{DocumentId, VersionId};
     use worklog_domain::ports::{Clock, Drafts, DraftsRead, Ids, Store, StoreRead};
-    use worklog_domain::schema::{KindOf, Record};
     use worklog_domain::testing::{after, first};
     use worklog_domain::version::{Envelope, Kind, Links, ReadError, Version};
+    use worklog_schema::{KindOf, Record};
 
     fn labeled_only(findings: Vec<Finding>) -> Vec<Finding> {
         let labeled = |found: Finding| Finding {

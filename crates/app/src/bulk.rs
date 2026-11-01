@@ -6,9 +6,9 @@ use crate::rules::referencable;
 use crate::save::Admitted;
 use crate::{Deps, Failure, Written, text};
 use worklog_domain::id::DocumentId;
-use worklog_domain::schema::Content;
-use worklog_domain::schema::kind::Role;
 use worklog_domain::version::Fields;
+use worklog_schema::Content;
+use worklog_schema::kind::Role;
 
 /// Writes nothing unless every document passes its checks.
 pub fn move_to(

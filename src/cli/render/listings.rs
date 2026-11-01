@@ -240,8 +240,8 @@ mod tests {
     use worklog_app::testing::{by_no_agent, counted as commands_of};
     use worklog_app::usage::{AgentUsage, CommandCount, Refusal};
     use worklog_domain::id::{DocumentId, VersionId};
-    use worklog_domain::schema::Date;
     use worklog_domain::testing::{atlas, lantern};
+    use worklog_schema::Date;
 
     fn date(text: &str) -> Date {
         Date::parse(text).expect("a date")

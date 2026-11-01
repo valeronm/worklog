@@ -2,7 +2,7 @@ use crate::live::open;
 use crate::lookup::Lookup;
 use crate::save::admit;
 use crate::{Deps, Failure, Written, text};
-use worklog_domain::schema::{Content, Ending, Name, Reason};
+use worklog_schema::{Content, Ending, Name, Reason};
 
 pub fn rename(deps: &Deps, address: &str, name: &str) -> Result<Written, Failure> {
     let lookup = Lookup::new(deps.read().store);
@@ -96,8 +96,8 @@ mod tests {
     use crate::{claim, draft};
     use worklog_domain::draft::Draft;
     use worklog_domain::ports::Drafts;
-    use worklog_domain::schema::address::Found;
-    use worklog_domain::schema::{Content, Name, Reason};
+    use worklog_schema::address::Found;
+    use worklog_schema::{Content, Name, Reason};
 
     #[test]
     fn a_renamed_fact_is_found_by_both_names() {

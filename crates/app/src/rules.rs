@@ -7,9 +7,9 @@ use crate::heads::{all_ended, kind_of, readable_heads, unended_heads};
 use crate::lookup::{Lookup, no_such_document, not_a};
 use worklog_domain::document::{Document, State};
 use worklog_domain::id::DocumentId;
-use worklog_domain::schema::graph::{Edges, closes_cycle};
-use worklog_domain::schema::kind::{Reference, Role};
-use worklog_domain::schema::{Claim, Content, KindOf};
+use worklog_schema::graph::{Edges, closes_cycle};
+use worklog_schema::kind::{Reference, Role};
+use worklog_schema::{Claim, Content, KindOf};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Misfit {

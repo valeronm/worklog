@@ -9,7 +9,7 @@ use crate::lookup::Lookup;
 use crate::rows::{memberships, reading};
 use crate::{Failure, ReadDeps, Reference};
 use worklog_domain::id::DocumentId;
-use worklog_domain::schema::{Content, Date, KindOf};
+use worklog_schema::{Content, Date, KindOf};
 
 const WEEKS_BEFORE: u64 = 52;
 

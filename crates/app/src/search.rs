@@ -12,8 +12,8 @@ use crate::show::{Unread, Why};
 use crate::{Failure, ReadDeps};
 use worklog_domain::document::Document;
 use worklog_domain::id::{DocumentId, VersionId};
-use worklog_domain::schema::KindOf;
 use worklog_domain::version::{Header, Stamp};
+use worklog_schema::KindOf;
 
 const SEARCHED: [KindOf; 4] = [KindOf::Topic, KindOf::Fact, KindOf::Entry, KindOf::Followup];
 

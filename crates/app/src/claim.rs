@@ -4,8 +4,8 @@ use crate::rules::claims_of;
 use crate::save::admit;
 use crate::{Deps, Failure, Written, kind_named, text};
 use worklog_domain::id::DocumentId;
-use worklog_domain::schema::{Directory, Ending, KindOf, Reason, Record};
 use worklog_domain::version::Fields;
+use worklog_schema::{Directory, Ending, KindOf, Reason, Record};
 
 /// The host's home directory is stored as `~` and a directory under it as `~/rest`; a
 /// directory no claim could carry is a usage failure. Refuses a claim this machine already
@@ -78,8 +78,8 @@ mod tests {
     use crate::heads::read_or_skip;
     use crate::testing::{ENDED, TOPIC, World, claim_fields, fork, head, refused, topic};
     use worklog_domain::ports::StoreRead;
-    use worklog_domain::schema::Content;
     use worklog_domain::version::{Kind, Version};
+    use worklog_schema::Content;
 
     fn world() -> World {
         let world = World::new();

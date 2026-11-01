@@ -4,10 +4,10 @@ use super::{Render, change_or_ending, line, row_fields, written};
 use worklog_app::show::{Diff, History, Linker, Shown, ShownVersion, Unread};
 use worklog_app::{Reference, counted};
 use worklog_domain::id::VersionId;
-use worklog_domain::schema::KindOf;
 use worklog_domain::version::Stamp;
 use worklog_render::diff::{UNTERMINATED, hunks};
 use worklog_render::{against, unread_notes};
+use worklog_schema::KindOf;
 
 fn naming(
     version: &VersionId,

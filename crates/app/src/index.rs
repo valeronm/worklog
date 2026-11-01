@@ -5,8 +5,8 @@ use crate::heads::{edges_of, ended_for, label_or_short, readable_heads, row_head
 use crate::lookup::Lookup;
 use crate::rows::Reference;
 use worklog_domain::id::DocumentId;
-use worklog_domain::schema::graph::{self, Edges, Reached};
-use worklog_domain::schema::{Content, KindOf, Name};
+use worklog_schema::graph::{self, Edges, Reached};
+use worklog_schema::{Content, KindOf, Name};
 
 struct Entry {
     name: Name,

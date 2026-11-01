@@ -63,7 +63,6 @@ mod tests {
     };
     use worklog_domain::id::{DocumentId, VersionId};
     use worklog_domain::ports::Usage as _;
-    use worklog_domain::schema::{Date, Directory, KindOf, Name};
     use worklog_domain::session::Session;
     use worklog_domain::testing::{
         ASSET, BINARY, DRAFTED, LANTERN, REFRESHED, atlas, build, first, lamp_session, published,
@@ -71,6 +70,7 @@ mod tests {
     };
     use worklog_domain::usage::Invocation;
     use worklog_domain::version::{Kind, ReadError, Stamp};
+    use worklog_schema::{Date, Directory, KindOf, Name};
 
     fn snake(word: &str) -> bool {
         word.starts_with(|first: char| first.is_ascii_lowercase())

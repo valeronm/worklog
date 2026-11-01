@@ -1,9 +1,9 @@
 use super::CONTEXT_BYTES;
 pub(super) use worklog_app::testing::{NOW as WRITTEN, row};
 use worklog_app::{FollowupRow, Reference, TriggerShown};
-use worklog_domain::schema::Date;
 use worklog_domain::testing::{atlas, lantern};
 use worklog_domain::version::Stamp;
+use worklog_schema::Date;
 
 pub(super) fn stamp(text: &str) -> Stamp {
     Stamp::parse(text).expect("a stamp")

@@ -9,8 +9,8 @@ use worklog_app::{
     Deps, Failure, ReadDeps, activity, amend, bulk, check, claim, context, draft, followup, fork,
     list, save, search, show, usage,
 };
-use worklog_domain::schema::Reason;
 use worklog_domain::usage::Agent;
+use worklog_schema::Reason;
 
 fn directory(environment: &Environment, given: Option<&Path>) -> Result<String, Failure> {
     let path = match given {

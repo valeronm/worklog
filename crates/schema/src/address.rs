@@ -4,7 +4,7 @@
 use super::error::SchemaError;
 use super::field::{Date, Name, dated};
 use super::kind::{Content, Record};
-use crate::id::{DocumentId, is_id_prefix};
+use worklog_domain::id::{DocumentId, is_id_prefix};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Address {
@@ -120,9 +120,9 @@ pub fn choose(candidates: &[Candidate]) -> Found {
 
 #[cfg(test)]
 mod tests {
-    use super::super::testing::record;
     use super::*;
-    use crate::testing::{LANTERN, lantern};
+    use crate::testing::record;
+    use worklog_domain::testing::{LANTERN, lantern};
 
     fn name(text: &str) -> Name {
         Name::parse(text).unwrap()

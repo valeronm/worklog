@@ -31,7 +31,7 @@ use worklog_app::record::Outcome;
 use worklog_app::setup::Refusal;
 use worklog_domain::ports::{Binary, Releases, StoreError};
 use worklog_domain::release::{self, Built};
-use worklog_domain::schema::Directory;
+use worklog_schema::Directory;
 
 const NAME: &str = "worklog";
 

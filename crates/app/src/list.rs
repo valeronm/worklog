@@ -14,8 +14,8 @@ use crate::rules::{claims_of, claims_placing};
 use crate::{Failure, ReadDeps, day_given};
 use worklog_domain::document::Document;
 use worklog_domain::id::{DocumentId, VersionId};
-use worklog_domain::schema::{Claim, Content, Date, KindOf};
 use worklog_domain::version::Stamp;
+use worklog_schema::{Claim, Content, Date, KindOf};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct TopicRow {

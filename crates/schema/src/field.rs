@@ -8,8 +8,8 @@ use toml::Value;
 use toml::value::Datetime;
 
 use super::error::SchemaError;
-use crate::id::DocumentId;
-use crate::version::Fields;
+use worklog_domain::id::DocumentId;
+use worklog_domain::version::Fields;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Date(NaiveDate);
@@ -292,7 +292,7 @@ impl Writer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::LANTERN;
+    use worklog_domain::testing::LANTERN;
 
     fn reader(toml: &str) -> Reader {
         Reader::new(&toml.parse().unwrap())

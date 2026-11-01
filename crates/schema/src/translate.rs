@@ -8,8 +8,8 @@ use toml::Value;
 use super::address::Found;
 use super::error::SchemaError;
 use super::kind::KindOf;
-use crate::id::DocumentId;
-use crate::version::Fields;
+use worklog_domain::id::DocumentId;
+use worklog_domain::version::Fields;
 
 fn each<E>(
     fields: &Fields,
@@ -85,9 +85,9 @@ pub fn to_ids(
 
 #[cfg(test)]
 mod tests {
-    use super::super::testing::fields;
     use super::*;
-    use crate::testing::{ATLAS, LANTERN, atlas, lantern};
+    use crate::testing::fields;
+    use worklog_domain::testing::{ATLAS, LANTERN, atlas, lantern};
 
     fn name_of(id: &DocumentId) -> Option<String> {
         match id.as_str() {

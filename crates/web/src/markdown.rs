@@ -9,7 +9,7 @@ use pulldown_cmark::{CodeBlockKind, CowStr, Event, LinkType, Options, Parser, Ta
 use super::mark::EndedMark;
 use worklog_app::show::Linked;
 use worklog_domain::id::DocumentId;
-use worklog_domain::schema::links::link_at;
+use worklog_schema::links::link_at;
 
 #[cfg(test)]
 thread_local! {
@@ -623,7 +623,7 @@ mod tests {
                     marked.push(target);
                 }
             }
-            assert_eq!(marked, worklog_domain::schema::links::links(body), "{body}");
+            assert_eq!(marked, worklog_schema::links::links(body), "{body}");
         }
     }
 

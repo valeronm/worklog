@@ -16,6 +16,7 @@ missing_errors_doc = "allow"
 
 [workspace.dependencies]
 worklog-domain = { path = "crates/domain" }
+worklog-schema = { path = "crates/schema" }
 worklog-app = { path = "crates/app" }
 worklog-render = { path = "crates/render" }
 worklog-wiring = { path = "crates/wiring" }
@@ -45,6 +46,7 @@ workspace = true
 
 [dependencies]
 worklog-domain.workspace = true
+worklog-schema.workspace = true
 worklog-app.workspace = true
 worklog-render.workspace = true
 worklog-wiring.workspace = true

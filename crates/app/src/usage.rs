@@ -7,9 +7,9 @@ use crate::lookup::Lookup;
 use crate::rows::{Reference, reading};
 use crate::{Failure, ReadDeps, day_given};
 use worklog_domain::id::DocumentId;
-use worklog_domain::schema::address::Found;
 use worklog_domain::session::Session;
 use worklog_domain::usage::{Agent, Invocation, RunFilter};
+use worklog_schema::address::Found;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Refusal {

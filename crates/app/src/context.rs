@@ -16,7 +16,7 @@ use crate::rules::claims_of;
 use crate::{Failure, ReadDeps};
 use worklog_domain::document::Document;
 use worklog_domain::id::DocumentId;
-use worklog_domain::schema::{Claim, Date, Directory, KindOf};
+use worklog_schema::{Claim, Date, Directory, KindOf};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Context {

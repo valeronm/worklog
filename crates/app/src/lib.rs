@@ -10,8 +10,8 @@ use worklog_domain::id::{DocumentId, VersionId};
 use worklog_domain::ports::{
     Clock, Drafts, DraftsRead, Host, HostRead, Ids, Store, StoreError, Usage, UsageRead,
 };
-use worklog_domain::schema::{Date, Directory, KindOf, SchemaError};
 use worklog_domain::version::Kind;
+use worklog_schema::{Date, Directory, KindOf, SchemaError};
 
 pub mod activity;
 pub mod amend;

@@ -16,10 +16,10 @@ use worklog_domain::document::{Document, Unreadable};
 use worklog_domain::draft::Draft;
 use worklog_domain::id::{DocumentId, VersionId, is_id_prefix};
 use worklog_domain::ports::NotRead;
-use worklog_domain::schema::address::Found;
-use worklog_domain::schema::translate::referred;
-use worklog_domain::schema::{Content, KindOf};
 use worklog_domain::version::{Header, ReadError, Stamp, Version};
+use worklog_schema::address::Found;
+use worklog_schema::translate::referred;
+use worklog_schema::{Content, KindOf};
 
 /// A file of the document that does not read as a version.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

@@ -16,9 +16,10 @@ nothing.
 `domain` holds the model and its rules and reaches nothing outside memory:
 no file, clock, environment, process or random source. The boundary is
 what makes every rule testable with the in-memory ports in
-`domain::testing`. Inside it, `schema` alone knows the kinds: the version,
-the document and the directory store do not refer to it, which is what
-lets a store keep documents of a kind this binary does not know.
+`domain::testing`. `schema` alone knows the kinds and, like the domain,
+reaches nothing outside memory. The version, the document and the directory
+store do not refer to it, which is what lets a store keep documents of a kind
+this binary does not know.
 
 `app` is one use case per command over the ports. It prints nothing, uses
 no renderer and reaches the host only through a port, so a use case that

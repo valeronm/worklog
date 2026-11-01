@@ -4,7 +4,7 @@ use crate::lookup::{Lookup, no_head_reads, unreadable};
 use crate::{Deps, DraftRef, Failure};
 use worklog_domain::document::State;
 use worklog_domain::draft::Draft;
-use worklog_domain::schema::{KindOf, step};
+use worklog_schema::{KindOf, step};
 
 /// Opens a draft with every head as a parent, holding the fields and body of the head the
 /// document is shown from. Refuses a document that is not forked, one with a draft open, one
@@ -43,9 +43,9 @@ mod tests {
     };
     use worklog_domain::id::{DocumentId, VersionId};
     use worklog_domain::ports::{Drafts, DraftsRead, Store, StoreRead};
-    use worklog_domain::schema::address::Found;
     use worklog_domain::testing::after;
     use worklog_domain::version::ReadError;
+    use worklog_schema::address::Found;
 
     #[test]
     fn resolving_opens_a_draft_of_every_head_and_saving_it_makes_the_document_live() {

@@ -1,5 +1,5 @@
-//! The domain touches nothing outside memory, and a convention nothing
-//! checks is one a routine edit falsifies.
+//! The domain and the schema touch nothing outside memory, and a convention
+//! nothing checks is one a routine edit falsifies.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -62,31 +62,9 @@ fn reaches_nothing_in(name: &str, modules: &[&str]) {
 }
 
 #[test]
-fn the_domain_does_no_io() {
-    reaches_nothing_in("domain", &["fs", "env", "process", "io", "net", "time"]);
-}
-
-#[test]
-fn no_module_outside_the_schema_names_it() {
-    let mut found = Vec::new();
-    for entry in fs::read_dir(layer("domain")).expect("readable source directory") {
-        let path = entry.expect("readable entry").path();
-        if path.file_name().is_some_and(|name| name != "schema") {
-            sources(&path, &mut found);
-        }
-    }
-    let in_the_domain = found.len();
-    sources(&layer("wiring").join("fs"), &mut found);
-    assert!(in_the_domain > 0 && found.len() > in_the_domain);
-    let parent = layer("domain").join("lib.rs").display().to_string();
-    for (path, text) in found {
-        // Declaring the module is the one mention its parent needs.
-        let text = if path == parent {
-            text.replacen("pub mod schema;", "", 1)
-        } else {
-            text
-        };
-        assert!(!text.contains("schema"), "{path} names the schema");
+fn the_domain_and_the_schema_do_no_io() {
+    for name in ["domain", "schema"] {
+        reaches_nothing_in(name, &["fs", "env", "process", "io", "net", "time"]);
     }
 }
 

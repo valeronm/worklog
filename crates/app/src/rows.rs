@@ -11,9 +11,9 @@ use crate::lookup::Lookup;
 use crate::{Failure, ReadDeps};
 use worklog_domain::document::Document;
 use worklog_domain::id::DocumentId;
-use worklog_domain::schema::kind::Role;
-use worklog_domain::schema::{Content, Date, KindOf, Record, Trigger};
 use worklog_domain::version::Header;
+use worklog_schema::kind::Role;
+use worklog_schema::{Content, Date, KindOf, Record, Trigger};
 
 /// Another document as a result refers to it: the id the referring document stores, the
 /// label the document referred to has now, or its short id, and the reason it ended with.

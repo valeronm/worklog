@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use chrono::{Datelike as _, NaiveDate, Weekday};
 
 use worklog_app::activity::Activity;
-use worklog_domain::schema::Date;
+use worklog_schema::Date;
 
 /// The level of the busiest day in the span.
 pub const TOP_LEVEL: usize = 4;

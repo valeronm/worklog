@@ -5,8 +5,8 @@ use crate::lookup::{Lookup, refuse_ended};
 use crate::save::{Admitted, stepped};
 use crate::{Deps, Failure, Written};
 use worklog_domain::id::DocumentId;
-use worklog_domain::schema::{Record, step};
 use worklog_domain::version::{Fields, Version};
+use worklog_schema::{Record, step};
 
 pub(super) struct Open {
     pub id: DocumentId,

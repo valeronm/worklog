@@ -1326,6 +1326,7 @@ dependencies = [
  "worklog-app",
  "worklog-domain",
  "worklog-render",
+ "worklog-schema",
  "worklog-web",
  "worklog-wiring",
 ]
@@ -1339,6 +1340,7 @@ dependencies = [
  "serde",
  "toml",
  "worklog-domain",
+ "worklog-schema",
 ]
 
 [[package]]
@@ -1346,7 +1348,6 @@ name = "worklog-domain"
 version = "0.5.12"
 dependencies = [
  "blake3",
- "chrono",
  "serde",
  "sha2",
  "toml",
@@ -1359,6 +1360,17 @@ dependencies = [
  "chrono",
  "similar",
  "worklog-app",
+ "worklog-domain",
+ "worklog-schema",
+]
+
+[[package]]
+name = "worklog-schema"
+version = "0.5.12"
+dependencies = [
+ "chrono",
+ "serde",
+ "toml",
  "worklog-domain",
 ]
 
@@ -1373,6 +1385,7 @@ dependencies = [
  "worklog-app",
  "worklog-domain",
  "worklog-render",
+ "worklog-schema",
 ]
 
 [[package]]

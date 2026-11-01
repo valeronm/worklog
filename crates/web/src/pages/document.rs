@@ -10,8 +10,8 @@ use worklog_app::list::{ClaimRow, EntryRow, FactRow, TopicClaims, TopicRow};
 use worklog_app::show::Linker;
 use worklog_app::show::{FieldItem, ShownDocument, ShownField, ShownVersion};
 use worklog_app::{FollowupRow, Reference};
-use worklog_domain::schema::KindOf;
 use worklog_render::{ended, unread_notes};
+use worklog_schema::KindOf;
 
 pub struct Field {
     pub name: String,

@@ -7,9 +7,9 @@ use crate::save::stepped;
 use crate::{Deps, Failure, kind_named, text};
 use worklog_domain::id::DocumentId;
 use worklog_domain::ports::{Host, HostRead, StoreError};
-use worklog_domain::schema::{KindOf, Name};
 use worklog_domain::session::Session;
 use worklog_domain::version::Fields;
+use worklog_schema::{KindOf, Name};
 
 const INIT: &str = "init";
 const JOIN: &str = "join";
@@ -184,10 +184,10 @@ mod tests {
         ENDED, World, fork, found, head, record, refused, topic, topic_fields, world,
     };
     use worklog_domain::ports::{Store, StoreRead};
-    use worklog_domain::schema::SchemaError;
-    use worklog_domain::schema::address::Found;
     use worklog_domain::testing::{first, first_minted, lantern};
     use worklog_domain::version::Kind;
+    use worklog_schema::SchemaError;
+    use worklog_schema::address::Found;
 
     fn bare() -> World {
         let mut world = World::new();

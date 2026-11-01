@@ -12,12 +12,12 @@ use worklog_domain::document::Document;
 use worklog_domain::document::State;
 use worklog_domain::id::{DocumentId, VersionId};
 use worklog_domain::ports::{Clock, Ids, NotRead, Store, StoreError, StoreRead};
-use worklog_domain::schema::address::Found;
-use worklog_domain::schema::{KindOf, Record};
 use worklog_domain::testing::{
     FixedClock, FixedHost, MemoryDrafts, MemoryStore, MemoryUsage, SequenceIds, after, first_minted,
 };
 use worklog_domain::version::{Envelope, Fields, Kind, Links, Stamp, Version};
+use worklog_schema::address::Found;
+use worklog_schema::{KindOf, Record};
 
 pub const NOW: &str = "2026-10-09T18:22:41.118204+01:00";
 

@@ -13,7 +13,7 @@ use askama::Template;
 
 use worklog_app::show::{self, Shown, ShownDocument};
 use worklog_app::{Failure, ReadDeps, activity, check, list, search};
-use worklog_domain::schema::KindOf;
+use worklog_schema::KindOf;
 
 pub use pages::DOC;
 use pages::{

@@ -9,7 +9,7 @@ use super::render::Output;
 use super::{Environment, NAME, hook};
 use worklog_app::offer::{self, Offered, Wanted};
 use worklog_app::{Failure, ReadDeps, draft};
-use worklog_domain::schema::{KindOf, Reason};
+use worklog_schema::{KindOf, Reason};
 
 type Listed = Result<Vec<CompletionCandidate>, Failure>;
 

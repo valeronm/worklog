@@ -6,7 +6,7 @@ use super::error::SchemaError;
 use super::field::Date;
 use super::kind::{Content, KindOf, Record};
 use super::links::links;
-use crate::version::{Fields, Kind};
+use worklog_domain::version::{Fields, Kind};
 
 /// The fields the tool writes that every version of a document carries.
 const CARRIED: [&str; 2] = ["created", "former_names"];
@@ -168,10 +168,10 @@ pub fn joined(
 
 #[cfg(test)]
 mod tests {
-    use super::super::field::Name;
-    use super::super::testing::{fields, record};
     use super::*;
-    use crate::testing::{ATLAS, LANTERN};
+    use crate::field::Name;
+    use crate::testing::{fields, record};
+    use worklog_domain::testing::{ATLAS, LANTERN};
 
     fn day(text: &str) -> Date {
         Date::parse(text).unwrap()

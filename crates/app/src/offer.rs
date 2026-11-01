@@ -12,7 +12,7 @@ use crate::rows::{Shown, row_at, urgency};
 use crate::{Failure, ReadDeps};
 use worklog_domain::document::Document;
 use worklog_domain::id::DocumentId;
-use worklog_domain::schema::{Content, Date, KindOf};
+use worklog_schema::{Content, Date, KindOf};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Wanted {
@@ -156,9 +156,9 @@ mod tests {
     };
     use worklog_domain::id::VersionId;
     use worklog_domain::ports::Store;
-    use worklog_domain::schema::address::Found;
     use worklog_domain::testing::first;
     use worklog_domain::version::ReadError;
+    use worklog_schema::address::Found;
 
     const NAMED: [KindOf; 4] = [KindOf::Topic, KindOf::Fact, KindOf::Entry, KindOf::Followup];
 

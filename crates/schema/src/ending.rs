@@ -3,7 +3,7 @@
 
 use super::error::SchemaError;
 use super::field::{Date, Reader, Writer};
-use crate::id::DocumentId;
+use worklog_domain::id::DocumentId;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Reason {

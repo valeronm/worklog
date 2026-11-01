@@ -9,8 +9,8 @@ use crate::save::stepped;
 use crate::{Deps, DraftRef, Failure, Written, day_given, kind_named, text};
 use worklog_domain::draft::Draft;
 use worklog_domain::id::DocumentId;
-use worklog_domain::schema::{Content, KindOf};
 use worklog_domain::version::Fields;
+use worklog_schema::{Content, KindOf};
 
 pub enum TriggerArg<'a> {
     LookAgain { on: &'a str, why: &'a str },
@@ -162,9 +162,9 @@ mod tests {
     use crate::testing::{World, head, refused, world_with_atlas};
     use worklog_domain::id::DocumentId;
     use worklog_domain::ports::{Drafts, DraftsRead};
-    use worklog_domain::schema::{Content, Trigger};
+    use worklog_schema::{Content, Trigger};
 
-    fn followup(world: &World, id: &DocumentId) -> worklog_domain::schema::Followup {
+    fn followup(world: &World, id: &DocumentId) -> worklog_schema::Followup {
         let head = head(world, id);
         match read_or_skip(&head).unwrap().content {
             Content::Followup(followup) => followup,

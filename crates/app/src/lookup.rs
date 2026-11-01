@@ -11,9 +11,9 @@ use crate::{Failure, kind_named};
 use worklog_domain::document::{Document, State};
 use worklog_domain::id::{DocumentId, VersionId};
 use worklog_domain::ports::{NotRead, StoreRead};
-use worklog_domain::schema::address::{Address, Candidate, Found, Holds, choose, displayed, holds};
-use worklog_domain::schema::{Content, Date, KindOf, Name, Record};
 use worklog_domain::version::{Header, Kind, Version};
+use worklog_schema::address::{Address, Candidate, Found, Holds, choose, displayed, holds};
+use worklog_schema::{Content, Date, KindOf, Name, Record};
 
 pub(super) fn with_article(word: &str) -> String {
     let article = if word.starts_with(['a', 'e', 'i', 'o', 'u']) {

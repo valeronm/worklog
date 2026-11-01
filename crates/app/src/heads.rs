@@ -4,10 +4,10 @@ use toml::Value;
 
 use worklog_domain::document::{Document, State};
 use worklog_domain::id::DocumentId;
-use worklog_domain::schema::address::displayed;
-use worklog_domain::schema::graph::Edges;
-use worklog_domain::schema::{Content, Directory, KindOf, Name, Record, SchemaError};
 use worklog_domain::version::{Fields, Header};
+use worklog_schema::address::displayed;
+use worklog_schema::graph::Edges;
+use worklog_schema::{Content, Directory, KindOf, Name, Record, SchemaError};
 
 pub(super) fn read_or_skip(head: &Header) -> Option<Record> {
     Record::read(&head.envelope.kind, &head.fields).ok()

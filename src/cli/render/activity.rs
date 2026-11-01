@@ -49,7 +49,7 @@ impl Render for Activity {
 mod tests {
     use super::*;
     use worklog_app::activity::Day;
-    use worklog_domain::schema::Date;
+    use worklog_schema::Date;
 
     fn date(text: &str) -> Date {
         Date::parse(text).unwrap()

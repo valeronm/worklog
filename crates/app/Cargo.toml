@@ -14,6 +14,7 @@ testing = ["worklog-domain/testing"]
 
 [dependencies]
 worklog-domain.workspace = true
+worklog-schema.workspace = true
 chrono.workspace = true
 regex = "1"
 serde.workspace = true

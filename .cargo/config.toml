@@ -1,4 +1,4 @@
 [alias]
 # The crates that take chrono without its clock. A workspace build turns on every
 # feature a member asks for.
-alone = "clippy --all-targets -p worklog-domain -p worklog-app -p worklog-render"
+alone = "clippy --all-targets -p worklog-schema -p worklog-app -p worklog-render"

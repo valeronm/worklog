@@ -9,10 +9,10 @@ use crate::{Deps, DraftRef, Failed, Failure, ReadDeps, kind_named, text};
 use worklog_domain::draft::{Draft, Listed};
 use worklog_domain::id::{DocumentId, is_id_prefix};
 use worklog_domain::ports::BrokenDraft;
-use worklog_domain::schema::address::{Address, Found};
-use worklog_domain::schema::{Content, Date, Entry, Fact, KindOf, Name, Topic, step, translate};
 use worklog_domain::session::Session;
 use worklog_domain::version::{Fields, Kind, Stamp, Version};
+use worklog_schema::address::{Address, Found};
+use worklog_schema::{Content, Date, Entry, Fact, KindOf, Name, Topic, step, translate};
 
 pub enum New<'a> {
     Topic {

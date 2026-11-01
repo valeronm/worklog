@@ -14,11 +14,11 @@ use crate::{Deps, Failed, Failure, Written, counted, kind_named};
 use worklog_domain::document::{Document, State};
 use worklog_domain::draft::Draft;
 use worklog_domain::id::{DocumentId, VersionId};
-use worklog_domain::schema::address::{Address, Found};
-use worklog_domain::schema::graph::Edges;
-use worklog_domain::schema::kind::Reference;
-use worklog_domain::schema::{Content, KindOf, Record, links, step, translate};
 use worklog_domain::version::{Envelope, Fields, Header, Kind, Links, Version};
+use worklog_schema::address::{Address, Found};
+use worklog_schema::graph::Edges;
+use worklog_schema::kind::Reference;
+use worklog_schema::{Content, KindOf, Record, links, step, translate};
 
 const NEW: &str = "new";
 const SAVE: &str = "save";
@@ -519,10 +519,10 @@ mod tests {
     };
     use worklog_domain::draft::Draft;
     use worklog_domain::ports::{Drafts, DraftsRead, Ids, Store, StoreRead};
-    use worklog_domain::schema::address::Found;
-    use worklog_domain::schema::{Date, Ending, Reason, step};
     use worklog_domain::testing::{after, first};
     use worklog_domain::version::ReadError;
+    use worklog_schema::address::Found;
+    use worklog_schema::{Date, Ending, Reason, step};
 
     fn end(world: &World, id: &DocumentId, name: &str) {
         world.amend(id, &format!("name = \"{name}\"\n{TOPIC}{ENDED}"), "\n");
