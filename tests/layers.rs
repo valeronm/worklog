@@ -1163,20 +1163,129 @@ fn modules_named(text: &str, parent: &str, modules: &[&str]) -> Vec<String> {
     named
 }
 
-// An alias or a new name for a crate leaves a check matching its paths nothing to match.
-fn names_paths_under(dir: &Path, parent: &str) -> bool {
+fn crate_named_another_way(text: &str, crates: &[String]) -> Vec<String> {
+    let code = uncommented(text);
+    let tokens = tokens(&code);
     let mut found = Vec::new();
-    sources(dir, &mut found);
-    found.iter().any(|(_, text)| {
-        let text = uncommented(text);
-        paths(&text)
-            .iter()
-            .any(|path| path.len() > 1 && path[0] == parent)
-    })
+    for (at, token) in tokens.iter().enumerate() {
+        if !crates.iter().any(|name| name == token) {
+            continue;
+        }
+        let how = match &tokens[at + 1..] {
+            ["as", ..] => Some("renames"),
+            ["::", "*", ..] => Some("imports all of"),
+            ["::", "{", group @ ..] => root_in_group(group),
+            _ => None,
+        };
+        if let Some(how) = how {
+            found.push(format!("{how} `{token}`"));
+        }
+    }
+    found
+}
+
+// Directly inside the braces after a crate's name, `self` is the crate and `*` is all of it.
+fn root_in_group(group: &[&str]) -> Option<&'static str> {
+    let mut depth = 1;
+    let mut previous = "{";
+    for (at, token) in group.iter().enumerate() {
+        match *token {
+            "{" => depth += 1,
+            "}" if depth == 1 => return None,
+            "}" => depth -= 1,
+            "self" if depth == 1 && group.get(at + 1) == Some(&"as") => return Some("renames"),
+            "*" if depth == 1 && matches!(previous, "{" | ",") => return Some("imports all of"),
+            _ => {}
+        }
+        previous = token;
+    }
+    None
+}
+
+const APP_CRATE: &str = "worklog_app";
+const DOMAIN_CRATE: &str = "worklog_domain";
+
+// An alias, a glob of its root or a new name for a crate leaves a check matching its paths
+// nothing to match.
+#[test]
+fn a_crate_of_the_workspace_goes_by_its_package_name_alone() {
+    let packages = packages();
+    let workspace: Vec<&str> = packages.iter().map(package_name).collect();
+    for package in &packages {
+        for dependency in dependencies(package) {
+            let name = dependency["name"].as_str().expect("a dependency's name");
+            assert!(
+                !workspace.contains(&name) || dependency["rename"].is_null(),
+                "{} renames {name}",
+                package_name(package)
+            );
+        }
+    }
+    let idents: Vec<String> = workspace
+        .iter()
+        .map(|name| name.replace('-', "_"))
+        .collect();
+    for matched in [APP_CRATE, DOMAIN_CRATE] {
+        assert!(
+            idents.iter().any(|name| name == matched),
+            "no crate is named {matched}"
+        );
+    }
+    let another_way = |text: &str| crate_named_another_way(text, &idents);
+    let mut found = violations(&src(), another_way);
+    found.extend(violations(&crates(), another_way));
+    assert_eq!(found, [""; 0]);
+}
+
+#[test]
+fn a_crate_named_another_way_is_found() {
+    let app = [APP_CRATE.to_owned()];
+    for clean in [
+        "use worklog_app::{self, show};",
+        "use worklog_app::show::{self as shown};",
+        "use worklog_app::{show::{self as shown}, Failure};",
+        "// use worklog_app as app;",
+        "let shown = worklog_app::show::show(deps, target)?;",
+        "use worklog_render::{self, ended};",
+        "use worklog_app::show::*;",
+        "use worklog_app::{self, show::*, Failure};",
+        "let product = worklog_app::counted(rows) * 2;",
+    ] {
+        assert_eq!(crate_named_another_way(clean, &app), [""; 0], "{clean}");
+    }
+    for (broken, found) in [
+        ("use worklog_app as app;", "renames `worklog_app`"),
+        ("pub use ::worklog_app as app;", "renames `worklog_app`"),
+        ("extern crate worklog_app as app;", "renames `worklog_app`"),
+        (
+            "use worklog_app::{self as app, show};",
+            "renames `worklog_app`",
+        ),
+        (
+            "use worklog_app::{\n    Failure,\n    show::{self, Shown},\n    self as app,\n};",
+            "renames `worklog_app`",
+        ),
+        (
+            "use {std::fs, worklog_app as app};",
+            "renames `worklog_app`",
+        ),
+        ("use worklog_app::*;", "imports all of `worklog_app`"),
+        ("pub use ::worklog_app::*;", "imports all of `worklog_app`"),
+        (
+            "use worklog_app::{Failure, *};",
+            "imports all of `worklog_app`",
+        ),
+        (
+            "use worklog_app::{self, *};",
+            "imports all of `worklog_app`",
+        ),
+    ] {
+        assert_eq!(crate_named_another_way(broken, &app), [found], "{broken}");
+    }
 }
 
 fn write_use_case_named(text: &str) -> Vec<String> {
-    modules_named(text, "worklog_app", &WRITES)
+    modules_named(text, APP_CRATE, &WRITES)
 }
 
 fn web() -> PathBuf {
@@ -1185,7 +1294,6 @@ fn web() -> PathBuf {
 
 #[test]
 fn the_web_view_names_no_write_use_case_in_its_tests_either() {
-    assert!(names_paths_under(&web(), "worklog_app"));
     assert_eq!(violations(&web(), write_use_case_named), [""; 0]);
 }
 
@@ -1458,7 +1566,7 @@ fn code_that_opens_another_way_past_escaping_is_found() {
 
 fn render_reach(text: &str) -> Vec<String> {
     let mut found = modules_named(text, "std", &["fs", "env", "process", "net", "time"]);
-    found.extend(modules_named(text, "worklog_domain", &["ports"]));
+    found.extend(modules_named(text, DOMAIN_CRATE, &["ports"]));
     // A use case takes the ports, so a module that cannot name them runs none.
     for token in tokens(&uncommented(text)) {
         if matches!(token, "Deps" | "ReadDeps") {
@@ -1470,7 +1578,6 @@ fn render_reach(text: &str) -> Vec<String> {
 
 #[test]
 fn what_both_renderers_share_reaches_the_domain_and_what_the_use_cases_return() {
-    assert!(names_paths_under(&layer("render"), "worklog_domain"));
     assert_eq!(violations(&layer("render"), render_reach), [""; 0]);
 }
 
