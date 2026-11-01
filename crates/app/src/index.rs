@@ -1,12 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::app::Failure;
-use crate::app::heads::{edges_of, ended_for, label_or_short, readable_heads, row_head_of};
-use crate::app::lookup::Lookup;
-use crate::app::rows::Reference;
-use crate::domain::id::DocumentId;
-use crate::domain::schema::graph::{self, Edges, Reached};
-use crate::domain::schema::{Content, KindOf, Name};
+use crate::Failure;
+use crate::heads::{edges_of, ended_for, label_or_short, readable_heads, row_head_of};
+use crate::lookup::Lookup;
+use crate::rows::Reference;
+use worklog_domain::id::DocumentId;
+use worklog_domain::schema::graph::{self, Edges, Reached};
+use worklog_domain::schema::{Content, KindOf, Name};
 
 struct Entry {
     name: Name,
@@ -180,8 +180,8 @@ impl Topics {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::testing::{ENDED, TOPIC, World, head, part_of, topic, uses, written_at};
-    use crate::domain::ports::Store;
+    use crate::testing::{ENDED, TOPIC, World, head, part_of, topic, uses, written_at};
+    use worklog_domain::ports::Store;
 
     fn reach(topics: &Topics, from: &[DocumentId]) -> Vec<DocumentId> {
         let reached = topics.reach_from(from);
@@ -304,7 +304,7 @@ mod tests {
             let fields = format!("name = \"{name}\"\n{TOPIC}{}", part_of(&[parent]));
             world
                 .store
-                .put(&crate::domain::testing::first(id, "topic", &fields, "\n"))
+                .put(&worklog_domain::testing::first(id, "topic", &fields, "\n"))
                 .unwrap();
         }
         let topics = Topics::load(&world.lookup()).unwrap();

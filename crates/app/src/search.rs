@@ -5,15 +5,15 @@ use std::ops::Range;
 use regex::{Regex, RegexBuilder};
 use serde::Serialize;
 
-use crate::app::heads::{ended_of, label_or_short};
-use crate::app::machines::written_on;
-use crate::app::rows::{Reference, Row, by_label, documents, reading, row, shown};
-use crate::app::show::{Unread, Why};
-use crate::app::{Failure, ReadDeps};
-use crate::domain::document::Document;
-use crate::domain::id::{DocumentId, VersionId};
-use crate::domain::schema::KindOf;
-use crate::domain::version::{Header, Stamp};
+use crate::heads::{ended_of, label_or_short};
+use crate::machines::written_on;
+use crate::rows::{Reference, Row, by_label, documents, reading, row, shown};
+use crate::show::{Unread, Why};
+use crate::{Failure, ReadDeps};
+use worklog_domain::document::Document;
+use worklog_domain::id::{DocumentId, VersionId};
+use worklog_domain::schema::KindOf;
+use worklog_domain::version::{Header, Stamp};
 
 const SEARCHED: [KindOf; 4] = [KindOf::Topic, KindOf::Fact, KindOf::Entry, KindOf::Followup];
 
@@ -227,14 +227,14 @@ pub fn log(deps: &ReadDeps, limit: usize, address: Option<&str>) -> Result<Log, 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::heads::row_head;
-    use crate::app::testing::{
+    use crate::heads::row_head;
+    use crate::testing::{
         ENDED, World, fact, fact_fields, fork, head, head_id, labels, stored, to, topic, world,
         written_at,
     };
-    use crate::domain::id::DocumentId;
-    use crate::domain::ports::{Store, StoreRead};
-    use crate::domain::version::ReadError;
+    use worklog_domain::id::DocumentId;
+    use worklog_domain::ports::{Store, StoreRead};
+    use worklog_domain::version::ReadError;
 
     fn find(world: &World, term: &str) -> Vec<Hit> {
         query(world, term, false, None, false)
@@ -783,7 +783,7 @@ mod tests {
         };
         world
             .store
-            .put(&crate::domain::testing::after(
+            .put(&worklog_domain::testing::after(
                 &[&root],
                 &fields(""),
                 "open side\n",
@@ -791,7 +791,7 @@ mod tests {
             .unwrap();
         world
             .store
-            .put(&crate::domain::testing::after(
+            .put(&worklog_domain::testing::after(
                 &[&root],
                 &fields(ENDED),
                 "ended side\n",

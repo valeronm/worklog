@@ -1,23 +1,23 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use crate::app::draft::{DraftRow, OpenDraft};
-use crate::app::heads::read_or_skip;
-use crate::app::lookup::{Lookup, Stored};
-use crate::app::rows::{Reference, Row};
-use crate::app::show::{HistoryRow, ShownVersion};
-use crate::app::usage::{AgentUsage, CommandCount};
-use crate::app::{Deps, Failure};
-use crate::domain::document::Document;
-use crate::domain::document::State;
-use crate::domain::id::{DocumentId, VersionId};
-use crate::domain::ports::{Clock, Ids, NotRead, Store, StoreError, StoreRead};
-use crate::domain::schema::address::Found;
-use crate::domain::schema::{KindOf, Record};
-use crate::domain::testing::{
+use crate::draft::{DraftRow, OpenDraft};
+use crate::heads::read_or_skip;
+use crate::lookup::{Lookup, Stored};
+use crate::rows::{Reference, Row};
+use crate::show::{HistoryRow, ShownVersion};
+use crate::usage::{AgentUsage, CommandCount};
+use crate::{Deps, Failure};
+use worklog_domain::document::Document;
+use worklog_domain::document::State;
+use worklog_domain::id::{DocumentId, VersionId};
+use worklog_domain::ports::{Clock, Ids, NotRead, Store, StoreError, StoreRead};
+use worklog_domain::schema::address::Found;
+use worklog_domain::schema::{KindOf, Record};
+use worklog_domain::testing::{
     FixedClock, FixedHost, MemoryDrafts, MemoryStore, MemoryUsage, SequenceIds, after, first_minted,
 };
-use crate::domain::version::{Envelope, Fields, Kind, Links, Stamp, Version};
+use worklog_domain::version::{Envelope, Fields, Kind, Links, Stamp, Version};
 
 pub const NOW: &str = "2026-10-09T18:22:41.118204+01:00";
 
@@ -30,7 +30,14 @@ pub struct World {
     pub usage: MemoryUsage,
 }
 
+impl Default for World {
+    fn default() -> World {
+        World::new()
+    }
+}
+
 impl World {
+    #[must_use]
     pub fn new() -> World {
         World {
             store: MemoryStore::default(),
@@ -53,7 +60,7 @@ impl World {
         )
     }
 
-    pub(in crate::app) fn lookup(&self) -> Lookup<'_> {
+    pub(crate) fn lookup(&self) -> Lookup<'_> {
         Lookup::new(Stored::new(&self.store))
     }
 
@@ -68,11 +75,19 @@ impl World {
         }
     }
 
+    /// # Panics
+    ///
+    /// When the host is bound to no machine topic.
     pub fn machine(&self) -> DocumentId {
         self.host.bound().expect("a host with a machine topic")
     }
 
     /// Stores a first version with these fields (TOML, references as ids) and returns its id.
+    ///
+    /// # Panics
+    ///
+    /// When `kind` is not a kind, `fields` is not TOML, the host has no machine topic, or the
+    /// version does not compose or store.
     pub fn put(&self, kind: &str, fields: &str, body: &str) -> DocumentId {
         let id = self.ids.mint().expect("an id");
         let fields: Fields = fields.parse().expect("fields in TOML");
@@ -93,6 +108,10 @@ impl World {
         self.amend_linking(id, fields, body, &[])
     }
 
+    /// # Panics
+    ///
+    /// When `id` does not read or has no head to follow, `fields` is not TOML, the host has no
+    /// machine topic, or the version does not compose or store.
     pub fn amend_linking(
         &self,
         id: &DocumentId,
@@ -122,6 +141,7 @@ pub const ENDED_FACT: &str = "ended = \"false\"\nended_on = 2026-10-09\nnote = \
 pub const REMOVED: &str = "ended = \"removed\"\nended_on = 2026-10-09\nnote = \"n\"\n";
 pub const DONE: &str = "ended = \"done\"\nended_on = 2026-10-09\nnote = \"n\"\n";
 
+#[must_use]
 pub fn topic_fields(name: &str, rest: &str) -> String {
     format!("name = \"{name}\"\n{TOPIC}{rest}")
 }
@@ -130,19 +150,23 @@ pub fn topic(world: &World, name: &str, rest: &str) -> DocumentId {
     world.put("topic", &topic_fields(name, rest), "\n")
 }
 
+#[must_use]
 pub fn list(key: &str, ids: &[&DocumentId]) -> String {
     let ids: Vec<String> = ids.iter().map(|id| format!("\"{id}\"")).collect();
     format!("{key} = [{}]\n", ids.join(", "))
 }
 
+#[must_use]
 pub fn part_of(parents: &[&DocumentId]) -> String {
     list("part_of", parents)
 }
 
+#[must_use]
 pub fn uses(used: &[&DocumentId]) -> String {
     list("uses", used)
 }
 
+#[must_use]
 pub fn world_of<const N: usize>(names: [&str; N]) -> (World, [DocumentId; N]) {
     let world = World::new();
     topic(&world, "desk", "");
@@ -150,18 +174,21 @@ pub fn world_of<const N: usize>(names: [&str; N]) -> (World, [DocumentId; N]) {
     (world, ids)
 }
 
+#[must_use]
 pub fn world() -> (World, DocumentId) {
     let (world, [lantern]) = world_of(["lantern"]);
     (world, lantern)
 }
 
 /// `world`, with the topic `atlas` after `lantern`.
+#[must_use]
 pub fn world_with_atlas() -> (World, DocumentId, DocumentId) {
     let (world, lantern) = world();
     let atlas = topic(&world, "atlas", "");
     (world, lantern, atlas)
 }
 
+#[must_use]
 pub fn fact_fields(topic: &DocumentId, name: &str, summary: &str, rest: &str) -> String {
     format!(
         "name = \"{name}\"\ntopic = \"{topic}\"\ncreated = 2026-09-04\n\
@@ -202,6 +229,7 @@ pub fn followup(world: &World, topics: &[&DocumentId], summary: &str, rest: &str
     )
 }
 
+#[must_use]
 pub fn claim_fields(machine: &DocumentId, topic: &DocumentId, directory: &str) -> String {
     let directory = if directory.is_empty() {
         String::new()
@@ -212,6 +240,10 @@ pub fn claim_fields(machine: &DocumentId, topic: &DocumentId, directory: &str) -
 }
 
 /// Stores two versions of `fields` on the live head and returns the heads.
+///
+/// # Panics
+///
+/// When `id` is not live or a version does not store.
 pub fn fork(world: &World, id: &DocumentId, fields: &str) -> Vec<VersionId> {
     let root = head(world, id);
     for body in ["left\n", "right\n"] {
@@ -224,6 +256,9 @@ pub fn fork(world: &World, id: &DocumentId, fields: &str) -> Vec<VersionId> {
     held.heads().iter().map(|head| head.id.clone()).collect()
 }
 
+/// # Panics
+///
+/// When `stamp` is not a stamp, `fields` is not TOML, or the version does not compose or store.
 pub fn written_at(
     world: &World,
     root: &Version,
@@ -250,6 +285,7 @@ pub fn written_at(
     version
 }
 
+#[must_use]
 pub fn counted(counts: &[(&str, usize)]) -> Vec<CommandCount> {
     (counts.iter())
         .map(|(command, run_count)| CommandCount {
@@ -260,6 +296,7 @@ pub fn counted(counts: &[(&str, usize)]) -> Vec<CommandCount> {
         .collect()
 }
 
+#[must_use]
 pub fn by_no_agent(counts: &[CommandCount]) -> Vec<AgentUsage> {
     vec![AgentUsage {
         agent: None,
@@ -268,14 +305,17 @@ pub fn by_no_agent(counts: &[CommandCount]) -> Vec<AgentUsage> {
     }]
 }
 
+#[must_use]
 pub fn to(document: &DocumentId, label: &str) -> Reference {
     Reference::to(document, label.to_owned(), None)
 }
 
+#[must_use]
 pub fn to_ended(document: &DocumentId, label: &str, reason: &str) -> Reference {
     Reference::to(document, label.to_owned(), Some(reason.to_owned()))
 }
 
+#[must_use]
 pub fn row(id: &DocumentId, label: &str, summary: &str) -> Row {
     Row {
         document: id.clone(),
@@ -289,6 +329,7 @@ pub fn row(id: &DocumentId, label: &str, summary: &str) -> Row {
     }
 }
 
+#[must_use]
 pub fn history_row(version: ShownVersion) -> HistoryRow {
     HistoryRow {
         version: version.version,
@@ -301,6 +342,7 @@ pub fn history_row(version: ShownVersion) -> HistoryRow {
     }
 }
 
+#[must_use]
 pub fn referred(references: &[Reference]) -> Vec<&str> {
     (references.iter())
         .map(|reference| reference.label.as_str())
@@ -314,6 +356,9 @@ pub fn labels<T>(items: &[T], row_of: impl Fn(&T) -> &Row) -> Vec<String> {
         .collect()
 }
 
+/// # Panics
+///
+/// When `id` does not read or is not live.
 pub fn head(world: &World, id: &DocumentId) -> Version {
     match world.store.headers(id).expect("a read").state() {
         State::Live(head) => stored(world, id, &head.id),
@@ -321,6 +366,9 @@ pub fn head(world: &World, id: &DocumentId) -> Version {
     }
 }
 
+/// # Panics
+///
+/// When `version` of `id` does not read.
 pub fn stored(world: &World, id: &DocumentId, version: &VersionId) -> Version {
     world
         .store
@@ -333,14 +381,23 @@ pub fn head_id(world: &World, id: &DocumentId) -> VersionId {
     head(world, id).id.clone()
 }
 
+/// # Panics
+///
+/// When `id` is not live or its head does not read as a record.
 pub fn record(world: &World, id: &DocumentId) -> Record {
     read_or_skip(&head(world, id)).expect("a readable head")
 }
 
+/// # Panics
+///
+/// When the store fails a read.
 pub fn found(world: &World, address: &str) -> Found {
     world.lookup().find(address).expect("a read")
 }
 
+/// # Panics
+///
+/// When `result` is not a refusal.
 pub fn refused<T>(result: Result<T, Failure>) -> String {
     match result {
         Err(Failure::Refused(text)) => text,
@@ -494,6 +551,7 @@ impl Store for Counting {
 /// # Panics
 ///
 /// When the draft does not read.
+#[must_use]
 pub fn open_row(row: &DraftRow) -> &OpenDraft {
     match row {
         DraftRow::Open(open) => open,

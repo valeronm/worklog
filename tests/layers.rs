@@ -12,7 +12,7 @@ fn src() -> PathBuf {
     root().join("src")
 }
 
-const CRATES: [&str; 1] = ["domain"];
+const CRATES: [&str; 2] = ["domain", "app"];
 
 fn layer(name: &str) -> PathBuf {
     if CRATES.contains(&name) {
@@ -816,7 +816,7 @@ const WRITES: [&str; 11] = [
     "amend", "bulk", "claim", "draft", "followup", "fork", "live", "record", "save", "setup",
     "upgrade",
 ];
-const SHARED: [&str; 5] = ["heads", "lookup", "mod", "rules", "testing"];
+const SHARED: [&str; 5] = ["heads", "lookup", "lib", "rules", "testing"];
 const WRITES_A_READ_MAY_NOT_USE: [&str; 10] = [
     "amend", "bulk", "claim", "followup", "fork", "live", "record", "save", "setup", "upgrade",
 ];
@@ -894,7 +894,7 @@ fn one_use_case_appends_to_the_usage_log() {
     assert_eq!(
         reached,
         [
-            format!("app/mod.rs: {HANDS_ON}"),
+            format!("app/lib.rs: {HANDS_ON}"),
             format!("app/record.rs: {APPENDS}"),
             format!("app/usage.rs: {READS}"),
             format!("app/usage.rs: {READS}"),
@@ -947,7 +947,7 @@ fn a_read_takes_no_write_dependencies_and_decides_no_ending() {
     sources(&app(), &mut found);
     let mut forbidden: Vec<String> = ["Record::read"].map(str::to_owned).into();
     for module in WRITES_A_READ_MAY_NOT_USE {
-        forbidden.push(format!("crate::app::{module}"));
+        forbidden.push(format!("crate::{module}"));
         forbidden.push(format!("super::{module}"));
     }
     let mut reads = 0;

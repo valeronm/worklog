@@ -4,21 +4,21 @@ use std::rc::Rc;
 
 use toml::Value;
 
-use crate::app::draft::{draft_for, names, spelled};
-use crate::app::heads::{
+use crate::draft::{draft_for, names, spelled};
+use crate::heads::{
     Read, filed_on, heads_not_ended, read_or_skip, readable_heads, row_head, texts, topic_edges,
 };
-use crate::app::lookup::{Lookup, forked, no_head_reads, unreadable, with_article};
-use crate::app::rules::{closing_edge, fits, holds_topic_open, name_is_free_as};
-use crate::app::{Deps, Failed, Failure, Written, counted, kind_named};
-use crate::domain::document::{Document, State};
-use crate::domain::draft::Draft;
-use crate::domain::id::{DocumentId, VersionId};
-use crate::domain::schema::address::{Address, Found};
-use crate::domain::schema::graph::Edges;
-use crate::domain::schema::kind::Reference;
-use crate::domain::schema::{Content, KindOf, Record, links, step, translate};
-use crate::domain::version::{Envelope, Fields, Header, Kind, Links, Version};
+use crate::lookup::{Lookup, forked, no_head_reads, unreadable, with_article};
+use crate::rules::{closing_edge, fits, holds_topic_open, name_is_free_as};
+use crate::{Deps, Failed, Failure, Written, counted, kind_named};
+use worklog_domain::document::{Document, State};
+use worklog_domain::draft::Draft;
+use worklog_domain::id::{DocumentId, VersionId};
+use worklog_domain::schema::address::{Address, Found};
+use worklog_domain::schema::graph::Edges;
+use worklog_domain::schema::kind::Reference;
+use worklog_domain::schema::{Content, KindOf, Record, links, step, translate};
+use worklog_domain::version::{Envelope, Fields, Header, Kind, Links, Version};
 
 const NEW: &str = "new";
 const SAVE: &str = "save";
@@ -512,17 +512,17 @@ mod tests {
     use toml::Value;
 
     use super::*;
-    use crate::app::draft::{self, New};
-    use crate::app::testing::{
+    use crate::draft::{self, New};
+    use crate::testing::{
         ENDED, ENDED_FACT, TOPIC, World, entry, fact, fact_fields, fork, head, head_id, record,
         refused, stored, topic, topic_fields, world, world_with_atlas,
     };
-    use crate::domain::draft::Draft;
-    use crate::domain::ports::{Drafts, DraftsRead, Ids, Store, StoreRead};
-    use crate::domain::schema::address::Found;
-    use crate::domain::schema::{Date, Ending, Reason, step};
-    use crate::domain::testing::{after, first};
-    use crate::domain::version::ReadError;
+    use worklog_domain::draft::Draft;
+    use worklog_domain::ports::{Drafts, DraftsRead, Ids, Store, StoreRead};
+    use worklog_domain::schema::address::Found;
+    use worklog_domain::schema::{Date, Ending, Reason, step};
+    use worklog_domain::testing::{after, first};
+    use worklog_domain::version::ReadError;
 
     fn end(world: &World, id: &DocumentId, name: &str) {
         world.amend(id, &format!("name = \"{name}\"\n{TOPIC}{ENDED}"), "\n");
@@ -590,15 +590,15 @@ mod tests {
         let (world, lantern) = world();
         new_topic(&world, "phone");
         assert_eq!(save(&world.deps(), "phone").unwrap().label, "phone");
-        let renamed = crate::app::amend::rename(&world.deps(), "lantern", "lamp").unwrap();
+        let renamed = crate::amend::rename(&world.deps(), "lantern", "lamp").unwrap();
         assert_eq!(
             (&renamed.document, renamed.label.as_str()),
             (&lantern, "lamp")
         );
 
-        crate::app::testing::topic(&world, "atlas", "");
-        let relay = crate::app::testing::fact(&world, &lantern, "relay", "");
-        let moved = crate::app::bulk::move_to(&world.deps(), &["lamp/relay"], "lamp", "atlas");
+        crate::testing::topic(&world, "atlas", "");
+        let relay = crate::testing::fact(&world, &lantern, "relay", "");
+        let moved = crate::bulk::move_to(&world.deps(), &["lamp/relay"], "lamp", "atlas");
         let moved = moved.unwrap();
         assert_eq!(moved.len(), 1);
         assert_eq!(
@@ -945,7 +945,7 @@ mod tests {
                 Version::compose(envelope, fields, Links(links), body.to_owned()).unwrap();
             world.store.put(&version).unwrap();
         }
-        crate::app::fork::resolve(&deps, "phone").unwrap();
+        crate::fork::resolve(&deps, "phone").unwrap();
         save(&deps, "phone").unwrap();
         let links = head(&world, &phone).links.0.clone();
         assert_eq!(
@@ -1419,7 +1419,7 @@ mod tests {
             ),
         );
         end(&world, &lantern, "lantern");
-        crate::app::fork::resolve(&deps, relay.as_str()).unwrap();
+        crate::fork::resolve(&deps, relay.as_str()).unwrap();
         let text = refused(save(&deps, relay.as_str()));
         assert!(
             text.contains("lantern/relay-pin: topic: lantern is ended"),
@@ -1523,8 +1523,8 @@ mod tests {
         let live = after(&[&root], &fields(&atlas, ""), "live\n");
         world.store.put(&ended).unwrap();
         world.store.put(&live).unwrap();
-        crate::app::amend::end(&deps, "lantern", "retired", "n", None).unwrap();
-        crate::app::fork::resolve(&deps, relay.as_str()).unwrap();
+        crate::amend::end(&deps, "lantern", "retired", "n", None).unwrap();
+        crate::fork::resolve(&deps, relay.as_str()).unwrap();
 
         set(&world, &relay, "topic", "lantern");
         let text = refused(save(&deps, relay.as_str()));

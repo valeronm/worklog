@@ -4,19 +4,19 @@ use std::rc::Rc;
 
 use serde::Serialize;
 
-use crate::app::heads::is_forked;
-use crate::app::index::Topics;
-use crate::app::lookup::Lookup;
-use crate::app::machines::PLACEHOLDER;
-use crate::app::rows::{
+use crate::heads::is_forked;
+use crate::index::Topics;
+use crate::lookup::Lookup;
+use crate::machines::PLACEHOLDER;
+use crate::rows::{
     Filed, Filings, FollowupRow, Reference, Row, by_label, filed, filed_by_topic, followup_rows,
     is_idea, row, shown,
 };
-use crate::app::rules::claims_of;
-use crate::app::{Failure, ReadDeps};
-use crate::domain::document::Document;
-use crate::domain::id::DocumentId;
-use crate::domain::schema::{Claim, Date, Directory, KindOf};
+use crate::rules::claims_of;
+use crate::{Failure, ReadDeps};
+use worklog_domain::document::Document;
+use worklog_domain::id::DocumentId;
+use worklog_domain::schema::{Claim, Date, Directory, KindOf};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Context {
@@ -368,16 +368,16 @@ impl Claimed {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::machines::PLACEHOLDER;
-    use crate::app::rows::TriggerShown;
-    use crate::app::testing::{
+    use crate::machines::PLACEHOLDER;
+    use crate::rows::TriggerShown;
+    use crate::testing::{
         ENDED, ENDED_FACT, World, claim_fields, fact, followup, fork, head, labels, part_of,
         refused, to, topic, topic_fields, uses, world, world_of,
     };
-    use crate::domain::draft::Draft;
-    use crate::domain::ports::{Drafts, Store};
-    use crate::domain::testing::{FixedHost, after};
-    use crate::domain::version::{Fields, Kind};
+    use worklog_domain::draft::Draft;
+    use worklog_domain::ports::{Drafts, Store};
+    use worklog_domain::testing::{FixedHost, after};
+    use worklog_domain::version::{Fields, Kind};
 
     fn claim(world: &World, topic: &DocumentId, directory: &str) -> DocumentId {
         world.put(

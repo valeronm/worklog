@@ -3,13 +3,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use chrono::{Datelike as _, Days, NaiveDate, Weekday};
 use serde::Serialize;
 
-use crate::app::heads::{ended_for, row_head};
-use crate::app::index::Topics;
-use crate::app::lookup::Lookup;
-use crate::app::rows::{memberships, reading};
-use crate::app::{Failure, ReadDeps, Reference};
-use crate::domain::id::DocumentId;
-use crate::domain::schema::{Content, Date, KindOf};
+use crate::heads::{ended_for, row_head};
+use crate::index::Topics;
+use crate::lookup::Lookup;
+use crate::rows::{memberships, reading};
+use crate::{Failure, ReadDeps, Reference};
+use worklog_domain::id::DocumentId;
+use worklog_domain::schema::{Content, Date, KindOf};
 
 const WEEKS_BEFORE: u64 = 52;
 
@@ -166,7 +166,7 @@ pub fn stats(deps: &ReadDeps, topic: Option<&str>, year: Option<i32>) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::testing::{entry, part_of, topic, world};
+    use crate::testing::{entry, part_of, topic, world};
 
     fn date(text: &str) -> Date {
         Date::parse(text).unwrap()

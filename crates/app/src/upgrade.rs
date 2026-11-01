@@ -3,8 +3,8 @@ use std::cmp::Ordering;
 use serde::Serialize;
 
 use super::Failure;
-use crate::domain::ports::{Binary, Refreshed, Releases};
-use crate::domain::release::{Built, ReleaseVersion, verify};
+use worklog_domain::ports::{Binary, Refreshed, Releases};
+use worklog_domain::release::{Built, ReleaseVersion, verify};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Checked {
@@ -112,9 +112,9 @@ pub fn install(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::testing::refused;
-    use crate::domain::ports::StoreError;
-    use crate::domain::testing::{
+    use crate::testing::refused;
+    use worklog_domain::ports::StoreError;
+    use worklog_domain::testing::{
         ASSET, BINARY, MemoryBinary, REFRESHED, build, published, version,
     };
 

@@ -1,10 +1,10 @@
-use crate::app::draft::{names, open_draft, refuse_open};
-use crate::app::heads::row_head;
-use crate::app::lookup::{Lookup, no_head_reads, unreadable};
-use crate::app::{Deps, DraftRef, Failure};
-use crate::domain::document::State;
-use crate::domain::draft::Draft;
-use crate::domain::schema::{KindOf, step};
+use crate::draft::{names, open_draft, refuse_open};
+use crate::heads::row_head;
+use crate::lookup::{Lookup, no_head_reads, unreadable};
+use crate::{Deps, DraftRef, Failure};
+use worklog_domain::document::State;
+use worklog_domain::draft::Draft;
+use worklog_domain::schema::{KindOf, step};
 
 /// Opens a draft with every head as a parent, holding the fields and body of the head the
 /// document is shown from. Refuses a document that is not forked, one with a draft open, one
@@ -35,17 +35,17 @@ pub fn resolve(deps: &Deps, address: &str) -> Result<DraftRef, Failure> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::draft::drafts;
-    use crate::app::save::save;
-    use crate::app::show::{Shown, show};
-    use crate::app::testing::{
+    use crate::draft::drafts;
+    use crate::save::save;
+    use crate::show::{Shown, show};
+    use crate::testing::{
         ENDED, TOPIC, World, fork, found, head, open_row, refused, stored, topic, world,
     };
-    use crate::domain::id::{DocumentId, VersionId};
-    use crate::domain::ports::{Drafts, DraftsRead, Store, StoreRead};
-    use crate::domain::schema::address::Found;
-    use crate::domain::testing::after;
-    use crate::domain::version::ReadError;
+    use worklog_domain::id::{DocumentId, VersionId};
+    use worklog_domain::ports::{Drafts, DraftsRead, Store, StoreRead};
+    use worklog_domain::schema::address::Found;
+    use worklog_domain::testing::after;
+    use worklog_domain::version::ReadError;
 
     #[test]
     fn resolving_opens_a_draft_of_every_head_and_saving_it_makes_the_document_live() {
@@ -219,7 +219,7 @@ mod tests {
         );
         assert_eq!(refused(resolve(&deps, atlas.as_str())), wanted);
         assert!(world.drafts.list().unwrap().is_empty());
-        let found = crate::app::check::check(&deps.read()).unwrap();
+        let found = crate::check::check(&deps.read()).unwrap();
         let on_atlas: Vec<&str> = (found.problems.iter())
             .filter(|finding| finding.label == atlas.short())
             .map(|finding| finding.what.as_str())
@@ -245,7 +245,7 @@ mod tests {
 
     fn resolved_as(world: &World, heads: [&str; 2], name: &str) -> (DocumentId, Vec<String>) {
         let deps = world.deps();
-        let lantern = crate::app::testing::topic(world, "lantern", "");
+        let lantern = crate::testing::topic(world, "lantern", "");
         let root = head(world, &lantern);
         for (fields, body) in heads.iter().zip(["one\n", "two\n"]) {
             world.store.put(&after(&[&root], fields, body)).unwrap();
@@ -257,7 +257,7 @@ mod tests {
             .insert("name".to_owned(), toml::Value::from(name));
         world.drafts.write(&draft).unwrap();
         save(&deps, lantern.as_str()).unwrap();
-        let stored = crate::app::testing::record(world, &lantern);
+        let stored = crate::testing::record(world, &lantern);
         let (current, former) = stored.content.naming().unwrap();
         assert_eq!(current.as_str(), name);
         let former = former.iter().map(ToString::to_string).collect();
@@ -330,14 +330,14 @@ mod tests {
     fn a_rename_of_a_live_document_keeps_the_one_name_it_had() {
         let (world, lantern) = world();
         let deps = world.deps();
-        crate::app::draft::checkout(&deps, "lantern").unwrap();
+        crate::draft::checkout(&deps, "lantern").unwrap();
         let mut draft = world.drafts.read(&lantern).unwrap().expect("a draft");
         draft
             .fields
             .insert("name".to_owned(), toml::Value::from("lamp"));
         world.drafts.write(&draft).unwrap();
         save(&deps, "lantern").unwrap();
-        let stored = crate::app::testing::record(&world, &lantern);
+        let stored = crate::testing::record(&world, &lantern);
         let (current, former) = stored.content.naming().unwrap();
         assert_eq!(current.as_str(), "lamp");
         assert_eq!(former.len(), 1);
@@ -349,7 +349,7 @@ mod tests {
         let (world, _) = world();
         let deps = world.deps();
         let phone = topic(&world, "phone", "");
-        crate::app::draft::checkout(&deps, "phone").unwrap();
+        crate::draft::checkout(&deps, "phone").unwrap();
         let text = refused(resolve(&deps, "phone"));
         assert!(text.contains("is not forked"), "{text}");
         let planted = after(&[&head(&world, &phone)], "x = 1", "\n").id.clone();

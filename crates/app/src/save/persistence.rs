@@ -1,16 +1,16 @@
 use super::Admitted;
-use crate::app::{Failure, Stored, Written};
-use crate::domain::ports::Store;
+use crate::{Failure, Stored, Written};
+use worklog_domain::ports::Store;
 
 #[derive(Clone, Copy)]
-pub(in crate::app) struct Writer<'a>(&'a dyn Store);
+pub(crate) struct Writer<'a>(&'a dyn Store);
 
 impl<'a> Writer<'a> {
-    pub(in crate::app) fn new(store: &'a dyn Store) -> Writer<'a> {
+    pub(crate) fn new(store: &'a dyn Store) -> Writer<'a> {
         Writer(store)
     }
 
-    pub(in crate::app) fn read(&self) -> Stored<'a> {
+    pub(crate) fn read(&self) -> Stored<'a> {
         Stored::new(self.0)
     }
 

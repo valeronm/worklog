@@ -1,11 +1,11 @@
-use crate::app::heads::place;
-use crate::app::lookup::Lookup;
-use crate::app::rules::claims_of;
-use crate::app::save::admit;
-use crate::app::{Deps, Failure, Written, kind_named, text};
-use crate::domain::id::DocumentId;
-use crate::domain::schema::{Directory, Ending, KindOf, Reason, Record};
-use crate::domain::version::Fields;
+use crate::heads::place;
+use crate::lookup::Lookup;
+use crate::rules::claims_of;
+use crate::save::admit;
+use crate::{Deps, Failure, Written, kind_named, text};
+use worklog_domain::id::DocumentId;
+use worklog_domain::schema::{Directory, Ending, KindOf, Reason, Record};
+use worklog_domain::version::Fields;
 
 /// The host's home directory is stored as `~` and a directory under it as `~/rest`; a
 /// directory no claim could carry is a usage failure. Refuses a claim this machine already
@@ -75,11 +75,11 @@ fn held(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::heads::read_or_skip;
-    use crate::app::testing::{ENDED, TOPIC, World, claim_fields, fork, head, refused, topic};
-    use crate::domain::ports::StoreRead;
-    use crate::domain::schema::Content;
-    use crate::domain::version::{Kind, Version};
+    use crate::heads::read_or_skip;
+    use crate::testing::{ENDED, TOPIC, World, claim_fields, fork, head, refused, topic};
+    use worklog_domain::ports::StoreRead;
+    use worklog_domain::schema::Content;
+    use worklog_domain::version::{Kind, Version};
 
     fn world() -> World {
         let world = World::new();
@@ -292,8 +292,7 @@ mod tests {
         world.host.set_home(Some("/".to_owned()));
         let text = usage(claim(&world.deps(), "lantern", Some("")));
         assert!(text.contains("absolute path"), "{text}");
-        let Err(Failure::Usage(text)) = crate::app::context::context(&world.deps().read(), "")
-        else {
+        let Err(Failure::Usage(text)) = crate::context::context(&world.deps().read(), "") else {
             panic!("an empty directory must be a usage failure");
         };
         assert!(text.contains("absolute path"), "{text}");
@@ -308,10 +307,7 @@ mod tests {
             let claimed = usage(claim(&deps, "lantern", Some(bad)));
             assert!(claimed.contains("absolute path"), "{claimed}");
             assert_eq!(usage(unclaim(&deps, "lantern", Some(bad))), claimed);
-            assert_eq!(
-                usage(crate::app::context::context(&deps.read(), bad)),
-                claimed
-            );
+            assert_eq!(usage(crate::context::context(&deps.read(), bad)), claimed);
         }
     }
 

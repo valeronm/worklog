@@ -1,8 +1,8 @@
-use crate::app::live::open;
-use crate::app::lookup::Lookup;
-use crate::app::save::admit;
-use crate::app::{Deps, Failure, Written, text};
-use crate::domain::schema::{Content, Ending, Name, Reason};
+use crate::live::open;
+use crate::lookup::Lookup;
+use crate::save::admit;
+use crate::{Deps, Failure, Written, text};
+use worklog_domain::schema::{Content, Ending, Name, Reason};
 
 pub fn rename(deps: &Deps, address: &str, name: &str) -> Result<Written, Failure> {
     let lookup = Lookup::new(deps.read().store);
@@ -90,14 +90,14 @@ pub fn reopen(deps: &Deps, address: &str) -> Result<Written, Failure> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::testing::{
+    use crate::testing::{
         entry, fact, fact_fields, fork, found, head, record, refused, topic, world,
     };
-    use crate::app::{claim, draft};
-    use crate::domain::draft::Draft;
-    use crate::domain::ports::Drafts;
-    use crate::domain::schema::address::Found;
-    use crate::domain::schema::{Content, Name, Reason};
+    use crate::{claim, draft};
+    use worklog_domain::draft::Draft;
+    use worklog_domain::ports::Drafts;
+    use worklog_domain::schema::address::Found;
+    use worklog_domain::schema::{Content, Name, Reason};
 
     #[test]
     fn a_renamed_fact_is_found_by_both_names() {

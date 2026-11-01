@@ -4,13 +4,13 @@
 use std::collections::BTreeSet;
 use std::rc::Rc;
 
-use crate::app::draft::usage;
-use crate::app::heads::{kind_of, unended_heads};
-use crate::app::lookup::{Lookup, held_by_several};
-use crate::app::{Failure, ReadDeps};
-use crate::domain::document::Document;
-use crate::domain::id::DocumentId;
-use crate::domain::schema::{Content, KindOf, Name};
+use crate::draft::usage;
+use crate::heads::{kind_of, unended_heads};
+use crate::lookup::{Lookup, held_by_several};
+use crate::{Failure, ReadDeps};
+use worklog_domain::document::Document;
+use worklog_domain::id::DocumentId;
+use worklog_domain::schema::{Content, KindOf, Name};
 
 /// The summary of a machine topic made before anyone said what the machine is. A topic
 /// stored with it is recognized by this text alone.
@@ -109,13 +109,13 @@ pub fn holds_nothing(deps: &ReadDeps) -> Result<bool, Failure> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::testing::{
+    use crate::testing::{
         ENDED, World, fact, head, refused, topic, topic_fields, world, written_at,
     };
-    use crate::domain::id::VersionId;
-    use crate::domain::ports::Store;
-    use crate::domain::testing::{first, lantern};
-    use crate::domain::version::ReadError;
+    use worklog_domain::id::VersionId;
+    use worklog_domain::ports::Store;
+    use worklog_domain::testing::{first, lantern};
+    use worklog_domain::version::ReadError;
 
     fn named(world: &mut World, name: Option<&str>) -> HostName {
         world.host.set_name(name.map(str::to_owned));
@@ -177,7 +177,7 @@ mod tests {
         let id = world.put("topic", &fields, "\n");
         assert_eq!(PLACEHOLDER, "(summary not yet written)");
         assert_eq!(
-            crate::app::testing::record(&world, &id).content.kind(),
+            crate::testing::record(&world, &id).content.kind(),
             KindOf::Topic
         );
     }

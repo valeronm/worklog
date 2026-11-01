@@ -2,18 +2,18 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
-use crate::app::heads::{
+use crate::heads::{
     ended_for, is_holder, kind_of, label_of, label_or_short, labeling_topic, readable_heads,
     row_head,
 };
-use crate::app::rows::Reference;
-use crate::app::{Failure, kind_named};
-use crate::domain::document::{Document, State};
-use crate::domain::id::{DocumentId, VersionId};
-use crate::domain::ports::{NotRead, StoreRead};
-use crate::domain::schema::address::{Address, Candidate, Found, Holds, choose, displayed, holds};
-use crate::domain::schema::{Content, Date, KindOf, Name, Record};
-use crate::domain::version::{Header, Kind, Version};
+use crate::rows::Reference;
+use crate::{Failure, kind_named};
+use worklog_domain::document::{Document, State};
+use worklog_domain::id::{DocumentId, VersionId};
+use worklog_domain::ports::{NotRead, StoreRead};
+use worklog_domain::schema::address::{Address, Candidate, Found, Holds, choose, displayed, holds};
+use worklog_domain::schema::{Content, Date, KindOf, Name, Record};
+use worklog_domain::version::{Header, Kind, Version};
 
 pub(super) fn with_article(word: &str) -> String {
     let article = if word.starts_with(['a', 'e', 'i', 'o', 'u']) {
@@ -646,13 +646,13 @@ fn by_prefix(mut ids: Vec<DocumentId>) -> Found {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::testing::{
+    use crate::testing::{
         Counting, ENDED, ENDED_FACT, TOPIC, World, claim_fields, entry, fact, fork, found, head,
         topic, topic_fields,
     };
-    use crate::domain::ports::Store;
-    use crate::domain::testing::{after, first, lantern};
-    use crate::domain::version::ReadError;
+    use worklog_domain::ports::Store;
+    use worklog_domain::testing::{after, first, lantern};
+    use worklog_domain::version::ReadError;
 
     fn holder_ids<V: AsRef<str>>(
         lookup: &Lookup,

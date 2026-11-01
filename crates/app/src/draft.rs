@@ -1,18 +1,18 @@
 use serde::Serialize;
 use toml::Value;
 
-use crate::app::heads::label_or_short;
-use crate::app::live::open;
-use crate::app::lookup::{Lookup, draft_open};
-use crate::app::rules::{name_is_free, referencable};
-use crate::app::{Deps, DraftRef, Failed, Failure, ReadDeps, kind_named, text};
-use crate::domain::draft::{Draft, Listed};
-use crate::domain::id::{DocumentId, is_id_prefix};
-use crate::domain::ports::BrokenDraft;
-use crate::domain::schema::address::{Address, Found};
-use crate::domain::schema::{Content, Date, Entry, Fact, KindOf, Name, Topic, step, translate};
-use crate::domain::session::Session;
-use crate::domain::version::{Fields, Kind, Stamp, Version};
+use crate::heads::label_or_short;
+use crate::live::open;
+use crate::lookup::{Lookup, draft_open};
+use crate::rules::{name_is_free, referencable};
+use crate::{Deps, DraftRef, Failed, Failure, ReadDeps, kind_named, text};
+use worklog_domain::draft::{Draft, Listed};
+use worklog_domain::id::{DocumentId, is_id_prefix};
+use worklog_domain::ports::BrokenDraft;
+use worklog_domain::schema::address::{Address, Found};
+use worklog_domain::schema::{Content, Date, Entry, Fact, KindOf, Name, Topic, step, translate};
+use worklog_domain::session::Session;
+use worklog_domain::version::{Fields, Kind, Stamp, Version};
 
 pub enum New<'a> {
     Topic {
@@ -330,12 +330,12 @@ pub(super) fn spelled(kind: &Kind, fields: &Fields) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::testing::{
+    use crate::testing::{
         ENDED, ENDED_FACT, TOPIC, World, fact, head, head_id, open_row, refused, topic, world,
     };
-    use crate::domain::ports::{Drafts, DraftsRead, Store};
-    use crate::domain::testing::lamp_session;
-    use crate::domain::version::{Kind, ReadError};
+    use worklog_domain::ports::{Drafts, DraftsRead, Store};
+    use worklog_domain::testing::lamp_session;
+    use worklog_domain::version::{Kind, ReadError};
 
     fn stored(world: &World, id: &DocumentId) -> Draft {
         world.drafts.read(id).unwrap().expect("a draft")
@@ -404,7 +404,7 @@ mod tests {
         let (world, lantern) = world();
         let root = head(&world, &lantern);
         for (rest, body) in [("", "left\n"), (ENDED, "right\n")] {
-            let fork = crate::domain::testing::after(
+            let fork = worklog_domain::testing::after(
                 &[&root],
                 &format!("name = \"lantern\"\n{TOPIC}{rest}"),
                 body,
@@ -544,7 +544,7 @@ mod tests {
         let phone = topic(&world, "phone", "");
         let root = head(&world, &phone);
         for body in ["left\n", "right\n"] {
-            let fork = crate::domain::testing::after(
+            let fork = worklog_domain::testing::after(
                 &[&root],
                 &format!("name = \"phone\"\n{TOPIC}"),
                 body,
@@ -563,7 +563,7 @@ mod tests {
         assert!(text.contains("a claim is never edited"), "{text}");
 
         let atlas = topic(&world, "atlas", "");
-        let planted = crate::domain::testing::first(&atlas, "topic", "name = \"x\"", "\n")
+        let planted = worklog_domain::testing::first(&atlas, "topic", "name = \"x\"", "\n")
             .id
             .clone();
         world
@@ -662,11 +662,11 @@ mod tests {
         let mut expected = vec![&lantern, &phone.document];
         expected.sort();
         assert_eq!(broken, expected);
-        let opened = crate::app::context::context(&deps.read(), "/work").unwrap();
+        let opened = crate::context::context(&deps.read(), "/work").unwrap();
         assert_eq!(opened.draft_count, 3);
         let text = refused(checkout(&deps, "lantern"));
         assert!(text.contains("a draft of lantern is open"), "{text}");
-        let Err(failure) = crate::app::save::save(&deps, "lantern") else {
+        let Err(failure) = crate::save::save(&deps, "lantern") else {
             panic!("a draft that does not read must not save");
         };
         assert!(

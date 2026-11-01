@@ -3,15 +3,15 @@ use std::rc::Rc;
 
 use serde::Serialize;
 
-use crate::app::heads::{kind_of, texts, unended_heads, unread_heads};
-use crate::app::index::Topics;
-use crate::app::lookup::Lookup;
-use crate::app::rules::{Misfit, closing_edge, fits, holds_topic_open, other_holders};
-use crate::app::{Failure, ReadDeps, counted};
-use crate::domain::document::Document;
-use crate::domain::id::DocumentId;
-use crate::domain::schema::{Content, Directory, KindOf};
-use crate::domain::version::{Header, ReadError};
+use crate::heads::{kind_of, texts, unended_heads, unread_heads};
+use crate::index::Topics;
+use crate::lookup::Lookup;
+use crate::rules::{Misfit, closing_edge, fits, holds_topic_open, other_holders};
+use crate::{Failure, ReadDeps, counted};
+use worklog_domain::document::Document;
+use worklog_domain::id::DocumentId;
+use worklog_domain::schema::{Content, Directory, KindOf};
+use worklog_domain::version::{Header, ReadError};
 
 /// What a store holds that a write would have refused to make, and what a person may want
 /// to look at.
@@ -265,18 +265,18 @@ mod tests {
     use toml::Value;
 
     use super::*;
-    use crate::app::save::save;
-    use crate::app::show::{Linked, Shown, show};
-    use crate::app::testing::{
+    use crate::save::save;
+    use crate::show::{Linked, Shown, show};
+    use crate::testing::{
         ENDED, ENDED_FACT, World, claim_fields, entry, fact, fact_fields, followup, fork, head,
         list, refused, to, to_ended, topic, topic_fields, world, world_with_atlas,
     };
-    use crate::app::{amend, draft, fork as forks};
-    use crate::domain::id::{DocumentId, VersionId};
-    use crate::domain::ports::{Clock, Drafts, DraftsRead, Ids, Store, StoreRead};
-    use crate::domain::schema::{KindOf, Record};
-    use crate::domain::testing::{after, first};
-    use crate::domain::version::{Envelope, Kind, Links, ReadError, Version};
+    use crate::{amend, draft, fork as forks};
+    use worklog_domain::id::{DocumentId, VersionId};
+    use worklog_domain::ports::{Clock, Drafts, DraftsRead, Ids, Store, StoreRead};
+    use worklog_domain::schema::{KindOf, Record};
+    use worklog_domain::testing::{after, first};
+    use worklog_domain::version::{Envelope, Kind, Links, ReadError, Version};
 
     fn labeled_only(findings: Vec<Finding>) -> Vec<Finding> {
         let labeled = |found: Finding| Finding {

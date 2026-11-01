@@ -6,20 +6,20 @@ use serde::ser::SerializeStruct;
 use serde::{Serialize, Serializer};
 use toml::Value;
 
-use crate::app::draft::{draft_for, draft_label, opened, shown_as};
-use crate::app::heads::{ended_for, ended_of, holding_heads, is_forked, kind_of, row_head, texts};
-use crate::app::index::Topics;
-use crate::app::lookup::{Lookup, names_no_document};
-use crate::app::rows::{self, Reference, Row};
-use crate::app::{Failure, ReadDeps};
-use crate::domain::document::{Document, Unreadable};
-use crate::domain::draft::Draft;
-use crate::domain::id::{DocumentId, VersionId, is_id_prefix};
-use crate::domain::ports::NotRead;
-use crate::domain::schema::address::Found;
-use crate::domain::schema::translate::referred;
-use crate::domain::schema::{Content, KindOf};
-use crate::domain::version::{Header, ReadError, Stamp, Version};
+use crate::draft::{draft_for, draft_label, opened, shown_as};
+use crate::heads::{ended_for, ended_of, holding_heads, is_forked, kind_of, row_head, texts};
+use crate::index::Topics;
+use crate::lookup::{Lookup, names_no_document};
+use crate::rows::{self, Reference, Row};
+use crate::{Failure, ReadDeps};
+use worklog_domain::document::{Document, Unreadable};
+use worklog_domain::draft::Draft;
+use worklog_domain::id::{DocumentId, VersionId, is_id_prefix};
+use worklog_domain::ports::NotRead;
+use worklog_domain::schema::address::Found;
+use worklog_domain::schema::translate::referred;
+use worklog_domain::schema::{Content, KindOf};
+use worklog_domain::version::{Header, ReadError, Stamp, Version};
 
 /// A file of the document that does not read as a version.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -727,17 +727,17 @@ pub fn diff(deps: &ReadDeps, first: &str, second: Option<&str>) -> Result<Diff, 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::draft::checkout;
-    use crate::app::testing::{
+    use crate::draft::checkout;
+    use crate::testing::{
         ENDED, ENDED_FACT, REMOVED, TOPIC, World, entry, entry_fields, fact, fact_fields, followup,
         fork, head, head_id, open_row, part_of, refused, stored, to, to_ended, topic, topic_fields,
         world, world_with_atlas, written_at,
     };
-    use crate::domain::draft::Draft;
-    use crate::domain::id::VersionId;
-    use crate::domain::ports::{Clock, Drafts, DraftsRead, Store, StoreRead};
-    use crate::domain::testing::{after, first, lantern};
-    use crate::domain::version::ReadError;
+    use worklog_domain::draft::Draft;
+    use worklog_domain::id::VersionId;
+    use worklog_domain::ports::{Clock, Drafts, DraftsRead, Store, StoreRead};
+    use worklog_domain::testing::{after, first, lantern};
+    use worklog_domain::version::ReadError;
 
     fn shown_document(world: &World, address: &str) -> ShownDocument {
         match show(&world.deps().read(), address).unwrap() {
@@ -779,7 +779,7 @@ mod tests {
         let gadget = world.put("gadget", "size = 4\n", "\n");
         let deps = world.deps();
 
-        let listed = crate::app::list::topics(&deps.read(), None, true).unwrap();
+        let listed = crate::list::topics(&deps.read(), None, true).unwrap();
         for (address, id) in [("lantern", &lantern), ("atlas", &atlas)] {
             let row = (listed.iter().map(|topic| &topic.row)).find(|row| row.document == *id);
             let shown = shown_document(&world, address);
@@ -787,7 +787,7 @@ mod tests {
             assert_eq!(shown.reads_as, Some(KindOf::Topic), "{address}");
         }
 
-        let facts = crate::app::list::facts(&deps.read(), None, false).unwrap();
+        let facts = crate::list::facts(&deps.read(), None, false).unwrap();
         assert_eq!(facts[0].row.document, relay);
         assert_eq!(
             shown_document(&world, "lantern/relay-pin").reads_as,
@@ -1241,7 +1241,7 @@ mod tests {
             &[("atlas", Some(&atlas))],
         );
         let noticed = |world: &World| -> Vec<String> {
-            let found = crate::app::check::check(&world.deps().read()).unwrap();
+            let found = crate::check::check(&world.deps().read()).unwrap();
             (found.notices.into_iter())
                 .map(|finding| finding.what)
                 .collect()
@@ -1322,7 +1322,7 @@ mod tests {
         let mut draft = world.drafts.read(&lantern).unwrap().unwrap();
         "See [[ atlas ]] and [[  Not A Name ]].\n".clone_into(&mut draft.body);
         world.drafts.write(&draft).unwrap();
-        crate::app::save::save(&world.deps(), "lantern").unwrap();
+        crate::save::save(&world.deps(), "lantern").unwrap();
         assert_eq!(
             shown_document(&world, "lantern").heads[0].links,
             [
@@ -1566,11 +1566,7 @@ mod tests {
         let text = refused(diff(&world.deps().read(), "nobody", None));
         assert!(text.contains("names no document"), "{text}");
 
-        crate::app::draft::new(
-            &world.deps(),
-            &crate::app::draft::New::Topic { name: "phone" },
-        )
-        .unwrap();
+        crate::draft::new(&world.deps(), &crate::draft::New::Topic { name: "phone" }).unwrap();
         let diff = diff(&world.deps().read(), "phone", None).unwrap();
         assert_eq!(diff.label, "phone");
         let side = only_side(&diff);
@@ -1589,7 +1585,7 @@ mod tests {
             .fields
             .insert("name".to_owned(), toml::Value::from("Relay Pin"));
         world.drafts.write(&draft).unwrap();
-        let listed = crate::app::draft::drafts(&deps.read()).unwrap();
+        let listed = crate::draft::drafts(&deps.read()).unwrap();
         assert_eq!(open_row(&listed[0]).label, "Relay Pin");
 
         let diff = diff(&deps.read(), &open_row(&listed[0]).label, None).unwrap();
@@ -1616,7 +1612,7 @@ mod tests {
         let mut draft = world.drafts.read(&lantern).unwrap().unwrap();
         draft.fields.remove("name");
         world.drafts.write(&draft).unwrap();
-        let listed = crate::app::draft::drafts(&deps.read()).unwrap();
+        let listed = crate::draft::drafts(&deps.read()).unwrap();
         assert_eq!(open_row(&listed[0]).label, lantern.short());
         assert_eq!(
             diff(&deps.read(), "lantern", None).unwrap().label,

@@ -4,12 +4,12 @@ use std::fmt;
 use serde::Serialize;
 use toml::Value;
 
-use crate::domain::id::{DocumentId, VersionId};
-use crate::domain::ports::{
+use worklog_domain::id::{DocumentId, VersionId};
+use worklog_domain::ports::{
     Clock, Drafts, DraftsRead, Host, HostRead, Ids, Store, StoreError, Usage, UsageRead,
 };
-use crate::domain::schema::{Date, Directory, KindOf, SchemaError};
-use crate::domain::version::Kind;
+use worklog_domain::schema::{Date, Directory, KindOf, SchemaError};
+use worklog_domain::version::Kind;
 
 pub mod activity;
 pub mod amend;
@@ -34,8 +34,8 @@ pub mod save;
 pub mod search;
 pub mod setup;
 pub mod show;
-#[cfg(test)]
-pub(crate) mod testing;
+#[cfg(any(test, feature = "testing"))]
+pub mod testing;
 pub mod upgrade;
 pub mod usage;
 
@@ -45,7 +45,7 @@ pub use rows::{FollowupRow, Reference, Row, TriggerShown};
 /// Read access to stored documents, drafts, usage, host state, and the clock.
 ///
 /// ```
-/// use worklog::app::{Failure, ReadDeps, context, draft, list, show, usage};
+/// use worklog_app::{Failure, ReadDeps, context, draft, list, show, usage};
 /// fn read(deps: &ReadDeps) -> Result<(), Failure> {
 ///     list::facts(deps, None, false)?;
 ///     draft::drafts(deps)?;
@@ -57,59 +57,62 @@ pub use rows::{FollowupRow, Reference, Row, TriggerShown};
 /// ```
 ///
 /// ```
-/// use worklog::{
-///     app::{ReadDeps, save},
-///     domain::{draft::Draft, id::DocumentId, usage::Invocation, version::Version},
-/// };
+/// use worklog_app::{ReadDeps, save};
+/// use worklog_domain::{draft::Draft, id::DocumentId, usage::Invocation, version::Version};
 /// fn inputs(_: &ReadDeps, _: &Version, _: &Draft, _: &DocumentId, _: &Invocation) {
 ///     let _ = save::save;
 /// }
 /// ```
 ///
 /// ```compile_fail
-/// use worklog::{app::ReadDeps, domain::version::Version};
+/// use worklog_app::ReadDeps;
+/// use worklog_domain::version::Version;
 /// fn write(deps: &ReadDeps, version: &Version) {
 ///     deps.store.put(version);
 /// }
 /// ```
 ///
 /// ```compile_fail
-/// use worklog::{app::ReadDeps, domain::draft::Draft};
+/// use worklog_app::ReadDeps;
+/// use worklog_domain::draft::Draft;
 /// fn write(deps: &ReadDeps, draft: &Draft) {
 ///     deps.drafts.write(draft);
 /// }
 /// ```
 ///
 /// ```compile_fail
-/// use worklog::{app::ReadDeps, domain::id::DocumentId};
+/// use worklog_app::ReadDeps;
+/// use worklog_domain::id::DocumentId;
 /// fn delete(deps: &ReadDeps, id: &DocumentId) {
 ///     deps.drafts.delete(id);
 /// }
 /// ```
 ///
 /// ```compile_fail
-/// use worklog::{app::ReadDeps, domain::usage::Invocation};
+/// use worklog_app::ReadDeps;
+/// use worklog_domain::usage::Invocation;
 /// fn record(deps: &ReadDeps, invocation: &Invocation) {
 ///     deps.usage.record(invocation);
 /// }
 /// ```
 ///
 /// ```compile_fail
-/// use worklog::{app::ReadDeps, domain::id::DocumentId};
+/// use worklog_app::ReadDeps;
+/// use worklog_domain::id::DocumentId;
 /// fn bind(deps: &ReadDeps, id: &DocumentId) {
 ///     deps.host.bind(id);
 /// }
 /// ```
 ///
 /// ```compile_fail
-/// use worklog::app::ReadDeps;
+/// use worklog_app::ReadDeps;
 /// fn mint(deps: &ReadDeps) {
 ///     deps.ids.mint();
 /// }
 /// ```
 ///
 /// ```compile_fail
-/// use worklog::app::{ReadDeps, save};
+/// use worklog_app::{ReadDeps, save};
 /// fn change(deps: &ReadDeps) {
 ///     save::save(deps, "lantern");
 /// }
@@ -210,25 +213,26 @@ fn kind_named(kind: KindOf) -> Kind {
     Kind::parse(kind.word()).expect("a kind word is a kind")
 }
 
-pub(super) fn text(value: impl Into<String>) -> Value {
+pub(crate) fn text(value: impl Into<String>) -> Value {
     Value::String(value.into())
 }
 
 /// Keeps the first failure of a closure that cannot return one.
 #[derive(Default)]
-pub(super) struct Failed(RefCell<Option<Failure>>);
+pub(crate) struct Failed(RefCell<Option<Failure>>);
 
 impl Failed {
-    pub(super) fn keep(&self, failure: Failure) {
+    pub(crate) fn keep(&self, failure: Failure) {
         self.0.borrow_mut().get_or_insert(failure);
     }
 
-    pub(super) fn done(self) -> Result<(), Failure> {
+    pub(crate) fn done(self) -> Result<(), Failure> {
         self.0.into_inner().map_or(Ok(()), Err)
     }
 }
 
-pub(crate) fn counted(count: usize, one: &str, several: &str) -> String {
+#[must_use]
+pub fn counted(count: usize, one: &str, several: &str) -> String {
     format!("{count} {}", if count == 1 { one } else { several })
 }
 
@@ -272,12 +276,12 @@ impl ReadDeps<'_> {
         }
     }
 
-    pub(super) fn home(&self) -> Result<Option<String>, Failure> {
+    pub(crate) fn home(&self) -> Result<Option<String>, Failure> {
         let home = self.host.home()?;
         Ok(home.map(|home| self.on_host(&home)).transpose()?)
     }
 
-    pub(super) fn directory(&self, given: &str) -> Result<Directory, Failure> {
+    pub(crate) fn directory(&self, given: &str) -> Result<Directory, Failure> {
         Directory::on_host(&self.on_host(given)?, self.home()?.as_deref())
             .map_err(|error| Failure::Usage(format!("{given:?}: {error}")))
     }
@@ -286,13 +290,13 @@ impl ReadDeps<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::testing::{
+    use worklog_domain::testing::{
         FixedClock, FixedHost, MemoryDrafts, MemoryStore, MemoryUsage, SequenceIds, atlas,
     };
 
     #[test]
     fn a_listing_reads_no_body() {
-        use crate::app::testing::{DONE, World, entry, fact, followup, topic};
+        use crate::testing::{DONE, World, entry, fact, followup, topic};
         type Listing = fn(&ReadDeps) -> Result<(), Failure>;
         let listings: [(&str, Listing); 12] = [
             ("topics", |deps| list::topics(deps, None, false).map(drop)),

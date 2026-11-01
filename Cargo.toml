@@ -1,7 +1,7 @@
 [workspace]
-members = ["crates/domain"]
+members = ["crates/domain", "crates/app"]
 # Every member, so a plain `cargo test` covers the crates as well as the root.
-default-members = [".", "crates/domain"]
+default-members = [".", "crates/domain", "crates/app"]
 
 [workspace.package]
 version = "0.5.12"
@@ -16,6 +16,7 @@ missing_errors_doc = "allow"
 
 [workspace.dependencies]
 worklog-domain = { path = "crates/domain" }
+worklog-app = { path = "crates/app" }
 blake3 = "1"
 # Without `clock`, which reads the time.
 chrono = { version = "0.4", default-features = false, features = ["std"] }
@@ -36,6 +37,7 @@ workspace = true
 
 [dependencies]
 worklog-domain.workspace = true
+worklog-app.workspace = true
 askama = "0.16"
 blake3.workspace = true
 clap = { version = "4", features = ["derive", "wrap_help"] }
@@ -46,7 +48,6 @@ httparse = "1"
 # The cache of the store's parsed tree, read whole by every command.
 postcard = { version = "1", default-features = false, features = ["use-std"] }
 pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
-regex = "1"
 rustix = { version = "1.1.4", features = ["system"] }
 serde.workspace = true
 # preserve_order so a value read back keeps the order its keys were printed in.
@@ -61,6 +62,7 @@ ureq = { version = "3", default-features = false, features = ["rustls"] }
 
 [dev-dependencies]
 worklog-domain = { workspace = true, features = ["testing"] }
+worklog-app = { workspace = true, features = ["testing"] }
 # A test shrinks its sockets' buffers, so a page of a few hundred kilobytes fills them.
 rustix = { version = "1.1.4", features = ["net"] }
 assert_cmd = "2"

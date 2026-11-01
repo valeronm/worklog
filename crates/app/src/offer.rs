@@ -4,15 +4,15 @@ use std::cmp::Reverse;
 use std::collections::BTreeSet;
 use std::rc::Rc;
 
-use crate::app::heads::{ended_for, kind_of, row_head};
-use crate::app::index::Topics;
-use crate::app::lookup::{Lookup, Names, write_gate};
-use crate::app::machines::machine_topics;
-use crate::app::rows::{Shown, row_at, urgency};
-use crate::app::{Failure, ReadDeps};
-use crate::domain::document::Document;
-use crate::domain::id::DocumentId;
-use crate::domain::schema::{Content, Date, KindOf};
+use crate::heads::{ended_for, kind_of, row_head};
+use crate::index::Topics;
+use crate::lookup::{Lookup, Names, write_gate};
+use crate::machines::machine_topics;
+use crate::rows::{Shown, row_at, urgency};
+use crate::{Failure, ReadDeps};
+use worklog_domain::document::Document;
+use worklog_domain::id::DocumentId;
+use worklog_domain::schema::{Content, Date, KindOf};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Wanted {
@@ -150,15 +150,15 @@ fn listed(shown: &Shown, today: Date) -> Place {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::testing::{
+    use crate::testing::{
         DONE, ENDED, ENDED_FACT, REMOVED, World, claim_fields, entry, fact, fact_fields, followup,
         fork, found, head, topic, world, written_at,
     };
-    use crate::domain::id::VersionId;
-    use crate::domain::ports::Store;
-    use crate::domain::schema::address::Found;
-    use crate::domain::testing::first;
-    use crate::domain::version::ReadError;
+    use worklog_domain::id::VersionId;
+    use worklog_domain::ports::Store;
+    use worklog_domain::schema::address::Found;
+    use worklog_domain::testing::first;
+    use worklog_domain::version::ReadError;
 
     const NAMED: [KindOf; 4] = [KindOf::Topic, KindOf::Fact, KindOf::Entry, KindOf::Followup];
 
@@ -366,7 +366,7 @@ mod tests {
             &fact_fields(&lantern, "fuse", "Pin four", ENDED_FACT),
         );
         let wick = fact(&world, &lantern, "wick", "");
-        crate::app::draft::checkout(&world.deps(), "lantern/wick").unwrap();
+        crate::draft::checkout(&world.deps(), "lantern/wick").unwrap();
         let case = fact(&world, &lantern, "case", "");
         (world.store).plant_unreadable(&case, VersionId::of(b"damaged"), ReadError::Corrupt);
         let cord = fact(&world, &lantern, "cord", ENDED_FACT);
@@ -394,7 +394,7 @@ mod tests {
         fact(&world, &lantern, "shade", ENDED_FACT);
         fact(&world, &lantern, "fuse", ENDED_FACT);
         fact(&world, &lantern, "dimmer", "idea = true\n");
-        crate::app::draft::checkout(&world.deps(), "lantern/relay").unwrap();
+        crate::draft::checkout(&world.deps(), "lantern/relay").unwrap();
         let unread = fact(&world, &lantern, "case", ENDED_FACT);
         fork(&world, &unread, "name = 4\n");
 

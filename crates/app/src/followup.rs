@@ -1,16 +1,16 @@
 use serde::{Serialize, Serializer};
 use toml::Value;
 
-use crate::app::draft::{named, open_draft};
-use crate::app::live::open;
-use crate::app::lookup::Lookup;
-use crate::app::rules::referencable;
-use crate::app::save::stepped;
-use crate::app::{Deps, DraftRef, Failure, Written, day_given, kind_named, text};
-use crate::domain::draft::Draft;
-use crate::domain::id::DocumentId;
-use crate::domain::schema::{Content, KindOf};
-use crate::domain::version::Fields;
+use crate::draft::{named, open_draft};
+use crate::live::open;
+use crate::lookup::Lookup;
+use crate::rules::referencable;
+use crate::save::stepped;
+use crate::{Deps, DraftRef, Failure, Written, day_given, kind_named, text};
+use worklog_domain::draft::Draft;
+use worklog_domain::id::DocumentId;
+use worklog_domain::schema::{Content, KindOf};
+use worklog_domain::version::Fields;
 
 pub enum TriggerArg<'a> {
     LookAgain { on: &'a str, why: &'a str },
@@ -157,14 +157,14 @@ pub fn set_trigger(deps: &Deps, address: &str, trigger: &TriggerArg) -> Result<W
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::heads::read_or_skip;
-    use crate::app::save::save;
-    use crate::app::testing::{World, head, refused, world_with_atlas};
-    use crate::domain::id::DocumentId;
-    use crate::domain::ports::{Drafts, DraftsRead};
-    use crate::domain::schema::{Content, Trigger};
+    use crate::heads::read_or_skip;
+    use crate::save::save;
+    use crate::testing::{World, head, refused, world_with_atlas};
+    use worklog_domain::id::DocumentId;
+    use worklog_domain::ports::{Drafts, DraftsRead};
+    use worklog_domain::schema::{Content, Trigger};
 
-    fn followup(world: &World, id: &DocumentId) -> crate::domain::schema::Followup {
+    fn followup(world: &World, id: &DocumentId) -> worklog_domain::schema::Followup {
         let head = head(world, id);
         match read_or_skip(&head).unwrap().content {
             Content::Followup(followup) => followup,
@@ -346,7 +346,7 @@ mod tests {
         let text = refused(save(&deps, apart.as_str()));
         assert!(text.contains("is not among `topics`"), "{text}");
 
-        crate::app::amend::end(&deps, "atlas", "retired", "n", None).unwrap();
+        crate::amend::end(&deps, "atlas", "retired", "n", None).unwrap();
         let ended = filled(&["atlas"]);
         let text = refused(save(&deps, ended.as_str()));
         assert!(text.contains("topics: atlas is ended"), "{text}");
@@ -422,7 +422,7 @@ mod tests {
         );
 
         let triggered = written(new_followup(&deps, &plain(&["lantern"], "Check"))).document;
-        crate::app::draft::checkout(&deps, triggered.as_str()).unwrap();
+        crate::draft::checkout(&deps, triggered.as_str()).unwrap();
         let text = refused(fill(&triggered, &|fields| {
             fields.remove("look_again");
             fields.remove("why");
@@ -432,15 +432,15 @@ mod tests {
             "{text}"
         );
 
-        let held = crate::app::testing::followup(&world, &[&lantern], "Old", "");
-        crate::app::draft::checkout(&deps, held.as_str()).unwrap();
+        let held = crate::testing::followup(&world, &[&lantern], "Old", "");
+        crate::draft::checkout(&deps, held.as_str()).unwrap();
         fill(&held, &|fields| {
             fields.insert("summary".to_owned(), "Older".into());
         })
         .unwrap();
         assert_eq!(followup(&world, &held).trigger, None);
-        crate::app::amend::end(&deps, held.as_str(), "done", "", None).unwrap();
-        crate::app::amend::reopen(&deps, held.as_str()).unwrap();
+        crate::amend::end(&deps, held.as_str(), "done", "", None).unwrap();
+        crate::amend::reopen(&deps, held.as_str()).unwrap();
         assert_eq!(followup(&world, &held).trigger, None);
     }
 
@@ -463,7 +463,7 @@ mod tests {
         ));
         assert!(text.contains("is not a followup"), "{text}");
         let id = written(new_followup(&deps, &plain(&["lantern"], "Check"))).document;
-        crate::app::amend::end(&deps, id.as_str(), "done", "", None).unwrap();
+        crate::amend::end(&deps, id.as_str(), "done", "", None).unwrap();
         let text = refused(set_trigger(
             &deps,
             id.as_str(),
@@ -490,7 +490,7 @@ mod tests {
         let (world, _, _) = world_with_atlas();
         let deps = world.deps();
         let id = written(new_followup(&deps, &plain(&["lantern"], "Check"))).document;
-        crate::app::draft::checkout(&deps, id.as_str()).unwrap();
+        crate::draft::checkout(&deps, id.as_str()).unwrap();
         let text = refused(set_trigger(
             &deps,
             id.as_str(),
@@ -517,7 +517,7 @@ mod tests {
         what.entry = Some("2026-10-08-lamp-driver");
         let stored = followup(&world, &written(new_followup(&deps, &what)).document);
         assert_eq!(stored.entry, Some(entry));
-        crate::app::amend::end(&deps, "atlas", "retired", "n", None).unwrap();
+        crate::amend::end(&deps, "atlas", "retired", "n", None).unwrap();
         let text = refused(new_followup(&deps, &plain(&["atlas"], "Check")));
         assert!(text.contains("is ended"), "{text}");
     }

@@ -3,17 +3,17 @@ use std::rc::Rc;
 
 use serde::Serialize;
 
-use crate::app::heads::{
+use crate::heads::{
     Read, ended_for, filed_on, held_under, is_forked, label_of, labeling_topic, row_head,
 };
-use crate::app::index::Topics;
-use crate::app::lookup::Lookup;
-use crate::app::{Failure, ReadDeps};
-use crate::domain::document::Document;
-use crate::domain::id::DocumentId;
-use crate::domain::schema::kind::Role;
-use crate::domain::schema::{Content, Date, KindOf, Record, Trigger};
-use crate::domain::version::Header;
+use crate::index::Topics;
+use crate::lookup::Lookup;
+use crate::{Failure, ReadDeps};
+use worklog_domain::document::Document;
+use worklog_domain::id::DocumentId;
+use worklog_domain::schema::kind::Role;
+use worklog_domain::schema::{Content, Date, KindOf, Record, Trigger};
+use worklog_domain::version::Header;
 
 /// Another document as a result refers to it: the id the referring document stores, the
 /// label the document referred to has now, or its short id, and the reason it ended with.
@@ -296,13 +296,13 @@ pub(super) fn shown<'d>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::lookup::Stored;
-    use crate::app::testing::{
+    use crate::lookup::Stored;
+    use crate::testing::{
         Counting, ENDED, ENDED_FACT, REMOVED, TOPIC, World, entry, fact, fact_fields, followup,
         head, part_of, referred, to, to_ended, topic, topic_fields, world_with_atlas, written_at,
     };
-    use crate::domain::ports::{Store, StoreRead};
-    use crate::domain::testing::first;
+    use worklog_domain::ports::{Store, StoreRead};
+    use worklog_domain::testing::first;
 
     fn row_of(world: &World, id: &DocumentId) -> Option<Row> {
         let topics = Topics::load(&world.lookup()).unwrap();

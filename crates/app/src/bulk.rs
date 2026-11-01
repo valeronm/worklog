@@ -1,14 +1,14 @@
 use toml::Value;
 
-use crate::app::live::{Open, open};
-use crate::app::lookup::Lookup;
-use crate::app::rules::referencable;
-use crate::app::save::Admitted;
-use crate::app::{Deps, Failure, Written, text};
-use crate::domain::id::DocumentId;
-use crate::domain::schema::Content;
-use crate::domain::schema::kind::Role;
-use crate::domain::version::Fields;
+use crate::live::{Open, open};
+use crate::lookup::Lookup;
+use crate::rules::referencable;
+use crate::save::Admitted;
+use crate::{Deps, Failure, Written, text};
+use worklog_domain::id::DocumentId;
+use worklog_domain::schema::Content;
+use worklog_domain::schema::kind::Role;
+use worklog_domain::version::Fields;
 
 /// Writes nothing unless every document passes its checks.
 pub fn move_to(
@@ -80,9 +80,9 @@ fn moved(target: &Open, from: &DocumentId, to: &DocumentId) -> Option<Fields> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::testing::{World, fact, head, head_id, refused, world_with_atlas};
-    use crate::domain::id::DocumentId;
-    use crate::domain::ports::Store;
+    use crate::testing::{World, fact, head, head_id, refused, world_with_atlas};
+    use worklog_domain::id::DocumentId;
+    use worklog_domain::ports::Store;
 
     fn followup(
         world: &World,
@@ -180,7 +180,7 @@ mod tests {
         assert!(matches!(result, Err(Failure::Usage(_))), "{result:?}");
     }
 
-    fn names_of(world: &World, ids: &[&DocumentId]) -> Vec<crate::domain::id::VersionId> {
+    fn names_of(world: &World, ids: &[&DocumentId]) -> Vec<worklog_domain::id::VersionId> {
         ids.iter().map(|id| head_id(world, id)).collect()
     }
 
@@ -225,7 +225,7 @@ mod tests {
         let (world, lantern, _) = world_with_atlas();
         let lamp = fact(&world, &lantern, "lamp-pin", "");
         let relay = fact(&world, &lantern, "relay-pin", "");
-        crate::app::draft::checkout(&world.deps(), "lantern/relay-pin").unwrap();
+        crate::draft::checkout(&world.deps(), "lantern/relay-pin").unwrap();
         let before = names_of(&world, &[&lamp, &relay]);
         let text = refused(move_to(
             &world.deps(),
@@ -260,12 +260,12 @@ mod tests {
         let (world, lantern, _) = world_with_atlas();
         let lamp = fact(&world, &lantern, "lamp-pin", "");
         let relay = fact(&world, &lantern, "relay-pin", "");
-        let planted = crate::domain::testing::first(&relay, "fact", "name = \"x\"", "\n")
+        let planted = worklog_domain::testing::first(&relay, "fact", "name = \"x\"", "\n")
             .id
             .clone();
         world
             .store
-            .plant_unreadable(&relay, planted, crate::domain::version::ReadError::Corrupt);
+            .plant_unreadable(&relay, planted, worklog_domain::version::ReadError::Corrupt);
         let before = names_of(&world, &[&lamp, &relay]);
         let text = refused(move_to(
             &world.deps(),
@@ -292,7 +292,7 @@ mod tests {
                 "name = \"relay-pin\"\ntopic = \"{atlas}\"\ncreated = 2026-09-04\n\
                  confirmed = 2026-09-04\nsummary = \"s\"\n"
             );
-            let version = crate::domain::testing::after(&[&root], &fields, body);
+            let version = worklog_domain::testing::after(&[&root], &fields, body);
             world.store.put(&version).unwrap();
         }
         let before = names_of(&world, &[&lamp, &relay]);

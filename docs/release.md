@@ -11,10 +11,10 @@ latest release from the redirect and install from it.
    `--locked`.
 2. `cargo fmt --all --check`, `cargo clippy --workspace --all-targets
    --all-features -- -D warnings` and `cargo test --workspace` green
-   locally, and for the domain built alone `cargo clippy -p
-   worklog-domain -- -D warnings` and `cargo check -p worklog-domain
-   --all-targets`; CI runs the same, and clippy and the tests on macOS
-   too, which no local check covers.
+   locally, and for the domain and the app built alone `cargo clippy -p
+   worklog-domain -p worklog-app -- -D warnings` and `cargo check -p
+   worklog-domain -p worklog-app --all-targets`; CI runs the same, and
+   clippy and the tests on macOS too, which no local check covers.
 3. Push `main` first, then the tag:
 
    ```

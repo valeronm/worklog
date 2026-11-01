@@ -1,9 +1,9 @@
 //! Recording that a command ran, the one write that stores no version.
 
-use crate::app::lookup::Lookup;
-use crate::app::{Deps, Failure};
-use crate::domain::release::Built;
-use crate::domain::usage::Invocation;
+use crate::lookup::Lookup;
+use crate::{Deps, Failure};
+use worklog_domain::release::Built;
+use worklog_domain::usage::Invocation;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Outcome {
@@ -47,12 +47,12 @@ pub fn record(deps: &Deps, run: &Run, outcome: Outcome) -> Result<(), Failure> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::testing::{NOW, World, topic};
-    use crate::domain::id::VersionId;
-    use crate::domain::ports::UsageRead as _;
-    use crate::domain::testing::{lamp_session, version};
-    use crate::domain::usage::RunFilter;
-    use crate::domain::version::{ReadError, Stamp};
+    use crate::testing::{NOW, World, topic};
+    use worklog_domain::id::VersionId;
+    use worklog_domain::ports::UsageRead as _;
+    use worklog_domain::testing::{lamp_session, version};
+    use worklog_domain::usage::RunFilter;
+    use worklog_domain::version::{ReadError, Stamp};
 
     fn run<'a>(command: &'a str, working_directory: &'a str) -> Run<'a> {
         Run {

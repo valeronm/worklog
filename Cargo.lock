@@ -1324,7 +1324,6 @@ dependencies = [
  "httparse",
  "postcard",
  "pulldown-cmark",
- "regex",
  "rustix",
  "serde",
  "serde_json",
@@ -1333,6 +1332,18 @@ dependencies = [
  "toml",
  "toml_edit",
  "ureq",
+ "worklog-app",
+ "worklog-domain",
+]
+
+[[package]]
+name = "worklog-app"
+version = "0.5.12"
+dependencies = [
+ "chrono",
+ "regex",
+ "serde",
+ "toml",
  "worklog-domain",
 ]
 

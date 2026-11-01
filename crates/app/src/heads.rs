@@ -2,12 +2,12 @@ use std::collections::BTreeSet;
 
 use toml::Value;
 
-use crate::domain::document::{Document, State};
-use crate::domain::id::DocumentId;
-use crate::domain::schema::address::displayed;
-use crate::domain::schema::graph::Edges;
-use crate::domain::schema::{Content, Directory, KindOf, Name, Record, SchemaError};
-use crate::domain::version::{Fields, Header};
+use worklog_domain::document::{Document, State};
+use worklog_domain::id::DocumentId;
+use worklog_domain::schema::address::displayed;
+use worklog_domain::schema::graph::Edges;
+use worklog_domain::schema::{Content, Directory, KindOf, Name, Record, SchemaError};
+use worklog_domain::version::{Fields, Header};
 
 pub(super) fn read_or_skip(head: &Header) -> Option<Record> {
     Record::read(&head.envelope.kind, &head.fields).ok()

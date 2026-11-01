@@ -9,7 +9,7 @@
 //! what the read use cases return as pages, and `render` holds what `cli` and `web` show the
 //! same way.
 
-pub mod app;
+pub use worklog_app as app;
 pub mod cli;
 pub use worklog_domain as domain;
 pub mod render;

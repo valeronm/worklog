@@ -1,12 +1,12 @@
 use std::rc::Rc;
 
-use crate::app::draft::is_drafted;
-use crate::app::lookup::{Lookup, refuse_ended};
-use crate::app::save::{Admitted, stepped};
-use crate::app::{Deps, Failure, Written};
-use crate::domain::id::DocumentId;
-use crate::domain::schema::{Record, step};
-use crate::domain::version::{Fields, Version};
+use crate::draft::is_drafted;
+use crate::lookup::{Lookup, refuse_ended};
+use crate::save::{Admitted, stepped};
+use crate::{Deps, Failure, Written};
+use worklog_domain::id::DocumentId;
+use worklog_domain::schema::{Record, step};
+use worklog_domain::version::{Fields, Version};
 
 pub(super) struct Open {
     pub id: DocumentId,

@@ -2,14 +2,14 @@ use std::borrow::Borrow;
 use std::fmt;
 use std::rc::Rc;
 
-use crate::app::Failure;
-use crate::app::heads::{all_ended, kind_of, readable_heads, unended_heads};
-use crate::app::lookup::{Lookup, no_such_document, not_a};
-use crate::domain::document::{Document, State};
-use crate::domain::id::DocumentId;
-use crate::domain::schema::graph::{Edges, closes_cycle};
-use crate::domain::schema::kind::{Reference, Role};
-use crate::domain::schema::{Claim, Content, KindOf};
+use crate::Failure;
+use crate::heads::{all_ended, kind_of, readable_heads, unended_heads};
+use crate::lookup::{Lookup, no_such_document, not_a};
+use worklog_domain::document::{Document, State};
+use worklog_domain::id::DocumentId;
+use worklog_domain::schema::graph::{Edges, closes_cycle};
+use worklog_domain::schema::kind::{Reference, Role};
+use worklog_domain::schema::{Claim, Content, KindOf};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Misfit {
@@ -196,9 +196,9 @@ fn claims_naming(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::testing::{ENDED, World, entry, head, topic, topic_fields};
-    use crate::domain::ports::Store;
-    use crate::domain::testing::after;
+    use crate::testing::{ENDED, World, entry, head, topic, topic_fields};
+    use worklog_domain::ports::Store;
+    use worklog_domain::testing::after;
 
     #[test]
     fn a_referencable_document_is_a_topic_with_a_head_that_is_not_ended() {

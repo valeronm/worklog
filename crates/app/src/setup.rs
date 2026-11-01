@@ -1,15 +1,15 @@
 use std::fmt;
 
-use crate::app::draft::usage;
-use crate::app::lookup::Lookup;
-use crate::app::machines::{PLACEHOLDER, topic_named};
-use crate::app::save::stepped;
-use crate::app::{Deps, Failure, kind_named, text};
-use crate::domain::id::DocumentId;
-use crate::domain::ports::{Host, HostRead, StoreError};
-use crate::domain::schema::{KindOf, Name};
-use crate::domain::session::Session;
-use crate::domain::version::Fields;
+use crate::draft::usage;
+use crate::lookup::Lookup;
+use crate::machines::{PLACEHOLDER, topic_named};
+use crate::save::stepped;
+use crate::{Deps, Failure, kind_named, text};
+use worklog_domain::id::DocumentId;
+use worklog_domain::ports::{Host, HostRead, StoreError};
+use worklog_domain::schema::{KindOf, Name};
+use worklog_domain::session::Session;
+use worklog_domain::version::Fields;
 
 const INIT: &str = "init";
 const JOIN: &str = "join";
@@ -180,14 +180,14 @@ fn made(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::testing::{
+    use crate::testing::{
         ENDED, World, fork, found, head, record, refused, topic, topic_fields, world,
     };
-    use crate::domain::ports::{Store, StoreRead};
-    use crate::domain::schema::SchemaError;
-    use crate::domain::schema::address::Found;
-    use crate::domain::testing::{first, first_minted, lantern};
-    use crate::domain::version::Kind;
+    use worklog_domain::ports::{Store, StoreRead};
+    use worklog_domain::schema::SchemaError;
+    use worklog_domain::schema::address::Found;
+    use worklog_domain::testing::{first, first_minted, lantern};
+    use worklog_domain::version::Kind;
 
     fn bare() -> World {
         let mut world = World::new();

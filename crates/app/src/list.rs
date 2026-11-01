@@ -4,18 +4,18 @@ use std::rc::Rc;
 
 use serde::Serialize;
 
-use crate::app::heads::{ended_of, is_forked, label_or_short};
-use crate::app::index::Topics;
-use crate::app::lookup::Lookup;
-use crate::app::rows::{
+use crate::heads::{ended_of, is_forked, label_or_short};
+use crate::index::Topics;
+use crate::lookup::Lookup;
+use crate::rows::{
     Filings, FollowupRow, Reference, Row, by_label, documents, followup_rows, reading, row, shown,
 };
-use crate::app::rules::{claims_of, claims_placing};
-use crate::app::{Failure, ReadDeps, day_given};
-use crate::domain::document::Document;
-use crate::domain::id::{DocumentId, VersionId};
-use crate::domain::schema::{Claim, Content, Date, KindOf};
-use crate::domain::version::Stamp;
+use crate::rules::{claims_of, claims_placing};
+use crate::{Failure, ReadDeps, day_given};
+use worklog_domain::document::Document;
+use worklog_domain::id::{DocumentId, VersionId};
+use worklog_domain::schema::{Claim, Content, Date, KindOf};
+use worklog_domain::version::Stamp;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct TopicRow {
@@ -359,15 +359,15 @@ pub fn forks(deps: &ReadDeps) -> Result<Vec<ForkRow>, Failure> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::rows::TriggerShown;
-    use crate::app::testing::{
+    use crate::rows::TriggerShown;
+    use crate::testing::{
         ENDED, ENDED_FACT, World, claim_fields, entry, fact, fact_fields, followup, head, labels,
         part_of, referred, refused, to, topic, topic_fields, world, written_at,
     };
-    use crate::domain::id::VersionId;
-    use crate::domain::ports::{Store, StoreRead};
-    use crate::domain::testing::first;
-    use crate::domain::version::Version;
+    use worklog_domain::id::VersionId;
+    use worklog_domain::ports::{Store, StoreRead};
+    use worklog_domain::testing::first;
+    use worklog_domain::version::Version;
 
     const DATED: &str = "look_again = 2026-10-20\nwhy = \"w\"\n";
 
@@ -1271,7 +1271,7 @@ mod tests {
         world.store.plant_unreadable(
             &sketch,
             VersionId::of(b"damaged"),
-            crate::domain::version::ReadError::Corrupt,
+            worklog_domain::version::ReadError::Corrupt,
         );
         let deps = world.deps();
 
@@ -1298,7 +1298,7 @@ mod tests {
             );
         }
         assert_eq!(
-            crate::app::check::check(&deps.read()).unwrap().fork_count,
+            crate::check::check(&deps.read()).unwrap().fork_count,
             rows.len()
         );
     }

@@ -3,13 +3,13 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Serialize;
 
-use crate::app::lookup::Lookup;
-use crate::app::rows::{Reference, reading};
-use crate::app::{Failure, ReadDeps, day_given};
-use crate::domain::id::DocumentId;
-use crate::domain::schema::address::Found;
-use crate::domain::session::Session;
-use crate::domain::usage::{Agent, Invocation, RunFilter};
+use crate::lookup::Lookup;
+use crate::rows::{Reference, reading};
+use crate::{Failure, ReadDeps, day_given};
+use worklog_domain::id::DocumentId;
+use worklog_domain::schema::address::Found;
+use worklog_domain::session::Session;
+use worklog_domain::usage::{Agent, Invocation, RunFilter};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Refusal {
@@ -192,15 +192,15 @@ mod tests {
     use std::cell::RefCell;
 
     use super::*;
-    use crate::app::amend::rename;
-    use crate::app::testing::{
+    use crate::amend::rename;
+    use crate::testing::{
         ENDED, World, by_no_agent, counted, fact, refused, to, to_ended, topic, topic_fields,
         world_with_atlas,
     };
-    use crate::domain::id::DocumentId;
-    use crate::domain::ports::{StoreError, Usage, UsageRead};
-    use crate::domain::testing::ran;
-    use crate::domain::version::Stamp;
+    use worklog_domain::id::DocumentId;
+    use worklog_domain::ports::{StoreError, Usage, UsageRead};
+    use worklog_domain::testing::ran;
+    use worklog_domain::version::Stamp;
 
     fn logged(world: &World, phone: &DocumentId) {
         for (machine, command, day) in [
