@@ -8,8 +8,8 @@ use super::render::{Output, Render, Stopped, output};
 use super::sandbox::Edit;
 use super::skill::SKILL;
 use super::{Environment, NAME, hook, sandbox};
-use crate::app::Failure;
-use crate::wiring::{self, Agent};
+use worklog_app::Failure;
+use worklog_wiring::Agent;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub(super) struct Placed {
@@ -61,7 +61,7 @@ impl Done {
         drafts: &Path,
     ) -> Result<(), Failure> {
         if planned.is_some() {
-            wiring::make_drafts(drafts)?;
+            worklog_wiring::make_drafts(drafts)?;
         }
         self.config(agent, planned)
     }
@@ -111,10 +111,10 @@ fn present(known: Vec<Agent>) -> Result<Vec<Agent>, Failure> {
 
 /// The agents present on this host, by name; none on a host with no home directory.
 pub(super) fn present_names(environment: &Environment) -> Result<Vec<&'static str>, Failure> {
-    if wiring::homes(environment.variable)?.is_empty() {
+    if worklog_wiring::homes(environment.variable)?.is_empty() {
         return Ok(Vec::new());
     }
-    let known = wiring::agents(environment.variable)?;
+    let known = worklog_wiring::agents(environment.variable)?;
     let present = known.iter().filter(|agent| agent.is_present());
     Ok(present.map(Agent::name).collect())
 }
@@ -154,8 +154,8 @@ pub(super) struct Placing {
 impl Placing {
     pub(super) fn on_this_host(environment: &Environment) -> Result<Placing, Failure> {
         let binary = environment.binary()?;
-        let agents = present(wiring::agents(environment.variable)?)?;
-        let drafts = wiring::drafts(environment.variable)?;
+        let agents = present(worklog_wiring::agents(environment.variable)?)?;
+        let drafts = worklog_wiring::drafts(environment.variable)?;
         let planned = planned(
             agents,
             |agent| hook::installed(agent, binary),
@@ -211,8 +211,8 @@ struct Refreshed {
 
 impl Refreshing {
     pub(super) fn on_this_host(environment: &Environment) -> Result<Refreshing, Failure> {
-        let agents = wiring::agents(environment.variable)?;
-        let drafts = wiring::drafts(environment.variable)?;
+        let agents = worklog_wiring::agents(environment.variable)?;
+        let drafts = worklog_wiring::drafts(environment.variable)?;
         let refreshed = |agent: Agent| {
             let skill = agent.read_skill()?;
             let (holds_hook, hooks) = hook::refreshed(&agent, || environment.binary())?;
@@ -254,8 +254,8 @@ impl Refreshing {
 }
 
 fn uninstall_into(environment: &Environment, done: &mut Done) -> Result<(), Failure> {
-    let agents = wiring::agents(environment.variable)?;
-    let drafts = wiring::drafts(environment.variable)?;
+    let agents = worklog_wiring::agents(environment.variable)?;
+    let drafts = worklog_wiring::drafts(environment.variable)?;
     let uninstalled = |agent: &Agent| sandbox::uninstalled(agent, &drafts);
     for Planned {
         agent,

@@ -1,10 +1,10 @@
 use std::fmt::Write as _;
 
 use super::{INDENT, Render, filed_counts, line, row_fields, row_line, written};
-use crate::app::list::{ClaimRow, EntryRow, FactRow, ForkRow, TopicRow};
-use crate::app::usage::MachineUsage;
-use crate::app::{FollowupRow, Reference, Row, counted};
-use crate::render::trigger_state;
+use worklog_app::list::{ClaimRow, EntryRow, FactRow, ForkRow, TopicRow};
+use worklog_app::usage::MachineUsage;
+use worklog_app::{FollowupRow, Reference, Row, counted};
+use worklog_render::trigger_state;
 
 fn dated(text: &mut String, day: &impl ToString, row: &Row) {
     let mut fields = vec![day.to_string()];
@@ -235,13 +235,13 @@ impl Render for Vec<ForkRow> {
 mod tests {
     use super::super::testing::{WRITTEN, followup, look_again, row, stamp, to};
     use super::*;
-    use crate::app::TriggerShown;
-    use crate::app::list::ForkHead;
-    use crate::app::testing::{by_no_agent, counted as commands_of};
-    use crate::app::usage::{AgentUsage, CommandCount, Refusal};
-    use crate::domain::id::{DocumentId, VersionId};
-    use crate::domain::schema::Date;
-    use crate::domain::testing::{atlas, lantern};
+    use worklog_app::TriggerShown;
+    use worklog_app::list::ForkHead;
+    use worklog_app::testing::{by_no_agent, counted as commands_of};
+    use worklog_app::usage::{AgentUsage, CommandCount, Refusal};
+    use worklog_domain::id::{DocumentId, VersionId};
+    use worklog_domain::schema::Date;
+    use worklog_domain::testing::{atlas, lantern};
 
     fn date(text: &str) -> Date {
         Date::parse(text).expect("a date")

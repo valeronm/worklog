@@ -1,8 +1,8 @@
 use std::fmt::Write as _;
 
 use super::Render;
-use crate::app::check::Check;
-use crate::render::check_summary;
+use worklog_app::check::Check;
+use worklog_render::check_summary;
 
 impl Render for Check {
     fn text(&self) -> String {
@@ -31,7 +31,7 @@ impl Render for Check {
 mod tests {
     use super::super::output;
     use super::*;
-    use crate::app::check::Finding;
+    use worklog_app::check::Finding;
 
     #[test]
     fn a_check_counts_what_it_found_marks_a_notice_and_exits_one_on_a_problem() {

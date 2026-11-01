@@ -1,13 +1,13 @@
 use std::fmt::Write as _;
 
 use super::{Render, change_or_ending, line, row_fields, written};
-use crate::app::show::{Diff, History, Linker, Shown, ShownVersion, Unread};
-use crate::app::{Reference, counted};
-use crate::domain::id::VersionId;
-use crate::domain::schema::KindOf;
-use crate::domain::version::Stamp;
-use crate::render::diff::{UNTERMINATED, hunks};
-use crate::render::{against, unread_notes};
+use worklog_app::show::{Diff, History, Linker, Shown, ShownVersion, Unread};
+use worklog_app::{Reference, counted};
+use worklog_domain::id::VersionId;
+use worklog_domain::schema::KindOf;
+use worklog_domain::version::Stamp;
+use worklog_render::diff::{UNTERMINATED, hunks};
+use worklog_render::{against, unread_notes};
 
 fn naming(
     version: &VersionId,
@@ -157,12 +157,12 @@ impl Render for Diff {
 mod tests {
     use super::super::testing::{WRITTEN, stamp, to, to_ended};
     use super::*;
-    use crate::app::show::{Compared, Linked, ShownDocument, ShownVersion, Side};
-    use crate::app::testing::history_row;
-    use crate::domain::document::Unreadable;
-    use crate::domain::id::VersionId;
-    use crate::domain::testing::lantern;
-    use crate::domain::version::ReadError;
+    use worklog_app::show::{Compared, Linked, ShownDocument, ShownVersion, Side};
+    use worklog_app::testing::history_row;
+    use worklog_domain::document::Unreadable;
+    use worklog_domain::id::VersionId;
+    use worklog_domain::testing::lantern;
+    use worklog_domain::version::ReadError;
 
     const SHOWN: &str = "2026-10-09T18:22:41.118+01:00";
 
@@ -237,8 +237,8 @@ mod tests {
     }
 
     fn linker(seed: u8, kind: KindOf, label: &str, by: &[&str]) -> Linker {
-        let mut row = crate::app::testing::row(
-            &crate::domain::id::DocumentId::from_bytes([seed; 16]),
+        let mut row = worklog_app::testing::row(
+            &worklog_domain::id::DocumentId::from_bytes([seed; 16]),
             label,
             "s",
         );

@@ -1,9 +1,9 @@
 use std::fmt::Write as _;
 
 use super::{Render, line};
-use crate::app::activity::Activity;
-use crate::app::counted;
-use crate::render::calendar::{Cell, TOP_LEVEL, calendar};
+use worklog_app::activity::Activity;
+use worklog_app::counted;
+use worklog_render::calendar::{Cell, TOP_LEVEL, calendar};
 
 const WEEKDAYS: [&str; 7] = ["Mon", "", "Wed", "", "Fri", "", ""];
 const LEFT: usize = 4;
@@ -48,8 +48,8 @@ impl Render for Activity {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::activity::Day;
-    use crate::domain::schema::Date;
+    use worklog_app::activity::Day;
+    use worklog_domain::schema::Date;
 
     fn date(text: &str) -> Date {
         Date::parse(text).unwrap()

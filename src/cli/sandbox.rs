@@ -4,8 +4,8 @@ use std::path::Path;
 
 use toml_edit::{Array, DocumentMut, Item, Table};
 
-use crate::app::Failure;
-use crate::wiring::{Agent, SandboxConfig};
+use worklog_app::Failure;
+use worklog_wiring::{Agent, SandboxConfig};
 
 const TABLE: &str = "sandbox_workspace_write";
 const ROOTS: &str = "writable_roots";

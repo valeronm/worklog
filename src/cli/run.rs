@@ -3,14 +3,14 @@ use std::path::Path;
 use super::Environment;
 use super::args::{ChangeCommand, Command, DraftCommand, ListCommand, NewWhat, ReadCommand};
 use super::render::{Output, Refusals, output, output_as};
-use crate::app::followup::{NewFollowup, TriggerArg};
-use crate::app::search::Query;
-use crate::app::{
+use worklog_app::followup::{NewFollowup, TriggerArg};
+use worklog_app::search::Query;
+use worklog_app::{
     Deps, Failure, ReadDeps, activity, amend, bulk, check, claim, context, draft, followup, fork,
     list, save, search, show, usage,
 };
-use crate::domain::schema::Reason;
-use crate::domain::usage::Agent;
+use worklog_domain::schema::Reason;
+use worklog_domain::usage::Agent;
 
 fn directory(environment: &Environment, given: Option<&Path>) -> Result<String, Failure> {
     let path = match given {
@@ -291,16 +291,16 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
-    use crate::app::testing::{
-        World, claim_fields, entry, fact, followup, fork, topic, world_with_atlas,
-    };
     use crate::cli::NAME;
     use crate::cli::args::{Cli, Invoked};
     use crate::cli::render::{CONTEXT_BYTES, assert_fits};
     use crate::cli::tests::environment;
-    use crate::domain::id::DocumentId;
-    use crate::domain::ports::Usage as _;
-    use crate::domain::testing::ran;
+    use worklog_app::testing::{
+        World, claim_fields, entry, fact, followup, fork, topic, world_with_atlas,
+    };
+    use worklog_domain::id::DocumentId;
+    use worklog_domain::ports::Usage as _;
+    use worklog_domain::testing::ran;
 
     const PROJECT: &str = "/home/desk/projects/lantern";
 

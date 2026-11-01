@@ -42,35 +42,35 @@ mod tests {
     use super::super::host::Initialized;
     use super::super::render::{Render, output};
     use super::*;
-    use crate::app::activity::{self, Activity};
-    use crate::app::check::Check;
-    use crate::app::context::Context;
-    use crate::app::draft::DraftRow;
-    use crate::app::followup::{Made, NewFollowup, TriggerArg};
-    use crate::app::list::{ClaimRow, EntryRow, FactRow, ForkRow, TopicRow};
-    use crate::app::machines::PLACEHOLDER;
-    use crate::app::search::{Hit, Log, Query};
-    use crate::app::show::{Diff, History, Shown};
-    use crate::app::testing::{
+    use worklog_app::activity::{self, Activity};
+    use worklog_app::check::Check;
+    use worklog_app::context::Context;
+    use worklog_app::draft::DraftRow;
+    use worklog_app::followup::{Made, NewFollowup, TriggerArg};
+    use worklog_app::list::{ClaimRow, EntryRow, FactRow, ForkRow, TopicRow};
+    use worklog_app::machines::PLACEHOLDER;
+    use worklog_app::search::{Hit, Log, Query};
+    use worklog_app::show::{Diff, History, Shown};
+    use worklog_app::testing::{
         ENDED as RETIRED, ENDED_FACT, NOW, World, claim_fields, entry, fact, followup, fork, head,
         head_id, part_of, topic, topic_fields, uses, world, world_with_atlas, written_at,
     };
-    use crate::app::upgrade::{Checked, Upgrade};
-    use crate::app::usage::MachineUsage;
-    use crate::app::{
+    use worklog_app::upgrade::{Checked, Upgrade};
+    use worklog_app::usage::MachineUsage;
+    use worklog_app::{
         DraftRef, FollowupRow, Written, amend, bulk, check, context, draft, followup as followups,
         list, search, setup, show, upgrade, usage,
     };
-    use crate::domain::id::{DocumentId, VersionId};
-    use crate::domain::ports::Usage as _;
-    use crate::domain::schema::{Date, Directory, KindOf, Name};
-    use crate::domain::session::Session;
-    use crate::domain::testing::{
+    use worklog_domain::id::{DocumentId, VersionId};
+    use worklog_domain::ports::Usage as _;
+    use worklog_domain::schema::{Date, Directory, KindOf, Name};
+    use worklog_domain::session::Session;
+    use worklog_domain::testing::{
         ASSET, BINARY, DRAFTED, LANTERN, REFRESHED, atlas, build, first, lamp_session, published,
         ran, version as release,
     };
-    use crate::domain::usage::Invocation;
-    use crate::domain::version::{Kind, ReadError, Stamp};
+    use worklog_domain::usage::Invocation;
+    use worklog_domain::version::{Kind, ReadError, Stamp};
 
     fn snake(word: &str) -> bool {
         word.starts_with(|first: char| first.is_ascii_lowercase())

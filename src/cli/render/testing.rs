@@ -1,20 +1,20 @@
 use super::CONTEXT_BYTES;
-pub(super) use crate::app::testing::{NOW as WRITTEN, row};
-use crate::app::{FollowupRow, Reference, TriggerShown};
-use crate::domain::schema::Date;
-use crate::domain::testing::{atlas, lantern};
-use crate::domain::version::Stamp;
+pub(super) use worklog_app::testing::{NOW as WRITTEN, row};
+use worklog_app::{FollowupRow, Reference, TriggerShown};
+use worklog_domain::schema::Date;
+use worklog_domain::testing::{atlas, lantern};
+use worklog_domain::version::Stamp;
 
 pub(super) fn stamp(text: &str) -> Stamp {
     Stamp::parse(text).expect("a stamp")
 }
 
 pub(super) fn to(label: &str) -> Reference {
-    crate::app::testing::to(&atlas(), label)
+    worklog_app::testing::to(&atlas(), label)
 }
 
 pub(super) fn to_ended(label: &str, reason: &str) -> Reference {
-    crate::app::testing::to_ended(&atlas(), label, reason)
+    worklog_app::testing::to_ended(&atlas(), label, reason)
 }
 
 pub(super) fn look_again(day: &str) -> TriggerShown {

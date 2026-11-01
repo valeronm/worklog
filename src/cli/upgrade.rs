@@ -1,7 +1,7 @@
 use super::agents::{self, Done};
 use super::render::{Output, Render, Stopped, output};
 use super::{Environment, refresh};
-use crate::app::upgrade::{self, Checked, Installed, Outcome, Upgrade};
+use worklog_app::upgrade::{self, Checked, Installed, Outcome, Upgrade};
 
 impl Render for Checked {
     fn text(&self) -> String {
@@ -59,11 +59,11 @@ mod tests {
     use super::super::skill::SKILL;
     use super::super::tests::Process;
     use super::*;
-    use crate::domain::ports::{Binary, Releases, StoreError};
-    use crate::domain::testing::{
+    use worklog_domain::ports::{Binary, Releases, StoreError};
+    use worklog_domain::testing::{
         ASSET, BINARY, MemoryBinary, MemoryReleases, REFRESHED, build, published, version,
     };
-    use crate::wiring::SKILL_DIRECTORY;
+    use worklog_wiring::SKILL_DIRECTORY;
 
     #[test]
     fn a_check_prints_both_versions_and_exits_zero_whichever_is_newer() {

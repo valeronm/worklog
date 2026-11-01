@@ -15,10 +15,10 @@ use std::fmt::Write as _;
 use serde::Serialize;
 
 use super::json::{Pinned, nothing, printed};
-use crate::app::draft::{DraftRow, Opener};
-use crate::app::followup::Made;
-use crate::app::{DraftRef, Failure, Row, Written, counted};
-use crate::render::{change_or_ending, ended, written};
+use worklog_app::draft::{DraftRow, Opener};
+use worklog_app::followup::Made;
+use worklog_app::{DraftRef, Failure, Row, Written, counted};
+use worklog_render::{change_or_ending, ended, written};
 
 #[cfg(test)]
 pub(super) use context::CONTEXT_BYTES;
@@ -135,7 +135,7 @@ fn row_fields(row: &Row, between: Vec<String>) -> Vec<String> {
 }
 
 fn filed_counts(fact_count: usize, idea_count: usize, open_count: usize) -> Option<String> {
-    let counts = crate::render::filed_counts(fact_count, idea_count, open_count);
+    let counts = worklog_render::filed_counts(fact_count, idea_count, open_count);
     (!counts.is_empty()).then(|| format!("({})", counts.join(", ")))
 }
 
@@ -240,11 +240,11 @@ fn age(seconds: u64) -> String {
 mod tests {
     use super::testing::{row, stamp};
     use super::*;
-    use crate::app::draft::{BrokenRow, OpenDraft};
-    use crate::app::show::{Shown, ShownDocument, Unread};
-    use crate::domain::id::VersionId;
-    use crate::domain::testing::{atlas, lantern};
-    use crate::domain::version::Stamp;
+    use worklog_app::draft::{BrokenRow, OpenDraft};
+    use worklog_app::show::{Shown, ShownDocument, Unread};
+    use worklog_domain::id::VersionId;
+    use worklog_domain::testing::{atlas, lantern};
+    use worklog_domain::version::Stamp;
 
     fn stored(label: &str) -> Written {
         Written {
@@ -299,9 +299,9 @@ mod tests {
             forked: false,
             ended: None,
             heads: Vec::new(),
-            unreadable: vec![Unread::from(&crate::domain::document::Unreadable {
+            unreadable: vec![Unread::from(&worklog_domain::document::Unreadable {
                 version: VersionId::of(b"lost"),
-                why: crate::domain::version::ReadError::Corrupt,
+                why: worklog_domain::version::ReadError::Corrupt,
             })],
             linked_from: Vec::new(),
         });

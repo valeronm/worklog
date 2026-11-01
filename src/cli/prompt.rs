@@ -7,10 +7,9 @@ use super::agents::{self, Placing};
 use super::host::initialized;
 use super::render::Output;
 use super::{Environment, NAME, said};
-use crate::app::machines::{self, HostName};
-use crate::app::setup::Joining;
-use crate::app::{Deps, Failure, ReadDeps, setup};
-use crate::wiring;
+use worklog_app::machines::{self, HostName};
+use worklog_app::setup::Joining;
+use worklog_app::{Deps, Failure, ReadDeps, setup};
 
 const DEFAULT_STORE: &str = "worklog";
 
@@ -107,7 +106,9 @@ fn store<T>(
     environment: &Environment,
     open: impl Fn(&Path) -> Result<T, Failure>,
 ) -> Result<(PathBuf, T), Failure> {
-    let home = wiring::homes(environment.variable)?.into_iter().next();
+    let home = worklog_wiring::homes(environment.variable)?
+        .into_iter()
+        .next();
     let default = home
         .as_ref()
         .map(|home| home.join(DEFAULT_STORE).display().to_string());
@@ -186,13 +187,13 @@ pub(super) fn asked(
     err: &mut dyn Write,
 ) -> Result<Output, Failure> {
     let answers = environment.terminal.ok_or_else(no_terminal)?;
-    if let Some(bound) = wiring::wire(environment.variable)? {
+    if let Some(bound) = worklog_wiring::wire(environment.variable)? {
         setup::refuse_bound(&bound.deps())?;
     }
     let mut answers = answers.borrow_mut();
     let mut terminal = Terminal::new(&mut *answers, err);
     let (chosen, adapters) = store(&mut terminal, environment, |chosen| {
-        wiring::wire_over(environment.variable, chosen)
+        worklog_wiring::wire_over(environment.variable, chosen)
     })?;
     init(&adapters.deps(), environment, json, &chosen, &mut terminal)
 }
@@ -250,11 +251,11 @@ mod tests {
     use std::ffi::OsString;
 
     use super::*;
-    use crate::app::list;
-    use crate::app::testing::{World, head, topic, world, written_at};
     use crate::cli::tests::environment;
-    use crate::domain::id::DocumentId;
-    use crate::domain::ports::HostRead as _;
+    use worklog_app::list;
+    use worklog_app::testing::{World, head, topic, world, written_at};
+    use worklog_domain::id::DocumentId;
+    use worklog_domain::ports::HostRead as _;
 
     const STORE: &str = "/home/desk/worklog";
     const CONFIRM: &str = "The store: /home/desk/worklog\nThe machine: ";

@@ -7,10 +7,9 @@ use super::agents::{self, Placing};
 use super::args::{HostCommand, InitArgs};
 use super::render::{Output, Render};
 use super::{Environment, prompt};
-use crate::app::setup::{self, Bound, Joining};
-use crate::app::{Deps, Failure};
-use crate::domain::id::DocumentId;
-use crate::wiring;
+use worklog_app::setup::{self, Bound, Joining};
+use worklog_app::{Deps, Failure};
+use worklog_domain::id::DocumentId;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub(super) struct Initialized {
@@ -85,7 +84,7 @@ fn bound_over(
     environment: &Environment,
     bind: impl FnOnce(&Deps) -> Result<Bound, Failure>,
 ) -> Result<Output, Failure> {
-    let adapters = wiring::wire_over(environment.variable, &environment.placed(store)?)?;
+    let adapters = worklog_wiring::wire_over(environment.variable, &environment.placed(store)?)?;
     let deps = adapters.deps();
     let placing = with_agents
         .then(|| Placing::on_this_host(environment))
@@ -110,7 +109,7 @@ pub(super) fn initialized(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::testing::atlas;
+    use worklog_domain::testing::atlas;
 
     #[test]
     fn a_bound_host_is_its_line_and_then_the_paths_written() {

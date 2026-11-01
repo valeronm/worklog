@@ -4057,7 +4057,7 @@ fn serve_is_logged_once_before_its_first_request() {
 const CURRENT: &str = env!("CARGO_PKG_VERSION");
 
 fn release_asset() -> String {
-    worklog::domain::release::asset("worklog").expect("a release for this target")
+    worklog_domain::release::asset("worklog").expect("a release for this target")
 }
 
 impl Host {
@@ -4070,7 +4070,7 @@ impl Host {
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("latest"), format!("{tag}\n")).unwrap();
         fs::write(dir.join(&asset), bytes).unwrap();
-        let digest = worklog::domain::release::sha256_hex(checksum_of);
+        let digest = worklog_domain::release::sha256_hex(checksum_of);
         fs::write(
             dir.join(format!("{asset}.sha256")),
             format!("{digest}  {asset}\n"),

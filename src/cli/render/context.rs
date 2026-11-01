@@ -2,8 +2,8 @@ use std::fmt::Write as _;
 
 use super::listings::followup_line;
 use super::{Render, filed_counts};
-use crate::app::context::{Context, Loaded, Part, Via};
-use crate::app::{Row, counted};
+use worklog_app::context::{Context, Loaded, Part, Via};
+use worklog_app::{Row, counted};
 
 // An agent keeps only the start of a session hook's output longer than 10,000 characters,
 // and a character never takes fewer than a byte.
@@ -310,8 +310,8 @@ impl Render for Context {
 mod tests {
     use super::super::testing::{assert_case_fits, assert_fits, followup, look_again, row, to};
     use super::*;
-    use crate::app::{FollowupRow, TriggerShown};
-    use crate::domain::testing::{atlas, lantern};
+    use worklog_app::{FollowupRow, TriggerShown};
+    use worklog_domain::testing::{atlas, lantern};
 
     const IDEAS: &str = "Ideas — unbuilt, kept with their settled design; opened like a fact:\n";
     const PARTS: &str = "Parts, with their facts, ideas and open followups:\n";

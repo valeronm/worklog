@@ -24,15 +24,14 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::Duration;
 
-use crate::app::Failure;
-use crate::app::record::Outcome;
-use crate::app::setup::Refusal;
-use crate::domain::ports::{Binary, Releases, StoreError};
-use crate::domain::release::{self, Built};
-use crate::domain::schema::Directory;
-use crate::{web, wiring};
 use args::{Cli, Command, Invoked, ReadCommand, ToolCommand};
 use render::{Output, Stopped};
+use worklog_app::Failure;
+use worklog_app::record::Outcome;
+use worklog_app::setup::Refusal;
+use worklog_domain::ports::{Binary, Releases, StoreError};
+use worklog_domain::release::{self, Built};
+use worklog_domain::schema::Directory;
 
 const NAME: &str = "worklog";
 
@@ -117,8 +116,8 @@ pub fn main() -> i32 {
         binary: std::env::current_exe().ok(),
         variable: &variable,
         version: release::current(),
-        releases: &|| wiring::releases(&variable),
-        binary_at: &|path| wiring::binary(path, NAME),
+        releases: &|| worklog_wiring::releases(&variable),
+        binary_at: &|path| worklog_wiring::binary(path, NAME),
         terminal: (typed.as_ref()).map(|typed| -> &RefCell<dyn BufRead> { typed }),
         hook_input: &piped_input,
     };
@@ -163,8 +162,8 @@ fn said(failure: &Failure) -> String {
 fn adapters_for(
     command: &Command,
     environment: &Environment,
-) -> Result<Option<wiring::Adapters>, Failure> {
-    let adapters = wiring::wire(environment.variable)?;
+) -> Result<Option<worklog_wiring::Adapters>, Failure> {
+    let adapters = worklog_wiring::wire(environment.variable)?;
     Ok(match command {
         Command::Read(ReadCommand::Context {
             hook: Some(word), ..
@@ -235,8 +234,8 @@ fn announce(
     out.flush()
 }
 
-fn wired(environment: &Environment) -> Result<wiring::Adapters, Failure> {
-    wiring::wire(environment.variable)?.ok_or(Failure::NotSetUp)
+fn wired(environment: &Environment) -> Result<worklog_wiring::Adapters, Failure> {
+    worklog_wiring::wire(environment.variable)?.ok_or(Failure::NotSetUp)
 }
 
 // The server ends only with the process.
@@ -245,9 +244,9 @@ fn listening(
     hosts: &[String],
     environment: &Environment,
     words: &[OsString],
-) -> Result<web::Server, Failure> {
+) -> Result<worklog_web::Server, Failure> {
     let adapters = wired(environment)?;
-    let server = web::Server::bind(&bind.to_string(), hosts);
+    let server = worklog_web::Server::bind(&bind.to_string(), hosts);
     let outcome = match &server {
         Ok(_) => Outcome::default(),
         Err(failure) => log::failed(failure),
@@ -278,18 +277,18 @@ fn serve(
         _ => {}
     }
     // A directory store answers header reads from one reading of its tree.
-    let reading = wiring::Reading::default();
+    let reading = worklog_wiring::Reading::default();
     let settled = || {
         let adapters = wired(environment)?.continuing(&reading);
         adapters.settle()?;
         Ok(adapters)
     };
     let ended = server.run(None, &|method, target| match settled() {
-        Ok(adapters) => web::respond(&adapters.deps().read(), method, target),
+        Ok(adapters) => worklog_web::respond(&adapters.deps().read(), method, target),
         Err(failure @ (Failure::Refused(_) | Failure::NotSetUp)) => {
-            web::failed(Failure::Store(StoreError::io("serve", said(&failure))))
+            worklog_web::failed(Failure::Store(StoreError::io("serve", said(&failure))))
         }
-        Err(failure) => web::failed(failure),
+        Err(failure) => worklog_web::failed(failure),
     });
     if let Err(error) = ended {
         fail(err, &format_args!("{address}: {error}"));
@@ -386,8 +385,8 @@ mod tests {
     use std::io;
 
     use super::*;
-    use crate::app::machines;
-    use crate::domain::testing::{MemoryBinary, MemoryReleases, version};
+    use worklog_app::machines;
+    use worklog_domain::testing::{MemoryBinary, MemoryReleases, version};
 
     const UNPUBLISHED: fn() -> Box<dyn Releases> = || Box::new(MemoryReleases::default());
 

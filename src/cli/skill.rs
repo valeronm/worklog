@@ -11,7 +11,6 @@ mod tests {
     use super::SKILL;
     use crate::cli::NAME;
     use crate::cli::args::Cli;
-    use crate::wiring;
 
     const HELP: &str = "help";
 
@@ -315,7 +314,7 @@ mod tests {
 
     #[test]
     fn the_binary_the_skill_and_its_directory_share_one_name() {
-        assert_eq!(wiring::SKILL_DIRECTORY, NAME);
+        assert_eq!(worklog_wiring::SKILL_DIRECTORY, NAME);
         assert!(SKILL.starts_with(&format!("---\nname: {NAME}\ndescription: ")));
         assert_eq!(unnamed(SKILL), Vec::<String>::new());
         assert!(!mentioned(SKILL).is_empty());

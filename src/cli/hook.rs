@@ -3,8 +3,8 @@ use std::path::Path;
 use serde_json::{Map, Value, json};
 
 use super::NAME;
-use crate::app::Failure;
-use crate::wiring::Agent;
+use worklog_app::Failure;
+use worklog_wiring::Agent;
 
 // A shell still interprets these inside double quotes.
 const UNQUOTABLE: [char; 4] = ['"', '$', '\\', '`'];
@@ -585,7 +585,7 @@ mod tests {
         use std::fs;
 
         use super::*;
-        use crate::wiring::agents;
+        use worklog_wiring::agents;
 
         fn claude(home: &Path) -> Agent {
             fs::create_dir_all(home.join(".claude")).unwrap();

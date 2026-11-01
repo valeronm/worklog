@@ -1,8 +1,8 @@
 use std::fmt::Write as _;
 
 use super::{INDENT, Render, change_or_ending, line, row_line, written};
-use crate::app::search::{Hit, Log};
-use crate::render::hit_lines;
+use worklog_app::search::{Hit, Log};
+use worklog_render::hit_lines;
 
 impl Render for Vec<Hit> {
     fn text(&self) -> String {
@@ -53,10 +53,10 @@ mod tests {
     use super::super::output;
     use super::super::testing::{WRITTEN, row, stamp, to};
     use super::*;
-    use crate::app::search::{Logged, Matched};
-    use crate::app::show::{Unread, Why};
-    use crate::domain::id::VersionId;
-    use crate::domain::testing::{atlas, lantern};
+    use worklog_app::search::{Logged, Matched};
+    use worklog_app::show::{Unread, Why};
+    use worklog_domain::id::VersionId;
+    use worklog_domain::testing::{atlas, lantern};
 
     #[test]
     fn a_hit_is_its_row_over_at_most_three_of_its_lines() {

@@ -7,10 +7,9 @@ use clap_complete::{ArgValueCandidates, CompleteEnv, CompletionCandidate};
 use super::args::{Cli, Shell};
 use super::render::Output;
 use super::{Environment, NAME, hook};
-use crate::app::offer::{self, Offered, Wanted};
-use crate::app::{Failure, ReadDeps, draft};
-use crate::domain::schema::{KindOf, Reason};
-use crate::wiring;
+use worklog_app::offer::{self, Offered, Wanted};
+use worklog_app::{Failure, ReadDeps, draft};
+use worklog_domain::schema::{KindOf, Reason};
 
 type Listed = Result<Vec<CompletionCandidate>, Failure>;
 
@@ -53,7 +52,7 @@ pub(super) fn runs_as_the_command(binary: &Path) -> bool {
 }
 
 pub(super) fn registered(shell: Shell, environment: &Environment) -> Result<Output, Failure> {
-    let homes = wiring::homes(environment.variable)?;
+    let homes = worklog_wiring::homes(environment.variable)?;
     let homes: Vec<&Path> = homes.iter().map(PathBuf::as_path).collect();
     Ok(Output {
         text: registration(shell, environment.binary()?, &homes)?,
@@ -143,7 +142,7 @@ fn offered(
     variable: &dyn Fn(&str) -> Option<OsString>,
     list: &dyn Fn(&ReadDeps) -> Listed,
 ) -> Vec<CompletionCandidate> {
-    let Ok(Some(adapters)) = wiring::wire(variable) else {
+    let Ok(Some(adapters)) = worklog_wiring::wire(variable) else {
         return Vec::new();
     };
     list(&adapters.recalling().deps().read()).unwrap_or_default()
@@ -227,14 +226,14 @@ mod tests {
     use clap::{CommandFactory as _, ValueHint};
 
     use super::*;
-    use crate::app::draft;
-    use crate::app::testing::{
+    use crate::cli::args::Cli;
+    use crate::cli::tests::Process;
+    use worklog_app::draft;
+    use worklog_app::testing::{
         DONE, ENDED, ENDED_FACT, REMOVED, World, claim_fields, entry, fact, followup, topic, world,
         world_with_atlas,
     };
-    use crate::cli::args::Cli;
-    use crate::cli::tests::Process;
-    use crate::domain::id::DocumentId;
+    use worklog_domain::id::DocumentId;
 
     fn pair(candidate: &CompletionCandidate) -> (String, String) {
         let help = candidate.get_help().map(ToString::to_string);

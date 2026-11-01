@@ -8,9 +8,8 @@ use clap::{CommandFactory as _, Subcommand as _};
 use super::args::{Cli, HostCommand, ToolCommand};
 use super::render::Output;
 use super::{Environment, exit_code, said};
-use crate::app::record::{Outcome, Run, record};
-use crate::app::{Deps, Failure};
-use crate::wiring;
+use worklog_app::record::{Outcome, Run, record};
+use worklog_app::{Deps, Failure};
 
 // Binding a host to a store and placing this tool on the host are no use of the store; words
 // that name no command are a use refused.
@@ -67,7 +66,9 @@ fn found_on_path(argv: &[OsString], environment: &Environment) -> bool {
         .and_then(|invoked| Path::new(invoked).file_name());
     let path = (environment.variable)("PATH");
     match (environment.binary.as_deref(), name, path) {
-        (Some(binary), Some(name), Some(path)) => wiring::found_on_path(binary, name, &path),
+        (Some(binary), Some(name), Some(path)) => {
+            worklog_wiring::found_on_path(binary, name, &path)
+        }
         _ => false,
     }
 }
@@ -95,7 +96,7 @@ pub(super) fn refused(argv: &[OsString], environment: &Environment, error: &clap
     let Some(line) = logged(argv, environment) else {
         return;
     };
-    let Ok(Some(adapters)) = wiring::wire(environment.variable) else {
+    let Ok(Some(adapters)) = worklog_wiring::wire(environment.variable) else {
         return;
     };
     let said = error.to_string();

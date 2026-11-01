@@ -10,9 +10,9 @@ use clap::{
 };
 
 use super::{NAME, complete};
-use crate::domain::release;
-use crate::domain::schema::{KindOf, Reason};
-use crate::web::Server;
+use worklog_domain::release;
+use worklog_domain::schema::{KindOf, Reason};
+use worklog_web::Server;
 
 fn reasons() -> String {
     let mut text = "The reasons a document ends for, by its kind:".to_owned();

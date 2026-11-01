@@ -283,7 +283,7 @@ fn the_command_line_names_no_store_in_its_tests_either() {
 #[test]
 fn a_command_line_file_that_names_the_store_is_found() {
     for clean in [
-        "use crate::app::{Deps, Failure, Stored};\n",
+        "use worklog_app::{Deps, Failure, Stored};\n",
         "Failure::Refused(_) | Failure::Store(_) => 1,",
         "Failure::Store(StoreError::io(\"desk\", \"gone\"))",
         "store: Stored::new(&FailingStore),",
@@ -291,10 +291,10 @@ fn a_command_line_file_that_names_the_store_is_found() {
         assert_eq!(store_port_named(clean), [""; 0], "{clean}");
     }
     for (broken, found) in [
-        ("use crate::domain::ports::Store;", "Store"),
-        ("use crate::domain::ports::{Host, Store as _};", "Store"),
+        ("use worklog_domain::ports::Store;", "Store"),
+        ("use worklog_domain::ports::{Host, Store as _};", "Store"),
         ("fn read(store: &dyn Store) {}", "Store"),
-        ("use crate::domain::ports::StoreRead;", "StoreRead"),
+        ("use worklog_domain::ports::StoreRead;", "StoreRead"),
         ("let store = MemoryStore::default();", "MemoryStore"),
     ] {
         assert_eq!(store_port_named(broken), [found], "{broken}");
@@ -665,7 +665,7 @@ fn a_file_that_makes_the_network_reader_is_found() {
         ),
         ("let held = releases(&given);", "calls `releases`"),
         (
-            "let source = crate::wiring :: releases (&|_| None);",
+            "let source = worklog_wiring :: releases (&|_| None);",
             "calls `releases`",
         ),
         (
@@ -858,7 +858,7 @@ fn one_use_case_appends_to_the_usage_log() {
 fn a_file_that_reaches_the_usage_log_is_found() {
     for clean in [
         "let counted = usage::usage(deps, machine.as_deref(), since.as_deref())?;",
-        "use crate::app::{setup, show, usage};\nlet usage = page(&world, target); usage.status",
+        "use worklog_app::{setup, show, usage};\nlet usage = page(&world, target); usage.status",
         "recorder.record(&deps, outcome);\nlet record = read_or_skip(head)?;",
         "// deps.usage.record(&run) is the recorder's.\nlet usage = 1;",
         "pub fn usage() {}\n\n#[cfg(test)]\nmod tests {\n    fn logged() {\n        world.usage.record(&run).unwrap();\n    }\n}\n",
@@ -956,7 +956,7 @@ fn a_read_that_names_a_write_use_case_is_found() {
 #[test]
 fn a_read_that_names_write_dependencies_is_found() {
     for clean in [
-        "use crate::app::{ReadDeps, Failure};",
+        "use crate::{ReadDeps, Failure};",
         "fn read(deps: &ReadDeps) {}",
         "// A write takes Deps.\nlet deps = read;",
         "fn read() {}\n\n#[cfg(test)]\nmod tests {\n    fn wrote(deps: &Deps) {}\n}\n",
@@ -969,9 +969,9 @@ fn a_read_that_names_write_dependencies_is_found() {
     }
     for broken in [
         "fn read(deps: &Deps) { deps.drafts.write(draft)?; }",
-        "use crate::app::{Deps as Writing, Failure};",
-        "fn read(deps: &crate::app::Deps) { deps.host.bind(machine)?; }",
-        "type Writing<'a> = crate::app::Deps<'a>;",
+        "use crate::{Deps as Writing, Failure};",
+        "fn read(deps: &crate::Deps) { deps.host.bind(machine)?; }",
+        "type Writing<'a> = crate::Deps<'a>;",
         "//! A read of the store.\n\nfn read(deps: &Deps) {}",
     ] {
         assert_eq!(

@@ -1,3 +1,5 @@
+//! One use case per command over the ports the domain declares.
+
 use std::cell::RefCell;
 use std::fmt;
 
