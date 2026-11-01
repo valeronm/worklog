@@ -4,13 +4,13 @@ use askama::Template;
 
 use super::links::{Layout, Line, Link, Place, Text, doc_links, ended_switch};
 use super::versions::document_link;
-use crate::app::check::{Check, Finding};
-use crate::app::list::{EntryRow, FactRow};
-use crate::app::search::{Hit, Query};
-use crate::app::show::Shown;
-use crate::app::{FollowupRow, Reference, Row, TriggerShown, counted};
-use crate::render::{check_summary, hit_lines, trigger_state};
-use crate::web::markdown::{Markup, marked, summary_marked};
+use crate::markdown::{Markup, marked, summary_marked};
+use worklog_app::check::{Check, Finding};
+use worklog_app::list::{EntryRow, FactRow};
+use worklog_app::search::{Hit, Query};
+use worklog_app::show::Shown;
+use worklog_app::{FollowupRow, Reference, Row, TriggerShown, counted};
+use worklog_render::{check_summary, hit_lines, trigger_state};
 
 pub struct Item {
     pub line: Line,
@@ -261,7 +261,7 @@ impl CheckPage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::id::DocumentId;
+    use worklog_domain::id::DocumentId;
 
     #[test]
     fn a_finding_links_its_label_when_it_has_a_document_and_escapes_it() {

@@ -1,8 +1,8 @@
 use super::{has, lacks, main_of, ok};
-use crate::app::testing::{
+use worklog_app::testing::{
     ENDED, fact, followup, fork, part_of, topic, topic_fields, world, world_with_atlas,
 };
-use crate::domain::id::DocumentId;
+use worklog_domain::id::DocumentId;
 
 #[test]
 fn home_nests_the_unended_topics_under_what_they_are_part_of_with_their_counts() {

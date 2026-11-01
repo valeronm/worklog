@@ -4,13 +4,13 @@ use std::fmt::Write as _;
 
 use askama::Template;
 
-use crate::app::{Reference, Row};
-use crate::domain::id::{DocumentId, VersionId};
-use crate::domain::release::{self, Built};
-use crate::domain::version::Stamp;
-use crate::render::{ended, written};
-use crate::web::mark::EndedMark;
-use crate::web::markdown::{Markup, marked, summary_html};
+use crate::mark::EndedMark;
+use crate::markdown::{Markup, marked, summary_html};
+use worklog_app::{Reference, Row};
+use worklog_domain::id::{DocumentId, VersionId};
+use worklog_domain::release::{self, Built};
+use worklog_domain::version::Stamp;
+use worklog_render::{ended, written};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Place {

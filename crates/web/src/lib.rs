@@ -11,9 +11,9 @@ mod tests;
 
 use askama::Template;
 
-use crate::app::show::{self, Shown, ShownDocument};
-use crate::app::{Failure, ReadDeps, activity, check, list, search};
-use crate::domain::schema::KindOf;
+use worklog_app::show::{self, Shown, ShownDocument};
+use worklog_app::{Failure, ReadDeps, activity, check, list, search};
+use worklog_domain::schema::KindOf;
 
 use pages::{
     CheckPage, DOC, DocumentPage, ErrorPage, ForksPage, HISTORY, Held, HistoryPage, Home, Listing,

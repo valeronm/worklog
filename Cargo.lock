@@ -1314,13 +1314,9 @@ dependencies = [
 name = "worklog"
 version = "0.5.12"
 dependencies = [
- "askama",
  "assert_cmd",
  "clap",
  "clap_complete",
- "httparse",
- "pulldown-cmark",
- "rustix",
  "serde",
  "serde_json",
  "similar",
@@ -1330,6 +1326,7 @@ dependencies = [
  "worklog-app",
  "worklog-domain",
  "worklog-render",
+ "worklog-web",
  "worklog-wiring",
 ]
 
@@ -1363,6 +1360,19 @@ dependencies = [
  "similar",
  "worklog-app",
  "worklog-domain",
+]
+
+[[package]]
+name = "worklog-web"
+version = "0.5.12"
+dependencies = [
+ "askama",
+ "httparse",
+ "pulldown-cmark",
+ "rustix",
+ "worklog-app",
+ "worklog-domain",
+ "worklog-render",
 ]
 
 [[package]]

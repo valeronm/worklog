@@ -1,10 +1,10 @@
 use super::{has, lacks, ok};
-use crate::app::testing::{
+use crate::respond;
+use worklog_app::testing::{
     ENDED_FACT, entry, fact, fact_fields, followup, fork, world, world_with_atlas,
 };
-use crate::app::{ReadDeps, list, show};
-use crate::domain::id::DocumentId;
-use crate::web::respond;
+use worklog_app::{ReadDeps, list, show};
+use worklog_domain::id::DocumentId;
 
 #[test]
 fn facts_are_listed_with_their_links_and_marks() {

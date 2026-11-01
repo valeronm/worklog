@@ -1,0 +1,23 @@
+[package]
+name = "worklog-web"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+worklog-domain.workspace = true
+worklog-app.workspace = true
+worklog-render.workspace = true
+askama = "0.16"
+httparse = "1"
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
+
+[dev-dependencies]
+worklog-domain = { workspace = true, features = ["testing"] }
+worklog-app = { workspace = true, features = ["testing"] }
+# A test shrinks its sockets' buffers, so a page of a few hundred kilobytes fills them.
+rustix = { workspace = true, features = ["net"] }

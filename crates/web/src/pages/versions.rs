@@ -7,13 +7,13 @@ use super::links::{
     Choice, Layout, Line, Link, Place, Stamped, Text, doc_link, history_href, marks, version_link,
     with_query,
 };
-use crate::app::list::{ForkHead, ForkRow};
-use crate::app::search::Log;
-use crate::app::show::{Compared, History, Side};
-use crate::app::{Row, counted};
-use crate::render::diff::{Hunk, Mark, UNTERMINATED, hunks};
-use crate::render::{against, change_or_ending, ended, unread_notes};
-use crate::web::markdown::{marked, summary_html};
+use crate::markdown::{marked, summary_html};
+use worklog_app::list::{ForkHead, ForkRow};
+use worklog_app::search::Log;
+use worklog_app::show::{Compared, History, Side};
+use worklog_app::{Row, counted};
+use worklog_render::diff::{Hunk, Mark, UNTERMINATED, hunks};
+use worklog_render::{against, change_or_ending, ended, unread_notes};
 
 #[derive(Template)]
 #[template(path = "history.html")]
@@ -235,10 +235,10 @@ impl VersionPage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::show::ShownVersion;
-    use crate::app::testing::history_row;
-    use crate::domain::id::{DocumentId, VersionId};
-    use crate::web::pages::testing::version;
+    use crate::pages::testing::version;
+    use worklog_app::show::ShownVersion;
+    use worklog_app::testing::history_row;
+    use worklog_domain::id::{DocumentId, VersionId};
 
     #[test]
     fn a_row_shows_a_change_up_to_its_colon_and_keeps_the_whole_as_a_title() {

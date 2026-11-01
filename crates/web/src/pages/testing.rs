@@ -1,11 +1,11 @@
-use crate::app::Reference;
-use crate::app::show::{FieldItem, ShownField, ShownVersion};
-use crate::app::testing::NOW;
-use crate::domain::id::{DocumentId, VersionId};
-use crate::domain::version::Stamp;
+use worklog_app::Reference;
+use worklog_app::show::{FieldItem, ShownField, ShownVersion};
+use worklog_app::testing::NOW;
+use worklog_domain::id::{DocumentId, VersionId};
+use worklog_domain::version::Stamp;
 
 pub fn to(byte: u8, label: &str) -> Reference {
-    crate::app::testing::to(&DocumentId::from_bytes([byte; 16]), label)
+    worklog_app::testing::to(&DocumentId::from_bytes([byte; 16]), label)
 }
 
 pub fn version(seed: &[u8]) -> ShownVersion {

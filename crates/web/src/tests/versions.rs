@@ -1,9 +1,9 @@
 use super::{forked_into, has, lacks, main_of, ok, page, stamp};
-use crate::app::testing::{
+use worklog_app::testing::{
     ENDED, NOW, fact, fact_fields, fork, head, head_id, topic, topic_fields, world,
     world_with_atlas, written_at,
 };
-use crate::domain::id::VersionId;
+use worklog_domain::id::VersionId;
 
 #[test]
 fn a_history_is_a_row_a_version_newest_first_each_linked() {

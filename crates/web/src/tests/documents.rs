@@ -1,12 +1,12 @@
 use super::{forked_into, has, lacks, main_of, ok, stamp};
-use crate::app::show;
-use crate::app::show::Shown;
-use crate::app::testing::{
+use worklog_app::show;
+use worklog_app::show::Shown;
+use worklog_app::testing::{
     DONE, ENDED, ENDED_FACT, entry, entry_fields, fact, fact_fields, fork, topic, topic_fields,
     world, world_with_atlas,
 };
-use crate::domain::id::{DocumentId, VersionId};
-use crate::domain::version::ReadError;
+use worklog_domain::id::{DocumentId, VersionId};
+use worklog_domain::version::ReadError;
 
 #[test]
 fn a_document_is_its_label_its_marks_and_its_head_with_fields_and_a_rendered_body() {

@@ -11,8 +11,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use super::{Page, Problem};
-use crate::app::Failure;
-use crate::domain::ports::StoreError;
+use worklog_app::Failure;
+use worklog_domain::ports::StoreError;
 
 fn names_this_server(host: &str, names: &[String]) -> bool {
     let (name, port) = match host.strip_prefix('[') {
@@ -388,9 +388,9 @@ impl Server {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::testing::{World, fact, fact_fields, world, world_with_atlas};
-    use crate::web::respond;
-    use crate::web::tests::{has, lacks};
+    use crate::respond;
+    use crate::tests::{has, lacks};
+    use worklog_app::testing::{World, fact, fact_fields, world, world_with_atlas};
 
     struct Serving {
         address: String,

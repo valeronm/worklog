@@ -1,5 +1,5 @@
 use super::{has, lacks, ok, page};
-use crate::app::testing::{entry, world_with_atlas};
+use worklog_app::testing::{entry, world_with_atlas};
 
 #[test]
 fn stats_draw_the_days_of_a_topic_and_link_each_day_holding_an_entry_to_its_entries() {

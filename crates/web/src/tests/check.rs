@@ -1,7 +1,7 @@
 use super::{has, lacks, ok};
-use crate::app::testing::{fork, topic, topic_fields, world};
-use crate::domain::id::VersionId;
-use crate::domain::version::ReadError;
+use worklog_app::testing::{fork, topic, topic_fields, world};
+use worklog_domain::id::VersionId;
+use worklog_domain::version::ReadError;
 
 #[test]
 fn a_check_is_a_page_whether_or_not_the_store_has_a_problem() {

@@ -5,13 +5,13 @@ use askama::Template;
 use super::home::TopicLine;
 use super::links::{Layout, Link, Place, Stamped, Text, doc_href, history_href, marks, with_query};
 use super::listing::{Item, entry_items, fact_items, followup_items, leave_out};
-use crate::app::list::{ClaimRow, EntryRow, FactRow, TopicClaims, TopicRow};
-use crate::app::show::Linker;
-use crate::app::show::{FieldItem, ShownDocument, ShownField, ShownVersion};
-use crate::app::{FollowupRow, Reference};
-use crate::domain::schema::KindOf;
-use crate::render::{ended, unread_notes};
-use crate::web::markdown::{Markup, summary_html, to_html};
+use crate::markdown::{Markup, summary_html, to_html};
+use worklog_app::list::{ClaimRow, EntryRow, FactRow, TopicClaims, TopicRow};
+use worklog_app::show::Linker;
+use worklog_app::show::{FieldItem, ShownDocument, ShownField, ShownVersion};
+use worklog_app::{FollowupRow, Reference};
+use worklog_domain::schema::KindOf;
+use worklog_render::{ended, unread_notes};
 
 pub struct Field {
     pub name: String,
@@ -317,8 +317,8 @@ impl TopicPage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::testing::NOW;
-    use crate::web::pages::testing::version;
+    use crate::pages::testing::version;
+    use worklog_app::testing::NOW;
 
     #[test]
     fn a_head_links_its_version_its_machine_and_each_document_a_field_refers_to() {

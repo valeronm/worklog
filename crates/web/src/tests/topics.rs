@@ -1,10 +1,10 @@
 use super::{has, lacks, main_of, ok, page, stamp};
-use crate::app::testing::{
+use crate::respond;
+use worklog_app::testing::{
     ENDED, ENDED_FACT, REMOVED, World, claim_fields, entry, fact, followup, fork, head_id, part_of,
     topic, topic_fields, uses, world,
 };
-use crate::domain::id::{DocumentId, VersionId};
-use crate::web::respond;
+use worklog_domain::id::{DocumentId, VersionId};
 
 fn tabs(topic: &DocumentId, current: &str, counts: [usize; 5]) -> String {
     let tabs = [

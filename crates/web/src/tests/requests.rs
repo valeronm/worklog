@@ -1,10 +1,10 @@
 use super::{has, lacks, ok, page};
-use crate::app::testing::{fact, fact_fields, head, topic_fields, world};
-use crate::app::{Failure, ReadDeps, Stored};
-use crate::domain::ports::StoreError;
-use crate::domain::release;
-use crate::domain::testing::FailingStore;
-use crate::web::{failed, respond};
+use crate::{failed, respond};
+use worklog_app::testing::{fact, fact_fields, head, topic_fields, world};
+use worklog_app::{Failure, ReadDeps, Stored};
+use worklog_domain::ports::StoreError;
+use worklog_domain::release;
+use worklog_domain::testing::FailingStore;
 
 #[test]
 fn what_a_page_prints_from_the_store_is_escaped() {

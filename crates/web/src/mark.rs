@@ -1,6 +1,6 @@
 //! How a link to a document that has ended is marked, in a template and in a body alike.
 
-use crate::render;
+use worklog_render::ended;
 
 pub struct EndedMark {
     class: &'static str,
@@ -12,7 +12,7 @@ impl EndedMark {
     pub fn of(reason: Option<&str>) -> Option<EndedMark> {
         reason.map(|reason| EndedMark {
             class: "ended",
-            title: render::ended(reason),
+            title: ended(reason),
         })
     }
 

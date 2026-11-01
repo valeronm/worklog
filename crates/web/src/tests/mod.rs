@@ -9,9 +9,9 @@ mod stats;
 mod topics;
 mod versions;
 
-use crate::app::testing::{NOW, World, head, topic_fields, written_at};
-use crate::domain::id::{DocumentId, VersionId};
-use crate::web::{Page, respond};
+use crate::{Page, respond};
+use worklog_app::testing::{NOW, World, head, topic_fields, written_at};
+use worklog_domain::id::{DocumentId, VersionId};
 
 pub fn page(world: &World, target: &str) -> Page {
     respond(&world.deps().read(), "GET", target)

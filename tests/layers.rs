@@ -12,11 +12,15 @@ fn src() -> PathBuf {
     root().join("src")
 }
 
-const CRATES: [&str; 4] = ["domain", "app", "render", "wiring"];
+const CRATES: [&str; 5] = ["domain", "app", "render", "wiring", "web"];
+
+fn crate_dir(name: &str) -> PathBuf {
+    root().join("crates").join(name)
+}
 
 fn layer(name: &str) -> PathBuf {
     if CRATES.contains(&name) {
-        root().join("crates").join(name).join("src")
+        crate_dir(name).join("src")
     } else {
         src().join(name)
     }
@@ -245,10 +249,6 @@ fn violations(root: &Path, rule: fn(&str) -> Vec<String>) -> Vec<String> {
 fn violations_in(root: &Path, extension: &str, rule: fn(&str) -> Vec<String>) -> Vec<String> {
     let mut found = Vec::new();
     files(root, extension, &mut found);
-    violations_among(found, rule)
-}
-
-fn violations_among(found: Vec<(String, String)>, rule: fn(&str) -> Vec<String>) -> Vec<String> {
     assert!(!found.is_empty());
     let mut broken = Vec::new();
     for (path, text) in found {
@@ -1078,11 +1078,7 @@ fn names_paths_under(dir: &Path, parent: &str) -> bool {
 }
 
 fn write_use_case_named(text: &str) -> Vec<String> {
-    modules_named(text, "app", &WRITES)
-}
-
-fn wiring_named(text: &str) -> Vec<String> {
-    modules_named(text, "crate", &["wiring"])
+    modules_named(text, "worklog_app", &WRITES)
 }
 
 fn web() -> PathBuf {
@@ -1091,119 +1087,79 @@ fn web() -> PathBuf {
 
 #[test]
 fn the_web_view_names_no_write_use_case_in_its_tests_either() {
+    assert!(names_paths_under(&web(), "worklog_app"));
     assert_eq!(violations(&web(), write_use_case_named), [""; 0]);
 }
 
 #[test]
 fn a_web_file_that_names_a_write_use_case_is_found() {
     for clean in [
-        "use crate::app::show::{self, Shown};\nuse crate::app::{Deps, Failure, check, list, search};\n",
-        "use crate::app::testing::{\n    Counting, World, entry, fact, followup, fork, head,\n};\n",
+        "use worklog_app::show::{self, Shown};\nuse worklog_app::{Deps, Failure, check, list, search};\n",
+        "use worklog_app::testing::{\n    Counting, World, entry, fact, followup, fork, head,\n};\n",
         "let heads = fork(&world, &lantern, &topic_fields(\"lantern\", \"\"));",
         "followup(&world, &[&lantern], \"open\", \"\");",
-        "use crate::app::{FollowupRow, Reference, Row, TriggerShown, counted};",
-        "// crate::app::save::save stores it.\nlet save = 1;",
+        "use worklog_app::{FollowupRow, Reference, Row, TriggerShown, counted};",
+        "// worklog_app::save::save stores it.\nlet save = 1;",
         "let draft = saved.draft; let claim = row.claim;",
-        "use crate::app::usage::{self, MachineUsage};\nlet record = shown.record;",
+        "use worklog_app::usage::{self, MachineUsage};\nlet record = shown.record;",
     ] {
         assert_eq!(write_use_case_named(clean), [""; 0], "{clean}");
     }
     for (broken, found) in [
         (
-            "use crate::app::save;",
-            "names `app::save` as `crate::app::save`",
+            "use worklog_app::save;",
+            "names `worklog_app::save` as `worklog_app::save`",
         ),
         (
-            "use crate::app::{Deps, Failure, check, draft, list};",
-            "names `app::draft` as `crate::app::draft`",
+            "use worklog_app::{Deps, Failure, check, draft, list};",
+            "names `worklog_app::draft` as `worklog_app::draft`",
         ),
         (
-            "use crate::app::{\n    Deps,\n    show::{self, Shown},\n    followup::{\n        new_followup,\n    },\n};",
-            "names `app::followup` as `crate::app::followup::new_followup`",
+            "use worklog_app::{\n    Deps,\n    show::{self, Shown},\n    followup::{\n        new_followup,\n    },\n};",
+            "names `worklog_app::followup` as `worklog_app::followup::new_followup`",
         ),
         (
-            "use crate::app::followup::set_trigger as set;",
-            "names `app::followup` as `crate::app::followup::set_trigger`",
+            "use worklog_app::followup::set_trigger as set;",
+            "names `worklog_app::followup` as `worklog_app::followup::set_trigger`",
         ),
         (
-            "use crate::app::{self, amend as change};",
-            "names `app::amend` as `crate::app::amend`",
+            "use worklog_app::{self, amend as change};",
+            "names `worklog_app::amend` as `worklog_app::amend`",
         ),
         (
-            "let stored = crate::app::save::save(deps, target)?;",
-            "names `app::save` as `crate::app::save::save`",
+            "let stored = worklog_app::save::save(deps, target)?;",
+            "names `worklog_app::save` as `worklog_app::save::save`",
         ),
         (
-            "use crate::app;\nlet claimed = app :: claim :: claim(deps, topic, None)?;",
-            "names `app::claim` as `app::claim::claim`",
+            "let claimed = worklog_app :: claim :: claim(deps, topic, None)?;",
+            "names `worklog_app::claim` as `worklog_app::claim::claim`",
         ),
         (
-            "use crate::app::*;\nlet opened = fork::resolve(deps, target)?;",
-            "names `app::fork` as `fork::resolve`",
+            "use worklog_app::*;\nlet opened = fork::resolve(deps, target)?;",
+            "names `worklog_app::fork` as `fork::resolve`",
         ),
         (
             "let moved = bulk::move_to(deps, &targets, from, to)?;",
-            "names `app::bulk` as `bulk::move_to`",
+            "names `worklog_app::bulk` as `bulk::move_to`",
         ),
         (
             "setup::start(deps, name, None)?;",
-            "names `app::setup` as `setup::start`",
+            "names `worklog_app::setup` as `setup::start`",
         ),
         (
-            "use super::super::app::live;",
-            "names `app::live` as `super::super::app::live`",
+            "use worklog_app::live;",
+            "names `worklog_app::live` as `worklog_app::live`",
         ),
         (
-            "use crate::app::record::record;",
-            "names `app::record` as `crate::app::record::record`",
+            "use worklog_app::record::record;",
+            "names `worklog_app::record` as `worklog_app::record::record`",
         ),
         (
-            "let path = crate::app::upgrade::replace(releases, binary, &checked)?;",
-            "names `app::upgrade` as `crate::app::upgrade::replace`",
+            "let path = worklog_app::upgrade::replace(releases, binary, &checked)?;",
+            "names `worklog_app::upgrade` as `worklog_app::upgrade::replace`",
         ),
     ] {
         assert_eq!(write_use_case_named(broken), [found], "{broken}");
-    }
-}
-
-#[test]
-fn the_web_view_is_handed_its_ports_and_wires_none() {
-    assert_eq!(violations(&web(), wiring_named), [""; 0]);
-}
-
-#[test]
-fn a_web_file_that_names_the_wiring_is_found() {
-    for clean in [
-        "use crate::app::{Deps, Failure};",
-        "// crate::wiring builds them.\nlet wiring = 1;",
-        "let wiring = request.wiring;",
-    ] {
-        assert_eq!(wiring_named(clean), [""; 0], "{clean}");
-    }
-    for (broken, found) in [
-        (
-            "use crate::wiring;",
-            "names `crate::wiring` as `crate::wiring`",
-        ),
-        (
-            "use crate::{app::Deps, wiring::{self, Adapters}};",
-            "names `crate::wiring` as `crate::wiring::self`",
-        ),
-        (
-            "let adapters = crate::wiring::wire(variable)?;",
-            "names `crate::wiring` as `crate::wiring::wire`",
-        ),
-        (
-            "use crate::*;\nlet adapters = wiring::wire(variable)?;",
-            "names `crate::wiring` as `wiring::wire`",
-        ),
-        (
-            "let adapters = super::wiring::wire(variable)?;",
-            "names `crate::wiring` as `super::wiring::wire`",
-        ),
-    ] {
-        let named = wiring_named(broken);
-        assert_eq!(named.first().map(String::as_str), Some(found), "{broken}");
     }
 }
 
@@ -1268,7 +1224,7 @@ fn escaping_turned_off(text: &str) -> Vec<String> {
 
 #[test]
 fn no_template_prints_a_value_unescaped() {
-    let templates = root().join("templates");
+    let templates = crate_dir("web").join("templates");
     assert_eq!(
         violations_in(&templates, "html", escaping_turned_off),
         [""; 0]
@@ -1352,11 +1308,13 @@ fn unescaped_in_code(text: &str) -> Vec<String> {
 
 #[test]
 fn one_type_alone_is_printed_unescaped() {
-    let found = violations_among(program_sources(), unescaped_in_code);
-    assert_eq!(found.len(), 1, "{found:?}");
-    assert!(
-        found[0].ends_with("web/markdown.rs: implements `HtmlSafe` for `Markup`"),
-        "{found:?}"
+    let markup = web().join("markdown.rs");
+    assert_eq!(
+        violations(&web(), unescaped_in_code),
+        [format!(
+            "{}: implements `HtmlSafe` for `Markup`",
+            markup.display()
+        )]
     );
 }
 

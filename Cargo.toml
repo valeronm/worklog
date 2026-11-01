@@ -19,6 +19,7 @@ worklog-domain = { path = "crates/domain" }
 worklog-app = { path = "crates/app" }
 worklog-render = { path = "crates/render" }
 worklog-wiring = { path = "crates/wiring" }
+worklog-web = { path = "crates/web" }
 blake3 = "1"
 # Without `clock`, which reads the time.
 chrono = { version = "0.4", default-features = false, features = ["std"] }
@@ -47,25 +48,21 @@ worklog-domain.workspace = true
 worklog-app.workspace = true
 worklog-render.workspace = true
 worklog-wiring.workspace = true
-askama = "0.16"
+worklog-web.workspace = true
 clap = { version = "4", features = ["derive", "wrap_help"] }
 clap_complete = { version = "4", features = ["unstable-dynamic"] }
-httparse = "1"
-pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
 serde.workspace = true
 serde_json.workspace = true
-similar.workspace = true
-toml.workspace = true
 # Keeps the comments and layout of an agent's config it adds a writable root to.
 toml_edit = "0.25.17"
 
 [dev-dependencies]
 worklog-domain = { workspace = true, features = ["testing"] }
 worklog-app = { workspace = true, features = ["testing"] }
-# A test shrinks its sockets' buffers, so a page of a few hundred kilobytes fills them.
-rustix = { workspace = true, features = ["net"] }
 assert_cmd = "2"
+similar.workspace = true
 tempfile.workspace = true
+toml.workspace = true
 
 # The upgrade scenario hashes a debug binary; unoptimised sha2 makes that
 # the slowest test by far.

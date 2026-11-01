@@ -7,9 +7,9 @@ use std::ops::Range;
 use pulldown_cmark::{CodeBlockKind, CowStr, Event, LinkType, Options, Parser, Tag, TagEnd, html};
 
 use super::mark::EndedMark;
-use crate::app::show::Linked;
-use crate::domain::id::DocumentId;
-use crate::domain::schema::links::link_at;
+use worklog_app::show::Linked;
+use worklog_domain::id::DocumentId;
+use worklog_domain::schema::links::link_at;
 
 #[cfg(test)]
 thread_local! {
@@ -338,7 +338,7 @@ mod tests {
     use pulldown_cmark::{Event, Parser};
 
     use super::*;
-    use crate::app::testing::{to, to_ended};
+    use worklog_app::testing::{to, to_ended};
 
     fn atlas() -> DocumentId {
         DocumentId::from_bytes([0xa7; 16])
@@ -623,7 +623,7 @@ mod tests {
                     marked.push(target);
                 }
             }
-            assert_eq!(marked, crate::domain::schema::links::links(body), "{body}");
+            assert_eq!(marked, worklog_domain::schema::links::links(body), "{body}");
         }
     }
 

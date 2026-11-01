@@ -3,9 +3,9 @@
 use askama::Template;
 
 use super::links::{Choice, Layout, Link, Place, with_query};
-use crate::app::activity::Stats;
-use crate::app::counted;
-use crate::render::calendar::{Cell, MONTH_GAP, Month, calendar};
+use worklog_app::activity::Stats;
+use worklog_app::counted;
+use worklog_render::calendar::{Cell, MONTH_GAP, Month, calendar};
 
 pub struct Square {
     pub level: usize,

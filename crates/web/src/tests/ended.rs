@@ -1,11 +1,11 @@
 use super::{forked_into, has, lacks, main_of, ok};
-use crate::app::show;
-use crate::app::testing::{
+use worklog_app::show;
+use worklog_app::testing::{
     DONE, ENDED, ENDED_FACT, REMOVED, World, entry, fact, fact_fields, followup, fork, head_id,
     topic_fields, world_with_atlas,
 };
-use crate::domain::id::{DocumentId, VersionId};
-use crate::domain::version::ReadError;
+use worklog_domain::id::{DocumentId, VersionId};
+use worklog_domain::version::ReadError;
 
 struct Ended {
     world: World,

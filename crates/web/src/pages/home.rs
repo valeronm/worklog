@@ -5,9 +5,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use askama::Template;
 
 use super::links::{Layout, Line, Link, NavLink, Place, doc_link, doc_links, ended_switch};
-use crate::app::list::TopicRow;
-use crate::domain::id::DocumentId;
-use crate::render::filed_counts;
+use worklog_app::list::TopicRow;
+use worklog_domain::id::DocumentId;
+use worklog_render::filed_counts;
 
 pub struct TopicLine {
     pub line: Line,
@@ -132,8 +132,8 @@ impl Home {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::testing::row;
-    use crate::web::pages::testing::to;
+    use crate::pages::testing::to;
+    use worklog_app::testing::row;
 
     fn topic(byte: u8, label: &str, part_of: &[&str]) -> TopicRow {
         TopicRow {
@@ -258,7 +258,7 @@ mod tests {
                 row.row.document = id(at);
                 row.top = at == 0;
                 if at + 1 < deep {
-                    row.parts = vec![crate::app::testing::to(&id(at + 1), "link")];
+                    row.parts = vec![worklog_app::testing::to(&id(at + 1), "link")];
                 }
                 row
             })

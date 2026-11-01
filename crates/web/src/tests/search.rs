@@ -1,5 +1,5 @@
 use super::{has, lacks, ok, page};
-use crate::app::testing::{ENDED_FACT, fact, fact_fields, topic, world, world_with_atlas};
+use worklog_app::testing::{ENDED_FACT, fact, fact_fields, topic, world, world_with_atlas};
 
 const FORM: &str = "<form action=\"/search\" method=\"get\">\
                     <input type=\"search\" name=\"q\" value=\"";
