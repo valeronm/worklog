@@ -3,12 +3,12 @@
 pub mod calendar;
 pub mod diff;
 
-use crate::app::check::Check;
-use crate::app::search::Matched;
-use crate::app::show::{Side, Unread};
-use crate::app::{FollowupRow, Reference, TriggerShown, counted};
-use crate::domain::id::VersionId;
-use crate::domain::version::Stamp;
+use worklog_app::check::Check;
+use worklog_app::search::Matched;
+use worklog_app::show::{Side, Unread};
+use worklog_app::{FollowupRow, Reference, TriggerShown, counted};
+use worklog_domain::id::VersionId;
+use worklog_domain::version::Stamp;
 
 const HIT_LINES: usize = 3;
 

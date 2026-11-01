@@ -12,7 +12,7 @@ fn src() -> PathBuf {
     root().join("src")
 }
 
-const CRATES: [&str; 2] = ["domain", "app"];
+const CRATES: [&str; 3] = ["domain", "app", "render"];
 
 fn layer(name: &str) -> PathBuf {
     if CRATES.contains(&name) {
@@ -1089,6 +1089,18 @@ fn modules_named(text: &str, parent: &str, modules: &[&str]) -> Vec<String> {
     named
 }
 
+// An alias or a new name for a crate leaves a check matching its paths nothing to match.
+fn names_paths_under(dir: &Path, parent: &str) -> bool {
+    let mut found = Vec::new();
+    sources(dir, &mut found);
+    found.iter().any(|(_, text)| {
+        let text = uncommented(text);
+        paths(&text)
+            .iter()
+            .any(|path| path.len() > 1 && path[0] == parent)
+    })
+}
+
 fn write_use_case_named(text: &str) -> Vec<String> {
     modules_named(text, "app", &WRITES)
 }
@@ -1414,8 +1426,7 @@ fn code_that_opens_another_way_past_escaping_is_found() {
 
 fn render_reach(text: &str) -> Vec<String> {
     let mut found = modules_named(text, "std", &["fs", "env", "process", "net", "time"]);
-    found.extend(modules_named(text, "crate", &["web", "cli", "wiring"]));
-    found.extend(modules_named(text, "domain", &["ports"]));
+    found.extend(modules_named(text, "worklog_domain", &["ports"]));
     // A use case takes the ports, so a module that cannot name them runs none.
     for token in tokens(&uncommented(text)) {
         if matches!(token, "Deps" | "ReadDeps") {
@@ -1427,17 +1438,18 @@ fn render_reach(text: &str) -> Vec<String> {
 
 #[test]
 fn what_both_renderers_share_reaches_the_domain_and_what_the_use_cases_return() {
+    assert!(names_paths_under(&layer("render"), "worklog_domain"));
     assert_eq!(violations(&layer("render"), render_reach), [""; 0]);
 }
 
 #[test]
-fn a_shared_renderer_that_reaches_a_renderer_the_ports_or_the_host_is_found() {
+fn a_shared_renderer_that_reaches_the_ports_or_the_host_is_found() {
     for clean in [
-        "use similar::{ChangeTag, TextDiff};\nuse crate::domain::version::Stamp;",
+        "use similar::{ChangeTag, TextDiff};\nuse worklog_domain::version::Stamp;",
         "pub mod diff;\nlet app = 1; let process = web.cli;",
-        "// crate::web::pages links them, over the Deps of a request.",
+        "// The web's pages link them, over the Deps of a request.",
         "let name = env!(\"CARGO_PKG_NAME\");",
-        "use crate::app::show::{Diff, Side};\nuse crate::app::{FollowupRow, counted};",
+        "use worklog_app::show::{Diff, Side};\nuse worklog_app::{FollowupRow, counted};",
     ] {
         assert_eq!(render_reach(clean), [""; 0], "{clean}");
     }
@@ -1455,39 +1467,19 @@ fn a_shared_renderer_that_reaches_a_renderer_the_ports_or_the_host_is_found() {
             "use std::net::SocketAddr;",
             "names `std::net` as `std::net::SocketAddr`",
         ),
-        ("use crate::app::{Deps, show};", "names `Deps`"),
-        ("use crate::app::{ReadDeps, show};", "names `ReadDeps`"),
+        ("use worklog_app::{Deps, show};", "names `Deps`"),
+        ("use worklog_app::{ReadDeps, show};", "names `ReadDeps`"),
         (
-            "let shown = show::show(&crate::app::Deps { store }, target)?;",
+            "let shown = show::show(&worklog_app::Deps { store }, target)?;",
             "names `Deps`",
         ),
         (
-            "use crate::{domain::id::VersionId, web::pages};",
-            "names `crate::web` as `crate::web::pages`",
+            "use worklog_domain::ports::Clock;",
+            "names `worklog_domain::ports` as `worklog_domain::ports::Clock`",
         ),
         (
-            "let text = crate::cli::render(&diff);",
-            "names `crate::cli` as `crate::cli::render`",
-        ),
-        (
-            "use crate::wiring;",
-            "names `crate::wiring` as `crate::wiring`",
-        ),
-        (
-            "use super::web::pages;",
-            "names `crate::web` as `super::web::pages`",
-        ),
-        (
-            "let text = super::super::cli::render(&diff);",
-            "names `crate::cli` as `super::super::cli::render`",
-        ),
-        (
-            "use crate::domain::ports::Clock;",
-            "names `domain::ports` as `crate::domain::ports::Clock`",
-        ),
-        (
-            "use crate::domain::{id::VersionId, ports::{Clock, Host}};",
-            "names `domain::ports` as `crate::domain::ports::Clock`",
+            "use worklog_domain::{id::VersionId, ports::{Clock, Host}};",
+            "names `worklog_domain::ports` as `worklog_domain::ports::Clock`",
         ),
         (
             "let now = std::time::SystemTime::now();",

@@ -12,6 +12,6 @@
 pub use worklog_app as app;
 pub mod cli;
 pub use worklog_domain as domain;
-pub mod render;
+pub use worklog_render as render;
 pub mod web;
 pub mod wiring;

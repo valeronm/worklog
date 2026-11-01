@@ -1334,6 +1334,7 @@ dependencies = [
  "ureq",
  "worklog-app",
  "worklog-domain",
+ "worklog-render",
 ]
 
 [[package]]
@@ -1356,6 +1357,16 @@ dependencies = [
  "serde",
  "sha2",
  "toml",
+]
+
+[[package]]
+name = "worklog-render"
+version = "0.5.12"
+dependencies = [
+ "chrono",
+ "similar",
+ "worklog-app",
+ "worklog-domain",
 ]
 
 [[package]]

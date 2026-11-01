@@ -4,8 +4,8 @@ use std::collections::BTreeMap;
 
 use chrono::{Datelike as _, NaiveDate, Weekday};
 
-use crate::app::activity::Activity;
-use crate::domain::schema::Date;
+use worklog_app::activity::Activity;
+use worklog_domain::schema::Date;
 
 /// The level of the busiest day in the span.
 pub const TOP_LEVEL: usize = 4;
@@ -106,7 +106,7 @@ pub fn calendar(activity: &Activity) -> Calendar {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::activity::Day;
+    use worklog_app::activity::Day;
 
     fn date(text: &str) -> Date {
         Date::parse(text).unwrap()
