@@ -36,6 +36,10 @@ jobs:
           cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
           cargo test --workspace --locked
 
+      - name: Libraries without their test features
+        # A build with tests turns on the crates' `testing` through their dev-dependencies.
+        run: cargo clippy --workspace --locked -- -D warnings
+
       - name: Domain, app and render built alone
         # A workspace build turns on every feature a member asks for, chrono's
         # clock and the crates' `testing` among them.

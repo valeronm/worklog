@@ -10,8 +10,9 @@ latest release from the redirect and install from it.
    and commit it on `main` with `Cargo.lock`, since the tag build uses
    `--locked`.
 2. `cargo fmt --all --check`, `cargo clippy --workspace --all-targets
-   --all-features -- -D warnings` and `cargo test --workspace` green
-   locally, and for the domain, the app and the renderer built alone
+   --all-features -- -D warnings`, `cargo test --workspace` and `cargo
+   clippy --workspace -- -D warnings` green locally, and for the domain,
+   the app and the renderer built alone
    `cargo clippy -p worklog-domain -p worklog-app -p worklog-render --
    -D warnings` and `cargo check -p worklog-domain -p worklog-app -p
    worklog-render --all-targets`; CI runs the same, and clippy and the
