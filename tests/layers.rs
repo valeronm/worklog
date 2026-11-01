@@ -14,8 +14,12 @@ fn src() -> PathBuf {
 
 const CRATES: [&str; 5] = ["domain", "app", "render", "wiring", "web"];
 
+fn crates() -> PathBuf {
+    root().join("crates")
+}
+
 fn crate_dir(name: &str) -> PathBuf {
-    root().join("crates").join(name)
+    crates().join(name)
 }
 
 fn layer(name: &str) -> PathBuf {
@@ -188,6 +192,105 @@ fn a_result_that_writes_its_own_json_is_found() {
 #[test]
 fn the_app_reaches_the_host_only_through_ports() {
     reaches_nothing_in("app", &["fs", "env", "process", "net", "time"]);
+}
+
+fn manifest(path: &Path) -> toml::Table {
+    fs::read_to_string(path)
+        .expect("a readable manifest")
+        .parse()
+        .expect("a manifest in TOML")
+}
+
+// chrono's `now` enables `Utc::now` without the rest of `clock`, and its default features hold both.
+fn takes_a_clock(entry: &toml::Value, shared: &toml::Value) -> bool {
+    let declared = if entry.get("workspace").is_some() {
+        shared
+    } else {
+        entry
+    };
+    let defaults = [entry, declared]
+        .iter()
+        .find_map(|table| table.get("default-features")?.as_bool())
+        != Some(false);
+    let clock = [entry, declared]
+        .iter()
+        .filter_map(|table| table.get("features")?.as_array())
+        .flatten()
+        .any(|feature| matches!(feature.as_str(), Some("clock" | "now")));
+    defaults || clock
+}
+
+fn built_alone() -> Vec<String> {
+    let config = manifest(&root().join(".cargo").join("config.toml"));
+    let alias = config["alias"]["alone"]
+        .as_str()
+        .expect("the `alone` alias");
+    let words: Vec<&str> = alias.split_whitespace().collect();
+    let mut alone: Vec<String> = words
+        .windows(2)
+        .filter(|pair| pair[0] == "-p")
+        .map(|pair| pair[1].to_owned())
+        .collect();
+    alone.sort_unstable();
+    alone
+}
+
+#[test]
+fn the_crates_built_alone_resolve_chrono_without_its_clock() {
+    let mut tree = std::process::Command::new(env!("CARGO"));
+    tree.current_dir(root()).args([
+        "tree",
+        "--offline",
+        "--locked",
+        "--target",
+        "all",
+        "--invert",
+        "chrono",
+        "--depth",
+        "0",
+        "--format",
+        "{f}",
+    ]);
+    for name in built_alone() {
+        tree.args(["--package", &name]);
+    }
+    let resolved = tree.output().expect("cargo runs");
+    let stderr = String::from_utf8_lossy(&resolved.stderr);
+    assert!(resolved.status.success(), "{stderr}");
+    let features = String::from_utf8(resolved.stdout).expect("cargo prints text");
+    assert!(
+        !features
+            .split([',', '\n'])
+            .any(|feature| matches!(feature, "clock" | "now")),
+        "chrono resolves with [{}]",
+        features.trim()
+    );
+}
+
+#[test]
+fn the_crates_built_alone_are_those_that_take_chrono_without_its_clock() {
+    let alone = built_alone();
+    let workspace = manifest(&root().join("Cargo.toml"));
+    let shared = &workspace["workspace"]["dependencies"]["chrono"];
+    // The root package takes the clock through the wiring.
+    let mut clockless: Vec<String> = fs::read_dir(crates())
+        .expect("the crates")
+        .map(|entry| manifest(&entry.expect("a crate").path().join("Cargo.toml")))
+        .filter(|member| {
+            let chrono = member
+                .get("dependencies")
+                .and_then(|deps| deps.get("chrono"));
+            chrono.is_some_and(|entry| !takes_a_clock(entry, shared))
+        })
+        .map(|member| {
+            member["package"]["name"]
+                .as_str()
+                .expect("a package name")
+                .to_owned()
+        })
+        .collect();
+    clockless.sort_unstable();
+    assert_eq!(alone, clockless);
 }
 
 fn tokens(text: &str) -> Vec<&str> {

@@ -40,12 +40,8 @@ jobs:
         # A build with tests turns on the crates' `testing` through their dev-dependencies.
         run: cargo clippy --workspace --locked -- -D warnings
 
-      - name: Domain, app and render built alone
-        # A workspace build turns on every feature a member asks for, chrono's
-        # clock and the crates' `testing` among them.
-        run: |
-          cargo clippy -p worklog-domain -p worklog-app -p worklog-render --locked -- -D warnings
-          cargo check -p worklog-domain -p worklog-app -p worklog-render --all-targets --locked
+      - name: Crates built alone
+        run: cargo alone --locked -- -D warnings
 
   macos:
     # Without this job, macOS code is first compiled by the tag build and
