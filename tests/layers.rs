@@ -73,33 +73,18 @@ fn sources(path: &Path, found: &mut Vec<(String, String)>) {
     files(path, "rs", found);
 }
 
-fn reaches_nothing_in(name: &str, forbidden: &[&str]) {
+fn reaches_nothing_in(name: &str, modules: &[&str]) {
     let mut found = Vec::new();
     sources(&layer(name), &mut found);
     assert!(!found.is_empty());
     for (path, text) in found {
-        for needle in forbidden {
-            assert!(
-                !text.contains(needle),
-                "{path} reaches outside `{name}` through `{needle}`"
-            );
-        }
+        assert_eq!(modules_named(&text, "std", modules), [""; 0], "{path}");
     }
 }
 
 #[test]
 fn the_domain_does_no_io() {
-    reaches_nothing_in(
-        "domain",
-        &[
-            "std::fs",
-            "std::env",
-            "std::process",
-            "std::io",
-            "std::net",
-            "std::time",
-        ],
-    );
+    reaches_nothing_in("domain", &["fs", "env", "process", "io", "net", "time"]);
 }
 
 #[test]
@@ -206,16 +191,7 @@ fn a_result_that_writes_its_own_json_is_found() {
 
 #[test]
 fn the_app_reaches_the_host_only_through_ports() {
-    reaches_nothing_in(
-        "app",
-        &[
-            "std::fs",
-            "std::env",
-            "std::process",
-            "std::net",
-            "std::time",
-        ],
-    );
+    reaches_nothing_in("app", &["fs", "env", "process", "net", "time"]);
 }
 
 fn tokens(text: &str) -> Vec<&str> {
@@ -940,15 +916,14 @@ fn write_dependencies_named(text: &str) -> Vec<String> {
         .collect()
 }
 
+fn write_reached(text: &str) -> Vec<String> {
+    modules_named(text, "crate", &WRITES_A_READ_MAY_NOT_USE)
+}
+
 #[test]
 fn a_read_takes_no_write_dependencies_and_decides_no_ending() {
     let mut found = Vec::new();
     sources(&app(), &mut found);
-    let mut forbidden: Vec<String> = ["Record::read"].map(str::to_owned).into();
-    for module in WRITES_A_READ_MAY_NOT_USE {
-        forbidden.push(format!("crate::{module}"));
-        forbidden.push(format!("super::{module}"));
-    }
     let mut reads = 0;
     for (path, text) in found {
         let relative = Path::new(&path).strip_prefix(app()).expect("an app source");
@@ -961,15 +936,45 @@ fn a_read_takes_no_write_dependencies_and_decides_no_ending() {
         let shipped = outside_tests(&text);
         assert_eq!(write_dependencies_named(shipped), [""; 0], "{path}");
         assert_eq!(ending_read(shipped), [""; 0], "{path}");
-        let squeezed = squeezed(shipped);
-        for needle in &forbidden {
-            assert!(
-                !squeezed.contains(needle.as_str()),
-                "{path} holds `{needle}`"
-            );
-        }
+        assert_eq!(write_reached(shipped), [""; 0], "{path}");
+        assert!(
+            !squeezed(shipped).contains("Record::read"),
+            "{path} holds `Record::read`"
+        );
     }
     assert!(reads > 0);
+}
+
+#[test]
+fn a_read_that_names_a_write_use_case_is_found() {
+    for clean in [
+        "use crate::{Failure, ReadDeps, list};",
+        "use crate::draft::{DraftRow, drafts};",
+        "// crate::save::save stores it.\nlet save = 1;",
+        "let record = shown.record; let claim = row.claim;",
+    ] {
+        assert_eq!(write_reached(clean), [""; 0], "{clean}");
+    }
+    for (broken, found) in [
+        (
+            "use crate::{Failure, amend};",
+            "names `crate::amend` as `crate::amend`",
+        ),
+        (
+            "use super::{save::save};",
+            "names `crate::save` as `super::save::save`",
+        ),
+        (
+            "use crate::*;\nlet opened = fork::resolve(deps, target)?;",
+            "names `crate::fork` as `fork::resolve`",
+        ),
+        (
+            "let stored = crate::save::save(deps, target)?;",
+            "names `crate::save` as `crate::save::save`",
+        ),
+    ] {
+        assert_eq!(write_reached(broken), [found], "{broken}");
+    }
 }
 
 #[test]
