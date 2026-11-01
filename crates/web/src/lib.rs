@@ -15,8 +15,9 @@ use worklog_app::show::{self, Shown, ShownDocument};
 use worklog_app::{Failure, ReadDeps, activity, check, list, search};
 use worklog_domain::schema::KindOf;
 
+pub use pages::DOC;
 use pages::{
-    CheckPage, DOC, DocumentPage, ErrorPage, ForksPage, HISTORY, Held, HistoryPage, Home, Listing,
+    CheckPage, DocumentPage, ErrorPage, ForksPage, HISTORY, Held, HistoryPage, Home, Listing,
     LogPage, Place, Scope, SearchPage, Section, StatsPage, TopicPage, VersionPage, shown_link,
 };
 use query::{Query, decoded};

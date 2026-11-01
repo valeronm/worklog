@@ -173,8 +173,8 @@ fits:
 
 1. Can it be done now? Then do it, or put it to the user.
 2. Is it already answered? Then `done` it, naming what dissolved it.
-3. Does an idea already hold the work? Then `drop` it and let the entry's
-   Notes link the idea.
+3. Does an idea already hold the work, and the followup no plan for it?
+   Then `drop` it and let the entry's Notes link the idea.
 4. Is something waiting on it? Then it is a followup with its trigger.
 5. Otherwise it is an idea.
 
@@ -193,6 +193,10 @@ A followup's trigger says when it comes up again:
 <document>` for the document the followup is about. With `--summary` it
 is stored at once and its id printed, with what `--body` holds as its
 body; without, a draft opens, saved by the id `worklog drafts` shows.
+
+A plan for open work is the body of its followup, `--about` the idea it
+builds, whatever place another tool suggests: the next session finds it
+there.
 
 ## Facts and topics
 
@@ -323,6 +327,11 @@ documents and reconstructing what changed, when and why, citing names. If
 nothing matches, say so. Where a fact and an entry disagree, the fact is
 current and the entry is what was true that day; report the disagreement,
 since one of them is stale.
+
+A document the user wants to read is given to them as a link into
+`worklog serve`, `http://127.0.0.1:8080/doc/<target>`, the target as any
+command takes it, on the address the server was started on if not that
+one. When nothing answers there, offer to start it.
 
 ## Links and what the store keeps
 

@@ -14,10 +14,9 @@ mod tests {
 
     const HELP: &str = "help";
 
-    const NOT_FOR_A_SESSION: [&str; 10] = [
+    const NOT_FOR_A_SESSION: [&str; 9] = [
         "init",
         "join",
-        "serve",
         "agents",
         "refresh",
         "usage",
@@ -356,6 +355,20 @@ mod tests {
         let mentioned = mentioned(SKILL);
         let missing: Vec<&String> = every.difference(&mentioned).collect();
         assert_eq!(missing, Vec::<&String>::new());
+    }
+
+    #[test]
+    fn the_skill_links_a_document_where_serve_shows_it_by_default() {
+        let root = root();
+        let serve = root.find_subcommand("serve").expect("a serve command");
+        let bind = (serve.get_arguments())
+            .find(|arg| arg.get_id() == "bind")
+            .expect("an address to listen on");
+        let default = (bind.get_default_values().first())
+            .and_then(|value| value.to_str())
+            .expect("a default address");
+        let link = format!("http://{default}{}", worklog_web::DOC);
+        assert!(SKILL.contains(&link), "the skill gives no link at {link}");
     }
 
     #[test]
