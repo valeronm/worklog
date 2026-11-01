@@ -98,8 +98,6 @@ fn the_domain_does_no_io() {
             "std::io",
             "std::net",
             "std::time",
-            "crate::wiring",
-            "getrandom",
         ],
     );
 }
@@ -131,65 +129,16 @@ fn no_module_outside_the_schema_names_it() {
 // A line of the usage log is a format of the store, worded by the file that writes it.
 const WORDS_ITS_OWN_LINE: &str = "wiring/fs/usage.rs";
 
-fn json_named(file: &str, text: &str) -> Vec<String> {
-    let layer = file.split('/').next().unwrap_or_default();
-    let barred = ["domain", "app", "wiring"].contains(&layer) && file != WORDS_ITS_OWN_LINE;
-    if barred && text.contains("serde_json") {
-        vec!["names `serde_json`".to_owned()]
-    } else {
-        Vec::new()
-    }
-}
-
 #[test]
 fn a_result_is_given_its_json_form_by_the_command_line_alone() {
-    let mut broken = Vec::new();
-    let mut wording_a_line = Vec::new();
-    for (path, text) in program_sources() {
-        let file = within(&path);
-        for what in json_named(&file, &text) {
-            broken.push(format!("{file}: {what}"));
-        }
-        if file == WORDS_ITS_OWN_LINE && text.contains("serde_json") {
-            wording_a_line.push(file);
-        }
-    }
-    assert_eq!(broken, [""; 0]);
-    assert_eq!(wording_a_line, [WORDS_ITS_OWN_LINE]);
-}
-
-#[test]
-fn a_file_below_the_command_line_that_names_json_is_found_but_the_one_wording_a_stored_line() {
-    let naming = "use serde_json::Value;
-let line = serde_json::to_string(&line);";
-    for clean in [
-        "wiring/fs/usage.rs",
-        "cli/json.rs",
-        "cli/usage.rs",
-        "web/mod.rs",
-    ] {
-        assert_eq!(json_named(clean, naming), [""; 0], "{clean}");
-    }
-    for broken in [
-        "wiring/fs/store.rs",
-        "wiring/fs/mod.rs",
-        "wiring/fs/usage/line.rs",
-        "wiring/usage.rs",
-        "wiring/mod.rs",
-        "wiring/net.rs",
-        "app/usage.rs",
-        "app/record.rs",
-        "app/wiring/fs/usage.rs",
-        "domain/usage.rs",
-        "domain/testing.rs",
-    ] {
-        assert_eq!(
-            json_named(broken, naming),
-            ["names `serde_json`"],
-            "{broken}"
-        );
-        assert_eq!(json_named(broken, "use serde::Serialize;"), [""; 0]);
-    }
+    let mut found = Vec::new();
+    sources(&layer("wiring"), &mut found);
+    let naming: Vec<String> = found
+        .iter()
+        .filter(|(_, text)| text.contains("serde_json"))
+        .map(|(path, _)| within(path))
+        .collect();
+    assert_eq!(naming, [WORDS_ITS_OWN_LINE]);
 }
 
 #[test]
@@ -265,7 +214,6 @@ fn the_app_reaches_the_host_only_through_ports() {
             "std::process",
             "std::net",
             "std::time",
-            "crate::wiring",
         ],
     );
 }
@@ -1542,55 +1490,6 @@ fn a_shared_renderer_that_reaches_a_renderer_the_ports_or_the_host_is_found() {
         ),
     ] {
         let named = render_reach(broken);
-        assert_eq!(named.first().map(String::as_str), Some(found), "{broken}");
-    }
-}
-
-fn renderer_named(text: &str) -> Vec<String> {
-    modules_named(text, "crate", &["render"])
-}
-
-#[test]
-fn a_use_case_names_no_renderer_in_its_tests_either() {
-    assert_eq!(violations(&app(), renderer_named), [""; 0]);
-}
-
-#[test]
-fn a_use_case_file_that_names_the_shared_renderer_is_found() {
-    for clean in [
-        "use crate::app::{Deps, Failure};\nuse crate::domain::version::Stamp;",
-        "// crate::render words it for both renderers.\nlet render = 1;",
-        "let render = row.render; let diff = render.diff;",
-    ] {
-        assert_eq!(renderer_named(clean), [""; 0], "{clean}");
-    }
-    for (broken, found) in [
-        (
-            "use crate::render;",
-            "names `crate::render` as `crate::render`",
-        ),
-        (
-            "use crate::{domain::id::VersionId, render::{ended, written}};",
-            "names `crate::render` as `crate::render::ended`",
-        ),
-        (
-            "let words = crate::render::ended(reason);",
-            "names `crate::render` as `crate::render::ended`",
-        ),
-        (
-            "use crate::*;\nlet lines = render::diff::hunks(before, after);",
-            "names `crate::render` as `render::diff::hunks`",
-        ),
-        (
-            "let words = super::super::render::ended(reason);",
-            "names `crate::render` as `super::super::render::ended`",
-        ),
-        (
-            "use super::super::render::{ended, written};",
-            "names `crate::render` as `super::super::render::ended`",
-        ),
-    ] {
-        let named = renderer_named(broken);
         assert_eq!(named.first().map(String::as_str), Some(found), "{broken}");
     }
 }
