@@ -1312,7 +1312,7 @@ dependencies = [
 
 [[package]]
 name = "worklog"
-version = "0.5.12"
+version = "0.5.13"
 dependencies = [
  "assert_cmd",
  "clap",
@@ -1333,7 +1333,7 @@ dependencies = [
 
 [[package]]
 name = "worklog-app"
-version = "0.5.12"
+version = "0.5.13"
 dependencies = [
  "chrono",
  "regex",
@@ -1345,7 +1345,7 @@ dependencies = [
 
 [[package]]
 name = "worklog-domain"
-version = "0.5.12"
+version = "0.5.13"
 dependencies = [
  "blake3",
  "serde",
@@ -1355,7 +1355,7 @@ dependencies = [
 
 [[package]]
 name = "worklog-render"
-version = "0.5.12"
+version = "0.5.13"
 dependencies = [
  "chrono",
  "similar",
@@ -1366,7 +1366,7 @@ dependencies = [
 
 [[package]]
 name = "worklog-schema"
-version = "0.5.12"
+version = "0.5.13"
 dependencies = [
  "chrono",
  "serde",
@@ -1376,7 +1376,7 @@ dependencies = [
 
 [[package]]
 name = "worklog-web"
-version = "0.5.12"
+version = "0.5.13"
 dependencies = [
  "askama",
  "httparse",
@@ -1390,7 +1390,7 @@ dependencies = [
 
 [[package]]
 name = "worklog-wiring"
-version = "0.5.12"
+version = "0.5.13"
 dependencies = [
  "blake3",
  "chrono",
