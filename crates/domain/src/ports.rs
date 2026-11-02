@@ -135,6 +135,9 @@ pub trait UsageRead {
     /// The lines that read and that `filter` keeps; a line filed under another machine or
     /// month than its own may be left out.
     fn read(&self, filter: &RunFilter) -> Result<Vec<Invocation>, StoreError>;
+
+    /// The lengths of the files `read` takes its lines from, added.
+    fn size(&self) -> Result<usize, StoreError>;
 }
 
 pub trait Usage: UsageRead {

@@ -11,4 +11,33 @@
 </div></div>
 <p class="muted">{{ total }}{% if let Some(topic) = under %} under {% call m::link(topic) %}{% endcall %}{% endif %} · {% for s in spans %}{% if !loop.first %} {% endif %}{% if s.current %}<strong>{{ s.link.text }}</strong>{% else %}{% call m::link(s.link) %}{% endcall %}{% endif %}{% endfor %}</p>
 </section>
+<section class="holdings">
+<h2>Holds</h2>
+<table>
+<tr><th>Kind</th><th class="n">Live</th><th class="n">Ended</th></tr>
+{% for k in kinds -%}
+<tr><td>{{ k.name }}</td><td class="n">{{ k.live }}</td><td class="n">{{ k.ended }}</td></tr>
+{% endfor -%}
+</table>
+<p class="muted">{{ held }}</p>
+{% if let Some(unfiled) = unfiled %}<p class="muted">{{ unfiled }}</p>{% endif %}
+</section>
+<section class="writes">
+{% if !written.is_empty() -%}
+<h2>Written</h2>
+<table>
+<tr><th>Month</th><th class="n">Documents</th><th class="n">Versions</th><th class="n">Size</th></tr>
+{% for w in written -%}
+<tr><td class="mono">{{ w.month }}</td><td class="n">{{ w.created }}</td><td class="n">{{ w.versions }}</td><td class="n">{{ w.size }}</td></tr>
+{% endfor -%}
+</table>
+<h2>By machine</h2>
+<table>
+<tr><th>Machine</th><th class="n">Versions</th><th class="n">Size</th></tr>
+{% for m in machines -%}
+<tr><td>{{ m.machine }}</td><td class="n">{{ m.versions }}</td><td class="n">{{ m.size }}</td></tr>
+{% endfor -%}
+</table>
+{% endif -%}
+</section>
 {% endblock %}

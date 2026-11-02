@@ -28,6 +28,57 @@ impl Serialize for KindOf {
     }
 }
 
+/// A kind as the listings tell kinds apart, with ideas apart from the facts they are stored as.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Category {
+    Kind(KindOf),
+    Idea,
+}
+
+impl Category {
+    #[must_use]
+    pub fn all() -> Vec<Category> {
+        let mut all = Vec::new();
+        for kind in KindOf::ALL {
+            all.push(Category::Kind(kind));
+            if kind == KindOf::Fact {
+                all.push(Category::Idea);
+            }
+        }
+        all
+    }
+
+    #[must_use]
+    pub fn of(content: &Content) -> Category {
+        match content {
+            Content::Fact(fact) if fact.idea => Category::Idea,
+            content => Category::Kind(content.kind()),
+        }
+    }
+
+    #[must_use]
+    pub fn word(self) -> &'static str {
+        match self {
+            Category::Kind(kind) => kind.word(),
+            Category::Idea => "idea",
+        }
+    }
+
+    #[must_use]
+    pub fn plural(self) -> &'static str {
+        match self {
+            Category::Kind(kind) => kind.plural(),
+            Category::Idea => "ideas",
+        }
+    }
+}
+
+impl Serialize for Category {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.word())
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Reference {
     pub key: &'static str,
@@ -135,14 +186,12 @@ impl KindOf {
     /// the reasons it ends for, an idea after the fact.
     #[must_use]
     pub fn endings_by_word() -> Vec<(&'static str, &'static [Reason])> {
-        let mut rows = Vec::new();
-        for kind in KindOf::ALL {
-            rows.push((kind.word(), kind.endings(false)));
-            if kind == KindOf::Fact {
-                rows.push(("idea", kind.endings(true)));
-            }
-        }
-        rows
+        (Category::all().into_iter())
+            .map(|category| match category {
+                Category::Kind(kind) => (category.word(), kind.endings(false)),
+                Category::Idea => (category.word(), KindOf::Fact.endings(true)),
+            })
+            .collect()
     }
 
     #[must_use]
@@ -607,6 +656,24 @@ mod tests {
                 ("entry", vec!["removed", "merged"]),
                 ("followup", vec!["done", "dropped"]),
                 ("claim", vec!["removed"]),
+            ]
+        );
+    }
+
+    #[test]
+    fn categories_list_each_kind_with_ideas_after_facts() {
+        let all = Category::all();
+        assert_eq!(
+            all.iter()
+                .map(|c| (c.word(), c.plural()))
+                .collect::<Vec<_>>(),
+            [
+                ("topic", "topics"),
+                ("fact", "facts"),
+                ("idea", "ideas"),
+                ("entry", "entries"),
+                ("followup", "followups"),
+                ("claim", "claims"),
             ]
         );
     }

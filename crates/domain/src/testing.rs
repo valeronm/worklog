@@ -364,6 +364,8 @@ impl Clock for FixedClock {
 #[derive(Default)]
 pub struct MemoryUsage {
     runs: RefCell<Vec<Invocation>>,
+    /// What `size` reports, since the runs are held as values and not as lines of a file.
+    pub size: Cell<usize>,
 }
 
 impl UsageRead for MemoryUsage {
@@ -374,6 +376,10 @@ impl UsageRead for MemoryUsage {
             .filter(|run| filter.keeps(run))
             .cloned()
             .collect())
+    }
+
+    fn size(&self) -> Result<usize, StoreError> {
+        Ok(self.size.get())
     }
 }
 

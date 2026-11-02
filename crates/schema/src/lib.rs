@@ -25,4 +25,4 @@ pub use directory::Directory;
 pub use ending::{Ending, Reason};
 pub use error::SchemaError;
 pub use field::{Date, Name};
-pub use kind::{Claim, Content, Entry, Fact, Followup, KindOf, Record, Topic, Trigger};
+pub use kind::{Category, Claim, Content, Entry, Fact, Followup, KindOf, Record, Topic, Trigger};

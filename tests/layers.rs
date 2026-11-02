@@ -935,7 +935,7 @@ fn log_reached(text: &str) -> Vec<String> {
             let called = tokens.get(at + 1) == Some(&".") && tokens.get(at + 3) == Some(&"(");
             found.push(match tokens.get(at + 2) {
                 Some(&"record") if called => APPENDS,
-                Some(&"read") if called => READS,
+                Some(&"read" | &"size") if called => READS,
                 _ => HANDS_ON,
             });
         }
@@ -949,11 +949,32 @@ fn log_reached(text: &str) -> Vec<String> {
     found.into_iter().map(str::to_owned).collect()
 }
 
+// A module named `tests`, a file or a directory, is compiled for tests alone.
+fn test_only(path: &str) -> bool {
+    Path::new(&from_root(path))
+        .components()
+        .any(|part| part.as_os_str() == "tests")
+        || module_of(path) == "tests"
+}
+
+#[test]
+fn a_file_compiled_for_tests_alone_is_told_from_a_shipped_one() {
+    for (file, alone) in [
+        ("crates/web/src/tests/stats.rs", true),
+        ("crates/app/src/tests.rs", true),
+        ("crates/web/src/pages/stats.rs", false),
+        ("crates/app/src/testing.rs", false),
+    ] {
+        let path = root().join(file).display().to_string();
+        assert_eq!(test_only(&path), alone, "{file}");
+    }
+}
+
 #[test]
 fn one_use_case_appends_to_the_usage_log() {
     let mut reached = Vec::new();
     for (path, text) in program_sources() {
-        if module_of(&path) == TEST_SUPPORT {
+        if module_of(&path) == TEST_SUPPORT || test_only(&path) {
             continue;
         }
         let file = from_root(&path);
@@ -965,6 +986,7 @@ fn one_use_case_appends_to_the_usage_log() {
     assert_eq!(
         reached,
         [
+            format!("crates/app/src/activity.rs: {READS}"),
             format!("crates/app/src/lib.rs: {HANDS_ON}"),
             format!("crates/app/src/record.rs: {APPENDS}"),
             format!("crates/app/src/usage.rs: {READS}"),
@@ -995,6 +1017,7 @@ fn a_file_that_reaches_the_usage_log_is_found() {
         ("Usage::record(log, &invocation)?;", APPENDS),
         ("<dyn Usage>::record(log, &invocation)?;", APPENDS),
         ("for run in deps.usage.read(&kept)? {", READS),
+        ("let size = deps.usage.size()?;", READS),
         ("let log = deps.usage;", HANDS_ON),
         ("let record = deps.usage.record;", HANDS_ON),
         ("logged(self.usage, &run)", HANDS_ON),

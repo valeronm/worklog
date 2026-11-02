@@ -194,13 +194,15 @@ pub struct Envelope {
     pub change: String,
 }
 
-/// What a reader finds in a version before its body.
+/// What is kept of a version without its body.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Header {
     pub id: VersionId,
     pub envelope: Envelope,
     pub fields: Fields,
     pub links: Links,
+    /// How many bytes the version's text holds.
+    pub length: usize,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -359,12 +361,14 @@ impl Version {
     ) -> Result<Version, VersionError> {
         let text =
             render(&envelope, &fields, &links, &body).ok_or(VersionError::DoesNotReadBack)?;
+        let length = text.len();
         let version = Version {
             header: Header {
                 id: VersionId::of(text.as_bytes()),
                 envelope,
                 fields,
                 links,
+                length,
             },
             body,
             text,
@@ -452,6 +456,7 @@ fn parts<'t>(name: &VersionId, text: &'t str) -> Result<(Header, &'t str), ReadE
             envelope,
             fields,
             links,
+            length: text.len(),
         },
         body,
     ))
@@ -722,6 +727,21 @@ mod tests {
     }
 
     #[test]
+    fn a_header_carries_the_length_in_bytes_of_its_version_s_text() {
+        let version = Version::compose(
+            envelope(),
+            fields(),
+            Links::default(),
+            "é wired\n".to_owned(),
+        )
+        .unwrap();
+        assert_ne!(version.text().len(), version.text().chars().count());
+        assert_eq!(version.length, version.text().len());
+        let read = Header::read(&version.id, version.text()).unwrap();
+        assert_eq!(read.length, version.text().len());
+    }
+
+    #[test]
     fn a_version_s_header_is_its_parts_without_the_text() {
         let version =
             Version::compose(envelope(), fields(), Links::default(), "body\n".to_owned()).unwrap();
@@ -730,6 +750,7 @@ mod tests {
             envelope: envelope(),
             fields: fields(),
             links: Links::default(),
+            length: version.text().len(),
         };
         assert_eq!(*version, header);
         assert_eq!(version.into_header(), header);

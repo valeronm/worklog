@@ -1,5 +1,5 @@
 use super::{has, lacks, ok, page};
-use worklog_app::testing::{entry, world_with_atlas};
+use worklog_app::testing::{ENDED_FACT, entry, fact, fact_fields, fork, world_with_atlas};
 
 #[test]
 fn stats_draw_the_days_of_a_topic_and_link_each_day_holding_an_entry_to_its_entries() {
@@ -84,4 +84,86 @@ fn a_topic_s_page_links_its_stats() {
         &ok(&world, &format!("/doc/{lantern}")),
         &format!("history</a> <a href=\"/stats?topic={lantern}\">stats</a>"),
     );
+}
+
+#[test]
+fn stats_count_what_the_store_holds_and_what_was_written_in_the_span() {
+    let (world, lantern, atlas) = world_with_atlas();
+    fact(&world, &lantern, "relay", "");
+    let fuse = fact(&world, &atlas, "fuse", "");
+    world.amend(
+        &fuse,
+        &fact_fields(&atlas, "fuse", "s", ENDED_FACT),
+        "The relay.\n",
+    );
+    world.put("lamp", "x = 1\n", "\n");
+    world.usage.size.set(4200);
+
+    let html = ok(&world, "/stats");
+    has(&html, "<h2>Holds</h2>");
+    has(
+        &html,
+        "<tr><td>topics</td><td class=\"n\">3</td><td class=\"n\">0</td></tr>",
+    );
+    has(
+        &html,
+        "<tr><td>facts</td><td class=\"n\">1</td><td class=\"n\">1</td></tr>",
+    );
+    has(
+        &html,
+        "<tr><td>ideas</td><td class=\"n\">0</td><td class=\"n\">0</td></tr>",
+    );
+    has(&html, "<p class=\"muted\">5 documents · 6 versions · ");
+    has(
+        &html,
+        "<p class=\"muted\">usage log 4.2 KB · 1 document of an unknown kind</p>",
+    );
+    has(
+        &html,
+        "<tr><td class=\"mono\">2026-10</td><td class=\"n\">5</td><td class=\"n\">6</td>",
+    );
+    has(&html, "<tr><td>desk</td><td class=\"n\">6</td>");
+
+    let html = ok(&world, "/stats?topic=atlas");
+    has(
+        &html,
+        "<tr><td>topics</td><td class=\"n\">1</td><td class=\"n\">0</td></tr>",
+    );
+    has(
+        &html,
+        "<tr><td>facts</td><td class=\"n\">0</td><td class=\"n\">1</td></tr>",
+    );
+    lacks(&html, "usage log");
+
+    let html = ok(&world, "/stats?year=2025");
+    has(
+        &html,
+        "<tr><td>facts</td><td class=\"n\">1</td><td class=\"n\">1</td></tr>",
+    );
+    lacks(&html, "<th>Month</th>");
+    lacks(&html, ">2026-10<");
+    lacks(&html, "<th>Machine</th>");
+}
+
+fn holdings_paragraphs(html: &str) -> usize {
+    let (_, rest) = html
+        .split_once("<section class=\"holdings\">")
+        .expect("the holdings");
+    let (section, _) = rest.split_once("</section>").expect("a closed section");
+    section.matches("<p").count()
+}
+
+#[test]
+fn the_totals_count_forked_documents_and_a_store_with_nothing_unfiled_has_no_second_line() {
+    let (world, lantern, _) = world_with_atlas();
+    let relay = fact(&world, &lantern, "relay", "");
+    let html = ok(&world, "/stats");
+    lacks(&html, " forked</p>");
+    assert_eq!(holdings_paragraphs(&html), 1);
+
+    fork(&world, &relay, &fact_fields(&lantern, "relay", "s", ""));
+    let html = ok(&world, "/stats");
+    has(&html, "<p class=\"muted\">4 documents · 6 versions · ");
+    has(&html, " · 1 forked</p>");
+    assert_eq!(holdings_paragraphs(&html), 1);
 }

@@ -16,7 +16,7 @@ use super::super::replace;
 
 /// Raised with any change to the records below, since a build of the same version reads
 /// the file the last one wrote.
-const CACHE_FORMAT: u32 = 3;
+const CACHE_FORMAT: u32 = 4;
 
 /// A directory changed this close to the walk that recorded it may have changed again
 /// within the granularity of its modification time, and is read again.
@@ -62,6 +62,7 @@ struct HeaderRecord {
     change: String,
     fields: Vec<(String, Value)>,
     links: Vec<(String, Option<String>)>,
+    length: usize,
 }
 
 // postcard reads no self-describing value, which a TOML value is.
@@ -153,6 +154,7 @@ fn header_record(header: &Header) -> HeaderRecord {
             .iter()
             .map(|(name, id)| (name.clone(), id.as_ref().map(|id| id.as_str().to_owned())))
             .collect(),
+        length: header.length,
     }
 }
 
@@ -187,6 +189,7 @@ fn header_of(document: &DocumentId, record: HeaderRecord) -> Option<Header> {
         envelope,
         fields: fields_of(record.fields)?,
         links: Links(links),
+        length: record.length,
     })
 }
 

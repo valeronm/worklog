@@ -6,6 +6,7 @@ use chrono::{Datelike as _, Days, NaiveDate, Weekday};
 use serde::Serialize;
 
 use crate::heads::{ended_for, row_head};
+use crate::holdings::{self, Holdings, Writes};
 use crate::index::Topics;
 use crate::lookup::Lookup;
 use crate::rows::{memberships, reading};
@@ -49,6 +50,9 @@ pub struct Stats {
     /// Each unended topic with its entries in the span, its parts' among them; the most first,
     /// then by label.
     pub topics: Vec<TopicCount>,
+    pub holdings: Holdings,
+    /// What was written over the span of `activity`.
+    pub writes: Writes,
 }
 
 fn span(today: Date, year: Option<i32>) -> Result<(Date, Date), Failure> {
@@ -85,7 +89,7 @@ fn dated_entries(lookup: &Lookup, topics: &Topics) -> Result<Vec<Dated>, Failure
         {
             dated.push(Dated {
                 date: entry.date,
-                under: topics.wholes(memberships(&document, KindOf::Entry)),
+                under: topics.wholes(memberships(&document, KindOf::Entry, false)),
             });
         }
     }
@@ -117,6 +121,12 @@ fn tally(dated: &[&Dated], from: Date, to: Date, year: Option<i32>) -> Activity 
     }
 }
 
+fn kept_under<'a>(dated: &'a [Dated], topic: Option<&DocumentId>) -> Vec<&'a Dated> {
+    (dated.iter())
+        .filter(|entry| topic.is_none_or(|topic| entry.under.contains(topic)))
+        .collect()
+}
+
 /// The unended entries under `topic` and its parts, or in the whole store, counted by day over
 /// the span of `year`, or of the 53 weeks up to today when no year is given. Refuses an
 /// address that is not one topic, and a year outside the four digits a date is written with.
@@ -125,15 +135,23 @@ pub fn activity(
     topic: Option<&str>,
     year: Option<i32>,
 ) -> Result<Activity, Failure> {
-    Ok(stats(deps, topic, year)?.activity)
+    let (from, to) = span(deps.today()?, year)?;
+    let (lookup, topics, topic) = reading(deps, topic)?;
+    let dated = dated_entries(&lookup, &topics)?;
+    Ok(tally(&kept_under(&dated, topic.as_ref()), from, to, year))
 }
 
-/// What `activity` returns, with the topic it names and each unended topic's count over the
-/// same span whatever the topic.
+/// What `activity` returns, with the topic it names, each unended topic's count over the same
+/// span whatever the topic, and what the store holds and was written in that span.
 pub fn stats(deps: &ReadDeps, topic: Option<&str>, year: Option<i32>) -> Result<Stats, Failure> {
     let (from, to) = span(deps.today()?, year)?;
     let (lookup, topics, topic) = reading(deps, topic)?;
     let dated = dated_entries(&lookup, &topics)?;
+    let scope = holdings::under(&lookup, &topics, topic.as_ref())?;
+    let unfiled = match topic {
+        None => Some(holdings::unfiled(&lookup, deps.usage.size()?)?),
+        Some(_) => None,
+    };
     let mut counts: BTreeMap<&DocumentId, usize> = BTreeMap::new();
     for entry in dated
         .iter()
@@ -151,17 +169,12 @@ pub fn stats(deps: &ReadDeps, topic: Option<&str>, year: Option<i32>) -> Result<
         })
         .collect();
     counted.sort_by(|a, b| (b.entry_count, &a.topic.label).cmp(&(a.entry_count, &b.topic.label)));
-    let under: Vec<&Dated> = (dated.iter())
-        .filter(|entry| {
-            topic
-                .as_ref()
-                .is_none_or(|topic| entry.under.contains(topic))
-        })
-        .collect();
     Ok(Stats {
-        activity: tally(&under, from, to, year),
+        activity: tally(&kept_under(&dated, topic.as_ref()), from, to, year),
         topic: topic.map(|id| topics.reference(&id)),
         topics: counted,
+        holdings: holdings::holdings(&scope, unfiled),
+        writes: holdings::writes(&scope, &topics, from, to),
     })
 }
 
@@ -171,6 +184,20 @@ mod tests {
     use crate::testing::{entry, part_of, topic, world};
     use alloc::borrow::ToOwned;
     use alloc::string::{String, ToString};
+    use worklog_domain::ports::{StoreError, UsageRead};
+    use worklog_domain::usage::{Invocation, RunFilter};
+
+    struct Unreadable;
+
+    impl UsageRead for Unreadable {
+        fn read(&self, _: &RunFilter) -> Result<Vec<Invocation>, StoreError> {
+            Ok(Vec::new())
+        }
+
+        fn size(&self) -> Result<usize, StoreError> {
+            Err(StoreError::io("usage", "unreadable"))
+        }
+    }
 
     fn date(text: &str) -> Date {
         Date::parse(text).unwrap()
@@ -258,5 +285,18 @@ mod tests {
             counted(Some(2024)),
             pairs(&[("phone", 1), ("atlas", 0), ("desk", 0), ("lantern", 0)])
         );
+    }
+
+    #[test]
+    fn the_activity_of_a_store_whose_usage_log_cannot_be_read_is_still_counted() {
+        let (world, lantern) = world();
+        entry(&world, "2026-10-08", "wiring", &[&lantern]);
+        let unreadable = Unreadable;
+        let deps = ReadDeps {
+            usage: &unreadable,
+            ..world.deps().read()
+        };
+        assert_eq!(activity(&deps, None, None).unwrap().entry_count, 1);
+        assert!(stats(&deps, None, None).is_err());
     }
 }

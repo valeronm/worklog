@@ -30,6 +30,7 @@ pub mod draft;
 pub mod followup;
 pub mod fork;
 mod heads;
+pub mod holdings;
 mod index;
 pub mod list;
 mod live;

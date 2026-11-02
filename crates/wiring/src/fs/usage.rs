@@ -88,16 +88,20 @@ impl FsUsage {
     pub fn new(dir: PathBuf) -> FsUsage {
         FsUsage { dir }
     }
+
+    fn names(&self) -> Result<Vec<String>, StoreError> {
+        match files(&self.dir) {
+            Ok(names) => Ok(names),
+            // Nothing can be appended under a file.
+            Err(_) if self.dir.is_file() => Ok(Vec::new()),
+            Err(error) => Err(error),
+        }
+    }
 }
 
 impl UsageRead for FsUsage {
     fn read(&self, filter: &RunFilter) -> Result<Vec<Invocation>, StoreError> {
-        let names = match files(&self.dir) {
-            Ok(names) => names,
-            // Nothing can be appended under a file.
-            Err(_) if self.dir.is_file() => Vec::new(),
-            Err(error) => return Err(error),
-        };
+        let names = self.names()?;
         let mut found = Vec::new();
         let reached = |name: &&String| {
             filed(name).is_some_and(|(machine, month)| filter.reaches(&machine, month))
@@ -113,6 +117,16 @@ impl UsageRead for FsUsage {
             found.extend(runs.filter(|run| filter.keeps(run)));
         }
         Ok(found)
+    }
+
+    fn size(&self) -> Result<usize, StoreError> {
+        let lengths = (self.names()?.into_iter())
+            .filter(|name| filed(name).is_some())
+            // A sync can remove a file after the listing.
+            .filter_map(|name| fs::metadata(self.dir.join(name)).ok())
+            .filter(fs::Metadata::is_file)
+            .map(|metadata| usize::try_from(metadata.len()).unwrap_or(usize::MAX));
+        Ok(lengths.fold(0, usize::saturating_add))
     }
 }
 
@@ -457,5 +471,27 @@ mod tests {
         let refused = usage.record(&ran(&lantern(), "context", "2026-09-04"));
         let refused = refused.unwrap_err().to_string();
         assert!(refused.starts_with(&dir.display().to_string()), "{refused}");
+    }
+
+    #[test]
+    fn the_size_adds_the_files_the_log_is_read_from() {
+        let (_kept, dir) = scratch();
+        let usage = FsUsage::new(dir.clone());
+        assert_eq!(usage.size(), Ok(0));
+        for day in ["2026-09-04", "2026-10-01"] {
+            usage.record(&ran(&lantern(), "show", day)).unwrap();
+        }
+        fs::write(dir.join("notes.txt"), "not a month of runs\n").unwrap();
+        fs::create_dir(dir.join("held")).unwrap();
+        std::os::unix::fs::symlink(
+            dir.join("held"),
+            dir.join(format!("{}-2026-08{EXTENSION}", lantern())),
+        )
+        .unwrap();
+        let logged: usize = ["2026-09-04", "2026-10-01"]
+            .map(|day| written(&lantern(), "show", day).len())
+            .iter()
+            .sum();
+        assert_eq!(usage.size(), Ok(logged));
     }
 }

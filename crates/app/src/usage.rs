@@ -455,6 +455,10 @@ mod tests {
             self.0.borrow_mut().push(filter.clone());
             Ok(Vec::new())
         }
+
+        fn size(&self) -> Result<usize, StoreError> {
+            Ok(0)
+        }
     }
 
     #[test]

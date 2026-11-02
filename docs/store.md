@@ -231,10 +231,11 @@ A host keeps the headers it parsed of the store's tree in one file per
 store, `$XDG_CACHE_HOME/worklog/<hash of the store's path>.store`, or
 under `~/.cache` where that variable is not set; `WORKLOG_HOME=<dir>`
 moves it to `<dir>/cache`. The file holds, for every document the last
-walk read, the header of each of its versions and the modification time
-its directory had, and nothing else: no body is cached, the version files
-stay what the store is, and the file is rebuilt from them whenever it is
-missing, does not read, or was written by another release of the binary.
+walk read, the header of each of its versions with the length of its file, and
+the modification time its directory had, and nothing else: no body is cached,
+the version files stay what the store is, and the file is rebuilt from them
+whenever it is missing, does not read, or was written by another release of
+the binary.
 
 A listing, a search by topic and the session opener answer from the
 headers alone. A command that shows, compares or searches a body reads

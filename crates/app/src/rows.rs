@@ -16,7 +16,7 @@ use worklog_domain::document::Document;
 use worklog_domain::id::DocumentId;
 use worklog_domain::version::Header;
 use worklog_schema::kind::Role;
-use worklog_schema::{Content, Date, KindOf, Record, Trigger};
+use worklog_schema::{Category, Content, Date, KindOf, Record, Trigger};
 
 /// Another document as a result refers to it: the id the referring document stores, the
 /// label the document referred to has now, or its short id, and the reason it ended with.
@@ -107,8 +107,8 @@ pub(super) fn members(
     lookup.holders(kind, key, &topics, ended)
 }
 
-pub(super) fn memberships(document: &Document, kind: KindOf) -> BTreeSet<DocumentId> {
-    let held = membership_key(kind).map(|key| held_under(document, kind, key, false));
+pub(super) fn memberships(document: &Document, kind: KindOf, ended: bool) -> BTreeSet<DocumentId> {
+    let held = membership_key(kind).map(|key| held_under(document, kind, key, ended));
     (held.into_iter().flatten())
         .filter_map(|text| DocumentId::parse(text).ok())
         .collect()
@@ -123,7 +123,7 @@ pub(super) fn filed_by_topic(
 ) -> Result<Filed, Failure> {
     let mut grouped = Filed::new();
     for document in members(lookup, kind, topics, false)? {
-        for topic in memberships(&document, kind) {
+        for topic in memberships(&document, kind, false) {
             grouped.entry(topic).or_default().push(Rc::clone(&document));
         }
     }
@@ -141,7 +141,7 @@ pub(super) fn filed(grouped: &Filed, topics: &BTreeSet<DocumentId>) -> Vec<Rc<Do
 }
 
 pub(super) fn is_idea(content: &Content) -> bool {
-    matches!(content, Content::Fact(fact) if fact.idea)
+    Category::of(content) == Category::Idea
 }
 
 pub(super) struct Counts {
