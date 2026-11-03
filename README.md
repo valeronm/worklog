@@ -1,150 +1,243 @@
 # worklog
 
-A store of work done, durable facts, ideas, follow-ups and topics, read and
-written only through this binary. It is the memory a coding agent opens a
-session with: which facts hold for the directory it is in, what is due, and
-what happened last time.
+worklog gives your coding agents one memory, shared between your machines
+and between the agents themselves. It records the work you and your agent
+do, what the agent learns along the way, ideas you haven't built yet and
+things to come back to.
 
-## The store
+Coding agents keep a memory of their own, but each keeps it for itself,
+on the machine where it ran. What Claude Code learned on your desktop
+isn't there when you open Codex, or when you open the same project on
+your laptop. So you explain the same constraints again, or dig through
+old chats to find why something was decided.
 
-One directory, meant to be shared between machines by a file sync such as
-Syncthing. Nothing in it is edited or deleted; a write is a new file.
+worklog works with Claude Code and Codex, on Linux and macOS. Your records
+are files in a folder, your store, which you can sync between machines
+with any file sync tool, such as Syncthing, Dropbox, Google Drive or
+OneDrive. worklog needs no hosted service and no account of its own.
 
-A document is a directory named by an id it is given when it is made, and
-every file in it is one immutable version, named by the hash of its bytes
-and listing the versions it follows. A document's name is a field of its
-versions and one document refers to another by id, so a rename moves no
-file and rewrites no other document, and two machines never write the same
-path with different content.
+## What it keeps
 
-Two machines that change one document before they sync leave it with two
-current versions. That is a fork: reads show every one, `check` counts it,
-and a person settles it by saving a version that follows them all. Nothing
-merges on its own, so the store needs no merge tool and no server, only a
-sync that carries files.
+worklog files records under topics. A topic is a project, a machine, a
+tool or anything else you work on. The records are:
 
-A topic is a project, a device, a tool or a subject, and facts, ideas,
-entries and followups are filed under topics. Each machine has a topic of
-its own, and a claim places a topic in a directory of one machine, so the
-same store serves machines with different layouts. `docs/documents.md` has
-the kinds and the rule for what a session loads, and `docs/store.md` the
-file format.
+- **facts**: what's true now, such as a decision and its reasons, or what
+  an experiment ruled out
+- **ideas**: designs you've settled on but haven't built yet
+- **entries**: work you've done, dated, with what was decided along the
+  way
+- **followups**: things to come back to, which can be set to come up
+  again on a date or the next time you work on one of their topics
+
+On each machine, a project folder is connected to its topic, so a session
+in that folder starts with a list of the topic's facts and ideas and the
+followups that are due. Each machine has a topic of its own too, whose
+facts and ideas every session on that machine gets.
+[docs/documents.md](docs/documents.md) describes each kind of record and
+how worklog picks what a session gets.
+
+worklog keeps one person's records, on as many machines as they use. It
+isn't built for a team to share: information everyone working on a
+project needs belongs in the project's own docs.
+
+## Status
+
+worklog is at 0.x: its commands and its store format can still change
+between releases.
 
 ## Install
 
-```
+You can install worklog on Linux x86_64 or aarch64, or on macOS Apple
+Silicon:
+
+```sh
 curl -fsSL https://raw.githubusercontent.com/valeronm/worklog/main/packaging/get.sh | sh
 ```
 
-Downloads the release for this machine's operating system and architecture
-into `~/.local/bin`, or into `$PREFIX`, after verifying the checksum
-published beside it. Or build from source with the Rust toolchain
-`mise.toml` pins: `packaging/install-build.sh` installs a build of the
-checkout in the same place.
+The installer picks the release for your machine, checks its checksum and
+puts it in `~/.local/bin`, or in `$PREFIX` if you set it. Make sure that
+folder is on your shell's `PATH`, then try `worklog --version`. You only
+need Rust if you want to [build from source](#contribute).
 
-From then on `worklog upgrade` does the same from the binary itself when a
-newer release exists, verified the same way, and `worklog upgrade --check`
-only reports the two versions.
+To update later, run `worklog upgrade`. Upgrade every machine that shares
+a store at the same time, since an older release refuses to change a
+record written in a newer format.
 
-## Set up a host
+## Set up this machine
 
-A host is bound once to its machine topic and to the directory of the
-store. `init` on a terminal asks for both:
-
-```
+```sh
 worklog init
 ```
 
-A directory that holds a store is joined: `init` lists its machine topics,
-binds the host to the one named, and makes a new one only on a yes, since
-a name the store lacks may not have synced yet. An empty or missing
-directory is started as a new store only on a yes, for the same reason. A
-directory of other files is not taken. A topic `init` makes reports that
-it needs a summary until one is written.
+It asks where to keep your records and what to call this machine. To
+have the same records on other machines, choose a new folder inside one
+your sync tool shares. If the folder already holds a store, setup joins
+it; otherwise it asks before creating one. It won't use a folder that
+holds other files.
 
-Without a terminal, `init` starts a new store, in a directory that is
-missing or empty, and `join` binds the host to a store another machine
-shares. `join` binds to the machine topic named, which the store must
-hold; with `--summary` it makes that topic, which the store must not hold.
+Setup then offers to configure the coding agents it finds. Say yes to let
+them use worklog; [What setup changes](#what-setup-changes) lists what
+that writes to their settings. If you skip this step, you can run
+`worklog agents install` later.
 
-```
-worklog init desk --store ~/sync/worklog --summary "The desk machine"
-worklog join phone --store ~/sync/worklog --summary "The phone"
-```
+## Work with your agent
 
-Until a host is set up, every command that uses the store is refused, and
-`context` prints a note and exits 0 so a session still opens.
+Start a new Claude Code or Codex session in your project folder and ask:
 
-A project is then given a topic and its checkout a claim:
-
-```
-worklog new topic lantern      # prints the path of a draft to edit
-worklog save lantern           # stores the edited draft
-worklog claim lantern          # run inside the checkout
-worklog context                # what a session in this directory opens with
+```text
+Set up worklog for this project.
 ```
 
-Prose goes through a draft: a command prints the path of a file to edit,
-and `save` checks it and stores it as the document's next version. State
-changes are commands that write a version directly. `--json` gives a
-command's result structured, and `worklog --help` lists the commands.
+The agent creates a topic for the project, connects it to this folder and
+fills in a description of your machine if it still needs one. From then
+on, each session there starts with that list, and your agent reads a
+record in full when it needs it.
 
-`worklog serve` answers with the store as read-only pages, on the loopback
-address unless `--bind` gives another. On any other address the store is
-served without a login to whatever reaches it. Each request reads the
-store as it then stands, so a machine holding a synced copy can serve it.
+worklog's [skill](skill/SKILL.md) teaches your agent to record the work
+you do together and what it learns. When work is left unfinished, your
+agent asks whether to do it now, save it for later or drop it. You can
+ask for a record or a reminder yourself, too. For example, after looking
+into a flaky login test:
 
-## Agents
+```text
+You: Log what we tried. Next time we work on this project, remind me
+     to run the login test with a fixed clock.
 
-The binary carries the skill that teaches a coding agent the store and its
-commands, and a SessionStart hook that opens every session with `worklog
-context`. `worklog agents install` places both for each agent it knows
-whose home directory exists: the skill under the agent's skills, and one
-hook merged into the agent's hooks file, the rest of which is kept. `init`
-offers it, and `init` or `join` given arguments does it with `--agents` and
-otherwise writes neither.
+Agent: Saved what we found, and a reminder for the fixed-clock run
+       next time we work on this project.
+```
 
-`worklog agents uninstall` takes both away and leaves whatever else the
-files hold. `worklog agents refresh` brings a skill and a hook up to the
-binary that runs it, only where each already is: the skill describes the
-commands of the binary it shipped with, and the hook holds the binary's
-path, which an install to a new place leaves stale. `worklog refresh` does
-the same for the agents and for fish's completions, and the installer and
-`upgrade` run it.
+The next day, in Codex on your laptop:
 
-Codex runs a command in a sandbox that holds everything outside the
-project read-only, the store with it, so a `worklog` it ran would read the
-store, write nothing to it and leave no usage line. For Codex an install
-therefore also writes `rules/worklog.rules`, a rule that runs every
-`worklog` command outside the sandbox without asking. The file is the
-tool's own: a refresh writes it wherever the skill or the hook is, and an
-uninstall removes it.
+```text
+You: What's next on this project?
 
-The rule covers commands, not the edit tool, which the sandbox keeps out of
-the drafts directory too. An install therefore also adds that directory, by
-its absolute path, to `sandbox_workspace_write.writable_roots` in
-`~/.codex/config.toml`, keeping the rest of the file as written. A refresh
-adds it wherever the skill or the hook is, and an uninstall takes out that
-one entry.
+Agent: The fixed-clock run for the login test is due. Last time, we
+       ruled out leftover test data and found that the session expired
+       before the assertion.
+```
 
-## Completions
+## Share between machines
 
-Completions are answered by the binary, so a shell is offered what the
-store holds as it stands: topics where a topic is expected, documents
-where a document is, open drafts for `save`. `worklog completions <shell>`
-prints the line a shell's startup file holds to take them; for fish,
-`refresh` writes that line where fish reads completions, once that
-directory exists.
+On another machine, once your sync tool has copied the store folder
+there, install worklog, run `worklog init`, choose that folder and give
+that machine a name of its own. Then ask your agent to connect the
+project to its existing topic. Your project can live in a different
+folder on each machine.
 
-## Develop
+Each change adds a new file and keeps the old ones, so file sync only has
+to copy files. If two machines change the same record before syncing,
+worklog keeps both versions as a fork, and your agent combines them,
+asking you where they disagree.
+[docs/store.md](docs/store.md) describes the files and their versions.
 
-`cargo test --workspace` runs the unit tests, the layer test and the
-command-line scenarios, each over a scratch store. `WORKLOG_HOME=<dir>`
-moves the host's config and drafts under `<dir>`, which is how the
-scenarios keep clear of a real store.
-`CLAUDE.md` holds the constraints worth knowing before changing anything.
+## Browse your records
 
-`packaging/install-build.sh` installs a build of the checkout in the place
-of the released binary and refreshes what the host has of it. The build is
-named after its commit, `worklog --version` shows the name, and `worklog
-upgrade` leaves it in place until a release of a higher number exists.
+```sh
+worklog serve
+```
+
+Open the address it prints in your browser to search your records, read
+them and see each one's history. The pages are read-only; to add or
+change something, ask your agent. Press Ctrl-C to stop the server.
+
+Each page reads the store when it loads, so records synced from other
+machines show up without a restart. By default, only your machine can
+reach the server. If you use `--bind` to listen on another address,
+anyone who can reach that address can read the store without logging in.
+To open it by a hostname, also pass that name with `--host`.
+
+## What setup changes
+
+Setup gives each agent worklog's skill and a hook that runs
+`worklog context` at the start of each session. The hook is added to the
+agent's hooks file beside your other hooks:
+
+- Claude Code: the skill in `~/.claude/skills/worklog/` and the hook in
+  `~/.claude/settings.json`
+- Codex: the skill in `~/.codex/skills/worklog/` and the hook in
+  `~/.codex/hooks.json`
+
+Codex runs commands in a sandbox that keeps the store read-only. Setup
+also gives Codex a rule, `~/.codex/rules/worklog.rules`, that lets
+`worklog` commands run outside the sandbox without asking. It adds
+worklog's drafts folder, where your agent writes a record before saving
+it, to `sandbox_workspace_write.writable_roots` in `~/.codex/config.toml`,
+so Codex's edit tool can write there.
+
+The skill and the hook ship inside the binary. `worklog refresh` brings
+the ones you have up to date with the binary you're running; run it after
+moving the binary, since the hook holds its path. The installer and
+`worklog upgrade` run it for you. If fish is set up, it also writes
+worklog's completions for fish.
+
+## Your data
+
+worklog logs each command run against the store, with its arguments, the
+folder it ran in and the agent session it ran under. The log is kept in
+the store's `usage` folder, so it syncs along with your records, and
+`worklog usage` summarizes it. [docs/store.md](docs/store.md#usage)
+lists everything a log line holds.
+
+Only the installer and `worklog upgrade` reach the network, to check for
+or download a release from GitHub. Your records and the usage log go
+wherever your sync tool copies the folder, and what your agent reads from
+the store goes to its model provider like the rest of the conversation.
+
+## Uninstall
+
+`worklog agents uninstall` removes what setup added to your agents'
+settings and leaves the rest of each file as it was. Then delete the
+binary and the files worklog keeps for this machine:
+
+- `~/.local/bin/worklog`, or the copy in `$PREFIX`
+- `~/.config/worklog`, `~/.local/state/worklog` and `~/.cache/worklog`,
+  or the same folders under `XDG_CONFIG_HOME`, `XDG_STATE_HOME` and
+  `XDG_CACHE_HOME` if you set them
+- `~/.config/fish/completions/worklog.fish`, or the same file under
+  `XDG_CONFIG_HOME`, if fish is set up
+
+Your store is a folder of its own. Keep it or delete it as you choose; if
+your sync tool shares it, deleting it here deletes it on your other
+machines too.
+
+## Contribute
+
+For bugs and ideas, open an
+[issue](https://github.com/valeronm/worklog/issues) or send a
+[pull request](https://github.com/valeronm/worklog/pulls). Before
+changing code, read [CLAUDE.md](CLAUDE.md) for the design and testing
+rules. Use made-up content in examples and fixtures; keep real worklog
+records out of the repo.
+
+Use the Rust toolchain pinned in [mise.toml](mise.toml). From a checkout:
+
+```sh
+cargo build --locked
+cargo test --workspace --locked
+```
+
+The tests use temporary stores. To try the checkout without touching your
+own records, set `WORKLOG_HOME` to an unused folder on every run; it gives
+the checkout its own config, drafts and cache. Give `init` a `--store` of
+its own too:
+
+```sh
+env WORKLOG_HOME=/tmp/worklog-dev cargo run --locked -- init desk \
+    --store /tmp/worklog-dev/store --summary "A development machine"
+env WORKLOG_HOME=/tmp/worklog-dev cargo run --locked -- context
+```
+
+`WORKLOG_HOME` doesn't cover your agents' settings or fish completions:
+`agents install`, `refresh` or a yes to the agents question in a bare
+`init` writes your real ones, pointing them at the checkout's build.
+
+The [CI workflow](.github/workflows/build.yml) has the full set of checks.
+If you're changing the store format, read the
+[release guide](docs/release.md) first.
+
+To install your build, run `packaging/install-build.sh`. It replaces the
+installed binary and runs `worklog refresh`. `worklog upgrade` leaves that
+build in place until a release with a higher version number is out.
+
+worklog uses the [MIT license](LICENSE).
