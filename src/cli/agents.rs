@@ -231,7 +231,13 @@ impl Refreshed {
 }
 
 impl Refreshing {
-    pub(super) fn on_this_host(environment: &Environment) -> Result<Refreshing, Failure> {
+    /// `None`, with a note in `done`, when an agent holds the skill or the hook, or `also_there`
+    /// is set, and this binary is not the one `PATH` finds.
+    pub(super) fn on_this_host(
+        environment: &Environment,
+        also_there: bool,
+        done: &mut Done,
+    ) -> Result<Option<Refreshing>, Failure> {
         let agents = worklog_wiring::agents(environment.variable)?;
         let drafts = worklog_wiring::drafts(environment.variable)?;
         let refreshed = |agent: Agent| {
@@ -245,27 +251,16 @@ impl Refreshing {
             refreshed.config(&drafts)?;
             Ok(refreshed)
         };
-        let refreshed = agents
+        let refreshed: Vec<Refreshed> = agents
             .into_iter()
             .map(refreshed)
             .collect::<Result<_, Failure>>()?;
-        Ok(Refreshing { refreshed, drafts })
-    }
-
-    /// Where an agent holds the skill or the hook, or `also_there` is set, a binary `PATH` does
-    /// not find gets a note and no write.
-    pub(super) fn goes_ahead(
-        &self,
-        environment: &Environment,
-        also_there: bool,
-        done: &mut Done,
-    ) -> Result<bool, Failure> {
-        let there = also_there || self.refreshed.iter().any(|refreshed| refreshed.installed);
-        let Some(why) = there.then(|| unfound(environment)).transpose()?.flatten() else {
-            return Ok(true);
-        };
-        done.notes.push(format!("{why}; nothing is refreshed"));
-        Ok(false)
+        let there = also_there || refreshed.iter().any(|refreshed| refreshed.installed);
+        if let Some(why) = there.then(|| unfound(environment)).transpose()?.flatten() {
+            done.notes.push(format!("{why}; nothing is refreshed"));
+            return Ok(None);
+        }
+        Ok(Some(Refreshing { refreshed, drafts }))
     }
 
     pub(super) fn write_into(
@@ -336,19 +331,17 @@ pub(super) fn run(
     json: bool,
 ) -> Result<Output, Stopped> {
     let mut done = Done::default();
-    let ended = match action {
-        AgentsAction::Install => {
-            Placing::on_this_host(environment).and_then(|placing| placing.install_into(&mut done))
-        }
-        AgentsAction::Refresh => Refreshing::on_this_host(environment).and_then(|agents| {
-            if agents.goes_ahead(environment, false, &mut done)? {
-                agents.write_into(environment, &mut done)?;
-            }
-            Ok(())
-        }),
-        AgentsAction::Uninstall => Uninstalling::on_this_host(environment)
-            .and_then(|uninstalling| uninstalling.uninstall_into(&mut done)),
-    };
+    let ended =
+        match action {
+            AgentsAction::Install => Placing::on_this_host(environment)
+                .and_then(|placing| placing.install_into(&mut done)),
+            AgentsAction::Refresh => Refreshing::on_this_host(environment, false, &mut done)
+                .and_then(|agents| {
+                    agents.map_or(Ok(()), |agents| agents.write_into(environment, &mut done))
+                }),
+            AgentsAction::Uninstall => Uninstalling::on_this_host(environment)
+                .and_then(|uninstalling| uninstalling.uninstall_into(&mut done)),
+        };
     done.ended(ended, json, |written| Placed { written })
 }
 
@@ -409,7 +402,9 @@ mod tests {
             binary: Some(moved.clone()),
             ..environment(&variable)
         };
-        let refreshing = Refreshing::on_this_host(&environment).unwrap();
+        let refreshing = Refreshing::on_this_host(&environment, false, &mut Done::default())
+            .unwrap()
+            .expect("a refresh from the binary PATH finds");
         let hooks = home.join(".claude").join("settings.json");
         let mut edited: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(&hooks).unwrap()).unwrap();

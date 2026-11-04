@@ -33,8 +33,7 @@ pub(super) fn refresh_into(environment: &Environment, done: &mut Done) -> Result
         Some(file) => fish_completions(environment, file, &homes, done)?,
         None => None,
     };
-    let agents = Refreshing::on_this_host(environment)?;
-    if agents.goes_ahead(environment, fish.is_some(), done)? {
+    if let Some(agents) = Refreshing::on_this_host(environment, fish.is_some(), done)? {
         agents.write_into(environment, done)?;
         if let Some((file, line)) = completions {
             worklog_wiring::write_completions(&file, &line)?;
