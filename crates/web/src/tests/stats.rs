@@ -1,5 +1,5 @@
 use super::{has, lacks, ok, page};
-use worklog_app::testing::{ENDED_FACT, entry, fact, fact_fields, fork, world_with_atlas};
+use worklog_app::testing::{ENDED_FACT, entry, fact, fact_fields, fork, topic, world_with_atlas};
 
 #[test]
 fn stats_draw_the_days_of_a_topic_and_link_each_day_holding_an_entry_to_its_entries() {
@@ -74,6 +74,28 @@ fn stats_draw_the_days_of_a_topic_and_link_each_day_holding_an_entry_to_its_entr
         ("/entries?on=yesterday", 400),
     ] {
         assert_eq!(page(&world, target).status, status, "{target}");
+    }
+}
+
+#[test]
+fn stats_offer_topics_that_share_a_name_by_an_address_each_answers_to() {
+    let (world, _, _) = world_with_atlas();
+    let one = topic(&world, "phone", "");
+    let other = topic(&world, "phone", "");
+    entry(&world, "2026-10-08", "case", &[&one]);
+    entry(&world, "2026-10-07", "screen", &[&other]);
+    let all = ok(&world, "/stats");
+    for (phone, on) in [(&one, "2026-10-08"), (&other, "2026-10-07")] {
+        let link = format!("/stats?topic={}", phone.short());
+        let count = "phone <span class=\"count\">1</span></a>";
+        has(&all, &format!("<a href=\"{link}\">{count}"));
+        let chosen = ok(&world, &link);
+        has(
+            &chosen,
+            &format!("<a href=\"{link}\" aria-current=\"true\">{count}"),
+        );
+        let day = format!("/entries?topic={}&#38;on={on}", phone.short());
+        has(&chosen, &format!("<a class=\"l4\" href=\"{day}\""));
     }
 }
 

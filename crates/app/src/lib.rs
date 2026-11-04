@@ -50,7 +50,7 @@ pub mod upgrade;
 pub mod usage;
 
 pub use lookup::Stored;
-pub use rows::{FollowupRow, Reference, Row, TriggerShown};
+pub use rows::{Addressed, FollowupRow, Reference, Row, TriggerShown};
 
 /// Read access to stored documents, drafts, usage, host state, and the clock.
 ///

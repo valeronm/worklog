@@ -78,8 +78,8 @@ impl LogPage {
         )];
         machines.extend(log.machines.iter().map(|machine| {
             let link = Link {
-                href: href(Some(&machine.address)),
-                ..Link::to(&machine.document, &machine.label, machine.ended.as_deref())
+                href: href(Some(machine.address())),
+                ..Link::to(&machine.document, &machine.label, machine.ended())
             };
             let current =
                 (log.machine.as_ref()).is_some_and(|asked| asked.document == machine.document);

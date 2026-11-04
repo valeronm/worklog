@@ -3,6 +3,7 @@
 use askama::Template;
 
 use super::links::{Choice, Layout, Link, Place, with_query};
+use worklog_app::Addressed;
 use worklog_app::activity::Stats;
 use worklog_app::counted;
 use worklog_app::holdings::Holdings;
@@ -125,7 +126,7 @@ impl StatsPage {
     pub fn new(stats: &Stats) -> StatsPage {
         let activity = &stats.activity;
         let shown = calendar(activity);
-        let topic = stats.topic.as_ref().map(|topic| topic.label.as_str());
+        let topic = stats.topic.as_ref().map(Addressed::address);
         let days = (shown.weeks.iter())
             .flat_map(|week| week.iter())
             .map(|cell| cell.as_ref().map(|cell| square(cell, topic)))
@@ -138,10 +139,10 @@ impl StatsPage {
         )];
         topics.extend(stats.topics.iter().map(|count| {
             let chosen = stats.topic.as_ref() == Some(&count.topic);
-            let label = Some(count.topic.label.as_str());
+            let address = Some(count.topic.address());
             Choice {
                 count: Some(count.entry_count),
-                ..choice(count.topic.label.clone(), label, activity.year, chosen)
+                ..choice(count.topic.label.clone(), address, activity.year, chosen)
             }
         }));
         let mut spans = vec![choice(

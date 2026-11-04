@@ -10,7 +10,7 @@ use crate::heads::{
     Read, ended_for, filed_on, held_under, is_forked, label_of, labeling_topic, row_head,
 };
 use crate::index::Topics;
-use crate::lookup::Lookup;
+use crate::lookup::{Lookup, Names};
 use crate::{Failure, ReadDeps};
 use worklog_domain::document::Document;
 use worklog_domain::id::DocumentId;
@@ -42,6 +42,38 @@ impl Reference {
     #[must_use]
     pub fn ended(&self) -> Option<&str> {
         self.ended.as_deref()
+    }
+}
+
+/// A topic with an address that finds it alone.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Addressed {
+    pub document: DocumentId,
+    pub label: String,
+    ended: Option<String>,
+    // Private so that no address is made but by `Names::address`.
+    address: String,
+}
+
+impl Addressed {
+    pub(super) fn of(reference: Reference, names: &Names) -> Result<Addressed, Failure> {
+        Ok(Addressed {
+            address: names.address(&reference.document, &reference.label)?,
+            document: reference.document,
+            label: reference.label,
+            ended: reference.ended,
+        })
+    }
+
+    /// The reason the topic ended with.
+    #[must_use]
+    pub fn ended(&self) -> Option<&str> {
+        self.ended.as_deref()
+    }
+
+    #[must_use]
+    pub fn address(&self) -> &str {
+        &self.address
     }
 }
 

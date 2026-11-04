@@ -12,7 +12,7 @@ use serde::Serialize;
 use crate::heads::{ended_of, label_or_short};
 use crate::lookup::Names;
 use crate::machines::written_on;
-use crate::rows::{Reference, Row, by_label, documents, reading, row, shown};
+use crate::rows::{Addressed, Reference, Row, by_label, documents, reading, row, shown};
 use crate::show::{Unread, Why};
 use crate::{Failure, ReadDeps};
 use worklog_domain::document::Document;
@@ -51,18 +51,8 @@ pub struct Log {
     pub machine: Option<Reference>,
     /// The topics not ended that a version was written on, and `machine` whether or not it
     /// ended; by label.
-    pub machines: Vec<LogMachine>,
+    pub machines: Vec<Addressed>,
     pub versions: Vec<Logged>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct LogMachine {
-    pub document: DocumentId,
-    pub label: String,
-    /// The reason the machine's topic ended with.
-    pub ended: Option<String>,
-    /// What `log` takes to show this machine's versions alone.
-    pub address: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -205,14 +195,7 @@ pub fn log(deps: &ReadDeps, limit: usize, address: Option<&str>) -> Result<Log, 
         .cloned();
     let names = Names::of(&lookup);
     let machines = (machines.into_iter())
-        .map(|reference| {
-            Ok(LogMachine {
-                address: names.address(&reference.document, &reference.label)?,
-                ended: reference.ended().map(ToOwned::to_owned),
-                document: reference.document,
-                label: reference.label,
-            })
-        })
+        .map(|reference| Addressed::of(reference, &names))
         .collect::<Result<_, Failure>>()?;
     let mut versions: Vec<(&Header, &Document)> = Vec::new();
     for document in &documents {

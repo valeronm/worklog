@@ -8,9 +8,9 @@ use serde::Serialize;
 use crate::heads::{ended_for, row_head};
 use crate::holdings::{self, Holdings, Writes};
 use crate::index::Topics;
-use crate::lookup::Lookup;
-use crate::rows::{memberships, reading};
-use crate::{Failure, ReadDeps, Reference};
+use crate::lookup::{Lookup, Names};
+use crate::rows::{Addressed, memberships, reading};
+use crate::{Failure, ReadDeps};
 use worklog_domain::id::DocumentId;
 use worklog_schema::{Content, Date, KindOf};
 
@@ -38,7 +38,7 @@ pub struct Day {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct TopicCount {
-    pub topic: Reference,
+    pub topic: Addressed,
     pub entry_count: usize,
 }
 
@@ -46,7 +46,7 @@ pub struct TopicCount {
 pub struct Stats {
     pub activity: Activity,
     /// The topic counted, or none for the whole store.
-    pub topic: Option<Reference>,
+    pub topic: Option<Addressed>,
     /// Each unended topic with its entries in the span, its parts' among them; the most first,
     /// then by label.
     pub topics: Vec<TopicCount>,
@@ -161,17 +161,23 @@ pub fn stats(deps: &ReadDeps, topic: Option<&str>, year: Option<i32>) -> Result<
             *counts.entry(under).or_default() += 1;
         }
     }
+    let names = Names::of(&lookup);
     let mut counted: Vec<TopicCount> = (topics.ids())
         .filter(|id| !topics.is_ended(id))
-        .map(|id| TopicCount {
-            topic: topics.reference(id),
-            entry_count: counts.get(id).copied().unwrap_or(0),
+        .map(|id| {
+            Ok(TopicCount {
+                topic: Addressed::of(topics.reference(id), &names)?,
+                entry_count: counts.get(id).copied().unwrap_or(0),
+            })
         })
-        .collect();
+        .collect::<Result<_, Failure>>()?;
     counted.sort_by(|a, b| (b.entry_count, &a.topic.label).cmp(&(a.entry_count, &b.topic.label)));
+    let chosen = (topic.as_ref())
+        .map(|id| Addressed::of(topics.reference(id), &names))
+        .transpose()?;
     Ok(Stats {
         activity: tally(&kept_under(&dated, topic.as_ref()), from, to, year),
-        topic: topic.map(|id| topics.reference(&id)),
+        topic: chosen,
         topics: counted,
         holdings: holdings::holdings(&scope, unfiled),
         writes: holdings::writes(&scope, &topics, from, to),
