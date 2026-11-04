@@ -32,7 +32,7 @@ pub(super) fn refresh_into(environment: &Environment, done: &mut Done) -> Result
     // A binary whose path is unknown or cannot be quoted is refused before the first write.
     let completions = fish_completions(environment, &homes, done)?;
     let agents = Refreshing::on_this_host(environment)?;
-    agents.write_into(done)?;
+    agents.write_into(environment, done)?;
     if let Some((file, line)) = completions {
         worklog_wiring::write_completions(&file, &line)?;
         done.wrote(&file);
