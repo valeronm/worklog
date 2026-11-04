@@ -12,7 +12,7 @@ use fs::{
 };
 use net::GitHubReleases;
 use worklog_app::{Deps, Failure};
-use worklog_domain::ports::{Binary, Releases, StoreError};
+use worklog_domain::ports::{Binary, DraftsRead as _, Releases, StoreError};
 use worklog_domain::session::Session;
 
 /// The last reading of the store a process made through its adapters, which adapters built
@@ -409,6 +409,70 @@ pub fn fish_completions(
     Ok(dir.map(|dir| dir.join(format!("{command}.fish"))))
 }
 
+/// What an uninstall removed of this host's own files, and each of its directories it left
+/// because it is not empty.
+#[derive(Debug, Default)]
+pub struct Uninstalled {
+    pub removed: Vec<PathBuf>,
+    pub left: Vec<PathBuf>,
+}
+
+impl Uninstalled {
+    fn record(&mut self, dir: &Path, removed: Option<bool>) {
+        match removed {
+            Some(true) => self.removed.push(dir.to_path_buf()),
+            Some(false) => self.left.push(dir.to_path_buf()),
+            None => {}
+        }
+    }
+}
+
+/// This host's own files, with no draft open among them.
+pub struct HostFiles {
+    paths: Paths,
+    fish: Option<PathBuf>,
+}
+
+impl HostFiles {
+    /// Refuses a host whose drafts directory holds a draft; `command` is the name fish's
+    /// completions are under and the refusal names.
+    pub fn closed(
+        variable: &dyn Fn(&str) -> Option<OsString>,
+        command: &str,
+    ) -> Result<HostFiles, Failure> {
+        let paths = Paths::resolved(variable)?;
+        if !FsDrafts::new(paths.drafts.clone()).documents()?.is_empty() {
+            return Err(Failure::at(
+                paths.drafts.display(),
+                format!(
+                    "holds open drafts, which `{command} drafts` lists; save or discard each first"
+                ),
+            ));
+        }
+        let fish = fish_completions(variable, command)?;
+        Ok(HostFiles { paths, fish })
+    }
+
+    /// Removes fish's completions and the config, empties the drafts and cache directories of
+    /// their files, then removes each of those and the tool's own directories once empty, all
+    /// under the host's setup lock.
+    pub fn remove(self) -> Result<Uninstalled, Failure> {
+        let config_dir = self.paths.config.parent().filter(|dir| dir.is_dir());
+        let _setup = config_dir.map(fs::setup_lock).transpose()?;
+        let mut done = Uninstalled::default();
+        for file in self.fish.iter().chain([&self.paths.config]) {
+            done.removed.extend(remove_optional(file)?);
+        }
+        for dir in [&self.paths.drafts, &self.paths.cache] {
+            done.record(dir, fs::remove_dir_of_files(dir)?);
+        }
+        for dir in &self.paths.holders {
+            done.record(dir, fs::remove_empty_dir(dir)?);
+        }
+        Ok(done)
+    }
+}
+
 /// Refuses a `file` whose directory is not there; nothing here creates it.
 pub fn write_completions(file: &Path, text: &str) -> Result<(), Failure> {
     let dir = file.parent().unwrap_or(file);
@@ -466,6 +530,29 @@ mod tests {
 
     fn wired_over(root: &Path, chosen: &Path) -> Result<Adapters, Failure> {
         wire_over(&home(root), chosen)
+    }
+
+    #[test]
+    fn an_uninstall_while_a_setup_holds_the_host_removes_nothing() {
+        let (_kept, root) = scratch();
+        let config = root.join("next/config.toml");
+        std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+        std::fs::write(&config, "").unwrap();
+        let held = fs::setup_lock(config.parent().unwrap()).unwrap();
+        let host = HostFiles::closed(&home(&root), "worklog").unwrap();
+        let Err(Failure::Store(refused)) = host.remove() else {
+            panic!("an uninstall must wait for the setup holding the host");
+        };
+        assert!(
+            refused
+                .to_string()
+                .contains("another setup of this host is running"),
+            "{refused}"
+        );
+        assert!(config.is_file());
+        drop(held);
+        let host = HostFiles::closed(&home(&root), "worklog").unwrap();
+        assert_eq!(host.remove().unwrap().removed, [config, root.join("next")]);
     }
 
     #[test]

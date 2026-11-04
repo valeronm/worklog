@@ -12,6 +12,8 @@ pub struct Paths {
     pub drafts: PathBuf,
     /// The directory of this host's cache of each store.
     pub cache: PathBuf,
+    /// The directories above the config, the drafts and the cache that exist for this tool.
+    pub holders: Vec<PathBuf>,
     pub home: Option<String>,
     /// `XDG_CONFIG_HOME` or the home directory's `.config`, whatever `WORKLOG_HOME` holds.
     pub config_home: Option<PathBuf>,
@@ -61,6 +63,7 @@ impl Paths {
                 config: root.join("config.toml"),
                 drafts: root.join("drafts"),
                 cache: root.join("cache"),
+                holders: vec![root],
                 home,
                 config_home,
             });
@@ -74,12 +77,15 @@ impl Paths {
         let base = |name: &str, default: &str| {
             given(name).unwrap_or_else(|| PathBuf::from(&home).join(default))
         };
+        let (config, state) = (
+            config_home.join(APP),
+            base("XDG_STATE_HOME", ".local/state").join(APP),
+        );
         Ok(Paths {
-            config: config_home.join(APP).join("config.toml"),
-            drafts: base("XDG_STATE_HOME", ".local/state")
-                .join(APP)
-                .join("drafts"),
+            config: config.join("config.toml"),
+            drafts: state.join("drafts"),
             cache: base("XDG_CACHE_HOME", ".cache").join(APP),
+            holders: vec![config, state],
             home: Some(home),
             config_home: Some(config_home),
         })
@@ -243,6 +249,30 @@ mod tests {
                 "{relative}"
             );
         }
+    }
+
+    #[test]
+    fn the_tool_s_own_directories_are_one_under_each_base_or_the_one_given_for_everything() {
+        let holders = |set: &[(&str, &str)]| resolved(set).unwrap().holders;
+        let home = ("HOME", "/home/desk");
+        assert_eq!(
+            holders(&[home]),
+            [
+                PathBuf::from("/home/desk/.config/worklog"),
+                PathBuf::from("/home/desk/.local/state/worklog")
+            ]
+        );
+        assert_eq!(
+            holders(&[home, ("XDG_STATE_HOME", "/atlas/state")]),
+            [
+                PathBuf::from("/home/desk/.config/worklog"),
+                PathBuf::from("/atlas/state/worklog")
+            ]
+        );
+        assert_eq!(
+            holders(&[home, ("WORKLOG_HOME", "/lantern")]),
+            [PathBuf::from("/lantern")]
+        );
     }
 
     #[test]

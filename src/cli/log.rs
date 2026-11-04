@@ -208,7 +208,8 @@ mod tests {
                 "agents",
                 "refresh",
                 "completions",
-                "upgrade"
+                "upgrade",
+                "uninstall"
             ]
         );
     }

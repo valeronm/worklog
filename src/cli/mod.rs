@@ -14,6 +14,7 @@ mod render;
 mod run;
 mod sandbox;
 mod skill;
+mod uninstall;
 mod upgrade;
 
 use std::cell::RefCell;
@@ -339,6 +340,9 @@ where
         }
         Invoked::Tool(ToolCommand::Refresh) => {
             return ended(refresh::run(environment, cli.json), out, err);
+        }
+        Invoked::Tool(ToolCommand::Uninstall) => {
+            return ended(uninstall::run(environment, cli.json), out, err);
         }
         Invoked::Tool(ToolCommand::Completions { shell }) => {
             return finished(complete::registered(*shell, environment), out, err);

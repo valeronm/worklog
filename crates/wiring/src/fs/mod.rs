@@ -17,7 +17,7 @@ pub use binary::FsBinary;
 pub use clock::SystemClock;
 pub use config::Config;
 pub use drafts::FsDrafts;
-pub use host::FsHost;
+pub use host::{FsHost, setup_lock};
 pub use ids::RandomIds;
 pub use paths::{Paths, set};
 pub use releases::DirReleases;
@@ -130,6 +130,25 @@ fn replace(
         flush(dir)?;
     }
     Ok(())
+}
+
+/// `None` for a `dir` that is not there, otherwise whether it was empty and so removed.
+pub fn remove_empty_dir(dir: &Path) -> Result<Option<bool>, StoreError> {
+    match std::fs::remove_dir(dir) {
+        Ok(()) => Ok(Some(true)),
+        Err(e) if e.kind() == ErrorKind::NotFound => Ok(None),
+        Err(e) if e.kind() == ErrorKind::DirectoryNotEmpty => Ok(Some(false)),
+        Err(e) => Err(io_error(dir, &e)),
+    }
+}
+
+/// Removes every entry of `dir` but a directory, then `dir` where that leaves it empty, as
+/// `remove_empty_dir` reports.
+pub fn remove_dir_of_files(dir: &Path) -> Result<Option<bool>, StoreError> {
+    for name in files(dir)? {
+        remove_optional(&dir.join(name))?;
+    }
+    remove_empty_dir(dir)
 }
 
 /// Sorted, and empty for a directory that is not there.

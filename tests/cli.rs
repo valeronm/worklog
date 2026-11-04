@@ -2873,6 +2873,95 @@ fn agents_uninstall_takes_back_only_what_install_placed() {
 }
 
 #[test]
+fn uninstall_takes_back_what_setup_wrote_and_leaves_the_store_and_the_binary() {
+    let host = Host::set_up("desk")
+        .on_path()
+        .with_agents(&[".claude", ".codex"]);
+    host.ok(&["agents", "install"]);
+    let fish = host.fish();
+    host.ok(&["refresh"]);
+    let next = host.root.join("next");
+    fs::create_dir_all(next.join("cache")).unwrap();
+    fs::write(next.join("cache/0123456789abcdef.store"), "").unwrap();
+    let mut stored = Vec::new();
+    version_files(&host.store(), &mut stored);
+    host.ok(&["new", "topic", "atlas"]);
+    let before = snapshot(&host);
+    assert_refused(
+        &host.run(&["uninstall"]),
+        1,
+        &format!(
+            "worklog: {}: holds open drafts, which `worklog drafts` lists; save or discard each \
+             first\n",
+            host.drafts().display()
+        ),
+    );
+    assert_eq!(snapshot(&host), before);
+
+    host.ok(&["discard", "atlas"]);
+    let ran = host.run(&["uninstall"]);
+    let skills = |home: &str| host.skill_of(home).parent().unwrap().to_path_buf();
+    assert_eq!(
+        ran.stdout,
+        lines(&[
+            skills(".claude"),
+            host.hooks_of(".claude"),
+            skills(".codex"),
+            host.rule_of_codex(),
+            host.config_of_codex(),
+            host.hooks_of(".codex"),
+            fish.clone(),
+            next.join("config.toml"),
+            host.drafts(),
+            next.join("cache"),
+            next.clone(),
+        ])
+    );
+    let stays = format!(
+        "worklog: {}: this binary stays; delete it to finish\n",
+        binary().display()
+    );
+    assert_eq!((ran.stderr.as_str(), ran.code), (stays.as_str(), Some(0)));
+    assert!(!fish.exists() && !next.exists() && !skills(".claude").exists());
+    let mut kept = Vec::new();
+    version_files(&host.store(), &mut kept);
+    assert_eq!(kept, stored);
+    assert_refused(&host.run(&["topics"]), 1, NOT_SET_UP);
+
+    let again = host.run(&["uninstall"]);
+    assert_eq!(
+        (again.stdout.as_str(), again.stderr.as_str(), again.code),
+        ("", stays.as_str(), Some(0))
+    );
+}
+
+#[test]
+fn uninstall_leaves_a_directory_that_is_not_empty_in_place() {
+    let host = Host::set_up("desk");
+    let kept = host.drafts().join("kept");
+    fs::create_dir_all(&kept).unwrap();
+    let ran = host.run(&["uninstall"]);
+    assert_eq!(ran.stdout, lines(&[host.root.join("next/config.toml")]));
+    let left = |dir: &Path| {
+        format!(
+            "worklog: {}: left in place, since it is not empty\n",
+            dir.display()
+        )
+    };
+    assert_eq!(
+        ran.stderr,
+        format!(
+            "{}{}worklog: {}: this binary stays; delete it to finish\n",
+            left(&host.drafts()),
+            left(&host.root.join("next")),
+            binary().display()
+        )
+    );
+    assert_eq!(ran.code, Some(0));
+    assert!(kept.is_dir());
+}
+
+#[test]
 fn agents_install_json_prints_the_written_object() {
     let host = Host::new().on_path().with_agents(&[".claude"]);
     let printed = host.json(&["agents", "install"]);

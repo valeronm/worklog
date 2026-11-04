@@ -14,11 +14,12 @@ mod tests {
 
     const HELP: &str = "help";
 
-    const NOT_FOR_A_SESSION: [&str; 9] = [
+    const NOT_FOR_A_SESSION: [&str; 10] = [
         "init",
         "join",
         "agents",
         "refresh",
+        "uninstall",
         "usage",
         "completions",
         "upgrade",

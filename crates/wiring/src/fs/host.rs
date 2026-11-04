@@ -9,6 +9,19 @@ use worklog_domain::session::Session;
 
 use super::{Config, io_error, make_dir};
 
+/// Locks `dir`, the config's directory, until the returned file is dropped; a second setup of
+/// this host is refused meanwhile.
+pub fn setup_lock(dir: &Path) -> Result<File, StoreError> {
+    let held = File::open(dir).map_err(|e| io_error(dir, &e))?;
+    held.try_lock().map_err(|e| match e {
+        TryLockError::WouldBlock => {
+            StoreError::io(dir.display(), "another setup of this host is running")
+        }
+        TryLockError::Error(e) => io_error(dir, &e),
+    })?;
+    Ok(held)
+}
+
 // This host as its config file and its environment described it when the command started.
 pub struct FsHost {
     config: PathBuf,
@@ -137,13 +150,7 @@ impl Host for FsHost {
             ));
         };
         make_dir(dir)?;
-        let held = File::open(dir).map_err(|e| io_error(dir, &e))?;
-        held.try_lock().map_err(|e| match e {
-            TryLockError::WouldBlock => {
-                StoreError::io(dir.display(), "another setup of this host is running")
-            }
-            TryLockError::Error(e) => io_error(dir, &e),
-        })?;
+        let held = setup_lock(dir)?;
         self.unbound_on_disk()?;
         self.setup.replace(Some(held));
         Ok(())

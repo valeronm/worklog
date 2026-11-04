@@ -287,7 +287,7 @@ impl Refreshing {
     }
 }
 
-fn uninstall_into(environment: &Environment, done: &mut Done) -> Result<(), Failure> {
+pub(super) fn uninstall_into(environment: &Environment, done: &mut Done) -> Result<(), Failure> {
     let agents = worklog_wiring::agents(environment.variable)?;
     let drafts = worklog_wiring::drafts(environment.variable)?;
     let uninstalled = |agent: &Agent| sandbox::uninstalled(agent, &drafts);

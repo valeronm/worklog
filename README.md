@@ -186,16 +186,14 @@ the store goes to its model provider like the rest of the conversation.
 
 ## Uninstall
 
-`worklog agents uninstall` removes what setup added to your agents'
-settings and leaves the rest of each file as it was. Then delete the
-binary and the files worklog keeps for this machine:
+```sh
+worklog uninstall
+```
 
-- `~/.local/bin/worklog`, or the copy in `$PREFIX`
-- `~/.config/worklog`, `~/.local/state/worklog` and `~/.cache/worklog`,
-  or the same folders under `XDG_CONFIG_HOME`, `XDG_STATE_HOME` and
-  `XDG_CACHE_HOME` if you set them
-- `~/.config/fish/completions/worklog.fish`, or the same file under
-  `XDG_CONFIG_HOME`, if fish is set up
+It removes what setup added to your agents' settings and leaves the rest
+of each file as it was. It also removes worklog's fish completions and the
+config, drafts and cache worklog keeps for this machine, and it refuses
+while a draft is still open. Then delete the binary at the path it prints.
 
 Your store is a folder of its own. Keep it or delete it as you choose; if
 your sync tool shares it, deleting it here deletes it on your other

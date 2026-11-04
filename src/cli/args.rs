@@ -126,6 +126,9 @@ pub enum ToolCommand {
         #[arg(long)]
         check: bool,
     },
+    /// Take back what setup wrote on this machine: the agents' setup, fish's completions, the
+    /// config, the drafts and the cache; the store and this binary stay
+    Uninstall,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Subcommand)]
