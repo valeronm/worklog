@@ -24,7 +24,7 @@ impl fmt::Display for NotADirectory {
 
 fn fold_home(path: &str, home: Option<&str>) -> String {
     let under = home
-        .filter(|home| home.starts_with('/') && path.starts_with('/'))
+        .filter(|_| path.starts_with('/'))
         .and_then(|home| path.strip_prefix(home.trim_end_matches('/')));
     match under {
         Some(rest) if rest.trim_end_matches('/').is_empty() => "~".to_owned(),
@@ -67,21 +67,21 @@ impl Directory {
         format!("/{}", kept.join("/"))
     }
 
-    /// `given` as a claim carries it on a host whose home directory is `home`: `~` for the
-    /// home itself, `~/rest` for a path under it by whole components, and `given` for any
-    /// other, for a path or a home that is not absolute and for no home.
+    /// `given` as a claim carries it on a host whose home directory is the absolute `home`:
+    /// `~` for the home itself, `~/rest` for a path under it by whole components, and `given`
+    /// for any other, for a path that is not absolute and for no home.
     pub fn on_host(given: &str, home: Option<&str>) -> Result<Directory, NotADirectory> {
         Directory::parse(&fold_home(given, home))
     }
 
-    /// This directory as a path from the root on a host whose home directory is `home`; `None`
-    /// for one under `~` with no home or a home that is not absolute.
+    /// This directory as a path from the root on a host whose home directory is the absolute
+    /// `home`; `None` for one under `~` with no home.
     #[must_use]
     pub fn from_root(&self, home: Option<&str>) -> Option<String> {
         let Some(rest) = self.0.strip_prefix('~') else {
             return Some(self.0.clone());
         };
-        let home = home.filter(|home| home.starts_with('/'))?;
+        let home = home?;
         match format!("{}{rest}", home.trim_end_matches('/')) {
             root if root.is_empty() => Some("/".to_owned()),
             path => Some(path),
@@ -205,10 +205,7 @@ mod tests {
             fold_home("/home/desk/lantern", Some("/home/desk/")),
             "~/lantern"
         );
-        for no_home in ["", "desk", "~"] {
-            assert_eq!(fold_home("/home/desk", Some(no_home)), "/home/desk");
-        }
-        for home in ["/", "/home/desk", "", "desk", "~"] {
+        for home in ["/", "/home/desk"] {
             for path in ["", "desk/lantern", "~", "~/lantern", "./lantern"] {
                 assert_eq!(fold_home(path, Some(home)), path, "{path:?} with {home:?}");
             }
@@ -238,9 +235,7 @@ mod tests {
         );
         assert_eq!(directory("~").from_root(Some("/")).as_deref(), Some("/"));
         assert_eq!(directory("/srv").from_root(None).as_deref(), Some("/srv"));
-        for home in [None, Some("desk"), Some("")] {
-            assert_eq!(directory("~/lantern").from_root(home), None, "{home:?}");
-        }
+        assert_eq!(directory("~/lantern").from_root(None), None);
         assert!(directory("~/").is_home());
         assert!(!directory("~/lantern").is_home() && !directory("/").is_home());
     }
