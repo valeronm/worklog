@@ -65,7 +65,7 @@ fn fed(mut program: Command, dir: &Path, args: &[&str], input: &str) -> Ran {
 struct Host {
     _kept: tempfile::TempDir,
     root: PathBuf,
-    linked: tempfile::TempDir,
+    linked: std::cell::OnceCell<tempfile::TempDir>,
     on_path: bool,
 }
 
@@ -77,7 +77,7 @@ impl Host {
         let host = Host {
             _kept: kept,
             root,
-            linked: tempfile::tempdir().expect("a temp dir"),
+            linked: std::cell::OnceCell::new(),
             on_path: false,
         };
         fs::create_dir(host.unpublished()).unwrap();
@@ -133,7 +133,10 @@ impl Host {
     }
 
     fn finding_as_worklog(&self, binary: &Path) -> OsString {
-        let link = self.linked.path().join("worklog");
+        let linked = self
+            .linked
+            .get_or_init(|| tempfile::tempdir().expect("a temp dir"));
+        let link = linked.path().join("worklog");
         let _ = fs::remove_file(&link);
         let binary = fs::canonicalize(binary).expect("the binary");
         std::os::unix::fs::symlink(binary, &link).unwrap();
@@ -160,7 +163,9 @@ impl Host {
 
     fn found(&self) -> Command {
         let mut program = self.program(&binary());
-        program.env("PATH", self.finding_as_worklog(&binary()));
+        if !self.on_path {
+            program.env("PATH", self.finding_as_worklog(&binary()));
+        }
         program
     }
 
@@ -4277,9 +4282,10 @@ impl Host {
 
     fn copy_of_the_binary(&self, to: &Path) {
         fs::copy(binary(), to).unwrap();
-        let version = || self.program(to).arg("--version").output();
+        let mut version = self.program(to);
+        version.arg("--version");
         loop {
-            match version() {
+            match version.output() {
                 Err(busy) if busy.kind() == std::io::ErrorKind::ExecutableFileBusy => {
                     std::thread::yield_now();
                 }
