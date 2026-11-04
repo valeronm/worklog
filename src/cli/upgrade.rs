@@ -429,10 +429,6 @@ mod tests {
         std::fs::remove_file(host.skill()).unwrap();
         std::fs::create_dir(host.skill()).unwrap();
         let renamed = host.root.join("bin").join(format!("{NAME}-0.3.0"));
-        let skipped = said(&format!(
-            "{}: fish's completions are not written, since the binary's file name is not {NAME}",
-            renamed.display()
-        ));
         let failed = |err: &str, before: &[&str]| {
             let lines: Vec<String> = err.lines().map(|line| format!("{line}\n")).collect();
             let (last, first) = lines.split_last().expect("a failure");
@@ -443,18 +439,18 @@ mod tests {
 
         let (out, err, code) = host.run_as(SAME, Some(&renamed), &["refresh"]);
         assert_eq!((out.as_str(), code), ("", 1));
-        failed(&err, &[&skipped]);
+        failed(&err, &[]);
         let line = ["refresh", "--json"];
         let (out, err, code) = host.run_as(SAME, Some(&renamed), &line);
         assert_eq!((out.as_str(), code), ("{\n  \"written\": []\n}\n", 1));
-        failed(&err, &[&skipped]);
+        failed(&err, &[]);
         let (out, err, code) = host.run_as(SAME, Some(&renamed), &["upgrade"]);
         assert_eq!((out.as_str(), code), ("", 1));
-        failed(&err, &[&said("already at 0.3.0"), &skipped]);
+        failed(&err, &[&said("already at 0.3.0")]);
         let (out, err, code) = host.run_as(SAME, Some(&renamed), &["upgrade", "--json"]);
         let value: Value = serde_json::from_str(&out).expect("one value");
         assert_eq!((&value["written"], code), (&json!([]), 1));
-        failed(&err, &[&skipped]);
+        failed(&err, &[]);
     }
 
     #[test]

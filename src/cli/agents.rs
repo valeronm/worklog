@@ -3,12 +3,12 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use super::args::AgentsAction;
+use super::args::{AgentsAction, Shell};
 use super::json::Pinned;
 use super::render::{Output, Render, Stopped, output};
 use super::sandbox::Edit;
 use super::skill::SKILL;
-use super::{Environment, NAME, hook, sandbox};
+use super::{Environment, NAME, complete, hook, sandbox};
 use worklog_app::Failure;
 use worklog_wiring::Agent;
 
@@ -213,10 +213,9 @@ pub(super) struct Refreshing {
     fish: Option<Fish>,
 }
 
-/// `line` is `None` where the binary's file name is not the command's.
-pub(super) struct Fish {
-    pub(super) file: PathBuf,
-    pub(super) line: Option<String>,
+struct Fish {
+    file: PathBuf,
+    line: String,
 }
 
 struct Refreshed {
@@ -238,11 +237,11 @@ impl Refreshed {
 }
 
 impl Refreshing {
-    /// `None`, with a note in `done`, when an agent holds the skill or the hook, or `fish` is
-    /// given, and this binary is not the one `PATH` finds.
+    /// `None`, with a note in `done`, when an agent holds the skill or the hook, or `fish`, the
+    /// file fish's completions go in, is given, and this binary is not the one `PATH` finds.
     pub(super) fn on_this_host(
         environment: &Environment,
-        fish: Option<Fish>,
+        fish: Option<PathBuf>,
         done: &mut Done,
     ) -> Result<Option<Refreshing>, Failure> {
         let agents = worklog_wiring::agents(environment.variable)?;
@@ -267,6 +266,10 @@ impl Refreshing {
             done.notes.push(format!("{why}; nothing is refreshed"));
             return Ok(None);
         }
+        let fish = match fish {
+            Some(file) => fish_line(environment, done)?.map(|line| Fish { file, line }),
+            None => None,
+        };
         Ok(Some(Refreshing {
             refreshed,
             drafts,
@@ -292,16 +295,27 @@ impl Refreshing {
                 Ok(hook::refreshed(agent, || environment.binary())?.1)
             })?;
         }
-        if let Some(Fish {
-            file,
-            line: Some(line),
-        }) = &self.fish
-        {
+        if let Some(Fish { file, line }) = &self.fish {
             worklog_wiring::write_completions(file, line)?;
             done.wrote(file);
         }
         Ok(())
     }
+}
+
+// A binary whose path is unknown or cannot be quoted is refused before the first write.
+fn fish_line(environment: &Environment, done: &mut Done) -> Result<Option<String>, Failure> {
+    let binary = environment.binary()?;
+    if !complete::runs_as_the_command(binary) {
+        done.notes.push(format!(
+            "{}: fish's completions are not written, since the binary's file name is not {NAME}",
+            binary.display()
+        ));
+        return Ok(None);
+    }
+    let homes = worklog_wiring::homes(environment.variable)?;
+    let homes: Vec<&Path> = homes.iter().map(PathBuf::as_path).collect();
+    complete::registration(Shell::Fish, binary, &homes).map(Some)
 }
 
 fn refresh_into(environment: &Environment, done: &mut Done) -> Result<(), Failure> {

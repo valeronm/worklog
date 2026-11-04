@@ -4644,11 +4644,6 @@ fn a_misnamed_binary_whose_hook_is_installed_is_upgraded_and_its_refresh_refused
         "{}: the binary's file name must be worklog, or its hook is not found again\n",
         installed.display()
     );
-    let skipped = format!(
-        "worklog: {}: fish's completions are not written, since the binary's file name is not \
-         worklog\n",
-        installed.display()
-    );
     let bytes = fs::read(binary()).unwrap();
     host.publish(&format!("v{CURRENT}"), b"", b"");
     let before = snapshot(&host);
@@ -4656,7 +4651,7 @@ fn a_misnamed_binary_whose_hook_is_installed_is_upgraded_and_its_refresh_refused
     assert_refused(
         &stayed,
         1,
-        &format!("worklog: already at {CURRENT}\n{skipped}worklog: {refusal}"),
+        &format!("worklog: already at {CURRENT}\nworklog: {refusal}"),
     );
     assert_eq!(snapshot(&host), before);
 
@@ -4666,9 +4661,8 @@ fn a_misnamed_binary_whose_hook_is_installed_is_upgraded_and_its_refresh_refused
         upgraded.stderr,
         format!(
             "worklog: upgraded {CURRENT} to 9.9.9\n\
-             worklog: {} refresh: {}worklog: {refusal}",
-            installed.display(),
-            skipped.strip_prefix("worklog: ").unwrap()
+             worklog: {} refresh: {refusal}",
+            installed.display()
         )
     );
     assert_eq!(

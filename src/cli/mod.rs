@@ -1271,6 +1271,24 @@ mod tests {
     }
 
     #[test]
+    fn a_refresh_by_a_binary_path_does_not_find_notes_only_that_nothing_is_refreshed() {
+        let (_kept, root) = scratch();
+        let home = root.join("home");
+        std::fs::create_dir_all(home.join(".config/fish/completions")).unwrap();
+        let store = root.join("store");
+        let line = ["init", "desk", "--store", store.to_str().unwrap()];
+        assert_eq!(run_with(Some(&home), None, &line).code, 0);
+        let misnamed = root.join("bench").join(format!("{NAME}-0.3.0"));
+        let ran = run_with(Some(&home), Some(misnamed.clone()), &["refresh"]);
+        let unfound = format!(
+            "{NAME}: {}: not the {NAME} that PATH finds, which is the one an agent runs; \
+             nothing is refreshed\n",
+            misnamed.display()
+        );
+        assert_eq!((ran.out.as_str(), ran.err, ran.code), ("", unfound, 0));
+    }
+
+    #[test]
     fn an_install_and_an_uninstall_that_fail_say_what_they_wrote_before_the_failure() {
         let (_kept, root) = scratch();
         let home = root.join("home");
