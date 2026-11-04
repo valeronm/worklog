@@ -365,10 +365,8 @@ mod tests {
 
     #[test]
     fn an_edit_to_a_hooks_file_after_the_install_was_planned_is_kept() {
-        let kept = tempfile::tempdir().unwrap();
-        let root = fs::canonicalize(kept.path()).unwrap();
+        let (_kept, root) = scratch_with_claude();
         let home = root.join("home");
-        fs::create_dir_all(home.join(".claude")).unwrap();
         let binary = root.join("bin").join(NAME);
         let variable = found(&home, &binary);
         let environment = Environment {
@@ -384,10 +382,8 @@ mod tests {
 
     #[test]
     fn an_edit_to_a_hooks_file_after_the_refresh_was_planned_is_kept() {
-        let kept = tempfile::tempdir().unwrap();
-        let root = fs::canonicalize(kept.path()).unwrap();
+        let (_kept, root) = scratch_with_claude();
         let home = root.join("home");
-        fs::create_dir_all(home.join(".claude")).unwrap();
         let binary = root.join("bin").join(NAME);
         let variable = found(&home, &binary);
         let installed = Environment {
@@ -406,19 +402,51 @@ mod tests {
             .unwrap()
             .expect("a refresh from the binary PATH finds");
         let hooks = home.join(".claude").join("settings.json");
-        let mut edited: serde_json::Value =
-            serde_json::from_str(&fs::read_to_string(&hooks).unwrap()).unwrap();
-        edited["theme"] = "dark".into();
-        fs::write(&hooks, edited.to_string()).unwrap();
+        darkened(&hooks);
         refreshing
             .write_into(&environment, &mut Done::default())
             .unwrap();
         themed_with_a_hook_running(&hooks, &moved);
     }
 
+    #[test]
+    fn an_edit_to_a_hooks_file_after_the_uninstall_was_planned_is_kept() {
+        let (_kept, root) = scratch_with_claude();
+        let home = root.join("home");
+        let binary = root.join("bin").join(NAME);
+        let variable = found(&home, &binary);
+        let environment = Environment {
+            binary: Some(binary),
+            ..environment(&variable)
+        };
+        let placing = Placing::on_this_host(&environment).unwrap();
+        placing.install_into(&mut Done::default()).unwrap();
+        let uninstalling = Uninstalling::on_this_host(&environment).unwrap();
+        let hooks = home.join(".claude").join("settings.json");
+        darkened(&hooks);
+        uninstalling.uninstall_into(&mut Done::default()).unwrap();
+        assert_eq!(json_at(&hooks), serde_json::json!({"theme": "dark"}));
+    }
+
+    fn scratch_with_claude() -> (tempfile::TempDir, PathBuf) {
+        let kept = tempfile::tempdir().unwrap();
+        let root = fs::canonicalize(kept.path()).unwrap();
+        fs::create_dir_all(root.join("home/.claude")).unwrap();
+        (kept, root)
+    }
+
+    fn json_at(path: &Path) -> serde_json::Value {
+        serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap()
+    }
+
+    fn darkened(hooks: &Path) {
+        let mut edited = json_at(hooks);
+        edited["theme"] = "dark".into();
+        fs::write(hooks, edited.to_string()).unwrap();
+    }
+
     fn themed_with_a_hook_running(hooks: &Path, binary: &Path) {
-        let written: serde_json::Value =
-            serde_json::from_str(&fs::read_to_string(hooks).unwrap()).unwrap();
+        let written = json_at(hooks);
         assert_eq!(written["theme"], "dark");
         let command = &written["hooks"]["SessionStart"][0]["hooks"][0]["command"];
         let runs = format!("\"{}\" context", binary.display());
