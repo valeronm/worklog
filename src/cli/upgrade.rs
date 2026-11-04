@@ -227,7 +227,7 @@ mod tests {
                 binary_at: &memory,
                 ..Process::nowhere()
             };
-            let ran = process.run(line);
+            let ran = process.found().run(line);
             (ran.out, ran.err, ran.code)
         }
 

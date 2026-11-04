@@ -1,3 +1,4 @@
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
@@ -94,7 +95,7 @@ impl Done {
 
 fn unfound(environment: &Environment) -> Result<Option<String>, Failure> {
     let binary = environment.binary()?;
-    Ok((!(environment.found_on_path)(binary)).then(|| {
+    Ok((!environment.found_as(OsStr::new(NAME))).then(|| {
         format!(
             "{}: not the {NAME} that PATH finds, which is the one an agent runs",
             binary.display()
@@ -334,7 +335,17 @@ mod tests {
     use std::fs;
 
     use super::*;
-    use crate::cli::tests::environment;
+    use crate::cli::tests::{Process, environment};
+
+    fn found(home: &Path, binary: &Path) -> impl Fn(&str) -> Option<OsString> + use<> {
+        let process = Process {
+            home: Some(home.to_path_buf()),
+            binary: Some(binary.to_path_buf()),
+            ..Process::nowhere()
+        };
+        let process = process.found();
+        move |name: &str| process.variable(name)
+    }
 
     #[test]
     fn an_edit_to_a_hooks_file_after_the_install_was_planned_is_kept() {
@@ -342,8 +353,8 @@ mod tests {
         let root = fs::canonicalize(kept.path()).unwrap();
         let home = root.join("home");
         fs::create_dir_all(home.join(".claude")).unwrap();
-        let variable = |name: &str| (name == "HOME").then(|| OsString::from(&home));
         let binary = root.join("bin").join(NAME);
+        let variable = found(&home, &binary);
         let environment = Environment {
             binary: Some(binary.clone()),
             ..environment(&variable)
@@ -361,14 +372,16 @@ mod tests {
         let root = fs::canonicalize(kept.path()).unwrap();
         let home = root.join("home");
         fs::create_dir_all(home.join(".claude")).unwrap();
-        let variable = |name: &str| (name == "HOME").then(|| OsString::from(&home));
+        let binary = root.join("bin").join(NAME);
+        let variable = found(&home, &binary);
         let installed = Environment {
-            binary: Some(root.join("bin").join(NAME)),
+            binary: Some(binary),
             ..environment(&variable)
         };
         let placing = Placing::on_this_host(&installed).unwrap();
         placing.install_into(&mut Done::default()).unwrap();
         let moved = root.join("bench").join(NAME);
+        let variable = found(&home, &moved);
         let environment = Environment {
             binary: Some(moved.clone()),
             ..environment(&variable)

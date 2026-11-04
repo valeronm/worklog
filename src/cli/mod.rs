@@ -49,8 +49,6 @@ struct Environment<'a> {
     version: Built,
     releases: &'a dyn Fn() -> Box<dyn Releases>,
     binary_at: &'a dyn Fn(&Path) -> Box<dyn Binary>,
-    /// Whether `PATH` finds the binary at a path under the tool's name, as an agent runs it.
-    found_on_path: &'a dyn Fn(&Path) -> bool,
     /// `None` unless both the input and stderr are a terminal.
     terminal: Option<&'a RefCell<dyn BufRead + 'a>>,
     /// `None` on a terminal and where the input is not closed within `HOOK_WAIT`; otherwise at
@@ -63,6 +61,11 @@ impl Environment<'_> {
         self.cwd
             .as_deref()
             .ok_or_else(|| Failure::Refused("no working directory".to_owned()))
+    }
+
+    fn found_as(&self, name: &OsStr) -> bool {
+        (self.binary.as_deref())
+            .is_some_and(|binary| worklog_wiring::found_on_path(binary, name, self.variable))
     }
 
     fn binary(&self) -> Result<&Path, Failure> {
@@ -121,10 +124,6 @@ pub fn main() -> i32 {
         version: release::current(),
         releases: &|| worklog_wiring::releases(&variable),
         binary_at: &|path| worklog_wiring::binary(path, NAME),
-        found_on_path: &|binary| {
-            variable("PATH")
-                .is_some_and(|path| worklog_wiring::found_on_path(binary, OsStr::new(NAME), &path))
-        },
         terminal: (typed.as_ref()).map(|typed| -> &RefCell<dyn BufRead> { typed }),
         hook_input: &piped_input,
     };
@@ -408,6 +407,13 @@ mod tests {
 
     const IN_MEMORY: fn(&Path) -> Box<dyn Binary> = |_| Box::new(MemoryBinary::default());
 
+    pub(super) fn path_finding(binary: &Path) -> OsString {
+        let dir = binary.parent().expect("a binary in a directory");
+        std::fs::create_dir_all(dir).unwrap();
+        std::fs::write(binary, "").unwrap();
+        dir.as_os_str().to_owned()
+    }
+
     pub(super) fn environment(variable: &dyn Fn(&str) -> Option<OsString>) -> Environment<'_> {
         Environment {
             cwd: None,
@@ -416,7 +422,6 @@ mod tests {
             version: release::current(),
             releases: &UNPUBLISHED,
             binary_at: &IN_MEMORY,
-            found_on_path: &|_| true,
             terminal: None,
             hook_input: &|| None,
         }
@@ -461,6 +466,13 @@ mod tests {
             }
         }
 
+        pub(super) fn found(self) -> Process<'a> {
+            Process {
+                path: self.binary.as_deref().map(path_finding),
+                ..self
+            }
+        }
+
         pub(super) fn variable(&self, name: &str) -> Option<OsString> {
             let set = |dir: &Option<PathBuf>| dir.clone().map(PathBuf::into_os_string);
             match name {
@@ -489,7 +501,6 @@ mod tests {
                 version: self.version,
                 releases: self.releases,
                 binary_at: self.binary_at,
-                found_on_path: &|_| true,
                 terminal: answers,
                 hook_input: &|| None,
             };
@@ -550,8 +561,7 @@ mod tests {
             let kept = tempfile::tempdir().unwrap();
             let root = std::fs::canonicalize(kept.path()).unwrap();
             for dir in ["bin", "bench"] {
-                std::fs::create_dir_all(root.join(dir)).unwrap();
-                std::fs::write(root.join(dir).join(NAME), "").unwrap();
+                path_finding(&root.join(dir).join(NAME));
             }
             std::fs::create_dir(root.join("home")).unwrap();
             Found { _kept: kept, root }
@@ -1108,7 +1118,7 @@ mod tests {
         let (_kept, root) = scratch();
         let home = root.join("home");
         std::fs::create_dir_all(home.join(".claude")).unwrap();
-        let made = typing(&root, "kept\ny\ndesk\ny\n\n").run(&["init"]);
+        let made = typing(&root, "kept\ny\ndesk\ny\n\n").found().run(&["init"]);
         let skill = home.join(".claude/skills").join(NAME).join("SKILL.md");
         let hooks = home.join(".claude/settings.json");
         assert_eq!(
@@ -1189,6 +1199,15 @@ mod tests {
         process.run(line)
     }
 
+    fn run_found(home: Option<&Path>, binary: Option<PathBuf>, line: &[&str]) -> Ran {
+        let process = Process {
+            home: home.map(Path::to_path_buf),
+            binary,
+            ..Process::nowhere()
+        };
+        process.found().run(line)
+    }
+
     fn printed(ran: &Ran, text: &str) {
         assert_eq!(
             (ran.out.as_str(), ran.err.as_str(), ran.code),
@@ -1243,7 +1262,7 @@ mod tests {
         let store = root.join("store");
         let line = ["init", "desk", "--store", store.to_str().unwrap()];
         assert_eq!(run_with(Some(&home), None, &line).code, 0);
-        let refresh = |binary: Option<PathBuf>| run_with(Some(&home), binary, &["refresh"]);
+        let refresh = |binary: Option<PathBuf>| run_found(Some(&home), binary, &["refresh"]);
 
         refused(&refresh(None), "the path of this binary is unknown");
         let quoted = refresh(Some(root.join("a\"b").join(NAME)));
@@ -1272,7 +1291,7 @@ mod tests {
         }
         let ran = |action: &str| {
             let binary = Some(root.join("bin").join(NAME));
-            run_with(Some(&home), binary, &["agents", action])
+            run_found(Some(&home), binary, &["agents", action])
         };
         let stopped = |ran: &Ran, written: &[PathBuf], at: &Path| {
             let written: Vec<String> = (written.iter())
@@ -1313,7 +1332,7 @@ mod tests {
         let store = root.join("store").display().to_string();
         let binary = Some(root.join("bin").join(NAME));
         let line = ["init", "desk", "--store", &store, "--agents"];
-        let ran = run_with(Some(&home), binary, &line);
+        let ran = run_found(Some(&home), binary, &line);
         let skill = home.join(".claude/skills").join(NAME).join("SKILL.md");
         let hooks = home.join(".claude/settings.json");
         let written = format!("desk created\n{}\n{}\n", skill.display(), hooks.display());

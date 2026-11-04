@@ -255,7 +255,7 @@ mod tests {
     use std::ffi::OsString;
 
     use super::*;
-    use crate::cli::tests::environment;
+    use crate::cli::tests::{Process, environment};
     use worklog_app::list;
     use worklog_app::testing::{World, head, topic, world, written_at};
     use worklog_domain::id::DocumentId;
@@ -616,15 +616,19 @@ mod tests {
         }
 
         fn asked(&self, world: &World, typed: &str) -> Asked {
-            self.asked_by(world, typed, &|_| true)
+            self.asked_by(world, typed, true)
         }
 
-        fn asked_by(&self, world: &World, typed: &str, found: &dyn Fn(&Path) -> bool) -> Asked {
-            let home = self.root.join("home");
-            let variable = |name: &str| (name == "HOME").then(|| OsString::from(&home));
+        fn asked_by(&self, world: &World, typed: &str, on_path: bool) -> Asked {
+            let process = Process {
+                home: Some(self.root.join("home")),
+                binary: Some(self.binary()),
+                ..Process::nowhere()
+            };
+            let process = if on_path { process.found() } else { process };
+            let variable = |name: &str| process.variable(name);
             let environment = Environment {
                 binary: Some(self.binary()),
-                found_on_path: found,
                 ..environment(&variable)
             };
             asked_in(world, &environment, typed.as_bytes())
@@ -691,7 +695,7 @@ mod tests {
     fn a_binary_path_does_not_find_is_not_asked_about_the_agents_and_sets_the_host_up() {
         let home = Home::with(&[".claude"]);
         let (world, _) = unbound(None);
-        let asked = home.asked_by(&world, "atlas\ny\n", &|_| false);
+        let asked = home.asked_by(&world, "atlas\ny\n", false);
         let note = format!(
             "{}: not the worklog that PATH finds, which is the one an agent runs; `worklog \
              agents install` sets the agents up once it is",

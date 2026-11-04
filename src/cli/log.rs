@@ -64,13 +64,7 @@ fn found_on_path(argv: &[OsString], environment: &Environment) -> bool {
     let name = argv
         .first()
         .and_then(|invoked| Path::new(invoked).file_name());
-    let path = (environment.variable)("PATH");
-    match (environment.binary.as_deref(), name, path) {
-        (Some(binary), Some(name), Some(path)) => {
-            worklog_wiring::found_on_path(binary, name, &path)
-        }
-        _ => false,
-    }
+    name.is_some_and(|name| environment.found_as(name))
 }
 
 pub(super) fn failed(failure: &Failure) -> Outcome {

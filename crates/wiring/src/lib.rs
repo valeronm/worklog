@@ -154,15 +154,21 @@ fn session(variable: &dyn Fn(&str) -> Option<OsString>) -> Option<Session> {
     })
 }
 
-/// Whether `binary`, the file that is running, is the one `path`, the value of `PATH`, finds
-/// for `name`, the file name it was run by.
+/// Whether `binary`, the file that is running, is the one `PATH` finds for `name`.
 #[must_use]
-pub fn found_on_path(binary: &Path, name: &OsStr, path: &OsStr) -> bool {
+pub fn found_on_path(
+    binary: &Path,
+    name: &OsStr,
+    variable: &dyn Fn(&str) -> Option<OsString>,
+) -> bool {
+    let Some(path) = variable("PATH") else {
+        return false;
+    };
     // A link on the path is found by the file it leads to.
     let Ok(running) = std::fs::canonicalize(binary) else {
         return false;
     };
-    std::env::split_paths(path)
+    std::env::split_paths(&path)
         .map(|dir| dir.join(name))
         .find(|candidate| candidate.is_file())
         .and_then(|candidate| std::fs::canonicalize(candidate).ok())
@@ -721,10 +727,11 @@ mod tests {
         std::fs::write(&binary, "").unwrap();
         std::fs::write(root.join("bench/lantern"), "").unwrap();
         std::os::unix::fs::symlink(&binary, root.join("linked/lantern")).unwrap();
-        let found = |binary: &Path, dirs: &[&str]| {
+        let on = |dirs: &[&str]| {
             let path = std::env::join_paths(dirs.iter().map(|dir| root.join(dir))).unwrap();
-            found_on_path(binary, name, &path)
+            move |variable: &str| (variable == "PATH").then(|| path.clone())
         };
+        let found = |binary: &Path, dirs: &[&str]| found_on_path(binary, name, &on(dirs));
 
         assert!(found(&binary, &["bin"]));
         assert!(found(&binary, &["empty", "holding", "bin", "bench"]));
@@ -734,11 +741,8 @@ mod tests {
         assert!(!found(&binary, &["empty"]));
         assert!(!found(&binary, &[]));
         assert!(!found(&root.join("gone/lantern"), &["bin"]));
-        assert!(!found_on_path(
-            &binary,
-            OsStr::new("atlas"),
-            root.join("bin").as_os_str()
-        ));
+        assert!(!found_on_path(&binary, OsStr::new("atlas"), &on(&["bin"])));
+        assert!(!found_on_path(&binary, name, &|_| None));
     }
 
     fn with_home(home: Option<&Path>, next: Option<&Path>) -> impl Fn(&str) -> Option<OsString> {
