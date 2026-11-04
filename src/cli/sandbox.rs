@@ -1,6 +1,6 @@
 //! The drafts directory among the roots an agent's sandbox lets a session write to.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use toml_edit::{Array, DocumentMut, Item, Table};
 
@@ -66,6 +66,7 @@ fn edited(text: &str, root: &str, change: Change) -> Result<Option<String>, Stri
 pub(super) struct Edit {
     pub(super) config: SandboxConfig,
     pub(super) text: String,
+    pub(super) grants: Option<PathBuf>,
 }
 
 fn planned(agent: &Agent, drafts: &Path, change: Change) -> Result<Option<Edit>, Failure> {
@@ -76,14 +77,22 @@ fn planned(agent: &Agent, drafts: &Path, change: Change) -> Result<Option<Edit>,
     let held = agent.read_config(&config)?.unwrap_or_default();
     let text = edited(&held, root, change)
         .map_err(|reason| Failure::at(config.path().display(), reason))?;
-    Ok(text.map(|text| Edit { config, text }))
+    Ok(text.map(|text| Edit {
+        config,
+        text,
+        grants: None,
+    }))
 }
 
 /// Reads the agent's config and writes nothing: its text with `drafts` among the writable
 /// roots, or `None` where it is there or the agent has no config; a refusal where the file is
 /// not TOML or its roots are not a table holding an array.
 pub(super) fn installed(agent: &Agent, drafts: &Path) -> Result<Option<Edit>, Failure> {
-    planned(agent, drafts, add)
+    let edit = planned(agent, drafts, add)?;
+    Ok(edit.map(|edit| Edit {
+        grants: Some(drafts.to_owned()),
+        ..edit
+    }))
 }
 
 /// Reads the agent's config and writes nothing: its text with `drafts` taken out of the

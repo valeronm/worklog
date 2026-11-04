@@ -58,25 +58,19 @@ impl Done {
         agent: &Agent,
         edit: impl FnOnce(&Agent) -> Result<Option<Edit>, Failure>,
     ) -> Result<(), Failure> {
-        if let Some(Edit { config, text }) = edit(agent)? {
-            self.wrote(&agent.write_config(&config, &text)?);
+        let Some(Edit {
+            config,
+            text,
+            grants,
+        }) = edit(agent)?
+        else {
+            return Ok(());
+        };
+        if let Some(root) = grants {
+            worklog_wiring::make_drafts(&root)?;
         }
+        self.wrote(&agent.write_config(&config, &text)?);
         Ok(())
-    }
-
-    fn granted(
-        &mut self,
-        agent: &Agent,
-        edit: impl FnOnce(&Agent) -> Result<Option<Edit>, Failure>,
-        drafts: &Path,
-    ) -> Result<(), Failure> {
-        self.config(agent, |agent| {
-            let edited = edit(agent)?;
-            if edited.is_some() {
-                worklog_wiring::make_drafts(drafts)?;
-            }
-            Ok(edited)
-        })
     }
 
     pub(super) fn ended<T: Render + Serialize + Pinned>(
@@ -176,7 +170,7 @@ impl Placing {
             if let Some(rule) = agent.write_rule()? {
                 done.wrote(&rule);
             }
-            done.granted(agent, |agent| self.config(agent), &self.drafts)?;
+            done.config(agent, |agent| self.config(agent))?;
             if !done.hooks(agent, |agent| self.hooks(agent))? {
                 done.notes.push(format!(
                     "{}: a SessionStart hook already runs {NAME} context",
@@ -247,7 +241,7 @@ impl Refreshing {
             if let Some(rule) = agent.refresh_rule(refreshed.installed)? {
                 done.wrote(&rule);
             }
-            done.granted(agent, |_| refreshed.config(&self.drafts), &self.drafts)?;
+            done.config(agent, |_| refreshed.config(&self.drafts))?;
             done.hooks(agent, |agent| {
                 Ok(hook::refreshed(agent, || environment.binary())?.1)
             })?;
