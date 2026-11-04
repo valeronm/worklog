@@ -37,7 +37,8 @@ struct Ran {
 struct Host {
     _kept: tempfile::TempDir,
     root: PathBuf,
-    linked: Option<tempfile::TempDir>,
+    linked: tempfile::TempDir,
+    on_path: bool,
 }
 
 impl Host {
@@ -48,7 +49,8 @@ impl Host {
         let host = Host {
             _kept: kept,
             root,
-            linked: None,
+            linked: tempfile::tempdir().expect("a temp dir"),
+            on_path: false,
         };
         fs::create_dir(host.unpublished()).unwrap();
         host
@@ -101,19 +103,29 @@ impl Host {
 
     /// Has `PATH` find each binary a run starts as `worklog`, as on a host it is installed on.
     fn on_path(mut self) -> Host {
-        self.linked = Some(tempfile::tempdir().expect("a temp dir"));
+        self.on_path = true;
         self
     }
 
+    fn finding_as_worklog(&self, binary: &Path) -> OsString {
+        let link = self.linked.path().join("worklog");
+        let _ = fs::remove_file(&link);
+        let binary = fs::canonicalize(binary).expect("the binary");
+        std::os::unix::fs::symlink(binary, &link).unwrap();
+        path_finding(&link)
+    }
+
+    fn found(&self) -> Command {
+        let mut program = Command::cargo_bin("worklog").expect("the binary");
+        let path = self.finding_as_worklog(Path::new(program.get_program()));
+        program.env("PATH", path);
+        program
+    }
+
     fn run_as(&self, mut program: Command, dir: &Path, args: &[&str]) -> Ran {
-        if let Some(linked) = &self.linked
-            && !program.get_envs().any(|(name, _)| name == "PATH")
-        {
-            let link = linked.path().join("worklog");
-            let _ = fs::remove_file(&link);
-            let binary = fs::canonicalize(program.get_program()).expect("the binary");
-            std::os::unix::fs::symlink(binary, &link).unwrap();
-            program.env("PATH", path_finding(&link));
+        if self.on_path && !program.get_envs().any(|(name, _)| name == "PATH") {
+            let path = self.finding_as_worklog(Path::new(program.get_program()));
+            program.env("PATH", path);
         }
         for (_, variable) in SESSIONS {
             if !program.get_envs().any(|(name, _)| name == variable) {
@@ -2287,13 +2299,14 @@ impl Serving {
 
 impl Host {
     fn spawned(&self, args: &[&str]) -> Spawned {
-        self.spawned_on(None, Stdio::null(), args)
+        self.spawned_on(Stdio::null(), args)
     }
 
-    fn spawned_on(&self, path: Option<OsString>, stdin: Stdio, args: &[&str]) -> Spawned {
-        let mut program = std::process::Command::new(env!("CARGO_BIN_EXE_worklog"));
-        if let Some(path) = path {
-            program.env("PATH", path);
+    fn spawned_on(&self, stdin: Stdio, args: &[&str]) -> Spawned {
+        let binary = Path::new(env!("CARGO_BIN_EXE_worklog"));
+        let mut program = std::process::Command::new(binary);
+        if self.on_path {
+            program.env("PATH", self.finding_as_worklog(binary));
         }
         for (_, variable) in SESSIONS {
             program.env_remove(variable);
@@ -2338,12 +2351,8 @@ impl Host {
     }
 
     fn serve(&self, rest: &[&str]) -> Serving {
-        self.serving(None, rest)
-    }
-
-    fn serving(&self, path: Option<OsString>, rest: &[&str]) -> Serving {
         let line = [&["serve", "--bind", "127.0.0.1:0"], rest].concat();
-        let mut spawned = self.spawned_on(path, Stdio::null(), &line);
+        let mut spawned = self.spawned_on(Stdio::null(), &line);
         let stdout = spawned.0.stdout.take().expect("a piped stdout");
         let (line, lines) = mpsc::channel();
         std::thread::spawn(move || {
@@ -3360,7 +3369,7 @@ impl Host {
     }
 
     fn offered(&self, words: &[&str]) -> String {
-        let ran = self.completing(found(), words);
+        let ran = self.completing(self.found(), words);
         assert_eq!(ran.stderr, "", "{words:?}");
         assert_eq!(ran.code, Some(0), "{words:?}");
         ran.stdout
@@ -3667,12 +3676,12 @@ fn a_shell_asking_on_a_host_with_no_store_is_offered_nothing_and_told_nothing() 
 #[test]
 fn a_shell_asking_for_candidates_is_no_run_the_usage_log_holds() {
     let host = Host::stocked();
-    let asked = host.completing(found(), &["facts", "la"]);
+    let asked = host.completing(host.found(), &["facts", "la"]);
     assert_eq!(
         (asked.stdout.as_str(), asked.stderr.as_str(), asked.code),
         ("lantern\tA thing\n", "", Some(0))
     );
-    let script = host.asking(found(), &[]);
+    let script = host.asking(host.found(), &[]);
     assert_eq!((script.stderr.as_str(), script.code), ("", Some(0)));
     assert!(script.stdout.contains("worklog"), "{}", script.stdout);
     host.used_ok(&["completions", "fish"]);
@@ -3680,7 +3689,7 @@ fn a_shell_asking_for_candidates_is_no_run_the_usage_log_holds() {
 
     let listed = host.used_ok(&["topics"]);
     for unset in ["", "0"] {
-        let mut program = found();
+        let mut program = host.found();
         program.env("COMPLETE", unset);
         let ran = host.run_as(program, &host.home(), &["topics"]);
         assert_eq!(
@@ -3698,19 +3707,9 @@ fn path_finding(binary: &Path) -> OsString {
     std::env::join_paths(ahead.chain(std::env::split_paths(&rest))).expect("a path")
 }
 
-fn path_finding_the_binary() -> OsString {
-    path_finding(Path::new(env!("CARGO_BIN_EXE_worklog")))
-}
-
-fn found() -> Command {
-    let mut program = Command::cargo_bin("worklog").expect("the binary");
-    program.env("PATH", path_finding_the_binary());
-    program
-}
-
 impl Host {
     fn used(&self, args: &[&str]) -> Ran {
-        self.run_as(found(), &self.home(), args)
+        self.run_as(self.found(), &self.home(), args)
     }
 
     fn used_ok(&self, args: &[&str]) -> String {
@@ -3850,7 +3849,11 @@ fn every_run_is_logged_under_the_machine_that_ran_it() {
 
     host.used_ok(&["--json", "topics"]);
     host.used_ok(&["topics", "--json"]);
-    host.run_as(found(), &host.home().join("projects/lantern"), &["topics"]);
+    host.run_as(
+        host.found(),
+        &host.home().join("projects/lantern"),
+        &["topics"],
+    );
     let logged = host.logged();
     assert_eq!(
         commands(&logged)[4..],
@@ -3976,11 +3979,11 @@ fn a_run_inside_an_agent_s_session_is_logged_with_its_id_and_the_first_agent_s_w
     let host = Host::stocked();
     let home = host.home();
     for (variable, id) in [(SESSIONS[0].1, "s-0"), (SESSIONS[1].1, "s-1")] {
-        let mut program = found();
+        let mut program = host.found();
         program.env(variable, id);
         assert_eq!(host.run_as(program, &home, &["facts"]).code, Some(0));
     }
-    let mut nested = found();
+    let mut nested = host.found();
     for (_, variable) in SESSIONS {
         nested.env(variable, "s-nested");
     }
@@ -4001,7 +4004,7 @@ fn a_context_an_agent_s_hook_runs_is_logged_in_the_session_its_input_holds() {
     let home = host.home();
     let plain = host.used_ok(&["context"]);
     let hooked = |input: &str, args: &[&str], outer: bool| {
-        let mut program = found();
+        let mut program = host.found();
         program.write_stdin(input);
         if outer {
             program.env(SESSIONS[0].1, "s-outer");
@@ -4036,7 +4039,7 @@ fn a_hook_whose_input_is_never_closed_still_opens_its_session() {
     let host = Host::stocked();
     let plain = host.ok(&["context"]);
     let line = ["context", "--hook", "codex"];
-    let mut held_open = host.spawned_on(None, Stdio::piped(), &line);
+    let mut held_open = host.spawned_on(Stdio::piped(), &line);
     let input = held_open.0.stdin.take().expect("a piped stdin");
     let ran = Host::ended(held_open, &line);
     drop(input);
@@ -4051,10 +4054,9 @@ fn a_binary_the_path_does_not_find_logs_nothing() {
     let host = Host::stocked();
     let elsewhere = host.root.join("bench");
     fs::create_dir_all(&elsewhere).unwrap();
-    let built = Path::new(env!("CARGO_BIN_EXE_worklog"));
-    fs::write(elsewhere.join(built.file_name().expect("a name")), "").unwrap();
-    let mut shadowed = found();
-    let finding = path_finding_the_binary();
+    fs::write(elsewhere.join("worklog"), "").unwrap();
+    let mut shadowed = Command::cargo_bin("worklog").expect("the binary");
+    let finding = host.finding_as_worklog(&binary());
     let behind = std::iter::once(elsewhere.clone()).chain(std::env::split_paths(&finding));
     shadowed.env("PATH", std::env::join_paths(behind).unwrap());
     let mut unfound = Command::cargo_bin("worklog").expect("the binary");
@@ -4197,16 +4199,10 @@ fn a_renamed_machine_topic_keeps_its_file_and_is_printed_by_its_new_name() {
     );
 }
 
-impl Host {
-    fn serve_used(&self) -> Serving {
-        self.serving(Some(path_finding_the_binary()), &[])
-    }
-}
-
 #[test]
 fn serve_is_logged_once_before_its_first_request() {
-    let host = Host::stocked();
-    let mut serving = host.serve_used();
+    let host = Host::stocked().on_path();
+    let mut serving = host.serve(&[]);
     let bound = ("serve", 0, vec!["--bind", "127.0.0.1:0"]);
     assert_eq!(commands(&host.logged()), std::slice::from_ref(&bound));
     assert!(serving.page("/").contains(">lantern</a>"));
@@ -4214,9 +4210,7 @@ fn serve_is_logged_once_before_its_first_request() {
     serving.running();
     assert_eq!(commands(&host.logged()), std::slice::from_ref(&bound));
 
-    let mut again = found();
-    again.args(["serve", "--bind", &serving.address]);
-    let busy = host.run_as(again, &host.home(), &[]);
+    let busy = host.run(&["serve", "--bind", &serving.address]);
     assert_eq!(busy.code, Some(1));
     let logged = host.logged();
     assert_eq!(
