@@ -192,7 +192,8 @@ pub(super) fn shown_as(
 
 pub fn discard(deps: &Deps, address: &str) -> Result<(), Failure> {
     let lookup = Lookup::new(deps.read().store);
-    let document = drafted_document(&deps.read(), &lookup, address)?;
+    let document =
+        drafted_document(&deps.read(), &lookup, address)?.ok_or_else(|| no_draft(address))?;
     deps.drafts.delete(&document)?;
     Ok(())
 }
@@ -271,10 +272,23 @@ pub fn drafts(deps: &ReadDeps) -> Result<Vec<DraftRow>, Failure> {
 
 /// Refuses an address that finds no draft or several, and one whose draft does not read.
 pub(super) fn draft_for(deps: &ReadDeps, lookup: &Lookup, address: &str) -> Result<Draft, Failure> {
-    let document = drafted_document(deps, lookup, address)?;
-    deps.drafts
-        .read(&document)?
-        .ok_or_else(|| Failure::at(address, "no draft"))
+    found_draft(deps, lookup, address)?.ok_or_else(|| no_draft(address))
+}
+
+/// `None` where no draft answers to `address`; several that do are refused.
+pub(super) fn found_draft(
+    deps: &ReadDeps,
+    lookup: &Lookup,
+    address: &str,
+) -> Result<Option<Draft>, Failure> {
+    let Some(document) = drafted_document(deps, lookup, address)? else {
+        return Ok(None);
+    };
+    Ok(deps.drafts.read(&document)?)
+}
+
+pub(super) fn no_draft(address: &str) -> Failure {
+    Failure::at(address, "no draft")
 }
 
 // The draft of a stored document the address finds is tried before a draft whose document's
@@ -284,11 +298,11 @@ fn drafted_document(
     deps: &ReadDeps,
     lookup: &Lookup,
     address: &str,
-) -> Result<DocumentId, Failure> {
+) -> Result<Option<DocumentId>, Failure> {
     match lookup.find(address) {
         Ok(Found::One(id)) => {
             if deps.drafts.documents()?.contains(&id) {
-                return Ok(id);
+                return Ok(Some(id));
             }
         }
         Ok(Found::Collision(_)) => {
@@ -308,8 +322,8 @@ fn drafted_document(
         })
         .collect();
     match matching.len() {
-        0 => Err(Failure::at(address, "no draft")),
-        1 => Ok(matching.remove(0)),
+        0 => Ok(None),
+        1 => Ok(Some(matching.remove(0))),
         _ => Err(Failure::at(address, "several drafts")),
     }
 }

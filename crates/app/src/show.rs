@@ -12,7 +12,7 @@ use serde::ser::SerializeStruct;
 use serde::{Serialize, Serializer};
 use toml::Value;
 
-use crate::draft::{draft_for, draft_label, opened, shown_as};
+use crate::draft::{draft_label, found_draft, no_draft, opened, shown_as};
 use crate::heads::{ended_for, ended_of, holding_heads, is_forked, kind_of, row_head, texts};
 use crate::index::Topics;
 use crate::lookup::{Lookup, names_no_document};
@@ -649,10 +649,12 @@ fn diff_draft(
     address: &str,
     named: bool,
 ) -> Result<Diff, Failure> {
-    let draft = match draft_for(deps, lookup, address) {
-        Ok(draft) => draft,
-        Err(Failure::Refused(_)) if !named => return Err(names_no_document(address)),
-        Err(other) => return Err(other),
+    let Some(draft) = found_draft(deps, lookup, address)? else {
+        return Err(if named {
+            no_draft(address)
+        } else {
+            names_no_document(address)
+        });
     };
     let document = lookup.headers(&draft.document)?;
     let label = draft_label(&draft);
@@ -733,7 +735,7 @@ pub fn diff(deps: &ReadDeps, first: &str, second: Option<&str>) -> Result<Diff, 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::draft::checkout;
+    use crate::draft::{checkout, draft_for};
     use crate::testing::{
         ENDED, ENDED_FACT, REMOVED, TOPIC, World, entry, entry_fields, fact, fact_fields, followup,
         fork, head, head_id, open_row, part_of, refused, stored, to, to_ended, topic, topic_fields,
@@ -1579,6 +1581,23 @@ mod tests {
         assert_eq!((&side.against, side.held), (&None, true));
         assert_eq!(side.before, "");
         assert!(diff.after.contains("name = \"phone\""), "{}", diff.after);
+    }
+
+    #[test]
+    fn a_diff_of_an_address_several_drafts_spell_says_so() {
+        let (world, _) = world();
+        let deps = world.deps();
+        crate::draft::new(&deps, &crate::draft::New::Topic { name: "phone" }).unwrap();
+        let phone = draft_for(&deps.read(), &world.lookup(), "phone").unwrap();
+        let other = Draft::first(
+            DocumentId::from_bytes([0x77; 16]),
+            phone.kind.clone(),
+            phone.fields.clone(),
+            String::new(),
+        );
+        world.drafts.write(&other).unwrap();
+        let text = refused(diff(&deps.read(), "phone", None));
+        assert!(text.contains("phone: several drafts"), "{text}");
     }
 
     #[test]
