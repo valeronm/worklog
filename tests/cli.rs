@@ -2970,8 +2970,8 @@ fn uninstall_names_the_drafts_folder_where_this_machine_can_no_longer_list_its_d
         &host.run(&["uninstall"]),
         1,
         &format!(
-            "worklog: {}: holds open drafts this machine is no longer set up to save or \
-             discard; delete them there first\n",
+            "worklog: {}: holds open drafts, and `worklog drafts` refuses: this machine is not \
+             set up; run `worklog init`\n",
             host.drafts().display()
         ),
     );

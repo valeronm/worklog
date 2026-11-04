@@ -2,7 +2,7 @@ use std::path::Path;
 
 use super::agents::{Done, Placed, Uninstalling};
 use super::render::{Output, Stopped};
-use super::{Environment, NAME, wired};
+use super::{Environment, NAME, said, wired};
 use worklog_app::Failure;
 use worklog_wiring::HostFiles;
 
@@ -12,10 +12,10 @@ fn open_drafts(environment: &Environment, drafts: &Path) -> Failure {
         Ok(_) => {
             format!("holds open drafts, which `{NAME} drafts` lists; save or discard each first")
         }
-        Err(Failure::NotSetUp) => "holds open drafts this machine is no longer set up to save \
-                                   or discard; delete them there first"
-            .to_owned(),
-        Err(failure) => format!("holds open drafts, and `{NAME} drafts` refuses: {failure}"),
+        Err(failure) => format!(
+            "holds open drafts, and `{NAME} drafts` refuses: {}",
+            said(&failure)
+        ),
     };
     Failure::at(drafts.display(), why)
 }
