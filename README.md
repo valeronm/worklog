@@ -228,9 +228,9 @@ env WORKLOG_HOME=/tmp/worklog-dev cargo run --locked -- init desk \
 env WORKLOG_HOME=/tmp/worklog-dev cargo run --locked -- context
 ```
 
-`WORKLOG_HOME` doesn't cover your agents' settings or fish completions:
-`agents install`, `refresh` or a yes to the agents question in a bare
-`init` writes your real ones, pointing them at the checkout's build.
+`WORKLOG_HOME` doesn't cover your agents' settings or fish completions.
+A build run from the checkout can't set them up or refresh them: only the
+`worklog` your `PATH` finds can.
 
 The [CI workflow](.github/workflows/build.yml) has the full set of checks.
 If you're changing the store format, read the

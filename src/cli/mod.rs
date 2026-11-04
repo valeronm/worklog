@@ -17,7 +17,7 @@ mod skill;
 mod upgrade;
 
 use std::cell::RefCell;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::io::{BufRead, ErrorKind, IsTerminal as _, Read as _, Write};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -48,6 +48,8 @@ struct Environment<'a> {
     version: Built,
     releases: &'a dyn Fn() -> Box<dyn Releases>,
     binary_at: &'a dyn Fn(&Path) -> Box<dyn Binary>,
+    /// Whether `PATH` finds the binary at a path under the tool's name, as an agent runs it.
+    found_on_path: &'a dyn Fn(&Path) -> bool,
     /// `None` unless both the input and stderr are a terminal.
     terminal: Option<&'a RefCell<dyn BufRead + 'a>>,
     /// `None` on a terminal and where the input is not closed within `HOOK_WAIT`; otherwise at
@@ -118,6 +120,10 @@ pub fn main() -> i32 {
         version: release::current(),
         releases: &|| worklog_wiring::releases(&variable),
         binary_at: &|path| worklog_wiring::binary(path, NAME),
+        found_on_path: &|binary| {
+            variable("PATH")
+                .is_some_and(|path| worklog_wiring::found_on_path(binary, OsStr::new(NAME), &path))
+        },
         terminal: (typed.as_ref()).map(|typed| -> &RefCell<dyn BufRead> { typed }),
         hook_input: &piped_input,
     };
@@ -406,6 +412,7 @@ mod tests {
             version: release::current(),
             releases: &UNPUBLISHED,
             binary_at: &IN_MEMORY,
+            found_on_path: &|_| true,
             terminal: None,
             hook_input: &|| None,
         }
@@ -478,6 +485,7 @@ mod tests {
                 version: self.version,
                 releases: self.releases,
                 binary_at: self.binary_at,
+                found_on_path: &|_| true,
                 terminal: answers,
                 hook_input: &|| None,
             };

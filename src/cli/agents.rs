@@ -92,6 +92,23 @@ impl Done {
     }
 }
 
+fn unfound(environment: &Environment) -> Result<Option<String>, Failure> {
+    let binary = environment.binary()?;
+    Ok((!(environment.found_on_path)(binary)).then(|| {
+        format!(
+            "{}: not the {NAME} that PATH finds, which is the one an agent runs",
+            binary.display()
+        )
+    }))
+}
+
+pub(super) fn unoffered(environment: &Environment) -> Option<String> {
+    let why = unfound(environment).ok().flatten()?;
+    Some(format!(
+        "{why}; `{NAME} agents install` sets the agents up once it is"
+    ))
+}
+
 fn present(known: Vec<Agent>) -> Result<Vec<Agent>, Failure> {
     let names: Vec<&str> = known.iter().map(Agent::name).collect();
     let present: Vec<Agent> = known.into_iter().filter(Agent::is_present).collect();
@@ -130,8 +147,9 @@ fn checked(
     Ok(())
 }
 
-/// An install with every refusal behind it: the binary's path is known and makes a command,
-/// an agent is present, and each hooks file and config was edited in memory.
+/// An install with every refusal behind it: the binary's path is known, is the one `PATH` finds
+/// and makes a command, an agent is present, and each hooks file and config was edited in
+/// memory.
 pub(super) struct Placing {
     agents: Vec<Agent>,
     binary: PathBuf,
@@ -140,6 +158,9 @@ pub(super) struct Placing {
 
 impl Placing {
     pub(super) fn on_this_host(environment: &Environment) -> Result<Placing, Failure> {
+        if let Some(why) = unfound(environment)? {
+            return Err(Failure::Refused(why));
+        }
         let binary = environment.binary()?.to_owned();
         let agents = present(worklog_wiring::agents(environment.variable)?)?;
         let drafts = worklog_wiring::drafts(environment.variable)?;
@@ -228,6 +249,22 @@ impl Refreshing {
         Ok(Refreshing { refreshed, drafts })
     }
 
+    /// Where an agent holds the skill or the hook, or `also_there` is set, a binary `PATH` does
+    /// not find gets a note and no write.
+    pub(super) fn goes_ahead(
+        &self,
+        environment: &Environment,
+        also_there: bool,
+        done: &mut Done,
+    ) -> Result<bool, Failure> {
+        let there = also_there || self.refreshed.iter().any(|refreshed| refreshed.installed);
+        let Some(why) = there.then(|| unfound(environment)).transpose()?.flatten() else {
+            return Ok(true);
+        };
+        done.notes.push(format!("{why}; nothing is refreshed"));
+        Ok(false)
+    }
+
     pub(super) fn write_into(
         &self,
         environment: &Environment,
@@ -278,8 +315,12 @@ pub(super) fn run(
         AgentsAction::Install => {
             Placing::on_this_host(environment).and_then(|placing| placing.install_into(&mut done))
         }
-        AgentsAction::Refresh => Refreshing::on_this_host(environment)
-            .and_then(|agents| agents.write_into(environment, &mut done)),
+        AgentsAction::Refresh => Refreshing::on_this_host(environment).and_then(|agents| {
+            if agents.goes_ahead(environment, false, &mut done)? {
+                agents.write_into(environment, &mut done)?;
+            }
+            Ok(())
+        }),
         AgentsAction::Uninstall => uninstall_into(environment, &mut done),
     };
     done.ended(ended, json, |written| Placed { written })

@@ -8,12 +8,10 @@ use worklog_app::Failure;
 
 fn fish_completions(
     environment: &Environment,
+    file: &Path,
     homes: &[&Path],
     done: &mut Done,
 ) -> Result<Option<(PathBuf, String)>, Failure> {
-    let Some(file) = worklog_wiring::fish_completions(environment.variable, NAME)? else {
-        return Ok(None);
-    };
     let binary = environment.binary()?;
     if !complete::runs_as_the_command(binary) {
         done.notes.push(format!(
@@ -23,19 +21,25 @@ fn fish_completions(
         return Ok(None);
     }
     let line = complete::registration(Shell::Fish, binary, homes)?;
-    Ok(Some((file, line)))
+    Ok(Some((file.to_path_buf(), line)))
 }
 
 pub(super) fn refresh_into(environment: &Environment, done: &mut Done) -> Result<(), Failure> {
     let homes = worklog_wiring::homes(environment.variable)?;
     let homes: Vec<&Path> = homes.iter().map(PathBuf::as_path).collect();
+    let fish = worklog_wiring::fish_completions(environment.variable, NAME)?;
     // A binary whose path is unknown or cannot be quoted is refused before the first write.
-    let completions = fish_completions(environment, &homes, done)?;
+    let completions = match &fish {
+        Some(file) => fish_completions(environment, file, &homes, done)?,
+        None => None,
+    };
     let agents = Refreshing::on_this_host(environment)?;
-    agents.write_into(environment, done)?;
-    if let Some((file, line)) = completions {
-        worklog_wiring::write_completions(&file, &line)?;
-        done.wrote(&file);
+    if agents.goes_ahead(environment, fish.is_some(), done)? {
+        agents.write_into(environment, done)?;
+        if let Some((file, line)) = completions {
+            worklog_wiring::write_completions(&file, &line)?;
+            done.wrote(&file);
+        }
     }
     if let Err(failure) = wired(environment) {
         done.notes.push(said(&failure));

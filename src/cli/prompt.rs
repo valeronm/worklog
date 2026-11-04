@@ -172,6 +172,10 @@ fn placing(environment: &Environment, terminal: &mut Terminal) -> Result<Option<
     if present.is_empty() {
         return Ok(None);
     }
+    if let Some(note) = agents::unoffered(environment) {
+        terminal.say(&note);
+        return Ok(None);
+    }
     let question = format!("Configure {} to use {NAME}?", joined(&present));
     if terminal.consent(&question, true)? {
         Placing::on_this_host(environment).map(Some)
@@ -613,13 +617,22 @@ mod tests {
         }
 
         fn asked(&self, world: &World, typed: &str) -> Asked {
+            self.asked_by(world, typed, &|_| true)
+        }
+
+        fn asked_by(&self, world: &World, typed: &str, found: &dyn Fn(&Path) -> bool) -> Asked {
             let home = self.root.join("home");
             let variable = |name: &str| (name == "HOME").then(|| OsString::from(&home));
             let environment = Environment {
-                binary: Some(self.root.join("bin").join(NAME)),
+                binary: Some(self.binary()),
+                found_on_path: found,
                 ..environment(&variable)
             };
             asked_in(world, &environment, typed.as_bytes())
+        }
+
+        fn binary(&self) -> PathBuf {
+            self.root.join("bin").join(NAME)
         }
 
         fn skill(&self, agent: &str) -> PathBuf {
@@ -673,6 +686,22 @@ mod tests {
         let asked = home.asked(&world, "atlas\ny\n");
         assert!(!asked.shown.contains("Install"), "{}", asked.shown);
         assert_eq!(printed(&asked), "atlas created\n");
+    }
+
+    #[test]
+    fn a_binary_path_does_not_find_is_not_asked_about_the_agents_and_sets_the_host_up() {
+        let home = Home::with(&[".claude"]);
+        let (world, _) = unbound(None);
+        let asked = home.asked_by(&world, "atlas\ny\n", &|_| false);
+        let note = format!(
+            "{}: not the worklog that PATH finds, which is the one an agent runs; `worklog \
+             agents install` sets the agents up once it is",
+            home.binary().display()
+        );
+        assert!(asked.shown.contains(&note), "{}", asked.shown);
+        assert!(!asked.shown.contains("Configure"), "{}", asked.shown);
+        assert_eq!(printed(&asked), "atlas created\n");
+        assert!(!home.skill(".claude").exists());
     }
 
     #[test]

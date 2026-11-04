@@ -37,6 +37,7 @@ struct Ran {
 struct Host {
     _kept: tempfile::TempDir,
     root: PathBuf,
+    linked: Option<tempfile::TempDir>,
 }
 
 impl Host {
@@ -44,7 +45,11 @@ impl Host {
         let kept = tempfile::tempdir().expect("a temp dir");
         let root = fs::canonicalize(kept.path()).expect("the temp dir's own path");
         fs::create_dir_all(root.join("home/projects/lantern")).unwrap();
-        let host = Host { _kept: kept, root };
+        let host = Host {
+            _kept: kept,
+            root,
+            linked: None,
+        };
         fs::create_dir(host.unpublished()).unwrap();
         host
     }
@@ -94,7 +99,22 @@ impl Host {
         )
     }
 
+    /// Has `PATH` find each binary a run starts as `worklog`, as on a host it is installed on.
+    fn on_path(mut self) -> Host {
+        self.linked = Some(tempfile::tempdir().expect("a temp dir"));
+        self
+    }
+
     fn run_as(&self, mut program: Command, dir: &Path, args: &[&str]) -> Ran {
+        if let Some(linked) = &self.linked
+            && !program.get_envs().any(|(name, _)| name == "PATH")
+        {
+            let link = linked.path().join("worklog");
+            let _ = fs::remove_file(&link);
+            let binary = fs::canonicalize(program.get_program()).expect("the binary");
+            std::os::unix::fs::symlink(binary, &link).unwrap();
+            program.env("PATH", path_finding(&link));
+        }
         for (_, variable) in SESSIONS {
             if !program.get_envs().any(|(name, _)| name == variable) {
                 program.env_remove(variable);
@@ -2613,7 +2633,7 @@ fn snapshot_without_cache(host: &Host) -> Snapshot {
 
 #[test]
 fn init_with_agents_installs_for_every_agent_present_and_prints_the_paths() {
-    let host = Host::new().with_agents(&[".claude", ".codex"]);
+    let host = Host::new().on_path().with_agents(&[".claude", ".codex"]);
     let printed = host.ok(&init_line(&["--agents"]));
     let paths = host.placed(&[".claude", ".codex"]);
     assert_eq!(printed, format!("desk created\n{}", lines(&paths)));
@@ -2624,8 +2644,8 @@ fn init_with_agents_installs_for_every_agent_present_and_prints_the_paths() {
 
 #[test]
 fn join_with_agents_installs_for_the_agent_present_and_prints_the_paths() {
-    let desk = Host::set_up("desk");
-    let phone = Host::new().with_agents(&[".claude"]);
+    let desk = Host::set_up("desk").on_path();
+    let phone = Host::new().on_path().with_agents(&[".claude"]);
     let store = desk.store();
     let printed = phone.ok(&[
         "join",
@@ -2641,13 +2661,13 @@ fn join_with_agents_installs_for_the_agent_present_and_prints_the_paths() {
 
 #[test]
 fn init_json_carries_the_paths_it_wrote_and_none_without_the_flag() {
-    let plain = Host::new().with_agents(&[".claude"]);
+    let plain = Host::new().on_path().with_agents(&[".claude"]);
     let bound = plain.json(&init_line(&[]));
     assert_eq!(bound["written"], serde_json::json!([]), "{bound}");
     assert!(!plain.skill_of(".claude").exists());
     assert!(!plain.hooks_of(".claude").exists());
 
-    let host = Host::new().with_agents(&[".claude", ".codex"]);
+    let host = Host::new().on_path().with_agents(&[".claude", ".codex"]);
     let bound = host.json(&init_line(&["--agents"]));
     let paths: Vec<String> = (host.placed(&[".claude", ".codex"]).iter())
         .map(|path| path.display().to_string())
@@ -2658,7 +2678,7 @@ fn init_json_carries_the_paths_it_wrote_and_none_without_the_flag() {
 
 #[test]
 fn init_with_agents_and_no_agent_home_is_refused_before_anything_is_written() {
-    let host = Host::new();
+    let host = Host::new().on_path();
     let before = snapshot(&host);
     let ran = host.run(&init_line(&["--agents"]));
     assert_refused(
@@ -2674,7 +2694,7 @@ fn init_with_agents_and_no_agent_home_is_refused_before_anything_is_written() {
 
 #[test]
 fn agents_install_reaches_the_agents_present_and_notes_a_hook_already_there() {
-    let host = Host::new().with_agents(&[".codex"]);
+    let host = Host::new().on_path().with_agents(&[".codex"]);
     assert_refused(&host.run(&["topics"]), 1, NOT_SET_UP);
     let first = host.ok(&["agents", "install"]);
     assert_eq!(first, lines(&host.placed(&[".codex"])));
@@ -2712,8 +2732,48 @@ fn agents_install_reaches_the_agents_present_and_notes_a_hook_already_there() {
 }
 
 #[test]
+fn only_the_binary_path_finds_sets_the_agents_up_and_a_refresh_by_another_writes_nothing() {
+    let host = Host::set_up("desk")
+        .on_path()
+        .with_agents(&[".claude", ".codex"]);
+    let elsewhere = |args: &[&str]| {
+        let mut program = Command::cargo_bin("worklog").expect("the binary");
+        program.env("PATH", &host.root);
+        host.run_as(program, &host.home(), args)
+    };
+    let not_found = format!(
+        "worklog: {}: not the worklog that PATH finds, which is the one an agent runs",
+        binary().display()
+    );
+    let before = snapshot(&host);
+    assert_refused(
+        &elsewhere(&["agents", "install"]),
+        1,
+        &format!("{not_found}\n"),
+    );
+    assert_eq!(snapshot(&host), before);
+
+    host.ok(&["agents", "install"]);
+    fs::create_dir_all(host.home().join(".config/fish/completions")).unwrap();
+    let before = snapshot(&host);
+    for args in [&["refresh"][..], &["agents", "refresh"]] {
+        let ran = elsewhere(args);
+        assert_eq!(
+            (ran.stdout.as_str(), ran.stderr.as_str(), ran.code),
+            (
+                "",
+                format!("{not_found}; nothing is refreshed\n").as_str(),
+                Some(0)
+            ),
+            "{args:?}"
+        );
+        assert_eq!(snapshot(&host), before, "{args:?}");
+    }
+}
+
+#[test]
 fn agents_install_with_no_agent_home_is_refused() {
-    let host = Host::new();
+    let host = Host::new().on_path();
     let ran = host.run(&["agents", "install"]);
     assert_refused(
         &ran,
@@ -2742,7 +2802,7 @@ fn agents_refresh_writes_nothing_where_there_is_nothing_to_bring_up() {
 
 #[test]
 fn agents_refresh_rewrites_a_stale_skill_rule_and_hook_and_nothing_else() {
-    let host = Host::new().with_agents(&[".claude", ".codex"]);
+    let host = Host::new().on_path().with_agents(&[".claude", ".codex"]);
     fs::create_dir_all(host.skill_of(".claude").parent().unwrap()).unwrap();
     fs::write(host.skill_of(".claude"), "old").unwrap();
     let theirs = serde_json::json!({"hooks": [{"type": "command", "command": "date"}]});
@@ -2780,7 +2840,7 @@ fn agents_refresh_rewrites_a_stale_skill_rule_and_hook_and_nothing_else() {
 
 #[test]
 fn agents_uninstall_takes_back_only_what_install_placed() {
-    let host = Host::new().with_agents(&[".claude", ".codex"]);
+    let host = Host::new().on_path().with_agents(&[".claude", ".codex"]);
     let other_skill = host.home().join(".claude/skills/other/SKILL.md");
     fs::create_dir_all(other_skill.parent().unwrap()).unwrap();
     fs::write(&other_skill, "desk").unwrap();
@@ -2814,7 +2874,7 @@ fn agents_uninstall_takes_back_only_what_install_placed() {
 
 #[test]
 fn agents_install_json_prints_the_written_object() {
-    let host = Host::new().with_agents(&[".claude"]);
+    let host = Host::new().on_path().with_agents(&[".claude"]);
     let printed = host.json(&["agents", "install"]);
     let paths =
         [host.skill_of(".claude"), host.hooks_of(".claude")].map(|p| p.display().to_string());
@@ -2834,7 +2894,7 @@ fn agents_install_json_prints_the_written_object() {
 
 #[test]
 fn init_with_agents_over_a_hooks_file_it_cannot_edit_writes_nothing_at_all() {
-    let host = Host::new().with_agents(&[".claude", ".codex"]);
+    let host = Host::new().on_path().with_agents(&[".claude", ".codex"]);
     fs::write(host.hooks_of(".codex"), "{ not json").unwrap();
     let before = snapshot(&host);
     let ran = host.run(&init_line(&["--agents"]));
@@ -2855,7 +2915,7 @@ fn init_with_agents_over_a_hooks_file_it_cannot_edit_writes_nothing_at_all() {
 
 #[test]
 fn agents_install_writes_nothing_for_the_first_agent_when_the_second_cannot_be_edited() {
-    let host = Host::new().with_agents(&[".claude", ".codex"]);
+    let host = Host::new().on_path().with_agents(&[".claude", ".codex"]);
     fs::write(host.hooks_of(".codex"), "{\"hooks\": 1}").unwrap();
     let before = snapshot(&host);
     let refused = format!(
@@ -2883,7 +2943,7 @@ fn agents_refresh_and_uninstall_over_a_hooks_file_that_is_not_json_change_nothin
 
 #[test]
 fn a_codex_config_keeps_what_it_held_through_an_install_and_an_uninstall() {
-    let host = Host::new().with_agents(&[".codex"]);
+    let host = Host::new().on_path().with_agents(&[".codex"]);
     let theirs = "# mine\nmodel = \"atlas\"\n\n[sandbox_workspace_write]\n\
                   writable_roots = [\"/lantern\"]\n";
     fs::write(host.config_of_codex(), theirs).unwrap();
@@ -2902,7 +2962,7 @@ fn a_codex_config_keeps_what_it_held_through_an_install_and_an_uninstall() {
 
 #[test]
 fn a_codex_config_of_another_shape_is_refused_and_nothing_is_written() {
-    let host = Host::new().with_agents(&[".claude", ".codex"]);
+    let host = Host::new().on_path().with_agents(&[".claude", ".codex"]);
     fs::write(host.config_of_codex(), "sandbox_workspace_write = 4\n").unwrap();
     let refused = format!(
         "worklog: {}: `sandbox_workspace_write` is not a table\n",
@@ -2924,7 +2984,7 @@ fn a_codex_config_of_another_shape_is_refused_and_nothing_is_written() {
 
 #[test]
 fn agents_refresh_under_another_file_name_is_refused_only_over_a_hook() {
-    let host = Host::new().with_agents(&[".claude", ".codex"]);
+    let host = Host::new().on_path().with_agents(&[".claude", ".codex"]);
     let renamed = host.root.join("worklog-0.3.0");
     copy_of_the_binary(&renamed);
     let refresh = || host.run_as(Command::new(&renamed), &host.home(), &["agents", "refresh"]);
@@ -3009,7 +3069,7 @@ fn a_refresh_that_succeeds_notes_a_host_it_cannot_be_used_on_yet() {
 
 #[test]
 fn refresh_writes_the_completions_where_fish_reads_them_and_only_where_fish_is() {
-    let host = Host::set_up("desk").with_agents(&[".claude"]);
+    let host = Host::set_up("desk").on_path().with_agents(&[".claude"]);
     assert_eq!(host.ok(&["refresh"]), "");
     assert!(!host.home().join(".config").exists());
 
@@ -3041,7 +3101,7 @@ fn refresh_writes_the_completions_where_fish_reads_them_and_only_where_fish_is()
 
 #[test]
 fn agents_refresh_leaves_the_completions_as_they_are() {
-    let host = Host::new().with_agents(&[".claude"]);
+    let host = Host::new().on_path().with_agents(&[".claude"]);
     let completions = host.fish();
     fs::create_dir_all(host.skill_of(".claude").parent().unwrap()).unwrap();
     fs::write(host.skill_of(".claude"), "old").unwrap();
@@ -3057,7 +3117,7 @@ fn agents_refresh_leaves_the_completions_as_they_are() {
 
 #[test]
 fn refresh_follows_the_config_directory_the_environment_gives_fish() {
-    let host = Host::set_up("desk");
+    let host = Host::set_up("desk").on_path();
     let under_home = host.fish();
     let given = host.root.join("config");
     fs::create_dir_all(given.join("fish/completions")).unwrap();
@@ -3102,7 +3162,7 @@ fn fish_left_out(renamed: &Path) -> String {
 
 #[test]
 fn refresh_under_another_file_name_writes_for_the_agents_and_no_completions() {
-    let host = Host::set_up("desk").with_agents(&[".claude"]);
+    let host = Host::set_up("desk").on_path().with_agents(&[".claude"]);
     let completions = host.fish();
     let renamed = host.root.join("worklog-0.3.0");
     copy_of_the_binary(&renamed);
@@ -3150,7 +3210,7 @@ fn refresh_under_another_file_name_writes_for_the_agents_and_no_completions() {
 
 #[test]
 fn install_and_uninstall_leave_the_fish_completions_as_they_are() {
-    let host = Host::new().with_agents(&[".claude"]);
+    let host = Host::new().on_path().with_agents(&[".claude"]);
     let completions = host.fish();
     let placed = host.placed(&[".claude"]);
     assert_eq!(host.ok(&["agents", "install"]), lines(&placed));
@@ -4133,7 +4193,7 @@ struct Stale {
 
 impl Stale {
     fn new() -> Stale {
-        let host = Host::set_up("desk").with_agents(&[".claude"]);
+        let host = Host::set_up("desk").on_path().with_agents(&[".claude"]);
         let (skill, settings) = (host.skill_of(".claude"), host.hooks_of(".claude"));
         fs::create_dir_all(skill.parent().unwrap()).unwrap();
         fs::write(&skill, "old").unwrap();
@@ -4188,7 +4248,11 @@ fn upgrade_has_the_release_it_put_in_place_refresh_the_host() {
     assert_eq!(fs::read_to_string(&stale.skill).unwrap(), "old");
     assert!(!stale.completions.exists());
 
-    let upgraded = stale.upgrade(&["upgrade"]);
+    let mut program = Command::new(&stale.installed);
+    program
+        .env(RELEASES, stale.host.releases())
+        .env("PATH", path_finding(&released));
+    let upgraded = stale.host.run_as(program, &stale.host.home(), &["upgrade"]);
     assert_eq!(
         upgraded.stderr,
         format!("worklog: upgraded {CURRENT} to 9.9.9\n")
@@ -4412,7 +4476,7 @@ fn an_upgrade_whose_new_binary_cannot_write_for_fish_says_what_that_binary_wrote
 
 #[test]
 fn a_binary_under_another_file_name_is_upgraded_on_a_host_with_fish() {
-    let host = Host::set_up("desk").with_agents(&[".claude"]);
+    let host = Host::set_up("desk").on_path().with_agents(&[".claude"]);
     let completions = host.fish();
     let skill = host.skill_of(".claude");
     fs::create_dir_all(skill.parent().unwrap()).unwrap();
@@ -4454,7 +4518,7 @@ fn a_binary_under_another_file_name_is_upgraded_on_a_host_with_fish() {
 #[test]
 fn a_misnamed_binary_whose_hook_is_installed_is_upgraded_and_its_refresh_refused_by_the_hook_s_rule()
  {
-    let host = Host::set_up("desk").with_agents(&[".claude"]);
+    let host = Host::set_up("desk").on_path().with_agents(&[".claude"]);
     let completions = host.fish();
     host.ok(&["agents", "install"]);
     let installed = host.install_as("worklog-0.3.0");
@@ -4568,7 +4632,7 @@ impl Host {
 #[test]
 fn refresh_takes_the_hook_the_tool_before_the_rebuild_left_as_its_own() {
     for spelled_with_home in [true, false] {
-        let host = Host::set_up("desk").with_agents(&[".claude"]);
+        let host = Host::set_up("desk").on_path().with_agents(&[".claude"]);
         let home = if spelled_with_home {
             "$HOME".to_owned()
         } else {
@@ -4595,7 +4659,7 @@ fn refresh_takes_the_hook_the_tool_before_the_rebuild_left_as_its_own() {
 
 #[test]
 fn refresh_writes_its_skill_over_the_one_the_tool_before_the_rebuild_left() {
-    let host = Host::set_up("desk").with_agents(&[".codex"]);
+    let host = Host::set_up("desk").on_path().with_agents(&[".codex"]);
     let left = host.home().join(".codex/skills/worklog/SKILL.md");
     fs::create_dir_all(left.parent().unwrap()).unwrap();
     fs::write(&left, "---\nname: worklog\ndescription: Lamp notes\n---\n").unwrap();
