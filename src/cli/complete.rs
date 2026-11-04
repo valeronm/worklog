@@ -227,7 +227,7 @@ mod tests {
 
     use super::*;
     use crate::cli::args::Cli;
-    use crate::cli::tests::Process;
+    use crate::cli::tests::{Process, scratch};
     use worklog_app::draft;
     use worklog_app::testing::{
         DONE, ENDED, ENDED_FACT, REMOVED, World, claim_fields, entry, fact, followup, topic, world,
@@ -438,8 +438,7 @@ mod tests {
 
     #[test]
     fn a_source_offers_what_this_host_s_store_holds_and_nothing_where_none_opens() {
-        let kept = tempfile::tempdir().unwrap();
-        let root = std::fs::canonicalize(kept.path()).unwrap();
+        let (_kept, root) = scratch();
         let process = Process::under(&root);
         let values = |list: &dyn Fn(&ReadDeps) -> Listed| -> Vec<String> {
             let offered = offered(&|name| process.variable(name), list);

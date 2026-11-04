@@ -57,7 +57,7 @@ mod tests {
 
     use super::super::NAME;
     use super::super::skill::SKILL;
-    use super::super::tests::Process;
+    use super::super::tests::{Process, scratch};
     use super::*;
     use worklog_domain::ports::{Binary, Releases, StoreError};
     use worklog_domain::testing::{
@@ -160,8 +160,7 @@ mod tests {
 
     impl Installed {
         fn with(memory: MemoryBinary) -> Installed {
-            let kept = tempfile::tempdir().unwrap();
-            let root = std::fs::canonicalize(kept.path()).unwrap();
+            let (kept, root) = scratch();
             let host = Installed {
                 _kept: kept,
                 root,
@@ -172,10 +171,7 @@ mod tests {
             std::fs::create_dir_all(skill.parent().unwrap()).unwrap();
             std::fs::write(skill, "old").unwrap();
             let store = host.root.join("store");
-            let set_up = Process {
-                home: Some(host.root.join("home")),
-                ..Process::nowhere()
-            };
+            let set_up = Process::of(Some(&host.root.join("home")), None);
             let made = set_up.run(&["init", "desk", "--store", store.to_str().unwrap()]);
             assert_eq!(made.code, 0, "{}", made.err);
             host

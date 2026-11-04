@@ -374,15 +374,10 @@ mod tests {
     use std::fs;
 
     use super::*;
-    use crate::cli::tests::{Process, environment};
+    use crate::cli::tests::{Process, environment, scratch};
 
     fn found(home: &Path, binary: &Path) -> impl Fn(&str) -> Option<OsString> + use<> {
-        let process = Process {
-            home: Some(home.to_path_buf()),
-            binary: Some(binary.to_path_buf()),
-            ..Process::nowhere()
-        };
-        let process = process.found();
+        let process = Process::of(Some(home), Some(binary.to_path_buf())).found();
         move |name: &str| process.variable(name)
     }
 
@@ -452,8 +447,7 @@ mod tests {
     }
 
     fn scratch_with_claude() -> (tempfile::TempDir, PathBuf) {
-        let kept = tempfile::tempdir().unwrap();
-        let root = fs::canonicalize(kept.path()).unwrap();
+        let (kept, root) = scratch();
         fs::create_dir_all(root.join("home/.claude")).unwrap();
         (kept, root)
     }

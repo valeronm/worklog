@@ -450,6 +450,14 @@ mod tests {
             }
         }
 
+        pub(super) fn of(home: Option<&Path>, binary: Option<PathBuf>) -> Process<'a> {
+            Process {
+                home: home.map(Path::to_path_buf),
+                binary,
+                ..Process::nowhere()
+            }
+        }
+
         pub(super) fn under(root: &Path) -> Process<'a> {
             Process {
                 next: Some(root.join("next")),
@@ -552,8 +560,7 @@ mod tests {
 
     impl Found {
         fn new() -> Found {
-            let kept = tempfile::tempdir().unwrap();
-            let root = std::fs::canonicalize(kept.path()).unwrap();
+            let (kept, root) = scratch();
             for dir in ["bin", "bench"] {
                 path_finding(&root.join(dir).join(NAME));
             }
@@ -945,7 +952,7 @@ mod tests {
         }
     }
 
-    fn scratch() -> (tempfile::TempDir, PathBuf) {
+    pub(super) fn scratch() -> (tempfile::TempDir, PathBuf) {
         let kept = tempfile::tempdir().unwrap();
         let root = std::fs::canonicalize(kept.path()).unwrap();
         (kept, root)
@@ -1185,21 +1192,11 @@ mod tests {
     }
 
     fn run_with(home: Option<&Path>, binary: Option<PathBuf>, line: &[&str]) -> Ran {
-        let process = Process {
-            home: home.map(Path::to_path_buf),
-            binary,
-            ..Process::nowhere()
-        };
-        process.run(line)
+        Process::of(home, binary).run(line)
     }
 
     fn run_found(home: Option<&Path>, binary: Option<PathBuf>, line: &[&str]) -> Ran {
-        let process = Process {
-            home: home.map(Path::to_path_buf),
-            binary,
-            ..Process::nowhere()
-        };
-        process.found().run(line)
+        Process::of(home, binary).found().run(line)
     }
 
     fn printed(ran: &Ran, text: &str) {
@@ -1219,8 +1216,7 @@ mod tests {
 
     #[test]
     fn completions_prints_a_shell_s_line_wherever_the_binary_is_known_by_its_own_name() {
-        let kept = tempfile::tempdir().unwrap();
-        let root = std::fs::canonicalize(kept.path()).unwrap();
+        let (_kept, root) = scratch();
         let home = root.join("home");
         let fish = ["completions", "fish"];
         printed(
@@ -1245,8 +1241,7 @@ mod tests {
 
     #[test]
     fn a_refresh_whose_binary_makes_no_line_for_fish_writes_nothing_for_an_agent_either() {
-        let kept = tempfile::tempdir().unwrap();
-        let root = std::fs::canonicalize(kept.path()).unwrap();
+        let (_kept, root) = scratch();
         let home = root.join("home");
         let skill = home.join(".claude/skills").join(NAME).join("SKILL.md");
         std::fs::create_dir_all(skill.parent().unwrap()).unwrap();
@@ -1277,8 +1272,7 @@ mod tests {
 
     #[test]
     fn an_install_and_an_uninstall_that_fail_say_what_they_wrote_before_the_failure() {
-        let kept = tempfile::tempdir().unwrap();
-        let root = std::fs::canonicalize(kept.path()).unwrap();
+        let (_kept, root) = scratch();
         let home = root.join("home");
         for agent in [".claude", ".codex"] {
             std::fs::create_dir_all(home.join(agent)).unwrap();
@@ -1348,8 +1342,7 @@ mod tests {
 
     #[test]
     fn a_command_that_names_the_binary_in_a_file_is_refused_when_its_path_is_unknown() {
-        let kept = tempfile::tempdir().unwrap();
-        let root = std::fs::canonicalize(kept.path()).unwrap();
+        let (_kept, root) = scratch();
         std::fs::create_dir_all(root.join("home/.claude")).unwrap();
         let home = root.join("home");
         let ran = |action: &str| {

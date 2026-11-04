@@ -255,7 +255,7 @@ mod tests {
     use std::ffi::OsString;
 
     use super::*;
-    use crate::cli::tests::{Process, environment};
+    use crate::cli::tests::{Process, environment, scratch};
     use worklog_app::list;
     use worklog_app::testing::{World, head, topic, world, written_at};
     use worklog_domain::id::DocumentId;
@@ -607,8 +607,7 @@ mod tests {
 
     impl Home {
         fn with(agents: &[&str]) -> Home {
-            let kept = tempfile::tempdir().unwrap();
-            let root = std::fs::canonicalize(kept.path()).unwrap();
+            let (kept, root) = scratch();
             for agent in agents {
                 std::fs::create_dir_all(root.join("home").join(agent)).unwrap();
             }
@@ -620,11 +619,7 @@ mod tests {
         }
 
         fn asked_by(&self, world: &World, typed: &str, on_path: bool) -> Asked {
-            let process = Process {
-                home: Some(self.root.join("home")),
-                binary: Some(self.binary()),
-                ..Process::nowhere()
-            };
+            let process = Process::of(Some(&self.root.join("home")), Some(self.binary()));
             let process = if on_path { process.found() } else { process };
             let variable = |name: &str| process.variable(name);
             let environment = Environment {

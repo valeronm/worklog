@@ -2511,7 +2511,10 @@ fn serve_is_refused_before_it_listens_on_a_host_or_an_address_it_cannot_serve() 
 }
 
 fn binary() -> PathBuf {
-    fs::canonicalize(env!("CARGO_BIN_EXE_worklog")).expect("the binary's own path")
+    static CANONICAL: OnceLock<PathBuf> = OnceLock::new();
+    let canonical =
+        || fs::canonicalize(env!("CARGO_BIN_EXE_worklog")).expect("the binary's own path");
+    CANONICAL.get_or_init(canonical).clone()
 }
 
 impl Host {
@@ -4274,14 +4277,7 @@ impl Host {
 
     fn copy_of_the_binary(&self, to: &Path) {
         fs::copy(binary(), to).unwrap();
-        let unpublished = to.with_extension("unpublished");
-        let version = || {
-            let mut copy = self.program(to);
-            copy.arg("--version")
-                .env(RELEASES, &unpublished)
-                .env(OVERRIDE, to.with_extension("home"))
-                .output()
-        };
+        let version = || self.program(to).arg("--version").output();
         loop {
             match version() {
                 Err(busy) if busy.kind() == std::io::ErrorKind::ExecutableFileBusy => {
