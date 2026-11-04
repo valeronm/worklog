@@ -322,7 +322,7 @@ where
     };
     let command = match &cli.command {
         Invoked::Host(command) => {
-            return finished(host::run(command, cli.json, environment, err), out, err);
+            return ended(host::run(command, cli.json, environment, err), out, err);
         }
         Invoked::Run(command) => command,
         Invoked::Serve { bind, hosts } => {
@@ -1287,6 +1287,38 @@ mod tests {
         std::fs::create_dir(&blocked).unwrap();
         std::fs::write(blocked.join(NAME), "").unwrap();
         stopped(&ran("uninstall"), &[skill, hooks], &blocked.join(NAME));
+    }
+
+    #[test]
+    fn an_init_whose_agents_fail_says_what_it_wrote_and_how_to_finish() {
+        let (_kept, root) = scratch();
+        let home = root.join("home");
+        for agent in [".claude", ".codex"] {
+            std::fs::create_dir_all(home.join(agent)).unwrap();
+        }
+        let blocked = home.join(".codex/skills");
+        std::fs::write(&blocked, "").unwrap();
+        let store = root.join("store").display().to_string();
+        let binary = Some(root.join("bin").join(NAME));
+        let line = ["init", "desk", "--store", &store, "--agents"];
+        let ran = run_with(Some(&home), binary, &line);
+        let skill = home.join(".claude/skills").join(NAME).join("SKILL.md");
+        let hooks = home.join(".claude/settings.json");
+        let written = format!("desk created\n{}\n{}\n", skill.display(), hooks.display());
+        assert_eq!((ran.out.as_str(), ran.code), (written.as_str(), 1));
+        let note = format!(
+            "{NAME}: this host is set up as desk; `{NAME} agents install` finishes the agents\n"
+        );
+        assert!(ran.err.starts_with(&note), "{}", ran.err);
+        let failed = format!("{NAME}: {}", blocked.display());
+        assert!(
+            ran.err
+                .lines()
+                .nth(1)
+                .is_some_and(|line| line.starts_with(&failed)),
+            "{}",
+            ran.err
+        );
     }
 
     #[test]

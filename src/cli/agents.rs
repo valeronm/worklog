@@ -78,24 +78,15 @@ impl Done {
         Ok(())
     }
 
-    /// The notes are given under `json` too, since the value printed there carries none.
-    pub(super) fn output<T: Render + Serialize + Pinned>(
-        self,
-        json: bool,
-        value: impl FnOnce(Vec<String>) -> T,
-    ) -> Output {
-        let mut made = output(&value(self.written), json);
-        made.notes.extend(self.notes);
-        made
-    }
-
     pub(super) fn ended<T: Render + Serialize + Pinned>(
         self,
         ended: Result<(), Failure>,
         json: bool,
         value: impl FnOnce(Vec<String>) -> T,
     ) -> Result<Output, Stopped> {
-        let done = self.output(json, value);
+        // The notes are given under `json` too, since the value printed there carries none.
+        let mut done = output(&value(self.written), json);
+        done.notes.extend(self.notes);
         match ended {
             Ok(()) => Ok(done),
             Err(failure) => Err(Stopped {
@@ -178,7 +169,7 @@ impl Placing {
         sandbox::installed(agent, &self.drafts)
     }
 
-    fn install_into(&self, done: &mut Done) -> Result<(), Failure> {
+    pub(super) fn install_into(&self, done: &mut Done) -> Result<(), Failure> {
         for agent in &self.agents {
             done.wrote(&agent.write_skill(SKILL)?);
             if let Some(rule) = agent.write_rule()? {
@@ -193,12 +184,6 @@ impl Placing {
             }
         }
         Ok(())
-    }
-
-    pub(super) fn install(&self) -> Result<Done, Failure> {
-        let mut done = Done::default();
-        self.install_into(&mut done)?;
-        Ok(done)
     }
 }
 

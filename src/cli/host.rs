@@ -3,10 +3,10 @@ use std::path::Path;
 
 use serde::Serialize;
 
-use super::agents::{self, Placing};
+use super::agents::{self, Done, Placing};
 use super::args::{HostCommand, InitArgs};
-use super::render::{Output, Render};
-use super::{Environment, prompt};
+use super::render::{Output, Render, Stopped};
+use super::{Environment, NAME, prompt};
 use worklog_app::setup::{self, Bound, Joining};
 use worklog_app::{Deps, Failure};
 use worklog_domain::id::DocumentId;
@@ -47,7 +47,7 @@ pub(super) fn run(
     json: bool,
     environment: &Environment,
     err: &mut dyn Write,
-) -> Result<Output, Failure> {
+) -> Result<Output, Stopped> {
     match command {
         HostCommand::Init { given: None } => prompt::asked(json, environment, err),
         HostCommand::Init {
@@ -83,7 +83,7 @@ fn bound_over(
     json: bool,
     environment: &Environment,
     bind: impl FnOnce(&Deps) -> Result<Bound, Failure>,
-) -> Result<Output, Failure> {
+) -> Result<Output, Stopped> {
     let adapters = worklog_wiring::wire_over(environment.variable, &environment.placed(store)?)?;
     let deps = adapters.deps();
     let placing = with_agents
@@ -97,13 +97,17 @@ pub(super) fn initialized(
     placing: Option<Placing>,
     json: bool,
     bind: impl FnOnce() -> Result<Bound, Failure>,
-) -> Result<Output, Failure> {
+) -> Result<Output, Stopped> {
     let bound = bind()?;
-    let done = placing
-        .map(|placing| placing.install())
-        .transpose()?
-        .unwrap_or_default();
-    Ok(done.output(json, |written| Initialized::new(bound, written)))
+    let mut done = Done::default();
+    let installed = placing.map_or(Ok(()), |placing| placing.install_into(&mut done));
+    if installed.is_err() {
+        done.notes.push(format!(
+            "this host is set up as {}; `{NAME} agents install` finishes the agents",
+            bound.label
+        ));
+    }
+    done.ended(installed, json, |written| Initialized::new(bound, written))
 }
 
 #[cfg(test)]

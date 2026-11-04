@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use super::agents::{self, Placing};
 use super::host::initialized;
-use super::render::Output;
+use super::render::{Output, Stopped};
 use super::{Environment, NAME, said};
 use worklog_app::machines::{self, HostName};
 use worklog_app::setup::Joining;
@@ -185,7 +185,7 @@ pub(super) fn asked(
     json: bool,
     environment: &Environment,
     err: &mut dyn Write,
-) -> Result<Output, Failure> {
+) -> Result<Output, Stopped> {
     let answers = environment.terminal.ok_or_else(no_terminal)?;
     if let Some(bound) = worklog_wiring::wire(environment.variable)? {
         setup::refuse_bound(&bound.deps())?;
@@ -204,7 +204,7 @@ fn init(
     json: bool,
     store: &Path,
     terminal: &mut Terminal,
-) -> Result<Output, Failure> {
+) -> Result<Output, Stopped> {
     setup::refuse_bound(deps)?;
     let starting = machines::holds_nothing(&deps.read())?;
     if starting {
@@ -217,7 +217,8 @@ fn init(
             return Err(Failure::at(
                 store.display(),
                 format!("no store was started; run `{NAME} init` again once it has synced"),
-            ));
+            )
+            .into());
         }
     }
     let (name, held) = machine(&deps.read(), terminal)?;
@@ -237,7 +238,7 @@ fn init(
         ));
     }
     if !terminal.consent("Set this host up?", !unsynced)? {
-        return Err(Failure::Refused("nothing was written".to_owned()));
+        return Err(Failure::Refused("nothing was written".to_owned()).into());
     }
     initialized(placing, json, || match (starting, held) {
         (true, _) => setup::start(deps, &name, None),
@@ -268,7 +269,7 @@ mod tests {
     }
 
     struct Asked {
-        result: Result<Output, Failure>,
+        result: Result<Output, Stopped>,
         shown: String,
     }
 
@@ -300,13 +301,16 @@ mod tests {
     fn printed(asked: &Asked) -> &str {
         match &asked.result {
             Ok(output) => &output.text,
-            Err(failure) => panic!("{failure}: {}", asked.shown),
+            Err(stopped) => panic!("{}: {}", stopped.failure, asked.shown),
         }
     }
 
     fn refused(asked: &Asked) -> &str {
         match &asked.result {
-            Err(Failure::Refused(text)) => text,
+            Err(Stopped {
+                done: None,
+                failure: Failure::Refused(text),
+            }) => text,
             other => panic!("expected a refusal, got {other:?}"),
         }
     }
