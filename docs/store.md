@@ -224,8 +224,8 @@ not read as an empty one.
 The file is `$XDG_CONFIG_HOME/worklog/config.toml`, or under `~/.config`
 where that variable is not set. `WORKLOG_HOME=<dir>` moves it to
 `<dir>/config.toml` and the drafts to `<dir>/drafts`. A relative path in
-an XDG variable counts as not set, and a relative `WORKLOG_HOME` is
-refused.
+an XDG variable counts as not set, and a relative `HOME` or
+`WORKLOG_HOME` is refused.
 
 ## The host's cache
 

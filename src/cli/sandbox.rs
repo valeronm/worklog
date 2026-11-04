@@ -10,11 +10,7 @@ use worklog_wiring::{Agent, SandboxConfig};
 const TABLE: &str = "sandbox_workspace_write";
 const ROOTS: &str = "writable_roots";
 
-// Codex is not documented to expand `~` or a variable in a writable root.
 fn root(drafts: &Path) -> Result<&str, Failure> {
-    if !drafts.is_absolute() {
-        return Err(Failure::at(drafts.display(), "is not an absolute path"));
-    }
     drafts
         .to_str()
         .ok_or_else(|| Failure::at(drafts.display(), "is not UTF-8"))
@@ -197,9 +193,11 @@ mod tests {
     }
 
     #[test]
-    fn a_root_is_an_absolute_utf_8_path() {
+    fn a_root_is_a_utf_8_path() {
+        use std::os::unix::ffi::OsStrExt as _;
         assert_eq!(root(Path::new(DRAFTS)), Ok(DRAFTS));
-        let refused = root(Path::new("state/drafts")).unwrap_err().to_string();
-        assert_eq!(refused, "state/drafts: is not an absolute path");
+        let unreadable = Path::new(std::ffi::OsStr::from_bytes(b"/home/\xff/drafts"));
+        let refused = root(unreadable).unwrap_err().to_string();
+        assert!(refused.ends_with(": is not UTF-8"), "{refused}");
     }
 }

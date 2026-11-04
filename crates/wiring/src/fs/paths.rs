@@ -1,5 +1,5 @@
 use std::ffi::OsString;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use worklog_domain::ports::StoreError;
 
@@ -23,15 +23,18 @@ pub fn set(variable: impl Fn(&str) -> Option<OsString>, name: &str) -> Option<Os
 }
 
 impl Paths {
-    /// Refuses a `HOME` that is not UTF-8.
+    /// Refuses a `HOME` that is not UTF-8 or not an absolute path.
     pub fn home(variable: impl Fn(&str) -> Option<OsString>) -> Result<Option<String>, StoreError> {
-        match set(&variable, "HOME") {
-            Some(home) => match home.into_string() {
-                Ok(home) => Ok(Some(home)),
-                Err(_) => Err(StoreError::io("$HOME", "is not UTF-8")),
-            },
-            None => Ok(None),
+        let Some(home) = set(&variable, "HOME") else {
+            return Ok(None);
+        };
+        let Ok(home) = home.into_string() else {
+            return Err(StoreError::io("$HOME", "is not UTF-8"));
+        };
+        if !Path::new(&home).is_absolute() {
+            return Err(StoreError::io("$HOME", "is not an absolute path"));
         }
+        Ok(Some(home))
     }
 
     pub fn resolved(variable: impl Fn(&str) -> Option<OsString>) -> Result<Paths, StoreError> {
@@ -262,6 +265,17 @@ mod tests {
                 _ => None,
             });
             assert_eq!(refused, Err(StoreError::io("$HOME", "is not UTF-8")));
+        }
+    }
+
+    #[test]
+    fn a_relative_home_directory_is_refused_wherever_the_rest_is_kept() {
+        let relative = ("HOME", "home/desk");
+        for set in [&[relative][..], &[relative, ("WORKLOG_HOME", "/lantern")]] {
+            assert_eq!(
+                resolved(set),
+                Err(StoreError::io("$HOME", "is not an absolute path"))
+            );
         }
     }
 
