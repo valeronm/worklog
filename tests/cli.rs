@@ -2944,6 +2944,24 @@ fn uninstall_takes_back_what_setup_wrote_and_leaves_the_store_and_the_binary() {
 }
 
 #[test]
+fn uninstall_names_the_drafts_folder_where_this_machine_can_no_longer_list_its_drafts() {
+    let host = Host::set_up("desk").on_path();
+    host.ok(&["new", "topic", "atlas"]);
+    fs::remove_file(host.root.join("next/config.toml")).unwrap();
+    let before = snapshot(&host);
+    assert_refused(
+        &host.run(&["uninstall"]),
+        1,
+        &format!(
+            "worklog: {}: holds open drafts this machine is no longer set up to save or \
+             discard; delete them there first\n",
+            host.drafts().display()
+        ),
+    );
+    assert_eq!(snapshot(&host), before);
+}
+
+#[test]
 fn uninstall_leaves_a_directory_that_is_not_empty_in_place() {
     let host = Host::set_up("desk").on_path();
     let kept = host.drafts().join("kept");

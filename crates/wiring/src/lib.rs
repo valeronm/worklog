@@ -448,12 +448,17 @@ impl HostFiles {
     ) -> Result<HostFiles, Failure> {
         let paths = Paths::resolved(variable)?;
         if !FsDrafts::new(paths.drafts.clone()).documents()?.is_empty() {
-            return Err(Failure::at(
-                paths.drafts.display(),
+            // A machine with no config or no store has no command that lists or ends a draft.
+            let why = if matches!(wire(variable), Ok(Some(_))) {
                 format!(
                     "holds open drafts, which `{command} drafts` lists; save or discard each first"
-                ),
-            ));
+                )
+            } else {
+                "holds open drafts this machine is no longer set up to save or discard; delete \
+                 them there first"
+                    .to_owned()
+            };
+            return Err(Failure::at(paths.drafts.display(), why));
         }
         let fish = fish_completions(variable, command)?;
         Ok(HostFiles { paths, fish })
