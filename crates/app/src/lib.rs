@@ -201,7 +201,7 @@ impl fmt::Display for Failure {
         match self {
             Failure::Refused(text) | Failure::Usage(text) => f.write_str(text),
             Failure::Store(error) => error.fmt(f),
-            Failure::NotSetUp => f.write_str("this host is not set up"),
+            Failure::NotSetUp => f.write_str("this machine is not set up"),
             Failure::Setup(refusal) => refusal.fmt(f),
         }
     }

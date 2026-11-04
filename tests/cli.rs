@@ -20,7 +20,7 @@ const CLOSING: &str = "Durable facts and ideas, by name where they fit and count
      `worklog ideas <topic>` for a topic's ideas,\n\
      `worklog show <topic>/<name>` for one,\n\
      `worklog followups <topic>` for open work.\n";
-const NOT_SET_UP: &str = "worklog: this host is not set up; run `worklog init`\n";
+const NOT_SET_UP: &str = "worklog: this machine is not set up; run `worklog init`\n";
 const RELEASES: &str = "WORKLOG_RELEASES";
 const OVERRIDE: &str = "WORKLOG_HOME";
 const SESSIONS: [(&str, &str); 2] = [
@@ -424,7 +424,11 @@ fn init_makes_the_machine_topic_and_a_second_init_is_refused() {
     assert_eq!(host.ok(&["topics"]), host.row("desk", "desk  A machine"));
 
     let again = host.run(&["init", "atlas", "--store", "elsewhere"]);
-    assert_refused(&again, 1, "worklog: this host is already set up as desk\n");
+    assert_refused(
+        &again,
+        1,
+        "worklog: this machine is already set up as desk\n",
+    );
     assert!(!host.home().join("elsewhere").exists());
 }
 
@@ -436,10 +440,9 @@ fn init_alone_with_no_terminal_is_a_usage_error_naming_both_forms_with_arguments
     assert_refused(
         &alone,
         2,
-        "worklog: `init` alone asks its questions on a terminal. A host is set up by its user, \
+        "worklog: `init` alone asks its questions on a terminal. A machine is set up by its user, \
          who gives the directory of the store; without a terminal, `worklog init <NAME> --store \
-         <DIR>` starts a new store and `worklog join <NAME> --store <DIR>` binds this host to a \
-         shared one\n",
+         <DIR>` starts a new store and `worklog join <NAME> --store <DIR>` joins a shared one\n",
     );
     assert!(!host.root.join("next").exists());
     assert_eq!(snapshot(&host), before);
@@ -528,7 +531,7 @@ fn a_second_host_is_bound_to_a_store_a_sync_tool_keeps_files_beside() {
     let phone = Host::new();
     let store = desk.store();
     let bound = phone.ok(&["join", "desk", "--store", store.to_str().unwrap()]);
-    assert_eq!(bound, "desk bound\n");
+    assert_eq!(bound, "desk joined\n");
     assert_eq!(phone.ok(&["topics"]), desk.ok(&["topics"]));
 }
 
@@ -552,7 +555,7 @@ fn init_refuses_a_store_that_holds_documents_and_names_join() {
     assert_refused(
         &refused,
         1,
-        "worklog: the store holds documents; `worklog join` binds this host to the store\n",
+        "worklog: the store holds documents; `worklog join` sets this machine up with it\n",
     );
     assert_eq!(snapshot_without_cache(&phone), phone_before);
     assert_eq!(snapshot(&desk), desk_before);
@@ -602,7 +605,8 @@ fn join_refuses_a_store_that_does_not_fit_what_it_is_told_and_writes_nothing() {
     assert_refused(
         &held,
         1,
-        "worklog: desk is already in the store; without `--summary` this host is bound to desk\n",
+        "worklog: desk is already in the store; without `--summary` this machine is set up as \
+         desk\n",
     );
     assert_eq!(snapshot_without_cache(&phone), phone_before);
     assert_eq!(snapshot(&desk), desk_before);
@@ -1099,7 +1103,7 @@ fn a_store_that_is_gone_is_refused_and_not_read_as_empty() {
     let moved = host.root.join("moved");
     fs::rename(host.store(), &moved).unwrap();
     let gone = format!(
-        "worklog: {}: this host's store is not a directory; {} binds this host to it\n",
+        "worklog: {}: this machine's store is not a directory; {} names it\n",
         host.store().display(),
         host.root.join("next/config.toml").display()
     );
@@ -1129,7 +1133,7 @@ fn a_fork_is_resolved_through_a_draft() {
     copy_tree(&desk.store(), &phone.store());
     assert_eq!(
         phone.ok(&["join", "desk", "--store", phone.store().to_str().unwrap()]),
-        "desk bound\n"
+        "desk joined\n"
     );
 
     desk.ok(&["rename", "lantern", "lamp"]);
@@ -2421,7 +2425,7 @@ fn serve_answers_500_while_the_store_or_the_config_is_gone_and_keeps_serving() {
     let config = host.root.join("next/config.toml");
     for (held, why) in [
         (host.store(), "store is not a directory"),
-        (config, "this host is not set up"),
+        (config, "this machine is not set up"),
     ] {
         let away = host.root.join("away");
         fs::rename(&held, &away).unwrap();
@@ -2478,7 +2482,7 @@ fn serve_is_refused_before_it_listens_on_a_host_or_an_address_it_cannot_serve() 
         &host.ends(&bind),
         1,
         &format!(
-            "worklog: {}: this host's store is not a directory; {} binds this host to it\n",
+            "worklog: {}: this machine's store is not a directory; {} names it\n",
             host.store().display(),
             host.root.join("next/config.toml").display()
         ),
@@ -2655,7 +2659,7 @@ fn join_with_agents_installs_for_the_agent_present_and_prints_the_paths() {
         "--agents",
     ]);
     let paths = phone.placed(&[".claude"]);
-    assert_eq!(printed, format!("desk bound\n{}", lines(&paths)));
+    assert_eq!(printed, format!("desk joined\n{}", lines(&paths)));
     phone.assert_placed(".claude");
 }
 
@@ -2684,7 +2688,7 @@ fn init_with_agents_and_no_agent_home_is_refused_before_anything_is_written() {
     assert_refused(
         &ran,
         1,
-        "worklog: no Claude Code or Codex home on this host\n",
+        "worklog: no Claude Code or Codex home on this machine\n",
     );
     assert_eq!(snapshot(&host), before);
     assert!(!host.root.join("next").exists());
@@ -2778,7 +2782,7 @@ fn agents_install_with_no_agent_home_is_refused() {
     assert_refused(
         &ran,
         1,
-        "worklog: no Claude Code or Codex home on this host\n",
+        "worklog: no Claude Code or Codex home on this machine\n",
     );
     assert!(!host.home().join(".claude").exists());
 }
@@ -3149,7 +3153,7 @@ fn a_refresh_that_succeeds_notes_a_host_it_cannot_be_used_on_yet() {
     let host = Host::set_up("desk");
     fs::rename(host.store(), host.root.join("moved")).unwrap();
     let gone = format!(
-        "worklog: {}: this host's store is not a directory; {} binds this host to it\n",
+        "worklog: {}: this machine's store is not a directory; {} names it\n",
         host.store().display(),
         host.root.join("next/config.toml").display()
     );

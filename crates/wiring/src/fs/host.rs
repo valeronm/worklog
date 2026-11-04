@@ -15,7 +15,7 @@ pub fn setup_lock(dir: &Path) -> Result<File, StoreError> {
     let held = File::open(dir).map_err(|e| io_error(dir, &e))?;
     held.try_lock().map_err(|e| match e {
         TryLockError::WouldBlock => {
-            StoreError::io(dir.display(), "another setup of this host is running")
+            StoreError::io(dir.display(), "another setup of this machine is running")
         }
         TryLockError::Error(e) => io_error(dir, &e),
     })?;
@@ -79,7 +79,7 @@ impl FsHost {
         if Config::read(&self.config)?.is_some() {
             return Err(StoreError::io(
                 self.config.display(),
-                "this host is already bound",
+                "this machine is already set up",
             ));
         }
         Ok(())
@@ -161,7 +161,7 @@ impl Host for FsHost {
         if self.setup.borrow().is_none() {
             return Err(StoreError::io(
                 self.config.display(),
-                "this host's setup is not held",
+                "this machine's setup is not held",
             ));
         }
         let config = Config {
@@ -279,7 +279,7 @@ mod tests {
         let second = FsHost::unbound(config.clone(), None, store, None);
         assert_eq!(first.hold_setup(), Ok(()));
         let running = format!(
-            "{}: another setup of this host is running",
+            "{}: another setup of this machine is running",
             dir.path().display()
         );
         assert_eq!(second.hold_setup().unwrap_err().to_string(), running);
@@ -298,7 +298,7 @@ mod tests {
             machine: lantern(),
         };
         kept.write(&config).unwrap();
-        let bound = format!("{}: this host is already bound", config.display());
+        let bound = format!("{}: this machine is already set up", config.display());
         assert_eq!(host.hold_setup().unwrap_err().to_string(), bound);
     }
 
@@ -306,7 +306,7 @@ mod tests {
     fn a_host_is_bound_only_while_its_setup_is_held() {
         let (dir, config) = scratch();
         let host = FsHost::unbound(config.clone(), None, dir.path().join("store"), None);
-        let unheld = format!("{}: this host's setup is not held", config.display());
+        let unheld = format!("{}: this machine's setup is not held", config.display());
         assert_eq!(host.bind(&lantern()).unwrap_err().to_string(), unheld);
         assert_eq!(host.machine(), Ok(None));
         assert_eq!(Config::read(&config), Ok(None));

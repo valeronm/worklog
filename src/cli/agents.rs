@@ -119,7 +119,9 @@ fn present(known: Vec<Agent>) -> Result<Vec<Agent>, Failure> {
         } else {
             format!("{} or {last}", first.join(", "))
         };
-        return Err(Failure::Refused(format!("no {joined} home on this host")));
+        return Err(Failure::Refused(format!(
+            "no {joined} home on this machine"
+        )));
     }
     Ok(present)
 }

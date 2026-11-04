@@ -110,7 +110,7 @@ impl<'a> Scope<'a> {
         if topics.is_ended(&machine) {
             return Err(Failure::at(
                 topics.label(&machine),
-                "is this host's machine topic and is ended; reopen it first",
+                "is the machine topic and is ended; reopen it first",
             ));
         }
 
@@ -846,10 +846,7 @@ mod tests {
         assert!(text.contains("absolute path"), "{text}");
         world.amend(&world.machine(), &topic_fields("desk", ENDED), "\n");
         let text = refused(due(&world.deps().read(), "/work"));
-        assert!(
-            text.contains("is this host's machine topic and is ended"),
-            "{text}"
-        );
+        assert!(text.contains("is the machine topic and is ended"), "{text}");
         world.host = FixedHost::new(None, None);
         assert!(matches!(
             due(&world.deps().read(), "/work"),
@@ -1237,7 +1234,7 @@ mod tests {
         world.amend(&world.machine(), &topic_fields("desk", ENDED), "\n");
         let text = refused(context(&world.deps().read(), "/work"));
         assert!(
-            text.contains("desk: is this host's machine topic and is ended"),
+            text.contains("desk: is the machine topic and is ended"),
             "{text}"
         );
     }

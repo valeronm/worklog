@@ -154,7 +154,9 @@ fn unfolded(content: &Content, (machine, home): &Here) -> Option<String> {
     let stored = claim.directory.as_ref()?;
     let folded = Directory::on_host(stored.as_str(), Some(home)).ok()?;
     (claim.machine == *machine && folded != *stored).then(|| {
-        format!("directory: {stored} is under this host's home; end this claim and claim {folded}")
+        format!(
+            "directory: {stored} is under this machine's home; end this claim and claim {folded}"
+        )
     })
 }
 
@@ -1107,7 +1109,7 @@ mod tests {
             found.notices,
             [finding(
                 "lantern at /home/desk/lantern",
-                "directory: /home/desk/lantern is under this host's home; \
+                "directory: /home/desk/lantern is under this machine's home; \
                  end this claim and claim ~/lantern"
             )]
         );

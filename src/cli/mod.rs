@@ -152,14 +152,14 @@ fn said(failure: &Failure) -> String {
     let next = match failure {
         Failure::NotSetUp => format!("run `{NAME} init`"),
         Failure::Setup(Refusal::HoldsDocuments) => {
-            format!("`{NAME} join` binds this host to the store")
+            format!("`{NAME} join` sets this machine up with it")
         }
         Failure::Setup(Refusal::HoldsNothing) => format!("`{NAME} init` starts a new store"),
         Failure::Setup(Refusal::LacksTopic(_)) => {
             "`--summary` makes a new machine topic".to_owned()
         }
         Failure::Setup(Refusal::HoldsTopic(name)) => {
-            format!("without `--summary` this host is bound to {name}")
+            format!("without `--summary` this machine is set up as {name}")
         }
         Failure::Refused(_) | Failure::Usage(_) | Failure::Store(_) => return failure.to_string(),
     };
@@ -225,7 +225,7 @@ fn announce(
     err: &mut dyn Write,
 ) -> std::io::Result<()> {
     let reach = if bind.ip().is_unspecified() {
-        Some("every network this host is on")
+        Some("every network this machine is on")
     } else if bind.ip().is_loopback() {
         None
     } else {
@@ -792,7 +792,7 @@ mod tests {
 
         let gone = found.run(&["topics"]);
         let said = format!(
-            "{NAME}: {}: this host's store is not a directory; {} binds this host to it\n",
+            "{NAME}: {}: this machine's store is not a directory; {} names it\n",
             store.display(),
             found.root.join("next/config.toml").display()
         );
@@ -842,7 +842,7 @@ mod tests {
             assert_eq!(announced(address), (line.to_owned(), String::new()));
         }
         let reached = "whatever reaches this address";
-        let everywhere = "every network this host is on";
+        let everywhere = "every network this machine is on";
         for (address, line, reach) in [
             ("192.168.7.20:4000", "http://192.168.7.20:4000\n", reached),
             ("10.0.0.5:8080", "http://10.0.0.5:8080\n", reached),
@@ -898,7 +898,7 @@ mod tests {
         assert_eq!(ran.out, "");
         assert_eq!(
             ran.err,
-            format!("{NAME}: this host is not set up; run `{NAME} init`\n")
+            format!("{NAME}: this machine is not set up; run `{NAME} init`\n")
         );
         assert_eq!(ran.code, 0);
         let json = run(scratch.path(), &["context", "--json"]);
@@ -955,10 +955,10 @@ mod tests {
         assert_eq!(
             ran.err,
             format!(
-                "{NAME}: `init` alone asks its questions on a terminal. A host is set up by its \
-                 user, who gives the directory of the store; without a terminal, `{NAME} init \
+                "{NAME}: `init` alone asks its questions on a terminal. A machine is set up by \
+                 its user, who gives the directory of the store; without a terminal, `{NAME} init \
                  <NAME> --store <DIR>` starts a new store and `{NAME} join <NAME> --store \
-                 <DIR>` binds this host to a shared one\n"
+                 <DIR>` joins a shared one\n"
             )
         );
         assert!(!root.join("next").exists());
@@ -975,7 +975,7 @@ mod tests {
         let first = format!("Directory of the store [{}]: ", default.display());
         assert!(made.err.starts_with(&first), "{}", made.err);
         let last = format!(
-            "The store: {}\nThe machine: desk, a new topic\nSet this host up? [Y/n]: ",
+            "The store: {}\nThe machine: desk, a new topic\nSet this machine up? [Y/n]: ",
             store.display()
         );
         assert!(made.err.ends_with(&last), "{}", made.err);
@@ -1084,7 +1084,7 @@ mod tests {
         assert_eq!((again.out.as_str(), again.code), ("", 1));
         assert_eq!(
             again.err,
-            format!("{NAME}: this host is already set up as desk\n")
+            format!("{NAME}: this machine is already set up as desk\n")
         );
         assert!(!root.join("home/elsewhere").exists());
 
@@ -1095,7 +1095,7 @@ mod tests {
         assert_eq!(
             gone.err,
             format!(
-                "{NAME}: {}: this host's store is not a directory; {} binds this host to it\n",
+                "{NAME}: {}: this machine's store is not a directory; {} names it\n",
                 store.display(),
                 root.join("next/config.toml").display()
             )
@@ -1319,7 +1319,7 @@ mod tests {
         let written = format!("desk created\n{}\n{}\n", skill.display(), hooks.display());
         assert_eq!((ran.out.as_str(), ran.code), (written.as_str(), 1));
         let note = format!(
-            "{NAME}: this host is set up as desk; `{NAME} agents install` finishes the agents\n"
+            "{NAME}: this machine is set up as desk; `{NAME} agents install` finishes the agents\n"
         );
         assert!(ran.err.starts_with(&note), "{}", ran.err);
         let failed = format!("{NAME}: {}", blocked.display());

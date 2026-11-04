@@ -54,12 +54,12 @@ what a reader tolerates; what follows from it:
   upgrade every machine sharing the store before the first document is
   written in the new shape.
 - A new key in a usage line is passed over by an older reader.
-- The host's cache is rebuilt by the first walk of a binary that did not
+- A machine's cache is rebuilt by the first walk of a binary that did not
   write it, so a release owes it nothing.
 
 ## A store from before 0.5.0
 
-0.5.0 keeps another store format and another host state than 0.4, and
+0.5.0 keeps another store format and another machine state than 0.4, and
 reads neither of them: `init` and `join` refuse a directory that holds a
 0.4 store. The converter and the steps of the crossing are in the tree at
 the tag `v0.5.0`, as `crates/worklog-convert` and this file. A store

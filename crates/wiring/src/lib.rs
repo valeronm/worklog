@@ -97,7 +97,7 @@ pub fn wire(variable: &dyn Fn(&str) -> Option<OsString>) -> Result<Option<Adapte
         return Err(Failure::Store(StoreError::io(
             held.store.display(),
             format!(
-                "this host's store is not a directory; {} binds this host to it",
+                "this machine's store is not a directory; {} names it",
                 paths.config.display()
             ),
         )));
@@ -546,7 +546,7 @@ mod tests {
         assert!(
             refused
                 .to_string()
-                .contains("another setup of this host is running"),
+                .contains("another setup of this machine is running"),
             "{refused}"
         );
         assert!(config.is_file());
@@ -576,7 +576,7 @@ mod tests {
         config.write(&path).unwrap();
 
         let gone = format!(
-            "{}: this host's store is not a directory; {} binds this host to it",
+            "{}: this machine's store is not a directory; {} names it",
             store.display(),
             path.display()
         );

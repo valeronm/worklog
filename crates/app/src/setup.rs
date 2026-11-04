@@ -70,7 +70,7 @@ impl Host for Becoming<'_> {
 pub fn refuse_bound(deps: &Deps) -> Result<(), Failure> {
     match deps.host.machine()? {
         Some(machine) => Err(Failure::Refused(format!(
-            "this host is already set up as {}",
+            "this machine is already set up as {}",
             Lookup::new(deps.read().store).label(&machine)?
         ))),
         None => Ok(()),
@@ -358,7 +358,7 @@ mod tests {
     fn a_host_that_is_bound_is_refused_before_anything_is_asked_of_it() {
         let (world, _) = world();
         let text = refused(refuse_bound(&world.deps()));
-        assert_eq!(text, "this host is already set up as desk");
+        assert_eq!(text, "this machine is already set up as desk");
         assert_eq!(refuse_bound(&bare().deps()), Ok(()));
     }
 
@@ -372,7 +372,7 @@ mod tests {
             refused(join(&world.deps(), "atlas", Joining::New { summary: None })),
         ];
         for text in refusals {
-            assert_eq!(text, "this host is already set up as desk");
+            assert_eq!(text, "this machine is already set up as desk");
         }
         assert_eq!(topics(&world), before);
         assert_eq!(world.host.machine(), Ok(Some(first_minted())));

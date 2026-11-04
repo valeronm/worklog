@@ -2,8 +2,8 @@
 
 What a store holds on disk: the tree, the shape of a version file, how a
 document's state follows from its files, what a reader refuses, and the
-files a host keeps beside the store. `documents.md` covers the kinds and
-their fields.
+files a machine keeps beside the store. `documents.md` covers the kinds
+and their fields.
 
 A store is shared between machines by a file sync, so the shape of a file
 is a contract. Nothing in it is edited in place, merged or repaired.
@@ -88,8 +88,8 @@ The header's keys:
 | `kind` | lowercase ASCII letters | the document's kind |
 | `parents` | a list of version ids | the versions this one follows: none for a first version, one for a change, every head for a version that closes a fork |
 | `ancestors` | a list of version ids | every version behind this one, the parents included |
-| `written` | a TOML offset date-time, unquoted | when it was written, by the clock and at the offset of the writing host |
-| `machine` | a document id | the machine topic of the host that wrote it |
+| `written` | a TOML offset date-time, unquoted | when it was written, by the clock and at the offset of the writing machine |
+| `machine` | a document id | the topic of the machine that wrote it |
 | `change` | text | one word: the command that wrote it, or the reason a document ended for; a version an older binary wrote may carry `: ` and a reason after the word |
 | `fields` | a table | the document's own fields, which `documents.md` lists by kind |
 | `links` | a table | each `[[target]]` of the body and the summary, with the id of the document it resolved to when the version was saved, or `""` for one that resolved to none |
@@ -109,7 +109,7 @@ a document id, or that holds a key this table does not list. A file whose
 newer binary, and its other keys are not interpreted. A writer refuses to
 make a version that would not read back as the parts it was made from.
 
-Hosts stamp their own clocks, so versions are ordered across machines by
+Machines stamp their own clocks, so versions are ordered across them by
 the instant `written` gives and not by its text.
 
 ## A document's state
@@ -149,7 +149,8 @@ format: `documents.md` has the ending.
 
 A reader that meets a `format` above its own reports the file as written
 by a newer binary: `check` lists it as a notice, where any other file that
-does not read is a problem, and the document takes no write on that host.
+does not read is a problem, and the document takes no write on that
+machine.
 
 A kind the reader does not know is kept: the documents read as versions,
 `check` gives one notice per kind, with the count of its documents, and
@@ -164,8 +165,8 @@ asks of the machines sharing a store.
 
 ## Usage
 
-The usage log is not a document, because a count is not immutable. A host
-appends one line per command run to its own file for the month,
+The usage log is not a document, because a count is not immutable. A
+machine appends one line per command run to its own file for the month,
 `usage/<machine>-<YYYY-MM>.jsonl`, where `<machine>` is the id of its
 machine topic and the month is that of the line's `written`. A reader
 takes every file of that name shape under `usage/`, so a sync carries the
@@ -181,7 +182,7 @@ A line is one JSON object ending in a newline, with every key present and
 | key | meaning |
 | --- | --- |
 | `written` | when the command ran, as a version's `written` is given |
-| `machine` | the id of the machine topic of the host that ran it |
+| `machine` | the id of the topic of the machine that ran it |
 | `version` | the version of the binary that ran, `X.Y.Z` for a release and `X.Y.Z+<name>` for a build made on top of one |
 | `agent`, `session` | the coding agent the command ran under and the id of its session; a line with one of them alone reads as having neither |
 | `command` | the command's path, `new entry` for a command with a subcommand, and empty where the words reach no command |
@@ -197,16 +198,17 @@ read, which is what a sync delivers of a line it cut short.
 A line is appended only by a binary that `PATH` finds under the name it
 was run by, since the log counts use and a build under test is not use. It
 is appended for a command that reads or writes the store and for `serve`;
-binding a host, the commands for the agents, `refresh`, the completions,
-`upgrade` and `uninstall` write none, and neither does a shell asking for completions. A
-command line the parser refuses is logged with its exit code under the
-last command its words reach. No line is written into a
-directory that holds nothing of the host's machine topic, so a store that
-has not synced or mounted is not started a second time under its path.
+setting a machine up, the commands for the agents, `refresh`, the
+completions, `upgrade` and `uninstall` write none, and neither does a
+shell asking for completions. A command line the parser refuses is logged
+with its exit code under the last command its words reach. No line is
+written into a directory that holds nothing of the machine topic, so a
+store that has not synced or mounted is not started a second time under
+its path.
 
-## The host's config
+## The machine's config
 
-`init` or `join` writes the config once per host, as TOML:
+`init` or `join` writes the config once per machine, as TOML:
 
 ```
 store = "/home/desk/sync/worklog"
@@ -214,12 +216,12 @@ machine = "03be552100000000000000000000000a"
 ```
 
 `store` is the store's directory as an absolute path, and `machine` the id
-of the host's machine topic, which every version and usage line written on
-the host carries. A file without both keys, with a `store` that is not
-absolute or a `machine` that is not a document id, is refused. A host with
-no config file is not set up. A config whose `store` is not a directory is
-refused by every command that uses the store, so a store that is gone is
-not read as an empty one.
+of the machine topic, which every version and usage line written on the
+machine carries. A file without both keys, with a `store` that is not
+absolute or a `machine` that is not a document id, is refused. A machine
+with no config file is not set up. A config whose `store` is not a
+directory is refused by every command that uses the store, so a store that
+is gone is not read as an empty one.
 
 The file is `$XDG_CONFIG_HOME/worklog/config.toml`, or under `~/.config`
 where that variable is not set. `WORKLOG_HOME=<dir>` moves it to
@@ -227,9 +229,9 @@ where that variable is not set. `WORKLOG_HOME=<dir>` moves it to
 an XDG variable counts as not set, and a relative `HOME` or
 `WORKLOG_HOME` is refused.
 
-## The host's cache
+## The machine's cache
 
-A host keeps the headers it parsed of the store's tree in one file per
+A machine keeps the headers it parsed of the store's tree in one file per
 store, `$XDG_CACHE_HOME/worklog/<hash of the store's path>.store`, or
 under `~/.cache` where that variable is not set; `WORKLOG_HOME=<dir>`
 moves it to `<dir>/cache`. The file holds, for every document the last
@@ -266,7 +268,7 @@ cache that cannot be written is left as it is and nothing is refused.
 ## Drafts
 
 Prose reaches the store through a draft, an editable file outside it. A
-host's drafts are its own and are not synced. They sit in one directory,
+machine's drafts are its own and are not synced. They sit in one directory,
 `$XDG_STATE_HOME/worklog/drafts`, or under `~/.local/state` where that
 variable is not set:
 

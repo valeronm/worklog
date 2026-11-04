@@ -81,8 +81,8 @@ steps. `uses` runs one way: a session in the topic loads what it uses, and
 a read of the used topic does not cover the topic. A change that would let
 a topic reach itself through either list is refused.
 
-A machine's topic is an ordinary topic that a host was bound to by `init`
-or `join`. Every version that host writes carries its id, so renaming it
+A machine's topic is the ordinary topic `init` or `join` gave the
+machine. Every version the machine writes carries its id, so renaming it
 rewrites nothing.
 
 ## Fact
@@ -116,7 +116,7 @@ is not maintained afterward.
 | --- | --- | --- |
 | `name` | always | the entry's name on its date |
 | `date` | always, once | the day the work was done |
-| `machine` | always, once | the machine topic of the host the work happened on |
+| `machine` | always, once | the topic of the machine the work happened on |
 | `topics` | if set | the topics the work touched |
 
 ## Followup
@@ -141,14 +141,14 @@ reopened.
 
 | field | presence | meaning |
 | --- | --- | --- |
-| `machine` | always, once | the machine topic of the host the claim is on |
+| `machine` | always, once | the topic of the machine the claim is on |
 | `topic` | always, once | the topic placed |
 | `directory` | if set, once | where: `~`, a path under `~/`, or an absolute path |
 
-A directory at or under the host's home is stored in the `~` form, after
-the links in it are followed, so one store serves hosts whose homes are in
-different places. A claim with no directory places its topic in every
-session that no claimed directory covers.
+A directory at or under the machine's home is stored in the `~` form,
+after the links in it are followed, so one store serves machines whose
+homes are in different places. A claim with no directory places its topic
+in every session that no claimed directory covers.
 
 ## Ending
 
@@ -218,7 +218,7 @@ tabs of their own.
 form a claim stores, and a claim covers its directory and everything under
 it by whole path components.
 
-1. The claims are those of the host's machine topic that are not ended and
+1. The claims are those of the machine topic that are not ended and
    whose topic is not ended.
 2. Where a claim with a directory covers the session's directory, the
    claimed topics are those of every such claim, the deepest directory

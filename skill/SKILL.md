@@ -263,13 +263,13 @@ lists the topics directly part of one.
 
 ## Machines and claims
 
-A host is set up once, by the user: `worklog init` asks for the store
+A machine is set up once, by the user: `worklog init` asks for the store
 and the machine topic, and the user answers. Until then every command
 that uses the store is refused, and `context` prints only a note saying so
-and exits 0. The machine topic loads in every session on that host; facts
-about the machine go under it. When `context` reports that the machine
-topic has no summary, write one from what the machine is (`worklog
-checkout <name>`, edit the draft, `worklog save <name>`).
+and exits 0. The machine topic loads in every session on that machine;
+facts about the machine go under it. When `context` reports that the
+machine topic has no summary, write one from what the machine is
+(`worklog checkout <name>`, edit the draft, `worklog save <name>`).
 
 A claim places a topic in a directory of this machine: `worklog claim
 <topic>` from inside the checkout, or `worklog claim <topic> <dir>`.
@@ -379,7 +379,7 @@ the user. A forked document takes no other change until resolved. Neither
 does one holding a version this binary cannot read: report it and leave
 it.
 
-`worklog drafts` lists the drafts open on this host, this session's
+`worklog drafts` lists the drafts open on this machine, this session's
 and any other's: a draft is the session's that opened it. Each line says
 whose it is, `this session`, another session's or `no session`, and how
 long ago it was last touched. Save or discard only a draft this session

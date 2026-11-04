@@ -110,18 +110,18 @@ pub enum Invoked {
 
 #[derive(Subcommand)]
 pub enum ToolCommand {
-    /// Configure the coding agents on this host to use this tool, or take that back
+    /// Configure the coding agents on this machine to use this tool, or take that back
     Agents {
         #[command(subcommand)]
         action: AgentsAction,
     },
-    /// Bring what `agents install` placed, and fish's completions where fish is set up, up to
-    /// this binary, and write nothing else
+    /// Bring what `agents install` placed, and fish's completions where their directory exists,
+    /// up to this binary, and write nothing else
     Refresh,
     /// The line a shell's startup file holds to take its completions from this binary
     Completions { shell: Shell },
     /// Put the latest release in the place of this binary when it is newer, and bring the
-    /// skill, the hook, and fish's completions where fish is set up, up to it
+    /// skill, the hook, and fish's completions where their directory exists, up to it
     Upgrade {
         /// Only say whether a newer release exists
         #[arg(long)]
@@ -134,7 +134,7 @@ pub enum ToolCommand {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Subcommand)]
 pub enum AgentsAction {
-    /// Configure every agent on this host to use this tool
+    /// Configure every agent on this machine to use this tool
     Install,
     /// Bring what an install placed up to this binary, and write nothing else
     Refresh,
@@ -144,15 +144,15 @@ pub enum AgentsAction {
 
 #[derive(Subcommand)]
 pub enum HostCommand {
-    /// Bind this host to a new store, or with no argument ask which store to use; done once per
-    /// host
+    /// Set this machine up with a new store, or with no argument ask which store to use; done
+    /// once per machine
     ///
-    /// With no argument it asks on a terminal, and joins a store the directory already holds.
+    /// It asks only on a terminal, and joins a store the directory already holds.
     Init {
         #[command(flatten)]
         given: Option<InitArgs>,
     },
-    /// Bind this host to a store another machine shares; done once per host
+    /// Set this machine up with a store another machine shares; done once per machine
     Join {
         /// The machine topic: one the store holds, or with `--summary` a new one
         name: String,
@@ -162,7 +162,7 @@ pub enum HostCommand {
         /// What the machine is, for a machine topic new to the store
         #[arg(long)]
         summary: Option<String>,
-        /// Also configure every coding agent on this host to use this tool
+        /// Also configure every coding agent on this machine to use this tool
         #[arg(long)]
         agents: bool,
     },
@@ -180,7 +180,7 @@ pub struct InitArgs {
     /// What the machine is; without it the topic carries a placeholder until one is written
     #[arg(long, requires = "name")]
     pub summary: Option<String>,
-    /// Also configure every coding agent on this host to use this tool
+    /// Also configure every coding agent on this machine to use this tool
     #[arg(long, requires = "name")]
     pub agents: bool,
 }
@@ -447,7 +447,7 @@ pub enum ReadCommand {
 
 #[derive(Subcommand)]
 pub enum ListCommand {
-    /// Every draft on this host
+    /// Every draft on this machine
     Drafts,
     /// Every topic with what it is, or the topics that are part of one
     Topics {

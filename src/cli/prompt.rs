@@ -15,10 +15,9 @@ const DEFAULT_STORE: &str = "worklog";
 
 fn no_terminal() -> Failure {
     Failure::Usage(format!(
-        "`init` alone asks its questions on a terminal. A host is set up by its user, who gives \
-         the directory of the store; without a terminal, `{NAME} init <NAME> --store <DIR>` \
-         starts a new store and `{NAME} join <NAME> --store <DIR>` binds this host to a shared \
-         one"
+        "`init` alone asks its questions on a terminal. A machine is set up by its user, who \
+         gives the directory of the store; without a terminal, `{NAME} init <NAME> --store \
+         <DIR>` starts a new store and `{NAME} join <NAME> --store <DIR>` joins a shared one"
     ))
 }
 
@@ -241,7 +240,7 @@ fn init(
              have synced to this one yet."
         ));
     }
-    if !terminal.consent("Set this host up?", !unsynced)? {
+    if !terminal.consent("Set this machine up?", !unsynced)? {
         return Err(Failure::Refused("nothing was written".to_owned()).into());
     }
     initialized(placing, json, || match (starting, held) {
@@ -268,7 +267,7 @@ mod tests {
     fn unsynced(name: &str) -> String {
         format!(
             "{name}, a new topic\nThe store holds no topic named {name}. A store shared between \
-             machines may not have synced to this one yet.\nSet this host up? [y/N]: "
+             machines may not have synced to this one yet.\nSet this machine up? [y/N]: "
         )
     }
 
@@ -343,9 +342,9 @@ mod tests {
             "This machine is lantern, found in the store.\n\
              Machine topic [lantern]: The store: /home/desk/worklog\n\
              The machine: lantern, the topic in the store\n\
-             Set this host up? [Y/n]: "
+             Set this machine up? [Y/n]: "
         );
-        assert_eq!(printed(&asked), "lantern bound\n");
+        assert_eq!(printed(&asked), "lantern joined\n");
         assert_eq!(world.host.machine(), Ok(Some(lantern)));
         assert_eq!(summary_of(&world), "s");
     }
@@ -390,9 +389,9 @@ mod tests {
         let from_the_list = asked(&world, "phone\n\n");
         assert_eq!(
             from_the_list.shown,
-            format!("{listed}{CONFIRM}phone, the topic in the store\nSet this host up? [Y/n]: ")
+            format!("{listed}{CONFIRM}phone, the topic in the store\nSet this machine up? [Y/n]: ")
         );
-        assert_eq!(printed(&from_the_list), "phone bound\n");
+        assert_eq!(printed(&from_the_list), "phone joined\n");
         assert_eq!(world.host.machine(), Ok(Some(phone)));
     }
 
@@ -426,7 +425,7 @@ mod tests {
                 "{}",
                 asked.shown
             );
-            assert_eq!(printed(&asked), "desk bound\n");
+            assert_eq!(printed(&asked), "desk joined\n");
         }
     }
 
@@ -509,7 +508,7 @@ mod tests {
                 asked.shown,
                 format!(
                     "{NOTHING_HELD}Machine topics:\n  desk (new)\nMachine topic: \
-                     {CONFIRM}desk, a new topic\nSet this host up? [Y/n]: "
+                     {CONFIRM}desk, a new topic\nSet this machine up? [Y/n]: "
                 )
             );
             assert_eq!(printed(&asked), "desk created\n");
@@ -525,7 +524,7 @@ mod tests {
             asked.shown,
             format!(
                 "{NOTHING_HELD}Machine topic: {CONFIRM}desk, a new topic\n\
-                 Set this host up? [Y/n]: "
+                 Set this machine up? [Y/n]: "
             )
         );
         assert_eq!(printed(&asked), "desk created\n");
@@ -552,7 +551,7 @@ mod tests {
         let start = "Start a new store there? [y/N]: ";
         let both = format!("{start}{YES_OR_NO}{start}{YES_OR_NO}{start}Machine topics:");
         assert!(started.shown.contains(&both), "{}", started.shown);
-        let confirm = "Set this host up? [Y/n]: ";
+        let confirm = "Set this machine up? [Y/n]: ";
         assert!(
             started
                 .shown
@@ -597,7 +596,7 @@ mod tests {
     fn a_host_that_is_bound_is_refused_before_it_is_asked_anything() {
         let (world, _) = world();
         let asked = asked(&world, "atlas\n\n");
-        assert_eq!(refused(&asked), "this host is already set up as desk");
+        assert_eq!(refused(&asked), "this machine is already set up as desk");
         assert_eq!(asked.shown, "");
     }
 
@@ -777,7 +776,7 @@ mod tests {
         let asked = asked_in(&world, &environment(&|_| None), b"\xff\ndesk\n\n");
         let again = "Machine topic: The answer is not UTF-8.\nMachine topic: ";
         assert!(asked.shown.contains(again), "{}", asked.shown);
-        assert_eq!(printed(&asked), "desk bound\n");
+        assert_eq!(printed(&asked), "desk joined\n");
     }
 
     #[test]

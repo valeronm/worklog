@@ -37,7 +37,7 @@ impl Initialized {
 
 impl Render for Initialized {
     fn text(&self) -> String {
-        let how = if self.created { "created" } else { "bound" };
+        let how = if self.created { "created" } else { "joined" };
         format!("{} {how}\n{}", self.label, agents::lines(&self.written))
     }
 }
@@ -103,7 +103,7 @@ pub(super) fn initialized(
     let installed = placing.map_or(Ok(()), |placing| placing.install_into(&mut done));
     if installed.is_err() {
         done.notes.push(format!(
-            "this host is set up as {}; `{NAME} agents install` finishes the agents",
+            "this machine is set up as {}; `{NAME} agents install` finishes the agents",
             bound.label
         ));
     }
@@ -129,6 +129,6 @@ mod tests {
         assert_eq!(made.text(), "atlas created\n/home/desk/a\n/home/desk/b\n");
         made.created = false;
         made.written.clear();
-        assert_eq!(made.text(), "atlas bound\n");
+        assert_eq!(made.text(), "atlas joined\n");
     }
 }

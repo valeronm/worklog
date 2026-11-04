@@ -262,7 +262,7 @@ mod tests {
         ] {
             assert!(lines.iter().any(|line| line == held), "{held:?}");
         }
-        let not_set_up = format!("{NAME}: this host is not set up; run `{NAME} init`\n");
+        let not_set_up = format!("{NAME}: this machine is not set up; run `{NAME} init`\n");
         for line in &lines {
             let words: Vec<&str> = line.iter().map(String::as_str).collect();
             assert!(

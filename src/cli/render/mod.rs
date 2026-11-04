@@ -278,13 +278,13 @@ mod tests {
         assert_eq!((json.notes.len(), json.exit), (0, 0));
         assert_eq!(output(&(), false).text, "");
 
-        let noted = Output::note("this host is not set up".to_owned(), false);
+        let noted = Output::note("this machine is not set up".to_owned(), false);
         assert_eq!(noted.text, "");
-        assert_eq!(noted.notes, ["this host is not set up"]);
+        assert_eq!(noted.notes, ["this machine is not set up"]);
         assert_eq!(noted.exit, 0);
-        let noted = Output::note("this host is not set up".to_owned(), true);
+        let noted = Output::note("this machine is not set up".to_owned(), true);
         assert_eq!(noted.text, "null\n");
-        assert_eq!(noted.notes, ["this host is not set up"]);
+        assert_eq!(noted.notes, ["this machine is not set up"]);
         assert_eq!(noted.exit, 0);
     }
 
