@@ -22,6 +22,17 @@ pub fn set(variable: impl Fn(&str) -> Option<OsString>, name: &str) -> Option<Os
     variable(name).filter(|value| !value.is_empty())
 }
 
+// A relative path names another directory for each directory a command runs in.
+fn absolute(variable: &str, path: &Path) -> Result<(), StoreError> {
+    if path.is_absolute() {
+        return Ok(());
+    }
+    Err(StoreError::io(
+        format!("${variable}"),
+        "is not an absolute path",
+    ))
+}
+
 impl Paths {
     /// Refuses a `HOME` that is not UTF-8 or not an absolute path.
     pub fn home(variable: impl Fn(&str) -> Option<OsString>) -> Result<Option<String>, StoreError> {
@@ -31,9 +42,7 @@ impl Paths {
         let Ok(home) = home.into_string() else {
             return Err(StoreError::io("$HOME", "is not UTF-8"));
         };
-        if !Path::new(&home).is_absolute() {
-            return Err(StoreError::io("$HOME", "is not an absolute path"));
-        }
+        absolute("HOME", Path::new(&home))?;
         Ok(Some(home))
     }
 
@@ -47,13 +56,7 @@ impl Paths {
                 .map(|home| PathBuf::from(home).join(".config"))
         });
         if let Some(root) = set(OVERRIDE) {
-            // A relative root names another directory for each directory a command runs in.
-            if !root.is_absolute() {
-                return Err(StoreError::io(
-                    format!("${OVERRIDE}"),
-                    "is not an absolute path",
-                ));
-            }
+            absolute(OVERRIDE, &root)?;
             return Ok(Paths {
                 config: root.join("config.toml"),
                 drafts: root.join("drafts"),

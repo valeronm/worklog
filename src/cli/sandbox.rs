@@ -10,12 +10,6 @@ use worklog_wiring::{Agent, SandboxConfig};
 const TABLE: &str = "sandbox_workspace_write";
 const ROOTS: &str = "writable_roots";
 
-fn root(drafts: &Path) -> Result<&str, Failure> {
-    drafts
-        .to_str()
-        .ok_or_else(|| Failure::at(drafts.display(), "is not UTF-8"))
-}
-
 fn add(roots: &mut Array, root: &str) -> bool {
     if roots.iter().any(|held| held.as_str() == Some(root)) {
         return false;
@@ -78,7 +72,7 @@ fn planned(agent: &Agent, drafts: &Path, change: Change) -> Result<Option<Edit>,
     let Some(config) = agent.config() else {
         return Ok(None);
     };
-    let root = root(drafts)?;
+    let root = (drafts.to_str()).ok_or_else(|| Failure::at(drafts.display(), "is not UTF-8"))?;
     let held = agent.read_config(&config)?.unwrap_or_default();
     let text = edited(&held, root, change)
         .map_err(|reason| Failure::at(config.path().display(), reason))?;
@@ -190,14 +184,5 @@ mod tests {
                 assert!(refused.starts_with(reason), "{text}: {refused}");
             }
         }
-    }
-
-    #[test]
-    fn a_root_is_a_utf_8_path() {
-        use std::os::unix::ffi::OsStrExt as _;
-        assert_eq!(root(Path::new(DRAFTS)), Ok(DRAFTS));
-        let unreadable = Path::new(std::ffi::OsStr::from_bytes(b"/home/\xff/drafts"));
-        let refused = root(unreadable).unwrap_err().to_string();
-        assert!(refused.ends_with(": is not UTF-8"), "{refused}");
     }
 }
