@@ -19,7 +19,7 @@ pub fn resolve(deps: &Deps, address: &str) -> Result<DraftRef, Failure> {
     };
     refuse_open(&deps.read(), &id, &label)?;
     if !document.unreadable().is_empty() {
-        return Err(unreadable(&label));
+        return Err(unreadable(&document, &label));
     }
     let Some((shown, _)) = row_head(&document) else {
         return Err(no_head_reads(&label));

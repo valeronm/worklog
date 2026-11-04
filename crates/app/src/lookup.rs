@@ -12,10 +12,10 @@ use crate::heads::{
 };
 use crate::rows::Reference;
 use crate::{Failure, kind_named};
-use worklog_domain::document::{Document, State};
+use worklog_domain::document::{Document, State, Unreadable};
 use worklog_domain::id::{DocumentId, VersionId};
 use worklog_domain::ports::{NotRead, StoreRead};
-use worklog_domain::version::{Header, Kind, Version};
+use worklog_domain::version::{Header, Kind, ReadError, Version};
 use worklog_schema::address::{Address, Candidate, Found, Holds, choose, displayed, holds};
 use worklog_schema::{Content, Date, KindOf, Name, Record};
 
@@ -32,7 +32,11 @@ pub(super) fn draft_open(what: &str) -> Failure {
     Failure::Refused(format!("a draft of {what} is open"))
 }
 
-pub(super) fn unreadable(what: &str) -> Failure {
+pub(super) fn unreadable(document: &Document, what: &str) -> Failure {
+    let newer = |file: &Unreadable| matches!(file.why, ReadError::Newer { .. });
+    if document.unreadable().iter().all(newer) {
+        return Failure::at(what, "holds a version a newer worklog wrote; upgrade first");
+    }
     Failure::at(what, "holds a version this worklog cannot read")
 }
 
@@ -92,7 +96,7 @@ pub(super) fn write_gate<'d>(
         return Err(draft_open(what));
     }
     if !document.unreadable().is_empty() {
-        return Err(unreadable(what));
+        return Err(unreadable(document, what));
     }
     one_head(document, what)
 }
@@ -900,6 +904,38 @@ mod tests {
             "{text}"
         );
         assert!(lookup.only_head(&lantern, "lantern").is_ok());
+    }
+
+    #[test]
+    fn a_document_holding_only_versions_a_newer_release_wrote_is_refused_with_the_upgrade() {
+        let world = World::new();
+        let _machine = topic(&world, "desk", "");
+        let lantern = topic(&world, "lantern", "");
+        let refusal = || {
+            let Err(Failure::Refused(text)) = world.lookup().writable(&lantern, false, "lantern")
+            else {
+                panic!("a document holding an unreadable file must be refused");
+            };
+            text
+        };
+        world.store.plant_unreadable(
+            &lantern,
+            VersionId::of(b"newer"),
+            ReadError::Newer { format: 2 },
+        );
+        let text = refusal();
+        assert!(
+            text.contains("lantern: holds a version a newer worklog wrote; upgrade first"),
+            "{text}"
+        );
+        world
+            .store
+            .plant_unreadable(&lantern, VersionId::of(b"damaged"), ReadError::Corrupt);
+        let text = refusal();
+        assert!(
+            text.contains("lantern: holds a version this worklog cannot read"),
+            "{text}"
+        );
     }
 
     #[test]

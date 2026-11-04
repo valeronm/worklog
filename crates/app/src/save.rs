@@ -170,7 +170,7 @@ impl<'a, 'b> Target<'a, 'b> {
 
     fn admits(&self, fork: Fork) -> Result<(), Failure> {
         if !self.document.unreadable().is_empty() {
-            return Err(unreadable(&self.what));
+            return Err(unreadable(&self.document, &self.what));
         }
         if let Some(stored) = self.document.kind()
             && *stored != self.kind
