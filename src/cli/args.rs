@@ -320,7 +320,7 @@ pub enum ChangeCommand {
         followup: String,
         note: Option<String>,
     },
-    /// Set when a followup comes up again: `<date> <why>`, `touching <topic>`, or `none`
+    /// Set when a followup comes up again: `<date> <why>` or `touching <topic>`
     Trigger {
         #[arg(add = complete::followups())]
         followup: String,
@@ -554,7 +554,6 @@ mod tests {
             "worklog drop 0a1b note",
             "worklog trigger 0a1b 2026-11-01 why",
             "worklog trigger 0a1b touching lantern",
-            "worklog trigger 0a1b none",
             "worklog claim lantern --anywhere",
             "worklog unclaim lantern --anywhere",
             "worklog claim lantern",
