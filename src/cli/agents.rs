@@ -210,6 +210,13 @@ impl Placing {
 pub(super) struct Refreshing {
     refreshed: Vec<Refreshed>,
     drafts: PathBuf,
+    fish: Option<Fish>,
+}
+
+/// `line` is `None` where the binary's file name is not the command's.
+pub(super) struct Fish {
+    pub(super) file: PathBuf,
+    pub(super) line: Option<String>,
 }
 
 struct Refreshed {
@@ -231,11 +238,11 @@ impl Refreshed {
 }
 
 impl Refreshing {
-    /// `None`, with a note in `done`, when an agent holds the skill or the hook, or `also_there`
-    /// is set, and this binary is not the one `PATH` finds.
+    /// `None`, with a note in `done`, when an agent holds the skill or the hook, or `fish` is
+    /// given, and this binary is not the one `PATH` finds.
     pub(super) fn on_this_host(
         environment: &Environment,
-        also_there: bool,
+        fish: Option<Fish>,
         done: &mut Done,
     ) -> Result<Option<Refreshing>, Failure> {
         let agents = worklog_wiring::agents(environment.variable)?;
@@ -255,12 +262,16 @@ impl Refreshing {
             .into_iter()
             .map(refreshed)
             .collect::<Result<_, Failure>>()?;
-        let there = also_there || refreshed.iter().any(|refreshed| refreshed.installed);
-        if let Some(why) = there.then(|| unfound(environment)).transpose()?.flatten() {
+        let there = fish.is_some() || refreshed.iter().any(|refreshed| refreshed.installed);
+        if there && let Some(why) = unfound(environment)? {
             done.notes.push(format!("{why}; nothing is refreshed"));
             return Ok(None);
         }
-        Ok(Some(Refreshing { refreshed, drafts }))
+        Ok(Some(Refreshing {
+            refreshed,
+            drafts,
+            fish,
+        }))
     }
 
     pub(super) fn write_into(
@@ -281,8 +292,23 @@ impl Refreshing {
                 Ok(hook::refreshed(agent, || environment.binary())?.1)
             })?;
         }
+        if let Some(Fish {
+            file,
+            line: Some(line),
+        }) = &self.fish
+        {
+            worklog_wiring::write_completions(file, line)?;
+            done.wrote(file);
+        }
         Ok(())
     }
+}
+
+fn refresh_into(environment: &Environment, done: &mut Done) -> Result<(), Failure> {
+    if let Some(refreshing) = Refreshing::on_this_host(environment, None, done)? {
+        refreshing.write_into(environment, done)?;
+    }
+    Ok(())
 }
 
 /// `on_this_host` refuses before anything is written, unless the binary is the one `PATH` finds
@@ -331,17 +357,14 @@ pub(super) fn run(
     json: bool,
 ) -> Result<Output, Stopped> {
     let mut done = Done::default();
-    let ended =
-        match action {
-            AgentsAction::Install => Placing::on_this_host(environment)
-                .and_then(|placing| placing.install_into(&mut done)),
-            AgentsAction::Refresh => Refreshing::on_this_host(environment, false, &mut done)
-                .and_then(|agents| {
-                    agents.map_or(Ok(()), |agents| agents.write_into(environment, &mut done))
-                }),
-            AgentsAction::Uninstall => Uninstalling::on_this_host(environment)
-                .and_then(|uninstalling| uninstalling.uninstall_into(&mut done)),
-        };
+    let ended = match action {
+        AgentsAction::Install => {
+            Placing::on_this_host(environment).and_then(|placing| placing.install_into(&mut done))
+        }
+        AgentsAction::Refresh => refresh_into(environment, &mut done),
+        AgentsAction::Uninstall => Uninstalling::on_this_host(environment)
+            .and_then(|uninstalling| uninstalling.uninstall_into(&mut done)),
+    };
     done.ended(ended, json, |written| Placed { written })
 }
 
@@ -398,7 +421,7 @@ mod tests {
             binary: Some(moved.clone()),
             ..environment(&variable)
         };
-        let refreshing = Refreshing::on_this_host(&environment, false, &mut Done::default())
+        let refreshing = Refreshing::on_this_host(&environment, None, &mut Done::default())
             .unwrap()
             .expect("a refresh from the binary PATH finds");
         let hooks = home.join(".claude").join("settings.json");
