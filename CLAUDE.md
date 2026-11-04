@@ -39,8 +39,9 @@ unless the layer test lists it as a write or as shared.
 `wiring` builds the adapters and keeps them to itself: `fs` implements the
 ports on a directory tree and `net` the one port that reaches the network,
 the releases `upgrade` reads. `WORKLOG_RELEASES=<dir>` swaps in a
-directory, and the layer test holds every helper of `tests/cli.rs` that
-runs the binary to set it, so no test touches the network.
+directory, and the layer test holds every test but its own to make each
+command in one `program` helper that sets it, so no test touches the
+network.
 
 `cli` parses arguments and renders, and `main.rs` only calls it. It reads
 the process only where the process starts and where a shell asks for

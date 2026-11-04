@@ -4,11 +4,10 @@ use std::fs;
 use std::io::{BufRead as _, BufReader, Read as _, Write as _};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Stdio};
+use std::process::{Child, Command, Output, Stdio};
 use std::sync::{OnceLock, mpsc};
 use std::time::{Duration, Instant};
 
-use assert_cmd::Command;
 use serde_json::Value;
 
 const SUMMARY: (&str, &str) = ("summary = \"\"", "summary = \"Pin four\"");
@@ -32,6 +31,35 @@ struct Ran {
     stdout: String,
     stderr: String,
     code: Option<i32>,
+}
+
+impl From<Output> for Ran {
+    fn from(output: Output) -> Ran {
+        Ran {
+            stdout: String::from_utf8(output.stdout).unwrap(),
+            stderr: String::from_utf8(output.stderr).unwrap(),
+            code: output.status.code(),
+        }
+    }
+}
+
+fn run_as(mut program: Command, dir: &Path, args: &[&str]) -> Ran {
+    let output = program.current_dir(dir).args(args).output();
+    Ran::from(output.expect("the binary runs"))
+}
+
+fn fed(mut program: Command, dir: &Path, args: &[&str], input: &str) -> Ran {
+    let mut child = (program.current_dir(dir).args(args))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("the binary runs");
+    let mut stdin = child.stdin.take().expect("a piped stdin");
+    // A run that never reads its input may have ended before it is written.
+    let _ = stdin.write_all(input.as_bytes());
+    drop(stdin);
+    Ran::from(child.wait_with_output().expect("the binary ends"))
 }
 
 struct Host {
@@ -94,14 +122,11 @@ impl Host {
     }
 
     fn run_in(&self, dir: &Path, args: &[&str]) -> Ran {
-        self.run_as(
-            Command::cargo_bin("worklog").expect("the binary"),
-            dir,
-            args,
-        )
+        run_as(self.program(&binary()), dir, args)
     }
 
-    /// Has `PATH` find each binary a run starts as `worklog`, as on a host it is installed on.
+    /// Has `PATH` find the binary of each command `program` makes as `worklog`, as on a host it
+    /// is installed on.
     fn on_path(mut self) -> Host {
         self.on_path = true;
         self
@@ -115,47 +140,28 @@ impl Host {
         path_finding(&link)
     }
 
-    fn found(&self) -> Command {
-        let mut program = Command::cargo_bin("worklog").expect("the binary");
-        let path = self.finding_as_worklog(Path::new(program.get_program()));
-        program.env("PATH", path);
+    /// A command running `binary` on this host, away from the network and the real home; what a
+    /// test sets on it afterwards wins.
+    fn program(&self, binary: &Path) -> Command {
+        let mut program = Command::new(binary);
+        if self.on_path {
+            program.env("PATH", self.finding_as_worklog(binary));
+        }
+        for (_, variable) in SESSIONS {
+            program.env_remove(variable);
+        }
+        (program.env(RELEASES, self.unpublished()))
+            .env(OVERRIDE, self.root.join("next"))
+            .env("HOME", self.home())
+            .env_remove("XDG_CONFIG_HOME")
+            .env_remove("XDG_STATE_HOME");
         program
     }
 
-    fn run_as(&self, mut program: Command, dir: &Path, args: &[&str]) -> Ran {
-        if self.on_path && !program.get_envs().any(|(name, _)| name == "PATH") {
-            let path = self.finding_as_worklog(Path::new(program.get_program()));
-            program.env("PATH", path);
-        }
-        for (_, variable) in SESSIONS {
-            if !program.get_envs().any(|(name, _)| name == variable) {
-                program.env_remove(variable);
-            }
-        }
-        if !program
-            .get_envs()
-            .any(|(name, _)| name == "XDG_CONFIG_HOME")
-        {
-            program.env_remove("XDG_CONFIG_HOME");
-        }
-        if !program.get_envs().any(|(name, _)| name == RELEASES) {
-            program.env(RELEASES, self.unpublished());
-        }
-        if !program.get_envs().any(|(name, _)| name == OVERRIDE) {
-            program.env(OVERRIDE, self.root.join("next"));
-        }
-        let output = program
-            .env("HOME", self.home())
-            .env_remove("XDG_STATE_HOME")
-            .current_dir(dir)
-            .args(args)
-            .output()
-            .expect("the binary runs");
-        Ran {
-            stdout: String::from_utf8(output.stdout).unwrap(),
-            stderr: String::from_utf8(output.stderr).unwrap(),
-            code: output.status.code(),
-        }
+    fn found(&self) -> Command {
+        let mut program = self.program(&binary());
+        program.env("PATH", self.finding_as_worklog(&binary()));
+        program
     }
 
     fn run(&self, args: &[&str]) -> Ran {
@@ -676,9 +682,9 @@ fn a_listed_draft_is_this_session_s_only_in_the_session_that_opened_it() {
     let host = Host::set_up("desk");
     let (agent, variable) = SESSIONS[0];
     let in_session = |args: &[&str]| {
-        let mut program = Command::cargo_bin("worklog").expect("the binary");
+        let mut program = host.program(&binary());
         program.env(variable, "7f3a91c0-55e2");
-        let ran = host.run_as(program, &host.home(), args);
+        let ran = run_as(program, &host.home(), args);
         assert_eq!((ran.stderr.as_str(), ran.code), ("", Some(0)), "{args:?}");
         ran.stdout
     };
@@ -2303,20 +2309,7 @@ impl Host {
     }
 
     fn spawned_on(&self, stdin: Stdio, args: &[&str]) -> Spawned {
-        let binary = Path::new(env!("CARGO_BIN_EXE_worklog"));
-        let mut program = std::process::Command::new(binary);
-        if self.on_path {
-            program.env("PATH", self.finding_as_worklog(binary));
-        }
-        for (_, variable) in SESSIONS {
-            program.env_remove(variable);
-        }
-        let child = program
-            .env(OVERRIDE, self.root.join("next"))
-            .env("HOME", self.home())
-            .env(RELEASES, self.unpublished())
-            .env_remove("XDG_CONFIG_HOME")
-            .env_remove("XDG_STATE_HOME")
+        let child = (self.program(&binary()))
             .current_dir(self.home())
             .args(args)
             .stdin(stdin)
@@ -2518,12 +2511,7 @@ fn serve_is_refused_before_it_listens_on_a_host_or_an_address_it_cannot_serve() 
 }
 
 fn binary() -> PathBuf {
-    fs::canonicalize(
-        Command::cargo_bin("worklog")
-            .expect("the binary")
-            .get_program(),
-    )
-    .expect("the binary's own path")
+    fs::canonicalize(env!("CARGO_BIN_EXE_worklog")).expect("the binary's own path")
 }
 
 impl Host {
@@ -2750,9 +2738,9 @@ fn only_the_binary_path_finds_sets_the_agents_up_or_takes_them_back() {
         .on_path()
         .with_agents(&[".claude", ".codex"]);
     let elsewhere = |args: &[&str]| {
-        let mut program = Command::cargo_bin("worklog").expect("the binary");
+        let mut program = host.program(&binary());
         program.env("PATH", &host.root);
-        host.run_as(program, &host.home(), args)
+        run_as(program, &host.home(), args)
     };
     let not_found = format!(
         "worklog: {}: not the worklog that PATH finds, which is the one an agent runs",
@@ -3130,8 +3118,8 @@ fn a_codex_config_of_another_shape_is_refused_and_nothing_is_written() {
 fn agents_refresh_under_another_file_name_is_refused_only_over_a_hook() {
     let host = Host::new().on_path().with_agents(&[".claude", ".codex"]);
     let renamed = host.root.join("worklog-0.3.0");
-    copy_of_the_binary(&renamed);
-    let refresh = || host.run_as(Command::new(&renamed), &host.home(), &["agents", "refresh"]);
+    host.copy_of_the_binary(&renamed);
+    let refresh = || run_as(host.program(&renamed), &host.home(), &["agents", "refresh"]);
     let before = snapshot(&host);
     let ran = refresh();
     assert_eq!((ran.stdout.as_str(), ran.stderr.as_str()), ("", ""));
@@ -3265,9 +3253,9 @@ fn refresh_follows_the_config_directory_the_environment_gives_fish() {
     let under_home = host.fish();
     let given = host.root.join("config");
     fs::create_dir_all(given.join("fish/completions")).unwrap();
-    let mut program = Command::cargo_bin("worklog").expect("the binary");
+    let mut program = host.program(&binary());
     program.env("XDG_CONFIG_HOME", &given);
-    let ran = host.run_as(program, &host.home(), &["refresh"]);
+    let ran = run_as(program, &host.home(), &["refresh"]);
     let written = given.join("fish/completions/worklog.fish");
     assert_eq!(
         (ran.stdout, ran.stderr, ran.code),
@@ -3281,9 +3269,9 @@ fn refresh_follows_the_config_directory_the_environment_gives_fish() {
     assert!(!under_home.exists());
 
     fs::create_dir_all(host.home().join("config/fish/completions")).unwrap();
-    let mut program = Command::cargo_bin("worklog").expect("the binary");
+    let mut program = host.program(&binary());
     program.env("XDG_CONFIG_HOME", "config");
-    let ran = host.run_as(program, &host.home(), &["refresh"]);
+    let ran = run_as(program, &host.home(), &["refresh"]);
     assert_eq!(
         (ran.stdout, ran.stderr, ran.code),
         (
@@ -3309,8 +3297,8 @@ fn refresh_under_another_file_name_writes_for_the_agents_and_no_completions() {
     let host = Host::set_up("desk").on_path().with_agents(&[".claude"]);
     let completions = host.fish();
     let renamed = host.root.join("worklog-0.3.0");
-    copy_of_the_binary(&renamed);
-    let run = |line: &[&str]| host.run_as(Command::new(&renamed), &host.home(), line);
+    host.copy_of_the_binary(&renamed);
+    let run = |line: &[&str]| run_as(host.program(&renamed), &host.home(), line);
     let before = snapshot(&host);
     let ran = run(&["refresh"]);
     assert_eq!(
@@ -3381,7 +3369,7 @@ fn install_and_uninstall_leave_the_fish_completions_as_they_are() {
 impl Host {
     fn asking(&self, mut program: Command, words: &[&str]) -> Ran {
         program.env("COMPLETE", "fish");
-        self.run_as(program, &self.home(), words)
+        run_as(program, &self.home(), words)
     }
 
     fn completing(&self, program: Command, words: &[&str]) -> Ran {
@@ -3711,7 +3699,7 @@ fn a_shell_asking_for_candidates_is_no_run_the_usage_log_holds() {
     for unset in ["", "0"] {
         let mut program = host.found();
         program.env("COMPLETE", unset);
-        let ran = host.run_as(program, &host.home(), &["topics"]);
+        let ran = run_as(program, &host.home(), &["topics"]);
         assert_eq!(
             (ran.stdout.as_str(), ran.stderr.as_str(), ran.code),
             (listed.as_str(), "", Some(0)),
@@ -3729,7 +3717,7 @@ fn path_finding(binary: &Path) -> OsString {
 
 impl Host {
     fn used(&self, args: &[&str]) -> Ran {
-        self.run_as(self.found(), &self.home(), args)
+        run_as(self.found(), &self.home(), args)
     }
 
     fn used_ok(&self, args: &[&str]) -> String {
@@ -3869,7 +3857,7 @@ fn every_run_is_logged_under_the_machine_that_ran_it() {
 
     host.used_ok(&["--json", "topics"]);
     host.used_ok(&["topics", "--json"]);
-    host.run_as(
+    run_as(
         host.found(),
         &host.home().join("projects/lantern"),
         &["topics"],
@@ -4001,13 +3989,13 @@ fn a_run_inside_an_agent_s_session_is_logged_with_its_id_and_the_first_agent_s_w
     for (variable, id) in [(SESSIONS[0].1, "s-0"), (SESSIONS[1].1, "s-1")] {
         let mut program = host.found();
         program.env(variable, id);
-        assert_eq!(host.run_as(program, &home, &["facts"]).code, Some(0));
+        assert_eq!(run_as(program, &home, &["facts"]).code, Some(0));
     }
     let mut nested = host.found();
     for (_, variable) in SESSIONS {
         nested.env(variable, "s-nested");
     }
-    assert_eq!(host.run_as(nested, &home, &["facts"]).code, Some(0));
+    assert_eq!(run_as(nested, &home, &["facts"]).code, Some(0));
     host.used_ok(&["facts"]);
     let expected = [
         within(SESSIONS[0].0, "s-0"),
@@ -4025,11 +4013,10 @@ fn a_context_an_agent_s_hook_runs_is_logged_in_the_session_its_input_holds() {
     let plain = host.used_ok(&["context"]);
     let hooked = |input: &str, args: &[&str], outer: bool| {
         let mut program = host.found();
-        program.write_stdin(input);
         if outer {
             program.env(SESSIONS[0].1, "s-outer");
         }
-        let ran = host.run_as(program, &home, args);
+        let ran = fed(program, &home, args, input);
         assert_eq!((ran.stdout.as_str(), ran.code), (plain.as_str(), Some(0)));
     };
     let given = r#"{"session_id": "s-9", "cwd": "/home/desk", "source": "startup"}"#;
@@ -4075,14 +4062,14 @@ fn a_binary_the_path_does_not_find_logs_nothing() {
     let elsewhere = host.root.join("bench");
     fs::create_dir_all(&elsewhere).unwrap();
     fs::write(elsewhere.join("worklog"), "").unwrap();
-    let mut shadowed = Command::cargo_bin("worklog").expect("the binary");
+    let mut shadowed = host.program(&binary());
     let finding = host.finding_as_worklog(&binary());
     let behind = std::iter::once(elsewhere.clone()).chain(std::env::split_paths(&finding));
     shadowed.env("PATH", std::env::join_paths(behind).unwrap());
-    let mut unfound = Command::cargo_bin("worklog").expect("the binary");
+    let mut unfound = host.program(&binary());
     unfound.env("PATH", &elsewhere);
     for program in [shadowed, unfound] {
-        let off = host.run_as(program, &host.home(), &["facts", "lantern"]);
+        let off = run_as(program, &host.home(), &["facts", "lantern"]);
         assert_eq!((off.stderr.as_str(), off.code), ("", Some(0)));
     }
     assert_eq!(host.usage_files(), [""; 0]);
@@ -4271,7 +4258,7 @@ impl Host {
         let prefix = self.home().join(".local/bin");
         fs::create_dir_all(&prefix).unwrap();
         let installed = prefix.join(name);
-        copy_of_the_binary(&installed);
+        self.copy_of_the_binary(&installed);
         installed
     }
 
@@ -4280,28 +4267,28 @@ impl Host {
     }
 
     fn upgrade(&self, installed: &Path, args: &[&str]) -> Ran {
-        let mut program = Command::new(installed);
+        let mut program = self.program(installed);
         program.env(RELEASES, self.releases());
-        self.run_as(program, &self.home(), args)
+        run_as(program, &self.home(), args)
     }
-}
 
-fn copy_of_the_binary(to: &Path) {
-    fs::copy(binary(), to).unwrap();
-    let unpublished = to.with_extension("unpublished");
-    let version = || {
-        let mut copy = std::process::Command::new(to);
-        copy.arg("--version")
-            .env(RELEASES, &unpublished)
-            .env(OVERRIDE, to.with_extension("home"))
-            .output()
-    };
-    loop {
-        match version() {
-            Err(busy) if busy.kind() == std::io::ErrorKind::ExecutableFileBusy => {
-                std::thread::yield_now();
+    fn copy_of_the_binary(&self, to: &Path) {
+        fs::copy(binary(), to).unwrap();
+        let unpublished = to.with_extension("unpublished");
+        let version = || {
+            let mut copy = self.program(to);
+            copy.arg("--version")
+                .env(RELEASES, &unpublished)
+                .env(OVERRIDE, to.with_extension("home"))
+                .output()
+        };
+        loop {
+            match version() {
+                Err(busy) if busy.kind() == std::io::ErrorKind::ExecutableFileBusy => {
+                    std::thread::yield_now();
+                }
+                ran => break assert!(ran.expect("the copy runs").status.success()),
             }
-            ran => break assert!(ran.expect("the copy runs").status.success()),
         }
     }
 }
@@ -4358,7 +4345,7 @@ fn upgrade_has_the_release_it_put_in_place_refresh_the_host() {
     let stale = Stale::new();
     let released = stale.host.root.join("released/worklog");
     fs::create_dir_all(released.parent().unwrap()).unwrap();
-    copy_of_the_binary(&released);
+    stale.host.copy_of_the_binary(&released);
     let handing_on = format!("#!/bin/sh\nexec \"{}\" \"$@\"\n", released.display());
     stale
         .host
@@ -4377,11 +4364,11 @@ fn upgrade_has_the_release_it_put_in_place_refresh_the_host() {
     assert_eq!(fs::read_to_string(&stale.skill).unwrap(), "old");
     assert!(!stale.completions.exists());
 
-    let mut program = Command::new(&stale.installed);
+    let mut program = stale.host.program(&stale.installed);
     program
         .env(RELEASES, stale.host.releases())
         .env("PATH", path_finding(&released));
-    let upgraded = stale.host.run_as(program, &stale.host.home(), &["upgrade"]);
+    let upgraded = run_as(program, &stale.host.home(), &["upgrade"]);
     assert_eq!(
         upgraded.stderr,
         format!("worklog: upgraded {CURRENT} to 9.9.9\n")
@@ -4701,12 +4688,12 @@ fn an_upgrade_and_the_refresh_it_has_the_new_binary_run_are_no_runs_the_usage_lo
     let host = Host::set_up("desk").with_agents(&[".claude"]);
     let installed = host.install();
     let found = || {
-        let mut program = Command::new("worklog");
+        let mut program = host.program(Path::new("worklog"));
         program.env("PATH", installed.parent().expect("a directory"));
         program.env(RELEASES, host.releases());
         program
     };
-    let used = |args: &[&str]| host.run_as(found(), &host.home(), args);
+    let used = |args: &[&str]| run_as(found(), &host.home(), args);
     let logged = || -> Vec<String> {
         let logged = host.logged();
         let command = |line: &Value| line["command"].as_str().expect("a command").to_owned();
@@ -4739,9 +4726,9 @@ fn an_upgrade_and_the_refresh_it_has_the_new_binary_run_are_no_runs_the_usage_lo
 
 impl Host {
     fn run_under_home(&self, args: &[&str]) -> Ran {
-        let mut program = Command::cargo_bin("worklog").expect("the binary");
+        let mut program = self.program(&binary());
         program.env_remove(OVERRIDE);
-        self.run_as(program, &self.home(), args)
+        run_as(program, &self.home(), args)
     }
 
     fn ok_under_home(&self, args: &[&str]) -> String {

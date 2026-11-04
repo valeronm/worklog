@@ -801,11 +801,9 @@ fn a_file_that_makes_the_network_reader_is_found() {
     }
 }
 
-const RUNS_A_PROGRAM: [&str; 4] = ["output", "spawn", "status", "assert"];
-
 // A binary run without `RELEASES` set reads its releases from the network, and one run
 // without `OVERRIDE` set keeps its cache under the home directory.
-fn run_past_the_releases(text: &str) -> Vec<String> {
+fn made_past_the_program(text: &str) -> Vec<String> {
     let text = uncommented(text);
     let tokens = tokens(&text);
     let starts: Vec<usize> = (0..tokens.len())
@@ -813,69 +811,90 @@ fn run_past_the_releases(text: &str) -> Vec<String> {
         .collect();
     let mut found = Vec::new();
     for (nth, start) in starts.iter().enumerate() {
-        let end = starts.get(nth + 1).copied().unwrap_or(tokens.len());
-        let body = &tokens[*start..end];
-        let runs = body
-            .windows(3)
-            .any(|call| call[0] == "." && RUNS_A_PROGRAM.contains(&call[1]) && call[2] == "(");
-        for given in ["RELEASES", "OVERRIDE"] {
-            if runs && !body.contains(&given) {
-                found.push(format!("`{}` runs a program without `{given}`", body[1]));
+        let body = &tokens[*start..starts.get(nth + 1).copied().unwrap_or(tokens.len())];
+        let name = body[1];
+        let makes = body
+            .windows(4)
+            .any(|made| made == ["Command", "::", "new", "("])
+            || body.windows(2).any(|made| made == ["cargo_bin", "("]);
+        if name == "program" {
+            for given in ["RELEASES", "OVERRIDE"] {
+                if !body.contains(&given) {
+                    found.push(format!("`program` makes a command without `{given}`"));
+                }
             }
+        } else if makes {
+            found.push(format!("`{name}` makes a command outside `program`"));
+        }
+        if body
+            .windows(3)
+            .any(|call| call == ["env_remove", "(", "RELEASES"])
+            || body.windows(2).any(|call| call == ["env_clear", "("])
+        {
+            found.push(format!("`{name}` takes `RELEASES` away"));
         }
     }
     found
 }
 
 #[test]
-fn every_scenario_runs_the_binary_with_its_releases_given() {
-    let scenarios = root().join("tests/cli.rs");
-    assert_eq!(violations(&scenarios, run_past_the_releases), [""; 0]);
-    let text = fs::read_to_string(&scenarios).expect("the scenarios");
+fn every_scenario_makes_its_command_where_the_releases_are_given() {
+    let tests = root().join("tests");
+    let mut scenarios = Vec::new();
+    files(&tests, "rs", &mut scenarios);
+    let layers = tests.join("layers.rs").display().to_string();
+    let mut broken = Vec::new();
+    for (path, text) in scenarios.iter().filter(|(path, _)| *path != layers) {
+        broken.extend(
+            made_past_the_program(text)
+                .iter()
+                .map(|what| format!("{path}: {what}")),
+        );
+    }
+    assert_eq!(broken, [""; 0]);
+    let text = fs::read_to_string(tests.join("cli.rs")).expect("the scenarios");
+    assert!(text.contains("\n    fn program(&self, binary: &Path) -> Command {\n"));
     assert!(text.contains("\nconst RELEASES: &str = \"WORKLOG_RELEASES\";\n"));
     assert!(text.contains("\nconst OVERRIDE: &str = \"WORKLOG_HOME\";\n"));
 }
 
 #[test]
-fn a_helper_that_runs_the_binary_without_its_releases_is_found() {
+fn a_command_made_outside_program_or_without_its_releases_is_found() {
     for clean in [
-        "fn run_as(&self, mut program: Command) -> Ran {\n    program.env(RELEASES, self.unpublished());\n    program.env(OVERRIDE, self.root.join(\"next\"));\n    program.output()\n}\n",
-        "fn spawned(&self) -> Child {\n    program\n        .env(RELEASES, dir)\n        .env(OVERRIDE, dir)\n        .spawn()\n        .expect(\"the binary runs\")\n}\n",
-        "fn run(&self, args: &[&str]) -> Ran {\n    self.run_in(&self.home(), args)\n}\n",
-        "fn listed(list: fn(&Host) -> Ran, host: &Host) -> Ran {\n    list(host)\n}\n",
-        "fn waited() {\n    // program.output() is run_as's.\n    let output = ran.output;\n}\n",
+        "fn program(&self, binary: &Path) -> Command {\n    let mut program = Command::new(binary);\n    program.env(RELEASES, dir).env(OVERRIDE, dir);\n    program\n}\n\nfn run_as(mut program: Command) -> Ran {\n    program.output()\n}\n",
+        "fn run(&self, args: &[&str]) -> Ran {\n    run_as(self.program(&binary()), args)\n}\n",
+        "fn under_home(&self) -> Ran {\n    let mut program = self.program(&binary());\n    program.env_remove(OVERRIDE);\n    run_as(program)\n}\n",
+        "fn waited() {\n    // Command::new(binary) is program's.\n    let output = ran.output;\n}\n",
     ] {
-        assert_eq!(run_past_the_releases(clean), [""; 0], "{clean}");
+        assert_eq!(made_past_the_program(clean), [""; 0], "{clean}");
     }
-    let without = |name: &str| {
-        [
-            format!("`{name}` runs a program without `RELEASES`"),
-            format!("`{name}` runs a program without `OVERRIDE`"),
-        ]
-    };
     for (broken, found) in [
         (
-            "fn bare(program: &mut Command) -> Output {\n    program.output().unwrap()\n}\n",
-            without("bare").to_vec(),
+            "fn bare() -> Output {\n    Command::new(\"worklog\").output().unwrap()\n}\n",
+            "`bare` makes a command outside `program`",
         ),
         (
-            "fn run_as() {\n    program.env(RELEASES, dir).env(OVERRIDE, dir).output();\n}\n\nfn served(program: &mut Command) -> Child {\n    program\n        . spawn ()\n        .unwrap()\n}\n",
-            without("served").to_vec(),
+            "fn built() -> Command {\n    Command::cargo_bin(\"worklog\").unwrap()\n}\n",
+            "`built` makes a command outside `program`",
         ),
         (
-            "impl Host {\n    fn checked(&self) {\n        Command::cargo_bin(\"lantern\").unwrap().assert().success();\n    }\n}\n",
-            without("checked").to_vec(),
+            "impl Host {\n    fn spawned(&self) -> Child {\n        std::process::Command::new(binary).spawn().unwrap()\n    }\n}\n",
+            "`spawned` makes a command outside `program`",
         ),
         (
-            "fn run_as(&self, mut program: Command) -> Ran {\n    program.env(RELEASES, self.unpublished());\n    program.output()\n}\n",
-            vec!["`run_as` runs a program without `OVERRIDE`".to_owned()],
+            "fn program(binary: &Path) -> Command {\n    let mut program = Command::new(binary);\n    program.env(RELEASES, dir);\n    program\n}\n",
+            "`program` makes a command without `OVERRIDE`",
         ),
         (
-            "fn exits(program: &mut Command) -> bool {\n    program.status().unwrap().success()\n}\n",
-            without("exits").to_vec(),
+            "fn offline(program: &mut Command) {\n    program.env_remove(RELEASES);\n}\n",
+            "`offline` takes `RELEASES` away",
+        ),
+        (
+            "fn cleared(program: &mut Command) {\n    program.env_clear();\n}\n",
+            "`cleared` takes `RELEASES` away",
         ),
     ] {
-        assert_eq!(run_past_the_releases(broken), found, "{broken}");
+        assert_eq!(made_past_the_program(broken), [found], "{broken}");
     }
 }
 

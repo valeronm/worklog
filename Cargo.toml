@@ -61,7 +61,6 @@ toml_edit = "0.25.17"
 [dev-dependencies]
 worklog-domain = { workspace = true, features = ["testing"] }
 worklog-app = { workspace = true, features = ["testing"] }
-assert_cmd = "2"
 similar.workspace = true
 tempfile.workspace = true
 toml.workspace = true
