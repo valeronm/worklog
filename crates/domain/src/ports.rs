@@ -195,6 +195,10 @@ pub trait HostRead {
 }
 
 pub trait Host: HostRead {
-    /// Makes `machine` this host's machine topic, refusing a host that already has one.
+    /// Holds this host's setup for as long as this port lives, refusing while another process
+    /// holds it and once the host is bound.
+    fn hold_setup(&self) -> Result<(), StoreError>;
+    /// Makes `machine` this host's machine topic, refusing a host that already has one and a
+    /// port that does not hold the setup.
     fn bind(&self, machine: &DocumentId) -> Result<(), StoreError>;
 }

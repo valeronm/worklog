@@ -57,6 +57,10 @@ impl HostRead for Becoming<'_> {
 }
 
 impl Host for Becoming<'_> {
+    fn hold_setup(&self) -> Result<(), StoreError> {
+        self.host.hold_setup()
+    }
+
     fn bind(&self, machine: &DocumentId) -> Result<(), StoreError> {
         self.host.bind(machine)
     }
@@ -141,6 +145,7 @@ pub fn join(deps: &Deps, name: &str, joining: Joining) -> Result<Bound, Failure>
 
 fn bound_to(deps: &Deps, lookup: &Lookup, machine: DocumentId) -> Result<Bound, Failure> {
     let label = lookup.label(&machine)?;
+    deps.host.hold_setup()?;
     deps.host.bind(&machine)?;
     Ok(Bound {
         document: machine,
@@ -171,7 +176,9 @@ fn made(
         ..*deps
     };
     let kind = kind_named(KindOf::Topic);
-    stepped(&as_itself, lookup, &machine, &kind, &fields, "\n", change)?.store(&as_itself)?;
+    let topic = stepped(&as_itself, lookup, &machine, &kind, &fields, "\n", change)?;
+    deps.host.hold_setup()?;
+    topic.store(&as_itself)?;
     deps.host.bind(&machine)?;
     Ok(Bound {
         document: machine,
@@ -456,6 +463,26 @@ mod tests {
         assert!(bound.created);
         assert_ne!(bound.document, lantern());
         assert_eq!(bound.label, "7f3a");
+    }
+
+    #[test]
+    fn a_setup_of_a_host_another_process_sets_up_stores_no_topic() {
+        let mut world = bare();
+        world.host.set_up_elsewhere();
+        let result = start(&world.deps(), "desk", Some("The desk"));
+        assert!(matches!(result, Err(Failure::Store(_))), "{result:?}");
+        assert_eq!(topics(&world), 0);
+
+        let (mut world, _) = sharing();
+        world.host.set_up_elsewhere();
+        let held = topics(&world);
+        let new = Joining::New { summary: None };
+        let result = join(&world.deps(), "atlas", new);
+        assert!(matches!(result, Err(Failure::Store(_))), "{result:?}");
+        assert_eq!(topics(&world), held);
+        let result = join(&world.deps(), "lantern", Joining::Known);
+        assert!(matches!(result, Err(Failure::Store(_))), "{result:?}");
+        assert_eq!(world.host.machine(), Ok(None));
     }
 
     #[test]

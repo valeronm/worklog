@@ -548,6 +548,8 @@ pub struct FixedHost {
     machine: RefCell<Option<DocumentId>>,
     home: Option<String>,
     binds: bool,
+    set_up_elsewhere: bool,
+    held: Cell<bool>,
     links: Vec<(String, String)>,
     missing: Vec<String>,
     session: Option<Session>,
@@ -563,6 +565,8 @@ impl FixedHost {
             machine: RefCell::new(machine),
             home,
             binds: true,
+            set_up_elsewhere: false,
+            held: Cell::new(false),
             links: Vec::new(),
             missing: Vec::new(),
             session: None,
@@ -585,6 +589,11 @@ impl FixedHost {
 
     pub fn set_binds(&mut self, binds: bool) {
         self.binds = binds;
+    }
+
+    /// Has another process hold this host's setup.
+    pub fn set_up_elsewhere(&mut self) {
+        self.set_up_elsewhere = true;
     }
 
     pub fn set_session(&mut self, session: Option<Session>) {
@@ -637,12 +646,26 @@ impl HostRead for FixedHost {
 }
 
 impl Host for FixedHost {
+    fn hold_setup(&self) -> Result<(), StoreError> {
+        if self.set_up_elsewhere {
+            return Err(StoreError::io(FIXED_HOST, "is set up by another process"));
+        }
+        if self.bound().is_some() {
+            return Err(StoreError::io(FIXED_HOST, "is already bound"));
+        }
+        self.held.set(true);
+        Ok(())
+    }
+
     fn bind(&self, machine: &DocumentId) -> Result<(), StoreError> {
         if !self.binds {
             return Err(StoreError::io(FIXED_HOST, "does not bind"));
         }
         if self.bound().is_some() {
             return Err(StoreError::io(FIXED_HOST, "is already bound"));
+        }
+        if !self.held.get() {
+            return Err(StoreError::io(FIXED_HOST, "does not hold its setup"));
         }
         self.machine.replace(Some(machine.clone()));
         Ok(())
@@ -1083,6 +1106,9 @@ mod tests {
         assert_eq!(host.machine(), Ok(None));
 
         host.set_binds(true);
+        let unheld = StoreError::io(FIXED_HOST, "does not hold its setup");
+        assert_eq!(host.bind(&lantern()), Err(unheld));
+        host.hold_setup().unwrap();
         host.bind(&lantern()).unwrap();
         assert_eq!(host.machine(), Ok(Some(lantern())));
         assert_eq!(host.bound(), Some(lantern()));

@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::fs::{File, TryLockError};
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
@@ -6,7 +7,7 @@ use worklog_domain::id::DocumentId;
 use worklog_domain::ports::{Host, HostRead, StoreError};
 use worklog_domain::session::Session;
 
-use super::{Config, io_error};
+use super::{Config, io_error, make_dir};
 
 // This host as its config file and its environment described it when the command started.
 pub struct FsHost {
@@ -15,6 +16,7 @@ pub struct FsHost {
     machine: RefCell<Option<DocumentId>>,
     store: PathBuf,
     session: Option<Session>,
+    setup: RefCell<Option<File>>,
 }
 
 impl FsHost {
@@ -31,6 +33,7 @@ impl FsHost {
             machine: RefCell::new(Some(held.machine)),
             store: held.store,
             session,
+            setup: RefCell::new(None),
         }
     }
 
@@ -48,6 +51,7 @@ impl FsHost {
             machine: RefCell::new(None),
             store,
             session,
+            setup: RefCell::new(None),
         }
     }
 
@@ -55,6 +59,17 @@ impl FsHost {
     pub fn in_session(mut self, session: Session) -> FsHost {
         self.session = Some(session);
         self
+    }
+
+    // Another process may have bound this host since the config was read.
+    fn unbound_on_disk(&self) -> Result<(), StoreError> {
+        if Config::read(&self.config)?.is_some() {
+            return Err(StoreError::io(
+                self.config.display(),
+                "this host is already bound",
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -110,12 +125,36 @@ impl HostRead for FsHost {
 }
 
 impl Host for FsHost {
-    fn bind(&self, machine: &DocumentId) -> Result<(), StoreError> {
-        // Another process may have bound this host since the config was read.
-        if Config::read(&self.config)?.is_some() {
+    fn hold_setup(&self) -> Result<(), StoreError> {
+        // A lock belongs to one open of the directory, not to the process holding it.
+        if self.setup.borrow().is_some() {
+            return self.unbound_on_disk();
+        }
+        let Some(dir) = self.config.parent() else {
             return Err(StoreError::io(
                 self.config.display(),
-                "this host is already bound",
+                "is not a file's path",
+            ));
+        };
+        make_dir(dir)?;
+        let held = File::open(dir).map_err(|e| io_error(dir, &e))?;
+        held.try_lock().map_err(|e| match e {
+            TryLockError::WouldBlock => {
+                StoreError::io(dir.display(), "another setup of this host is running")
+            }
+            TryLockError::Error(e) => io_error(dir, &e),
+        })?;
+        self.unbound_on_disk()?;
+        self.setup.replace(Some(held));
+        Ok(())
+    }
+
+    fn bind(&self, machine: &DocumentId) -> Result<(), StoreError> {
+        self.unbound_on_disk()?;
+        if self.setup.borrow().is_none() {
+            return Err(StoreError::io(
+                self.config.display(),
+                "this host's setup is not held",
             ));
         }
         let config = Config {
@@ -172,6 +211,7 @@ mod tests {
         let store = dir.path().join("store");
         let home = Some("/home/desk".to_owned());
         let host = FsHost::unbound(config.clone(), home.clone(), store.clone(), None);
+        host.hold_setup().unwrap();
         host.bind(&lantern()).unwrap();
         assert_eq!(host.machine(), Ok(Some(lantern())));
         assert_eq!(host.home(), Ok(Some("/home/desk".to_owned())));
@@ -222,6 +262,50 @@ mod tests {
         std::fs::remove_file(root.join("link")).unwrap();
         assert_eq!(read("link/case"), Ok(root.join("link/case")));
         assert_eq!(host.resolve("/"), Ok("/".to_owned()));
+    }
+
+    #[test]
+    fn the_setup_of_a_host_is_held_by_one_port_at_a_time() {
+        let (dir, config) = scratch();
+        let store = dir.path().join("store");
+        let first = FsHost::unbound(config.clone(), None, store.clone(), None);
+        let second = FsHost::unbound(config.clone(), None, store, None);
+        assert_eq!(first.hold_setup(), Ok(()));
+        let running = format!(
+            "{}: another setup of this host is running",
+            dir.path().display()
+        );
+        assert_eq!(second.hold_setup().unwrap_err().to_string(), running);
+        assert_eq!(first.hold_setup(), Ok(()));
+        assert_eq!(second.hold_setup().unwrap_err().to_string(), running);
+        drop(first);
+        assert_eq!(second.hold_setup(), Ok(()));
+    }
+
+    #[test]
+    fn a_setup_held_behind_one_that_bound_the_host_is_refused() {
+        let (dir, config) = scratch();
+        let host = FsHost::unbound(config.clone(), None, dir.path().join("store"), None);
+        let kept = Config {
+            store: dir.path().join("elsewhere"),
+            machine: lantern(),
+        };
+        kept.write(&config).unwrap();
+        let bound = format!("{}: this host is already bound", config.display());
+        assert_eq!(host.hold_setup().unwrap_err().to_string(), bound);
+    }
+
+    #[test]
+    fn a_host_is_bound_only_while_its_setup_is_held() {
+        let (dir, config) = scratch();
+        let host = FsHost::unbound(config.clone(), None, dir.path().join("store"), None);
+        let unheld = format!("{}: this host's setup is not held", config.display());
+        assert_eq!(host.bind(&lantern()).unwrap_err().to_string(), unheld);
+        assert_eq!(host.machine(), Ok(None));
+        assert_eq!(Config::read(&config), Ok(None));
+        host.hold_setup().unwrap();
+        assert_eq!(host.bind(&lantern()), Ok(()));
+        assert_eq!(host.machine(), Ok(Some(lantern())));
     }
 
     #[test]
