@@ -439,20 +439,24 @@ pub struct HostFiles {
     fish: Option<PathBuf>,
 }
 
+/// A host's own files, or the drafts directory holding the drafts that keep them in place.
+pub enum Closing {
+    Closed(HostFiles),
+    OpenDrafts(PathBuf),
+}
+
 impl HostFiles {
-    /// Refuses a host whose drafts directory holds a draft, with the failure `open` returns
-    /// for that directory; `command` is the name fish's completions are under.
+    /// `command` is the name fish's completions are under.
     pub fn closed(
         variable: &dyn Fn(&str) -> Option<OsString>,
         command: &str,
-        open: impl FnOnce(&Path) -> Failure,
-    ) -> Result<HostFiles, Failure> {
+    ) -> Result<Closing, Failure> {
         let paths = Paths::resolved(variable)?;
         if !FsDrafts::new(paths.drafts.clone()).documents()?.is_empty() {
-            return Err(open(&paths.drafts));
+            return Ok(Closing::OpenDrafts(paths.drafts));
         }
         let fish = fish_completions(variable, command)?;
-        Ok(HostFiles { paths, fish })
+        Ok(Closing::Closed(HostFiles { paths, fish }))
     }
 
     /// Removes fish's completions and the config, empties the drafts and cache directories of
@@ -541,8 +545,9 @@ mod tests {
         std::fs::create_dir_all(config.parent().unwrap()).unwrap();
         std::fs::write(&config, "").unwrap();
         let held = fs::setup_lock(config.parent().unwrap()).unwrap();
-        let host =
-            HostFiles::closed(&home(&root), "worklog", |_| panic!("no draft is open")).unwrap();
+        let Closing::Closed(host) = HostFiles::closed(&home(&root), "worklog").unwrap() else {
+            panic!("no draft is open");
+        };
         let Err(Failure::Store(refused)) = host.remove() else {
             panic!("an uninstall must wait for the setup holding the host");
         };
@@ -554,8 +559,9 @@ mod tests {
         );
         assert!(config.is_file());
         drop(held);
-        let host =
-            HostFiles::closed(&home(&root), "worklog", |_| panic!("no draft is open")).unwrap();
+        let Closing::Closed(host) = HostFiles::closed(&home(&root), "worklog").unwrap() else {
+            panic!("no draft is open");
+        };
         assert_eq!(host.remove().unwrap().removed, [config, root.join("next")]);
     }
 

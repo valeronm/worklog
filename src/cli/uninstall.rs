@@ -4,7 +4,7 @@ use super::agents::{Done, Placed, Uninstalling};
 use super::render::{Output, Stopped};
 use super::{Environment, NAME, said, wired};
 use worklog_app::Failure;
-use worklog_wiring::HostFiles;
+use worklog_wiring::{Closing, HostFiles};
 
 // `drafts`, `save` and `discard` run only on a machine `wired` takes.
 fn open_drafts(environment: &Environment, drafts: &Path) -> Failure {
@@ -22,8 +22,10 @@ fn open_drafts(environment: &Environment, drafts: &Path) -> Failure {
 
 fn uninstall_into(environment: &Environment, done: &mut Done) -> Result<(), Failure> {
     let agents = Uninstalling::on_this_host(environment)?;
-    let open = |drafts: &Path| open_drafts(environment, drafts);
-    let host = HostFiles::closed(environment.variable, NAME, open)?;
+    let host = match HostFiles::closed(environment.variable, NAME)? {
+        Closing::Closed(host) => host,
+        Closing::OpenDrafts(drafts) => return Err(open_drafts(environment, &drafts)),
+    };
     agents.uninstall_into(done)?;
     let uninstalled = host.remove()?;
     for path in &uninstalled.removed {
