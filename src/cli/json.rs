@@ -849,15 +849,17 @@ mod tests {
             first(&gadget, Value::Null),
         ]);
         let desk = to(&world.machine(), "desk");
+        let mut offered = json!(desk);
+        offered["address"] = json!("desk");
         let log = |machine: Option<&str>| search::log(&world.deps().read(), 4, machine).unwrap();
         vec![
             (
                 log(None),
-                json!({ "machine": null, "machines": [desk], "versions": expected }),
+                json!({ "machine": null, "machines": [offered], "versions": expected }),
             ),
             (
                 log(Some("desk")),
-                json!({ "machine": desk, "machines": [desk], "versions": expected }),
+                json!({ "machine": desk, "machines": [offered], "versions": expected }),
             ),
         ]
     }

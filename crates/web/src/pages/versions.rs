@@ -4,8 +4,7 @@ use askama::Template;
 
 use super::document::Head;
 use super::links::{
-    Choice, Layout, Line, Link, Place, Stamped, Text, doc_link, history_href, marks, version_link,
-    with_query,
+    Choice, Layout, Line, Link, Place, Stamped, Text, history_href, marks, version_link, with_query,
 };
 use crate::markdown::{marked, summary_html};
 use worklog_app::list::{ForkHead, ForkRow};
@@ -78,14 +77,9 @@ impl LogPage {
             log.machine.is_none(),
         )];
         machines.extend(log.machines.iter().map(|machine| {
-            // An ended topic's name may be held by one that is not ended.
-            let address = match machine.ended() {
-                None => machine.label.clone(),
-                Some(_) => machine.document.to_string(),
-            };
             let link = Link {
-                href: href(Some(&address)),
-                ..doc_link(machine)
+                href: href(Some(&machine.address)),
+                ..Link::to(&machine.document, &machine.label, machine.ended.as_deref())
             };
             let current =
                 (log.machine.as_ref()).is_some_and(|asked| asked.document == machine.document);

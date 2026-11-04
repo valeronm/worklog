@@ -339,13 +339,11 @@ fn a_log_offers_each_machine_and_shows_only_what_the_one_asked_for_wrote() {
         "\n",
         Some(&globe),
     );
-    lacks(&ok(&world, "/log"), &format!("machine={globe}"));
+    lacks(&ok(&world, "/log"), "machine=globe");
     has(
         &ok(&world, &format!("/log?machine={globe}")),
-        &format!(
-            "<a href=\"/log?machine={globe}\" class=\"ended\" title=\"ended retired\" \
-             aria-current=\"true\">globe</a>"
-        ),
+        "<a href=\"/log?machine=globe\" class=\"ended\" title=\"ended retired\" \
+         aria-current=\"true\">globe</a>",
     );
 
     for (target, why) in [
@@ -358,6 +356,35 @@ fn a_log_offers_each_machine_and_shows_only_what_the_one_asked_for_wrote() {
         let page = page(&world, target);
         assert_eq!(page.status, 404, "{}", page.html);
         has(&page.html, why);
+    }
+}
+
+#[test]
+fn a_log_offers_machines_that_share_a_name_by_an_address_each_answers_to() {
+    let (world, lantern) = world();
+    let one = topic(&world, "phone", "");
+    let other = topic(&world, "phone", "");
+    for (machine, at) in [
+        (&one, "2026-10-10T09:00:00+01:00"),
+        (&other, "2026-10-11T09:00:00+01:00"),
+    ] {
+        written_at(
+            &world,
+            &head(&world, &lantern),
+            &topic_fields("lantern", ""),
+            at,
+            "\n",
+            Some(machine),
+        );
+    }
+    let all = ok(&world, "/log");
+    for machine in [&one, &other] {
+        let link = format!("/log?machine={}", machine.short());
+        has(&all, &format!("<a href=\"{link}\">phone</a>"));
+        has(
+            &ok(&world, &link),
+            &format!("<a href=\"{link}\" aria-current=\"true\">phone</a>"),
+        );
     }
 }
 
