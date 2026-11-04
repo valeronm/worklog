@@ -168,27 +168,17 @@ fn said(failure: &Failure) -> String {
 fn adapters_for(
     command: &Command,
     environment: &Environment,
-) -> Result<Option<worklog_wiring::Adapters>, Failure> {
-    let adapters = worklog_wiring::wire(environment.variable)?;
+) -> Result<worklog_wiring::Adapters, Failure> {
+    let adapters = wired(environment)?;
     Ok(match command {
         Command::Read(ReadCommand::Context {
             hook: Some(word), ..
-        }) => adapters.map(|adapters| {
+        }) => {
             let given = |key: &str| hook::text_under(&(environment.hook_input)()?, key);
             adapters.run_by_hook(word, &given)
-        }),
+        }
         _ => adapters,
     })
-}
-
-fn unbound(command: &Command, json: bool) -> Result<Output, Failure> {
-    match command {
-        // A session opens with `context` unasked, on a host set up or not.
-        Command::Read(ReadCommand::Context { .. }) => {
-            Ok(Output::note(said(&Failure::NotSetUp), json))
-        }
-        _ => Err(Failure::NotSetUp),
-    }
 }
 
 // A log that stalls must not hold back the run's output.
@@ -201,8 +191,12 @@ fn ran(
     err: &mut dyn Write,
 ) -> i32 {
     let adapters = match adapters_for(command, environment) {
-        Ok(Some(adapters)) => adapters,
-        Ok(None) => return finished(unbound(command, json), out, err),
+        Ok(adapters) => adapters,
+        // A session opens with `context` unasked, on a host set up or not.
+        Err(Failure::NotSetUp) if matches!(command, Command::Read(ReadCommand::Context { .. })) => {
+            let note = Output::note(said(&Failure::NotSetUp), json);
+            return finished(Ok(note), out, err);
+        }
         Err(failure) => return finished(Err(failure), out, err),
     };
     let deps = adapters.deps();
