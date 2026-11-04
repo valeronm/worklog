@@ -199,6 +199,9 @@ mod tests {
         assert!(text.contains("does not end as built"), "{text}");
         let text = refused(end(&deps, "lantern/relay", "false", "  ", None));
         assert!(text.contains("says why in its note"), "{text}");
+        let fenced = refused(end(&deps, "lantern/relay", "false", "a\n+++\nb", None));
+        let fence = "lantern/relay: a field holds a line that is only `+++`";
+        assert!(fenced.contains(fence), "{fenced}");
         end(&deps, "lantern/relay", "false", "n", None).unwrap();
         let text = refused(end(&deps, "lantern/relay", "moved", "n", None));
         assert!(text.contains("is ended"), "{text}");

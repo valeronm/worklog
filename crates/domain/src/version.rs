@@ -12,7 +12,7 @@ use serde::{Serialize, Serializer};
 use toml::value::Datetime;
 use toml::{Table, Value};
 
-use super::fence;
+use super::fence::{self, FenceError};
 use super::id::{DocumentId, VersionId};
 
 /// The newest file layout this reader knows.
@@ -22,6 +22,7 @@ pub const FORMAT: u32 = 1;
 pub enum VersionError {
     NotAKind(String),
     NotAStamp(String),
+    Fence(FenceError),
     /// The parts render to a file that parses to other parts.
     DoesNotReadBack,
 }
@@ -33,6 +34,7 @@ impl fmt::Display for VersionError {
             VersionError::NotAStamp(text) => {
                 write!(f, "`{text}` is not a date and time with an offset")
             }
+            VersionError::Fence(error) => error.fmt(f),
             VersionError::DoesNotReadBack => f.write_str("does not read back as written"),
         }
     }
@@ -224,7 +226,12 @@ fn ids(ids: &[VersionId]) -> Value {
     Value::Array(ids.iter().map(|id| id.as_str().into()).collect())
 }
 
-fn render(envelope: &Envelope, fields: &Fields, links: &Links, body: &str) -> Option<String> {
+fn render(
+    envelope: &Envelope,
+    fields: &Fields,
+    links: &Links,
+    body: &str,
+) -> Result<String, VersionError> {
     let mut header = Table::new();
     header.insert("format".into(), i64::from(FORMAT).into());
     header.insert("document".into(), envelope.document.as_str().into());
@@ -248,7 +255,8 @@ fn render(envelope: &Envelope, fields: &Fields, links: &Links, body: &str) -> Op
             .collect();
         header.insert("links".into(), Value::Table(links));
     }
-    fence::join(&toml::to_string(&header).ok()?, body).ok()
+    let header = toml::to_string(&header).map_err(|_| VersionError::DoesNotReadBack)?;
+    fence::join(&header, body).map_err(VersionError::Fence)
 }
 
 fn take(header: &mut Table, key: &str) -> Result<Value, ReadError> {
@@ -359,8 +367,7 @@ impl Version {
         links: Links,
         body: String,
     ) -> Result<Version, VersionError> {
-        let text =
-            render(&envelope, &fields, &links, &body).ok_or(VersionError::DoesNotReadBack)?;
+        let text = render(&envelope, &fields, &links, &body)?;
         let length = text.len();
         let version = Version {
             header: Header {
@@ -691,7 +698,7 @@ mod tests {
         fields.insert("note".into(), "before\n+++\nafter".into());
         assert_eq!(
             Version::compose(envelope(), fields, links(), String::new()),
-            Err(VersionError::DoesNotReadBack)
+            Err(VersionError::Fence(FenceError::InHeader))
         );
     }
 
