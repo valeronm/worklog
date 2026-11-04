@@ -10,7 +10,7 @@ use worklog_domain::id::{DocumentId, VersionId};
 use worklog_domain::ports::{NotRead, Store, StoreError, StoreRead};
 use worklog_domain::version::{Header, Kind, ReadError, Version, read_body};
 
-use super::{STAGING_PREFIX, USAGE_DIRECTORY, directories, files, io_error, make_dir, optional};
+use super::{STAGING_PREFIX, USAGE_DIRECTORY, directories, files, io_error, optional, replace};
 
 mod cache;
 
@@ -401,15 +401,10 @@ impl StoreRead for FsStore {
 impl Store for FsStore {
     fn put(&self, version: &Version) -> Result<(), StoreError> {
         let document = &version.envelope.document;
-        let dir = self.document_dir(document);
-        let target = dir.join(file_name(&version.id));
+        let target = self.document_dir(document).join(file_name(&version.id));
         if !target.exists() {
             self.keep_sync_clean()?;
-            make_dir(&dir)?;
-            // Syncthing picks up a file as soon as it appears.
-            let staging = dir.join(format!("{STAGING_PREFIX}{}", version.id));
-            fs::write(&staging, version.text()).map_err(|e| io_error(&staging, &e))?;
-            fs::rename(&staging, &target).map_err(|e| io_error(&target, &e))?;
+            replace(&target, version.text().as_bytes(), None, true)?;
         }
         if let Some(walked) = self.walked.get() {
             let mut walked = walked.borrow_mut();
@@ -424,10 +419,11 @@ impl Store for FsStore {
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsStr;
     use std::time::{Duration, SystemTime};
 
     use super::*;
-    use crate::fs::RandomIds;
+    use crate::fs::{RandomIds, staging_of};
     use worklog_domain::testing::{LANTERN, after, first, lantern, store_contract};
 
     const ATLAS: &str = "7fd0000000000000000000000000000c";
@@ -663,11 +659,8 @@ mod tests {
         let relay = first(&lantern(), "fact", RELAY, "first\n");
         store.put(&relay).unwrap();
         let document = store.document_dir(&lantern());
-        fs::write(
-            document.join(format!("{STAGING_PREFIX}{}", relay.id)),
-            "half",
-        )
-        .unwrap();
+        let staged = file_name(&relay.id);
+        fs::write(staging_of(&document, OsStr::new(&staged)), "half").unwrap();
         fs::write(document.join("notes.md"), "stray").unwrap();
         fs::create_dir(document.join(file_name(&VersionId::of(b"a directory")))).unwrap();
         fs::write(dir.path().join(".stignore"), "x").unwrap();
@@ -692,8 +685,8 @@ mod tests {
         let (_dir, store) = scratch();
         let directory = store.document_dir(&lantern());
         fs::create_dir_all(&directory).unwrap();
-        let staged = format!("{STAGING_PREFIX}{}", VersionId::of(b"half"));
-        fs::write(directory.join(staged), "half").unwrap();
+        let staged = file_name(&VersionId::of(b"half"));
+        fs::write(staging_of(&directory, OsStr::new(&staged)), "half").unwrap();
         for prefix in ["7", "7f", LANTERN] {
             assert!(
                 store.documents_under(prefix).unwrap().is_empty(),

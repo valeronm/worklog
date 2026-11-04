@@ -38,8 +38,19 @@ fn io_error(location: &Path, error: &std::io::Error) -> StoreError {
     StoreError::io(location.display(), error)
 }
 
+/// Makes `dir` and each missing directory above it, each on the disk before the return.
 pub fn make_dir(dir: &Path) -> Result<(), StoreError> {
-    std::fs::create_dir_all(dir).map_err(|e| io_error(dir, &e))
+    let missing = |ancestor: &&Path| !ancestor.as_os_str().is_empty() && !ancestor.exists();
+    let made = dir.ancestors().take_while(missing).count();
+    std::fs::create_dir_all(dir).map_err(|e| io_error(dir, &e))?;
+    // A directory made here is on the disk only once its parent is flushed.
+    dir.ancestors().skip(1).take(made).try_for_each(flush)
+}
+
+fn flush(dir: &Path) -> Result<(), StoreError> {
+    File::open(dir)
+        .and_then(|opened| opened.sync_all())
+        .map_err(|e| io_error(dir, &e))
 }
 
 // A missing file or directory is one not made yet.
@@ -95,7 +106,7 @@ fn staged(
 
 /// Replaces `target` whole with `bytes`, through a file beside it that is gone again when the
 /// write fails. The file ends with `permissions`, or without them with those of a new file,
-/// and `synced` has its bytes on the disk before it takes the target's name.
+/// and `synced` has its bytes on the disk before the rename and the rename before the return.
 fn replace(
     target: &Path,
     bytes: &[u8],
@@ -114,7 +125,11 @@ fn replace(
     if replaced.is_err() {
         let _ = std::fs::remove_file(&staging);
     }
-    replaced
+    replaced?;
+    if synced {
+        flush(dir)?;
+    }
+    Ok(())
 }
 
 /// Sorted, and empty for a directory that is not there.

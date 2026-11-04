@@ -27,7 +27,7 @@ that starts with the bucket's name, and a file in that as a version when
 its name is a version id followed by `.md`. Everything else in the tree is
 passed over, so a sync tool may keep files of its own beside the documents.
 
-A version is written under the name `.tmp-<version id>` in its document's
+A version is written under a name starting `.tmp-` in its document's
 directory and renamed into place, so a sync does not carry a partial file.
 A version whose file is already there is not written again. In a Syncthing
 folder, recognized by its `.stfolder` marker, a store with no `.stignore`
