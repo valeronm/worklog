@@ -1,12 +1,13 @@
-use super::agents::{self, Done, Placed};
+use super::agents::{Done, Placed, Uninstalling};
 use super::render::{Output, Stopped};
 use super::{Environment, NAME};
 use worklog_app::Failure;
 use worklog_wiring::HostFiles;
 
 fn uninstall_into(environment: &Environment, done: &mut Done) -> Result<(), Failure> {
+    let agents = Uninstalling::on_this_host(environment)?;
     let host = HostFiles::closed(environment.variable, NAME)?;
-    agents::uninstall_into(environment, done)?;
+    agents.uninstall_into(done)?;
     let uninstalled = host.remove()?;
     for path in &uninstalled.removed {
         done.wrote(path);

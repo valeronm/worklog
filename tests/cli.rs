@@ -2782,6 +2782,8 @@ fn only_the_binary_path_finds_sets_the_agents_up_or_takes_them_back() {
         );
         assert_eq!(snapshot(&host), before, "{args:?}");
     }
+    host.ok(&["new", "topic", "atlas"]);
+    let before = snapshot(&host);
     for args in [&["uninstall"][..], &["agents", "uninstall"]] {
         assert_refused(&elsewhere(args), 1, &format!("{not_found}\n"));
         assert_eq!(snapshot(&host), before, "{args:?}");

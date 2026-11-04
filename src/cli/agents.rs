@@ -290,25 +290,44 @@ impl Refreshing {
     }
 }
 
-pub(super) fn uninstall_into(environment: &Environment, done: &mut Done) -> Result<(), Failure> {
-    if let Some(why) = unfound(environment)? {
-        return Err(Failure::Refused(why));
-    }
-    let agents = worklog_wiring::agents(environment.variable)?;
-    let drafts = worklog_wiring::drafts(environment.variable)?;
-    let uninstalled = |agent: &Agent| sandbox::uninstalled(agent, &drafts);
-    checked(&agents, hook::uninstalled, uninstalled)?;
-    for agent in &agents {
-        if let Some(dir) = agent.remove_skill()? {
-            done.wrote(&dir);
+/// `on_this_host` refuses before anything is written, unless the binary is the one `PATH` finds
+/// and each hooks file and config edits cleanly in memory.
+pub(super) struct Uninstalling {
+    agents: Vec<Agent>,
+    drafts: PathBuf,
+}
+
+impl Uninstalling {
+    pub(super) fn on_this_host(environment: &Environment) -> Result<Uninstalling, Failure> {
+        if let Some(why) = unfound(environment)? {
+            return Err(Failure::Refused(why));
         }
-        if let Some(rule) = agent.remove_rule()? {
-            done.wrote(&rule);
-        }
-        done.config(agent, uninstalled)?;
-        done.hooks(agent, hook::uninstalled)?;
+        let agents = worklog_wiring::agents(environment.variable)?;
+        let drafts = worklog_wiring::drafts(environment.variable)?;
+        let uninstalling = Uninstalling { agents, drafts };
+        checked(&uninstalling.agents, hook::uninstalled, |agent| {
+            uninstalling.config(agent)
+        })?;
+        Ok(uninstalling)
     }
-    Ok(())
+
+    fn config(&self, agent: &Agent) -> Result<Option<Edit>, Failure> {
+        sandbox::uninstalled(agent, &self.drafts)
+    }
+
+    pub(super) fn uninstall_into(&self, done: &mut Done) -> Result<(), Failure> {
+        for agent in &self.agents {
+            if let Some(dir) = agent.remove_skill()? {
+                done.wrote(&dir);
+            }
+            if let Some(rule) = agent.remove_rule()? {
+                done.wrote(&rule);
+            }
+            done.config(agent, |agent| self.config(agent))?;
+            done.hooks(agent, hook::uninstalled)?;
+        }
+        Ok(())
+    }
 }
 
 pub(super) fn run(
@@ -327,7 +346,8 @@ pub(super) fn run(
             }
             Ok(())
         }),
-        AgentsAction::Uninstall => uninstall_into(environment, &mut done),
+        AgentsAction::Uninstall => Uninstalling::on_this_host(environment)
+            .and_then(|uninstalling| uninstalling.uninstall_into(&mut done)),
     };
     done.ended(ended, json, |written| Placed { written })
 }
