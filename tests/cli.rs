@@ -2958,7 +2958,25 @@ fn uninstall_takes_back_what_setup_wrote_and_leaves_the_store_and_the_binary() {
 fn uninstall_names_the_drafts_folder_where_this_machine_can_no_longer_list_its_drafts() {
     let host = Host::set_up("desk").on_path();
     host.ok(&["new", "topic", "atlas"]);
-    fs::remove_file(host.root.join("next/config.toml")).unwrap();
+    let config = host.root.join("next/config.toml");
+    let moved = host.root.join("moved");
+    fs::rename(host.store(), &moved).unwrap();
+    let before = snapshot(&host);
+    assert_refused(
+        &host.run(&["uninstall"]),
+        1,
+        &format!(
+            "worklog: {}: holds open drafts, and `worklog drafts` refuses: {}: this machine's \
+             store is not a directory; {} names it\n",
+            host.drafts().display(),
+            host.store().display(),
+            config.display()
+        ),
+    );
+    assert_eq!(snapshot(&host), before);
+
+    fs::rename(&moved, host.store()).unwrap();
+    fs::remove_file(&config).unwrap();
     let before = snapshot(&host);
     assert_refused(
         &host.run(&["uninstall"]),

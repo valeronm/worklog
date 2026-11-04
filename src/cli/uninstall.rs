@@ -1,12 +1,29 @@
+use std::path::Path;
+
 use super::agents::{Done, Placed, Uninstalling};
 use super::render::{Output, Stopped};
-use super::{Environment, NAME};
+use super::{Environment, NAME, wired};
 use worklog_app::Failure;
 use worklog_wiring::HostFiles;
 
+// `drafts`, `save` and `discard` run only on a machine `wired` takes.
+fn open_drafts(environment: &Environment, drafts: &Path) -> Failure {
+    let why = match wired(environment) {
+        Ok(_) => {
+            format!("holds open drafts, which `{NAME} drafts` lists; save or discard each first")
+        }
+        Err(Failure::NotSetUp) => "holds open drafts this machine is no longer set up to save \
+                                   or discard; delete them there first"
+            .to_owned(),
+        Err(failure) => format!("holds open drafts, and `{NAME} drafts` refuses: {failure}"),
+    };
+    Failure::at(drafts.display(), why)
+}
+
 fn uninstall_into(environment: &Environment, done: &mut Done) -> Result<(), Failure> {
     let agents = Uninstalling::on_this_host(environment)?;
-    let host = HostFiles::closed(environment.variable, NAME)?;
+    let open = |drafts: &Path| open_drafts(environment, drafts);
+    let host = HostFiles::closed(environment.variable, NAME, open)?;
     agents.uninstall_into(done)?;
     let uninstalled = host.remove()?;
     for path in &uninstalled.removed {
