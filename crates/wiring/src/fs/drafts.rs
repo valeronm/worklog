@@ -8,7 +8,7 @@ use worklog_domain::id::DocumentId;
 use worklog_domain::ports::{BrokenDraft, Drafts, DraftsRead, StoreError};
 
 use super::clock::stamp_at;
-use super::{files, io_error, make_dir, optional};
+use super::{files, io_error, optional, replace};
 
 pub struct FsDrafts {
     dir: PathBuf,
@@ -94,12 +94,11 @@ impl Drafts for FsDrafts {
         let text = draft
             .text()
             .map_err(|e| StoreError::io(path.display(), e))?;
-        make_dir(&self.dir)?;
         // A text without an origin is refused, where an origin without a
         // text reads as no draft.
         let origin = self.origin(&draft.document);
-        fs::write(&origin, draft.origin()).map_err(|e| io_error(&origin, &e))?;
-        fs::write(&path, text).map_err(|e| io_error(&path, &e))?;
+        replace(&origin, draft.origin().as_bytes(), None, true)?;
+        replace(&path, text.as_bytes(), None, true)?;
         Ok(self.location(&draft.document))
     }
 
