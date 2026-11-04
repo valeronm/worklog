@@ -9,9 +9,19 @@ use worklog_domain::session::Session;
 
 use super::{Config, io_error, make_dir};
 
-/// Locks `dir`, the config's directory, until the returned file is dropped; a second setup of
+pub struct SetupLock(File);
+
+impl Drop for SetupLock {
+    // The lock belongs to the open file, which a child process started meanwhile shares until it
+    // runs its program; unlocking releases it for every copy.
+    fn drop(&mut self) {
+        let _ = self.0.unlock();
+    }
+}
+
+/// Locks `dir`, the config's directory, until the returned lock is dropped; a second setup of
 /// this host is refused meanwhile.
-pub fn setup_lock(dir: &Path) -> Result<File, StoreError> {
+pub fn setup_lock(dir: &Path) -> Result<SetupLock, StoreError> {
     let held = File::open(dir).map_err(|e| io_error(dir, &e))?;
     held.try_lock().map_err(|e| match e {
         TryLockError::WouldBlock => {
@@ -19,7 +29,7 @@ pub fn setup_lock(dir: &Path) -> Result<File, StoreError> {
         }
         TryLockError::Error(e) => io_error(dir, &e),
     })?;
-    Ok(held)
+    Ok(SetupLock(held))
 }
 
 // This host as its config file and its environment described it when the command started.
@@ -29,7 +39,7 @@ pub struct FsHost {
     machine: RefCell<Option<DocumentId>>,
     store: PathBuf,
     session: Option<Session>,
-    setup: RefCell<Option<File>>,
+    setup: RefCell<Option<SetupLock>>,
 }
 
 impl FsHost {
@@ -269,6 +279,16 @@ mod tests {
         std::fs::remove_file(root.join("link")).unwrap();
         assert_eq!(read("link/case"), Ok(root.join("link/case")));
         assert_eq!(host.resolve("/"), Ok("/".to_owned()));
+    }
+
+    #[test]
+    fn a_setup_lock_is_released_while_a_copy_of_its_file_is_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let held = setup_lock(dir.path()).unwrap();
+        let copy = held.0.try_clone().unwrap();
+        drop(held);
+        assert!(setup_lock(dir.path()).is_ok());
+        drop(copy);
     }
 
     #[test]
