@@ -2736,7 +2736,7 @@ fn agents_install_reaches_the_agents_present_and_notes_a_hook_already_there() {
 }
 
 #[test]
-fn only_the_binary_path_finds_sets_the_agents_up_and_a_refresh_by_another_writes_nothing() {
+fn only_the_binary_path_finds_sets_the_agents_up_or_takes_them_back() {
     let host = Host::set_up("desk")
         .on_path()
         .with_agents(&[".claude", ".codex"]);
@@ -2771,6 +2771,10 @@ fn only_the_binary_path_finds_sets_the_agents_up_and_a_refresh_by_another_writes
             ),
             "{args:?}"
         );
+        assert_eq!(snapshot(&host), before, "{args:?}");
+    }
+    for args in [&["uninstall"][..], &["agents", "uninstall"]] {
+        assert_refused(&elsewhere(args), 1, &format!("{not_found}\n"));
         assert_eq!(snapshot(&host), before, "{args:?}");
     }
 }
@@ -2941,7 +2945,7 @@ fn uninstall_takes_back_what_setup_wrote_and_leaves_the_store_and_the_binary() {
 
 #[test]
 fn uninstall_leaves_a_directory_that_is_not_empty_in_place() {
-    let host = Host::set_up("desk");
+    let host = Host::set_up("desk").on_path();
     let kept = host.drafts().join("kept");
     fs::create_dir_all(&kept).unwrap();
     let ran = host.run(&["uninstall"]);
@@ -3021,7 +3025,7 @@ fn agents_install_writes_nothing_for_the_first_agent_when_the_second_cannot_be_e
 
 #[test]
 fn agents_refresh_and_uninstall_over_a_hooks_file_that_is_not_json_change_nothing() {
-    let host = Host::new().with_agents(&[".claude", ".codex"]);
+    let host = Host::new().on_path().with_agents(&[".claude", ".codex"]);
     fs::create_dir_all(host.skill_of(".claude").parent().unwrap()).unwrap();
     fs::write(host.skill_of(".claude"), "old").unwrap();
     fs::write(host.hooks_of(".codex"), "{ not json").unwrap();

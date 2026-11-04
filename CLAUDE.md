@@ -159,10 +159,11 @@ writes one that is missing for an agent holding the skill or the hook,
 since a host set up before the rule existed is upgraded and not installed
 again.
 
-Only the binary `PATH` finds as `worklog` sets an agent up, since the
-skill has the agent run the tool by that name. A refresh by another
-binary notes it and writes nothing rather than refusing, because the
-installer runs one before its prefix is on `PATH`.
+Only the binary `PATH` finds as `worklog` sets an agent up or takes it
+back: the skill has the agent run the tool by that name, and any other
+binary is a build whose runs leave the real settings alone. A refresh by
+another binary notes it and writes nothing rather than refusing, because
+the installer runs one before its prefix is on `PATH`.
 
 A usage line gets its session from the environment variable an agent sets
 for a command it runs, and for a session hook from the hook's input, which

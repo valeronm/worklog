@@ -1374,7 +1374,7 @@ mod tests {
         std::fs::write(root.join("home/.claude/settings.json"), hooks.to_string()).unwrap();
         assert_eq!(ran("refresh"), unknown);
         std::fs::remove_file(root.join("home/.claude/settings.json")).unwrap();
-        assert_eq!(ran("uninstall"), (String::new(), 0));
+        assert_eq!(ran("uninstall"), unknown);
         assert!(!root.join("home/.claude/settings.json").exists());
     }
 }
