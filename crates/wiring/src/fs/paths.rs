@@ -36,14 +36,21 @@ impl Paths {
 
     pub fn resolved(variable: impl Fn(&str) -> Option<OsString>) -> Result<Paths, StoreError> {
         let set = |name: &str| set(&variable, name).map(PathBuf::from);
-        let home = Paths::home(&variable)?;
         // The base directory specification has a relative path ignored.
-        let given = set("XDG_CONFIG_HOME").filter(|given| given.is_absolute());
-        let config_home = given.or_else(|| {
+        let given = |name: &str| set(name).filter(|given| given.is_absolute());
+        let home = Paths::home(&variable)?;
+        let config_home = given("XDG_CONFIG_HOME").or_else(|| {
             home.as_ref()
                 .map(|home| PathBuf::from(home).join(".config"))
         });
         if let Some(root) = set(OVERRIDE) {
+            // A relative root names another directory for each directory a command runs in.
+            if !root.is_absolute() {
+                return Err(StoreError::io(
+                    format!("${OVERRIDE}"),
+                    "is not an absolute path",
+                ));
+            }
             return Ok(Paths {
                 config: root.join("config.toml"),
                 drafts: root.join("drafts"),
@@ -52,25 +59,23 @@ impl Paths {
                 config_home,
             });
         }
-        let Some(home) = home else {
+        let (Some(home), Some(config_home)) = (home, config_home) else {
             return Err(StoreError::io(
                 "$HOME",
                 format!("not set, and neither is ${OVERRIDE}"),
             ));
         };
         let base = |name: &str, default: &str| {
-            set(name).unwrap_or_else(|| PathBuf::from(&home).join(default))
+            given(name).unwrap_or_else(|| PathBuf::from(&home).join(default))
         };
         Ok(Paths {
-            config: base("XDG_CONFIG_HOME", ".config")
-                .join(APP)
-                .join("config.toml"),
+            config: config_home.join(APP).join("config.toml"),
             drafts: base("XDG_STATE_HOME", ".local/state")
                 .join(APP)
                 .join("drafts"),
             cache: base("XDG_CACHE_HOME", ".cache").join(APP),
             home: Some(home),
-            config_home,
+            config_home: Some(config_home),
         })
     }
 }
@@ -211,6 +216,27 @@ mod tests {
             under(&[home, next, ("XDG_CONFIG_HOME", "")]),
             Some(PathBuf::from("/home/desk/.config"))
         );
+    }
+
+    #[test]
+    fn a_relative_base_directory_is_passed_over_and_a_relative_override_refused() {
+        let home = ("HOME", "/home/desk");
+        let defaults = resolved(&[home]).unwrap();
+        for relative in ["cache", "./state", "../atlas/config"] {
+            let set = [
+                home,
+                ("XDG_CONFIG_HOME", relative),
+                ("XDG_STATE_HOME", relative),
+                ("XDG_CACHE_HOME", relative),
+            ];
+            assert_eq!(resolved(&set), Ok(defaults.clone()), "{relative}");
+            let refused = resolved(&[home, ("WORKLOG_HOME", relative)]).unwrap_err();
+            assert_eq!(
+                refused.to_string(),
+                "$WORKLOG_HOME: is not an absolute path",
+                "{relative}"
+            );
+        }
     }
 
     #[test]
