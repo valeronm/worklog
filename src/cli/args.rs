@@ -96,7 +96,8 @@ pub enum Invoked {
     Run(Command),
     /// Serve the store as read-only pages until stopped, printing the address to open
     Serve {
-        /// The address and port to listen on
+        /// The address and port to listen on; anyone who can reach it reads the store without
+        /// logging in
         #[arg(long, value_name = "ADDR:PORT", default_value = "127.0.0.1:8080")]
         bind: SocketAddr,
         /// A name a browser may reach this server by, beside localhost and an IP address
@@ -114,13 +115,13 @@ pub enum ToolCommand {
         #[command(subcommand)]
         action: AgentsAction,
     },
-    /// Bring what `agents install` placed and the fish completions already there up to this
-    /// binary, and write nothing else
+    /// Bring what `agents install` placed, and fish's completions where fish is set up, up to
+    /// this binary, and write nothing else
     Refresh,
     /// The line a shell's startup file holds to take its completions from this binary
     Completions { shell: Shell },
     /// Put the latest release in the place of this binary when it is newer, and bring the
-    /// skill, the hook and the fish completions already there up to it
+    /// skill, the hook, and fish's completions where fish is set up, up to it
     Upgrade {
         /// Only say whether a newer release exists
         #[arg(long)]
@@ -143,7 +144,8 @@ pub enum AgentsAction {
 
 #[derive(Subcommand)]
 pub enum HostCommand {
-    /// Start a new store and bind this host to its machine topic; done once per host
+    /// Bind this host to a new store, or with no argument ask which store to use; done once per
+    /// host
     ///
     /// With no argument it asks on a terminal, and joins a store the directory already holds.
     Init {
