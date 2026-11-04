@@ -70,12 +70,13 @@ impl Done {
         edit: impl FnOnce(&Agent) -> Result<Option<Edit>, Failure>,
         drafts: &Path,
     ) -> Result<(), Failure> {
-        let Some(Edit { config, text }) = edit(agent)? else {
-            return Ok(());
-        };
-        worklog_wiring::make_drafts(drafts)?;
-        self.wrote(&agent.write_config(&config, &text)?);
-        Ok(())
+        self.config(agent, |agent| {
+            let edited = edit(agent)?;
+            if edited.is_some() {
+                worklog_wiring::make_drafts(drafts)?;
+            }
+            Ok(edited)
+        })
     }
 
     pub(super) fn ended<T: Render + Serialize + Pinned>(
