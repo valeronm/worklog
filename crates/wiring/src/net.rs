@@ -1,5 +1,7 @@
 //! The port implemented over the network: where releases of this binary are published.
 
+use std::time::Duration;
+
 use ureq::Agent;
 use ureq::http::StatusCode;
 
@@ -11,10 +13,20 @@ pub struct GitHubReleases {
     agent: Agent,
 }
 
+const CONNECT: Duration = Duration::from_secs(10);
+const HEADERS: Duration = Duration::from_secs(10);
+// ureq bounds a body's whole download, not the wait for its next bytes.
+const BODY: Duration = Duration::from_mins(1);
+
 impl GitHubReleases {
     pub fn new() -> GitHubReleases {
+        let config = Agent::config_builder()
+            .timeout_connect(Some(CONNECT))
+            .timeout_recv_response(Some(HEADERS))
+            .timeout_recv_body(Some(BODY))
+            .build();
         GitHubReleases {
-            agent: Agent::new_with_defaults(),
+            agent: Agent::new_with_config(config),
         }
     }
 }
