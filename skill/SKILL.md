@@ -123,15 +123,20 @@ stderr with exit 1; a usage error exits 2.
 ## Capture — an entry for work done
 
 1. Put each doable item of open work from this session to the user, one
-   question per item naming the item and what doing it involves, with
-   three options: **do it now**, in this session; **record it**; **drop
-   it**, and if the drop was a decision its why goes in the entry's Notes.
-   Never withhold an item because it seemed not worth asking, and never
-   ask the same item twice. A silently recorded item is a delay decision
-   the user never made. Ask, and do what is to be done now, before
-   opening the entry: no draft waits on the answers, and the entry records
-   that work.
-2. `worklog new entry <name>`, with `--date <YYYY-MM-DD>` for work
+   question per item naming the item, what doing it involves and how large
+   it is, with three options: **do it now**, in this session; **record
+   it**; **drop it**. Each option carries its reason. A drop's reason goes
+   in the entry's Notes, and a reason that will still hold in later
+   sessions is also written as a fact. Before asking, `worklog search` the
+   item, and if it was dropped or recorded before, say when and why. Never
+   withhold an item because it seemed not worth asking, and never ask the
+   same item twice. A silently recorded item is a delay decision the user
+   never made.
+2. Do what the user said to do now, before opening the entry: no draft
+   waits on the answers, and the entry records that work. A do-it-now item
+   that grows past the size it was asked at goes back to the user before
+   it goes on.
+3. `worklog new entry <name>`, with `--date <YYYY-MM-DD>` for work
    of another day; edit the draft. `date` and `machine` are filled. Set
    `topics` to the topics the work touched, `topics = ["lantern"]`, which
    a listing or a search by topic finds the entry by, and `summary`,
@@ -139,17 +144,17 @@ stderr with exit 1; a usage error exits 2.
    Notes**. Record what was non-obvious: decisions, gotchas, why not the
    other way. Never git state. Link each idea to be recorded and each
    fact to be promoted as `[[<topic>/<name>]]`.
-3. `diff`, then `save`, each with the entry's `<date>-<name>`.
-4. Record each item the user said to record, where the triage under Open
+4. `diff`, then `save`, each with the entry's `<date>-<name>`.
+5. Record each item the user said to record, where the triage under Open
    work puts it: a followup, one each, `worklog new followup --topics
    <topic> --summary "<what is open>" --body "<the rest of it>" --entry
    <date>-<name> --look-again <date> --why "<what to look for>"`, or
    `--touching <topic>` in place of the date and its why; or an idea,
    `worklog new idea <topic>/<name>`.
-5. Reconcile: `worklog followups <topic>` for the topics this work
+6. Reconcile: `worklog followups <topic>` for the topics this work
    touched; `done` what it completed with a note naming what dissolved it,
    `trigger` what it moved, `drop` what it made moot.
-6. Promote what outlives the entry into a fact. What turns up after the
+7. Promote what outlives the entry into a fact. What turns up after the
    save is added with `worklog checkout <date>-<name>` and a save again.
 
 ## Open work
@@ -180,7 +185,7 @@ a new trigger.
 Triage an item, new or found in a backlog, by the first question that
 fits:
 
-1. Can it be done now? Then do it, or put it to the user.
+1. Can it be done or decided now? Then do it, or put it to the user.
 2. Is it already answered? Then `done` it, naming what dissolved it.
 3. Does an idea already hold the work, and the followup no plan for it?
    Then `drop` it and let the entry's Notes link the idea.
