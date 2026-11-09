@@ -350,10 +350,10 @@ start of an id for a followup. A fact is linked with its topic, from
 inside that topic too. A link is resolved when its document is
 saved and follows its target through a rename; one written before its
 target exists resolves once the target is stored. Link to say where
-something was decided, not instead of saying it here. A link inside a code
-span is quoted, not made. Never delete a link because it failed to
-resolve: the target may be alive under another name or on a machine that
-has not synced.
+something was decided, not instead of saying it here. Only an entry may
+link an ended document. A link inside a code span is quoted, not made.
+Never delete a link because it failed to resolve: the target may be alive
+under another name or on a machine that has not synced.
 
 `worklog check` prints each problem, then each notice with `notice:`
 before it, then the counts of problems, notices and forks, and exits 1 on
@@ -374,8 +374,9 @@ reason that fits, as an idea is `built` once the designs it rests on are,
 or a fact `superseded` or `false`. Or it still holds:
 rewrite what the ending made untrue, and where a sentence only cites the
 target, point it at what the target became, the entry that built it or
-the fact that replaced it. Removing or rewording the link so the notice
-goes away, with the document unread, decides nothing.
+the fact that replaced it, or, where nothing replaced it, a new fact
+holding what this document needs from it. Removing or rewording the link
+so the notice goes away, with the document unread, decides nothing.
 
 A fork is a document with two or more current versions, written on
 different machines before they synced. `worklog forks` lists each
