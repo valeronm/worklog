@@ -4,7 +4,7 @@ use std::process::Command;
 use worklog_domain::ports::{Binary, Refreshed, StoreError};
 use worklog_domain::release;
 
-use super::{io_error, replace};
+use super::{io_error, replace, target_of};
 
 const REFRESH: [&str; 1] = ["refresh"];
 
@@ -28,11 +28,12 @@ impl Binary for FsBinary {
     }
 
     fn replace(&self, bytes: &[u8]) -> Result<String, StoreError> {
-        let kept = std::fs::metadata(&self.exe)
-            .map_err(|e| io_error(&self.exe, &e))?
+        let target = target_of(&self.exe)?;
+        let kept = std::fs::metadata(&target)
+            .map_err(|e| io_error(&target, &e))?
             .permissions();
-        replace(&self.exe, bytes, Some(&kept), true)?;
-        Ok(self.exe.display().to_string())
+        replace(&target, bytes, Some(&kept), true)?;
+        Ok(target.display().to_string())
     }
 
     fn refresh(&self) -> Refreshed {
@@ -103,6 +104,29 @@ mod tests {
         let mode = fs::metadata(&exe).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o750);
         assert_eq!(names(kept.path()), ["lantern"]);
+    }
+
+    #[test]
+    fn a_binary_run_through_a_link_has_the_file_it_links_to_replaced_and_the_link_kept() {
+        let kept = tempfile::tempdir().unwrap();
+        let root = fs::canonicalize(kept.path()).unwrap();
+        fs::create_dir_all(root.join("desk/bin")).unwrap();
+        fs::create_dir_all(root.join("atlas")).unwrap();
+        let real = root.join("atlas/lantern");
+        fs::write(&real, "old").unwrap();
+        fs::set_permissions(&real, fs::Permissions::from_mode(0o750)).unwrap();
+        let link = root.join("desk/bin/lantern");
+        std::os::unix::fs::symlink("../../atlas/lantern", &link).unwrap();
+
+        assert_eq!(
+            binary(&link).replace(b"new"),
+            Ok(real.display().to_string())
+        );
+        assert_eq!(fs::read(&real).unwrap(), b"new");
+        assert!(fs::symlink_metadata(&link).unwrap().is_symlink());
+        let mode = fs::metadata(&real).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o750);
+        assert_eq!(names(&root.join("atlas")), ["lantern"]);
     }
 
     #[test]

@@ -104,6 +104,28 @@ fn staged(
     }
 }
 
+const LINK_HOPS: usize = 40;
+
+// A rename onto a link replaces the link itself.
+fn target_of(path: &Path) -> Result<PathBuf, StoreError> {
+    let mut at = path.to_path_buf();
+    for _ in 0..LINK_HOPS {
+        match std::fs::symlink_metadata(&at) {
+            Ok(found) if found.is_symlink() => {
+                let to = std::fs::read_link(&at).map_err(|e| io_error(&at, &e))?;
+                at = at.parent().map_or(to.clone(), |dir| dir.join(&to));
+            }
+            Ok(_) => return std::fs::canonicalize(&at).map_err(|e| io_error(&at, &e)),
+            Err(e) if e.kind() == ErrorKind::NotFound => return Ok(at),
+            Err(e) => return Err(io_error(&at, &e)),
+        }
+    }
+    Err(StoreError::io(
+        path.display(),
+        "is a chain of links too long to follow",
+    ))
+}
+
 /// Replaces `target` whole with `bytes`, through a file beside it that is gone again when the
 /// write fails. The file ends with `permissions`, or without them with those of a new file,
 /// and `synced` has its bytes on the disk before the rename and the rename before the return.

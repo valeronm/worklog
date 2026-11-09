@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use worklog_domain::ports::StoreError;
 
-use super::{io_error, optional, replace};
+use super::{optional, replace, target_of};
 
 pub const SKILL_DIRECTORY: &str = "worklog";
 
@@ -86,28 +86,6 @@ pub fn read_optional(path: &Path) -> Result<Option<String>, StoreError> {
 
 pub fn remove_optional(path: &Path) -> Result<Option<PathBuf>, StoreError> {
     Ok(optional(path, fs::remove_file(path))?.map(|()| path.to_path_buf()))
-}
-
-const LINK_HOPS: usize = 40;
-
-// A rename onto a link replaces the link itself.
-fn target_of(path: &Path) -> Result<PathBuf, StoreError> {
-    let mut at = path.to_path_buf();
-    for _ in 0..LINK_HOPS {
-        match fs::symlink_metadata(&at) {
-            Ok(found) if found.is_symlink() => {
-                let to = fs::read_link(&at).map_err(|e| io_error(&at, &e))?;
-                at = at.parent().map_or(to.clone(), |dir| dir.join(&to));
-            }
-            Ok(_) => return fs::canonicalize(&at).map_err(|e| io_error(&at, &e)),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(at),
-            Err(e) => return Err(io_error(&at, &e)),
-        }
-    }
-    Err(StoreError::io(
-        path.display(),
-        "is a chain of links too long to follow",
-    ))
 }
 
 fn replace_file(path: &Path, text: &str) -> Result<(), StoreError> {
