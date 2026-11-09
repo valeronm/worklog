@@ -126,32 +126,64 @@ fn target_of(path: &Path) -> Result<PathBuf, StoreError> {
     ))
 }
 
-/// Replaces `target` whole with `bytes`, through a file beside it that is gone again when the
-/// write fails. The file ends with `permissions`, or without them with those of a new file,
-/// and `synced` has its bytes on the disk before the rename and the rename before the return.
+/// A file written beside `target`, removed when dropped unless `put` renamed it over `target`.
+struct Staging {
+    path: PathBuf,
+    target: PathBuf,
+    placed: bool,
+}
+
+impl Staging {
+    /// Renames the staged file over its target, and with `synced` has the rename on the disk
+    /// before the return.
+    fn put(mut self, synced: bool) -> Result<(), StoreError> {
+        let target = &self.target;
+        std::fs::rename(&self.path, target).map_err(|e| io_error(target, &e))?;
+        self.placed = true;
+        match self.target.parent() {
+            Some(dir) if synced => flush(dir),
+            _ => Ok(()),
+        }
+    }
+}
+
+impl Drop for Staging {
+    fn drop(&mut self) {
+        if !self.placed {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+}
+
+/// Writes `bytes` to a file beside `target`, with `permissions` or without them those of a
+/// new file, and with `synced` has its bytes on the disk before the return.
+fn stage(
+    target: &Path,
+    bytes: &[u8],
+    permissions: Option<&Permissions>,
+    synced: bool,
+) -> Result<Staging, StoreError> {
+    let (Some(dir), Some(name)) = (target.parent(), target.file_name()) else {
+        return Err(StoreError::io(target.display(), "is not a file's path"));
+    };
+    make_dir(dir)?;
+    // A rename replaces the file whole only from the same file system.
+    let staging = Staging {
+        path: staging_of(dir, name),
+        target: target.to_path_buf(),
+        placed: false,
+    };
+    staged(&staging.path, bytes, permissions, synced).map_err(|e| io_error(&staging.path, &e))?;
+    Ok(staging)
+}
+
 fn replace(
     target: &Path,
     bytes: &[u8],
     permissions: Option<&Permissions>,
     synced: bool,
 ) -> Result<(), StoreError> {
-    let (Some(dir), Some(name)) = (target.parent(), target.file_name()) else {
-        return Err(StoreError::io(target.display(), "is not a file's path"));
-    };
-    make_dir(dir)?;
-    // A rename replaces the file whole only from the same file system.
-    let staging = staging_of(dir, name);
-    let replaced = staged(&staging, bytes, permissions, synced)
-        .map_err(|e| io_error(&staging, &e))
-        .and_then(|()| std::fs::rename(&staging, target).map_err(|e| io_error(target, &e)));
-    if replaced.is_err() {
-        let _ = std::fs::remove_file(&staging);
-    }
-    replaced?;
-    if synced {
-        flush(dir)?;
-    }
-    Ok(())
+    stage(target, bytes, permissions, synced)?.put(synced)
 }
 
 /// `None` for a `dir` that is not there, otherwise whether it was empty and so removed.

@@ -1,10 +1,10 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-use worklog_domain::ports::{Binary, Refreshed, StoreError};
+use worklog_domain::ports::{Binary, Refreshed, Staged, StoreError};
 use worklog_domain::release;
 
-use super::{io_error, replace, target_of};
+use super::{Staging, io_error, stage, target_of};
 
 const REFRESH: [&str; 1] = ["refresh"];
 
@@ -22,18 +22,46 @@ impl FsBinary {
     }
 }
 
+struct FsStaged(Staging);
+
+impl Staged for FsStaged {
+    fn runs(&self) -> Result<(), StoreError> {
+        let staged = &self.0.path;
+        let output = Command::new(staged)
+            .arg("--version")
+            .output()
+            .map_err(|e| io_error(staged, &e))?;
+        if output.status.success() {
+            return Ok(());
+        }
+        let said = String::from_utf8_lossy(&output.stderr);
+        let why = match said.trim() {
+            "" => output.status.to_string(),
+            said => format!("{}: {said}", output.status),
+        };
+        Err(StoreError::io(staged.display(), why))
+    }
+
+    fn put(self: Box<Self>) -> Result<String, StoreError> {
+        let FsStaged(staging) = *self;
+        let target = staging.target.display().to_string();
+        staging.put(true)?;
+        Ok(target)
+    }
+}
+
 impl Binary for FsBinary {
     fn asset(&self) -> Option<String> {
         release::asset(&self.command)
     }
 
-    fn replace(&self, bytes: &[u8]) -> Result<String, StoreError> {
+    fn stage(&self, bytes: &[u8]) -> Result<Box<dyn Staged + '_>, StoreError> {
         let target = target_of(&self.exe)?;
         let kept = std::fs::metadata(&target)
             .map_err(|e| io_error(&target, &e))?
             .permissions();
-        replace(&target, bytes, Some(&kept), true)?;
-        Ok(target.display().to_string())
+        let staging = stage(&target, bytes, Some(&kept), true)?;
+        Ok(Box::new(FsStaged(staging)))
     }
 
     fn refresh(&self) -> Refreshed {
@@ -89,6 +117,10 @@ mod tests {
         FsBinary::new(exe.to_path_buf(), "lantern")
     }
 
+    fn replaced(binary: &FsBinary, bytes: &[u8]) -> Result<String, StoreError> {
+        binary.stage(bytes)?.put()
+    }
+
     #[test]
     fn a_binary_is_replaced_whole_with_its_mode_kept_and_nothing_left_beside_it() {
         let kept = tempfile::tempdir().unwrap();
@@ -97,7 +129,7 @@ mod tests {
         fs::set_permissions(&exe, fs::Permissions::from_mode(0o750)).unwrap();
 
         assert_eq!(
-            binary(&exe).replace(&[0, 159, 10]),
+            replaced(&binary(&exe), &[0, 159, 10]),
             Ok(exe.display().to_string())
         );
         assert_eq!(fs::read(&exe).unwrap(), [0, 159, 10]);
@@ -119,7 +151,7 @@ mod tests {
         std::os::unix::fs::symlink("../../atlas/lantern", &link).unwrap();
 
         assert_eq!(
-            binary(&link).replace(b"new"),
+            replaced(&binary(&link), b"new"),
             Ok(real.display().to_string())
         );
         assert_eq!(fs::read(&real).unwrap(), b"new");
@@ -133,7 +165,7 @@ mod tests {
     fn a_binary_that_is_gone_is_not_replaced_and_nothing_is_staged_for_it() {
         let kept = tempfile::tempdir().unwrap();
         let gone = binary(&kept.path().join("lantern"));
-        let refused = gone.replace(b"new").unwrap_err().to_string();
+        let refused = replaced(&gone, b"new").unwrap_err().to_string();
         assert!(refused.contains("lantern"), "{refused}");
         assert_eq!(names(kept.path()), [""; 0]);
     }
@@ -144,7 +176,7 @@ mod tests {
         let exe = kept.path().join("lantern");
         fs::create_dir(&exe).unwrap();
         fs::write(exe.join("relay"), "old").unwrap();
-        assert!(binary(&exe).replace(b"new").is_err());
+        assert!(replaced(&binary(&exe), b"new").is_err());
         assert_eq!(names(kept.path()), ["lantern"]);
         assert_eq!(fs::read_to_string(exe.join("relay")).unwrap(), "old");
     }
@@ -156,17 +188,62 @@ mod tests {
         exe
     }
 
+    // A file just written can be held open by a child another test thread forked meanwhile.
+    fn busy(error: &StoreError) -> bool {
+        error.to_string().contains("ext file busy")
+    }
+
     fn refreshed(binary: &FsBinary) -> Refreshed {
         loop {
             match binary.refresh() {
                 Refreshed {
-                    ended: Err(busy), ..
-                } if busy.to_string().contains("ext file busy") => {
-                    std::thread::yield_now();
-                }
+                    ended: Err(error), ..
+                } if busy(&error) => std::thread::yield_now(),
                 ended => return ended,
             }
         }
+    }
+
+    fn ran(staged: &dyn Staged) -> Result<(), StoreError> {
+        loop {
+            match staged.runs() {
+                Err(error) if busy(&error) => std::thread::yield_now(),
+                ran => return ran,
+            }
+        }
+    }
+
+    #[test]
+    fn a_staged_binary_is_run_with_version_and_gone_again_unless_it_is_put() {
+        let kept = tempfile::tempdir().unwrap();
+        let exe = script(kept.path(), "lantern", "exit 0");
+        let lantern = binary(&exe);
+
+        let answering = b"#!/bin/sh\n[ \"$1\" = --version ] || exit 9\n";
+        let staged = lantern.stage(answering).unwrap();
+        assert_eq!(ran(staged.as_ref()), Ok(()));
+        drop(staged);
+        assert_eq!(names(kept.path()), ["lantern"]);
+
+        let failing = b"#!/bin/sh\necho 'no room' >&2\nexit 3\n";
+        let staged = lantern.stage(failing).unwrap();
+        let refused = ran(staged.as_ref()).unwrap_err().to_string();
+        assert!(refused.ends_with(": exit status: 3: no room"), "{refused}");
+        drop(staged);
+        let staged = lantern.stage(b"#!/bin/sh\nexit 4\n").unwrap();
+        let refused = ran(staged.as_ref()).unwrap_err().to_string();
+        assert!(refused.ends_with(": exit status: 4"), "{refused}");
+        drop(staged);
+        let staged = lantern.stage(&[0, 159, 10]).unwrap();
+        assert!(ran(staged.as_ref()).is_err());
+        drop(staged);
+        assert_eq!(names(kept.path()), ["lantern"]);
+
+        let staged = lantern.stage(answering).unwrap();
+        ran(staged.as_ref()).unwrap();
+        assert_eq!(staged.put(), Ok(exe.display().to_string()));
+        assert_eq!(fs::read(&exe).unwrap(), answering);
+        assert_eq!(names(kept.path()), ["lantern"]);
     }
 
     fn wrote(lines: &[&str]) -> Refreshed {

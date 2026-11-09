@@ -1,6 +1,7 @@
 //! What a use case needs from outside the domain, as traits the adapters under `wiring`
 //! implement and the tests stub.
 
+use alloc::boxed::Box;
 use alloc::collections::BTreeSet;
 use alloc::rc::Rc;
 use alloc::string::{String, ToString};
@@ -161,15 +162,24 @@ pub struct Refreshed {
     pub ended: Result<(), StoreError>,
 }
 
+/// A binary written beside the running one, removed again when dropped before `put`.
+pub trait Staged {
+    /// Runs the staged binary with `--version`; an error where it does not start or exits
+    /// with a failure.
+    fn runs(&self) -> Result<(), StoreError>;
+    /// Puts the staged binary in the place of the running one and returns where that is.
+    fn put(self: Box<Self>) -> Result<String, StoreError>;
+}
+
 /// The executable this process runs from.
 pub trait Binary {
     /// The release asset built for the target this binary runs on; `None` where no release
     /// is built for it.
     fn asset(&self) -> Option<String>;
-    /// Puts `bytes` in the place of the running binary and returns where that is.
-    fn replace(&self, bytes: &[u8]) -> Result<String, StoreError>;
-    /// Has the binary now in place, which after `replace` is not this process, bring what
-    /// this host takes from it up to itself.
+    /// Writes `bytes` beside the running binary, with its permissions, ready to take its place.
+    fn stage(&self, bytes: &[u8]) -> Result<Box<dyn Staged + '_>, StoreError>;
+    /// Has the binary now in place, which after a `put` is not this process, bring what this
+    /// host takes from it up to itself.
     fn refresh(&self) -> Refreshed;
 }
 

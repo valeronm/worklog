@@ -81,7 +81,11 @@ fn replace(releases: &dyn Releases, binary: &dyn Binary, tag: &str) -> Result<St
     let checksum = releases.fetch(tag, &format!("{asset}.sha256"))?;
     let bytes = releases.fetch(tag, &asset)?;
     verify(&bytes, &String::from_utf8_lossy(&checksum)).map_err(|why| Failure::at(&asset, why))?;
-    Ok(binary.replace(&bytes)?)
+    let staged = binary.stage(&bytes)?;
+    staged
+        .runs()
+        .map_err(|e| Failure::at(&asset, format!("does not run on this machine: {e}")))?;
+    Ok(staged.put()?)
 }
 
 /// What an install wrote, the binary's own path first, and what the binary's refresh of this
@@ -95,7 +99,8 @@ pub struct Installed {
 
 /// Puts the release under `tag` in the place of the binary and has the binary then in place
 /// bring this host up to itself. The asset is the one built for the binary's target, refused
-/// where none is, and its `.sha256` beside it must match before anything is replaced.
+/// where none is; its `.sha256` beside it must match and it must run on this host before
+/// anything is replaced.
 pub fn install(
     releases: &dyn Releases,
     binary: &dyn Binary,
@@ -177,12 +182,14 @@ mod tests {
     }
 
     #[test]
-    fn a_checksum_that_does_not_match_or_a_target_with_no_release_replaces_nothing() {
+    fn a_release_that_does_not_match_its_checksum_or_run_here_or_exist_replaces_nothing() {
         let tampered = published("v0.3.0", ASSET, b"new", b"other");
         let releases = published("v0.3.0", ASSET, b"new", b"new");
         let mut unsummed = published("v0.3.0", ASSET, b"new", b"new");
         unsummed.assets.remove(&format!("{ASSET}.sha256"));
         let missing = StoreError::io(format!("{ASSET}.sha256"), "no such asset");
+        let unrunnable = published("v0.3.0", ASSET, b"\x7fELF\xff", b"\x7fELF\xff");
+        let stopped = StoreError::io(BINARY, "cannot execute binary file");
         for (releases, asset, failure) in [
             (
                 &tampered,
@@ -197,6 +204,11 @@ mod tests {
                 ),
             ),
             (&unsummed, Some(ASSET), Failure::Store(missing)),
+            (
+                &unrunnable,
+                Some(ASSET),
+                Failure::at(ASSET, format!("does not run on this machine: {stopped}")),
+            ),
         ] {
             let binary = MemoryBinary {
                 asset: asset.map(str::to_owned),

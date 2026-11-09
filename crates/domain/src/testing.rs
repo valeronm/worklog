@@ -2,6 +2,7 @@
 //! contract every implementation of a port is held to.
 
 use alloc::borrow::ToOwned;
+use alloc::boxed::Box;
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::format;
 use alloc::rc::Rc;
@@ -15,7 +16,7 @@ use super::draft::{Draft, Listed};
 use super::id::{DocumentId, VersionId};
 use super::ports::{
     Binary, BrokenDraft, Clock, Drafts, DraftsRead, Host, HostRead, Ids, NotRead, Refreshed,
-    Releases, Store, StoreError, StoreRead, Usage, UsageRead,
+    Releases, Staged, Store, StoreError, StoreRead, Usage, UsageRead,
 };
 use super::release::{Built, ReleaseVersion, sha256_hex};
 use super::session::Session;
@@ -457,15 +458,36 @@ impl MemoryBinary {
     }
 }
 
+/// A staged `MemoryBinary` that runs where its bytes are text.
+struct MemoryStaged<'a> {
+    binary: &'a MemoryBinary,
+    bytes: Vec<u8>,
+}
+
+impl Staged for MemoryStaged<'_> {
+    fn runs(&self) -> Result<(), StoreError> {
+        core::str::from_utf8(&self.bytes)
+            .map(|_| ())
+            .map_err(|_| StoreError::io(BINARY, "cannot execute binary file"))
+    }
+
+    fn put(self: Box<Self>) -> Result<String, StoreError> {
+        *self.binary.replaced_with.borrow_mut() = Some(self.bytes);
+        self.binary.calls.borrow_mut().push("replace");
+        Ok(BINARY.to_owned())
+    }
+}
+
 impl Binary for MemoryBinary {
     fn asset(&self) -> Option<String> {
         self.asset.clone()
     }
 
-    fn replace(&self, bytes: &[u8]) -> Result<String, StoreError> {
-        *self.replaced_with.borrow_mut() = Some(bytes.to_vec());
-        self.calls.borrow_mut().push("replace");
-        Ok(BINARY.to_owned())
+    fn stage(&self, bytes: &[u8]) -> Result<Box<dyn Staged + '_>, StoreError> {
+        Ok(Box::new(MemoryStaged {
+            binary: self,
+            bytes: bytes.to_vec(),
+        }))
     }
 
     fn refresh(&self) -> Refreshed {
@@ -483,8 +505,8 @@ impl<B: Binary + ?Sized> Binary for Rc<B> {
         (**self).asset()
     }
 
-    fn replace(&self, bytes: &[u8]) -> Result<String, StoreError> {
-        (**self).replace(bytes)
+    fn stage(&self, bytes: &[u8]) -> Result<Box<dyn Staged + '_>, StoreError> {
+        (**self).stage(bytes)
     }
 
     fn refresh(&self) -> Refreshed {

@@ -4468,6 +4468,24 @@ fn upgrade_replaces_the_binary_only_with_a_newer_release_whose_checksum_matches(
 }
 
 #[test]
+fn a_release_that_does_not_run_here_leaves_the_binary_and_the_host_as_they_were() {
+    let stale = Stale::new();
+    let bytes = fs::read(&stale.installed).unwrap();
+    let unrunnable = b"\x7fELF\x02\x01\x01";
+    stale.host.publish("v9.9.9", unrunnable, unrunnable);
+    let stopped = stale.upgrade(&["upgrade"]);
+    let why = format!(
+        "worklog: {}: does not run on this machine: ",
+        release_asset()
+    );
+    assert!(stopped.stderr.starts_with(&why), "{}", stopped.stderr);
+    assert_eq!((stopped.stdout.as_str(), stopped.code), ("", Some(1)));
+    assert_eq!(fs::read(&stale.installed).unwrap(), bytes);
+    assert_eq!(beside(&stale.installed), ["worklog"]);
+    assert_eq!(fs::read_to_string(&stale.skill).unwrap(), "old");
+}
+
+#[test]
 fn an_upgrade_check_against_releases_that_do_not_read_is_refused_in_text_and_in_json() {
     let stale = Stale::new();
     let latest = stale.host.releases().join("latest");
@@ -4525,7 +4543,7 @@ fn the_refresh_after_an_upgrade_is_run_by_the_file_at_the_binary_s_own_path() {
     assert_eq!(beside(&installed), ["worklog"]);
 
     let installed = host.install();
-    let failing = b"#!/bin/sh\necho /desk/skill\necho 'worklog: no agents here' >&2\nexit 1\n";
+    let failing = b"#!/bin/sh\n[ \"$1\" = --version ] && exit 0\necho /desk/skill\necho 'worklog: no agents here' >&2\nexit 1\n";
     host.publish("v9.9.9", failing, failing);
     let stopped = host.upgrade(&installed, &["upgrade"]);
     assert_eq!(
