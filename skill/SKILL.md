@@ -165,8 +165,17 @@ the followups filed on a topic claimed for the session's directory, on
 anything part of one, and on what the claimed topics are part of or use.
 Where no claimed directory covers the session, the topics claimed
 `--anywhere` count as the claimed ones, and it covers those filed on the
-machine's topics too. Everything due is triaged in that session: done,
-dropped, rescheduled, or acted on.
+machine's topics too.
+
+A session takes up a due item only where its task bears on it: the item is
+what the task is about, or concerns something the work reads or changes.
+The rest it leaves as it stands for a backlog triage.
+
+A backlog triage is a session of its own, run when the user asks for one,
+over the due followups of a topic and those with no trigger. Check each
+against the code or the data it names before putting it to the user, in
+groups the user can answer at once. Each item leaves done, dropped or with
+a new trigger.
 
 Triage an item, new or found in a backlog, by the first question that
 fits:

@@ -13,7 +13,7 @@ pub(crate) const CONTEXT_BYTES: usize = 10_000;
 const FORK_LABEL_BYTES: usize = 800;
 const COLUMNS: usize = 78;
 const SUMMARY_CHARS: usize = 96;
-const DUE: &str = "due now — `worklog show <id>` for one, `worklog due`, run here, for all:\n";
+pub(crate) const DUE: &str = "due — before acting on one, read Open work in the worklog skill;\n`worklog show <id>` for one, `worklog due`, run here, for all:\n";
 const CLOSING: &str = "Durable facts and ideas, by name where they fit and counted where not —\n\
      `worklog facts <topic>` for a topic's facts,\n\
      `worklog ideas <topic>` for a topic's ideas,\n\
@@ -485,7 +485,7 @@ mod tests {
         );
         assert_eq!(
             DUE,
-            "due now — `worklog show <id>` for one, `worklog due`, run here, for all:\n"
+            "due — before acting on one, read Open work in the worklog skill;\n`worklog show <id>` for one, `worklog due`, run here, for all:\n"
         );
         assert_eq!(
             CLOSING,
@@ -725,8 +725,12 @@ mod tests {
         opened.draft_count = 2;
         let text = opened.text();
         let (before, rest) = text.split_once(NEEDS_SUMMARY).unwrap();
-        assert!(before.starts_with(DUE), "{before}");
-        assert_eq!(before.lines().count(), 3, "{before}");
+        assert_eq!(
+            before,
+            format!(
+                "{DUE}due 2026-01-01  7f3a91c0  Add relay 1 to the board and wire its driver\n\n"
+            )
+        );
         assert!(rest.starts_with("\nForked — "), "{rest}");
     }
 

@@ -13,7 +13,7 @@ use serde_json::Value;
 const SUMMARY: (&str, &str) = ("summary = \"\"", "summary = \"Pin four\"");
 const LANTERN_HERE: &str = "lantern — claimed at ~/projects/lantern: A thing\n  (no facts)\n";
 const DESK: &str = "desk — this machine: A machine\n  (no facts)\n";
-const DUE: &str = "due now — `worklog show <id>` for one, `worklog due`, run here, for all:\n";
+const DUE: &str = "due — before acting on one, read Open work in the worklog skill;\n`worklog show <id>` for one, `worklog due`, run here, for all:\n";
 const CLOSING: &str = "Durable facts and ideas, by name where they fit and counted where not —\n\
      `worklog facts <topic>` for a topic's facts,\n\
      `worklog ideas <topic>` for a topic's ideas,\n\

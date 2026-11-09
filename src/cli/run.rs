@@ -293,7 +293,7 @@ mod tests {
     use super::*;
     use crate::cli::NAME;
     use crate::cli::args::{Cli, Invoked};
-    use crate::cli::render::{CONTEXT_BYTES, assert_fits};
+    use crate::cli::render::{CONTEXT_BYTES, DUE, assert_fits};
     use crate::cli::tests::environment;
     use worklog_app::testing::{
         World, claim_fields, entry, fact, followup, fork, topic, world_with_atlas,
@@ -578,11 +578,7 @@ mod tests {
             line
         );
         let opened = fixture.text(&["context"]);
-        let heading = "due now — `worklog show <id>` for one, `worklog due`, run here, for all:\n";
-        assert!(
-            opened.starts_with(&format!("{heading}{line}\n")),
-            "{opened}"
-        );
+        assert!(opened.starts_with(&format!("{DUE}{line}\n")), "{opened}");
         assert_eq!(
             refused(fixture.run_in(None, &["due"])),
             "no working directory"
@@ -606,10 +602,9 @@ mod tests {
 
         let text = fixture.text(&["context"]);
         assert_fits(&text);
-        assert!(text.starts_with("due now — "), "{text}");
-        assert_eq!(
-            text.lines().nth(1).map(|line| &line[..16]),
-            Some("due 2026-01-05  ")
+        assert!(
+            text.starts_with(&format!("{DUE}due 2026-01-05  ")),
+            "{text}"
         );
         for id in &due {
             let line = format!("due 2026-01-05  {id}  Check the driver\n");

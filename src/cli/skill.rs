@@ -11,6 +11,7 @@ mod tests {
     use super::SKILL;
     use crate::cli::NAME;
     use crate::cli::args::Cli;
+    use crate::cli::render::DUE;
 
     const HELP: &str = "help";
 
@@ -245,6 +246,12 @@ mod tests {
             }
         }
         wrong
+    }
+
+    #[test]
+    fn the_section_the_due_heading_names_is_one_the_skill_has() {
+        assert!(DUE.contains("read Open work in the worklog skill"), "{DUE}");
+        assert!(SKILL.lines().any(|line| line == "## Open work"));
     }
 
     #[test]
