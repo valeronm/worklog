@@ -12,21 +12,12 @@ pub(crate) const CONTEXT_BYTES: usize = 10_000;
 // The topics and the due lines give way for the line of fork labels, which no `Step` shortens.
 const FORK_LABEL_BYTES: usize = 800;
 const COLUMNS: usize = 78;
-const SUMMARY_CHARS: usize = 96;
 pub(crate) const DUE: &str = "due — before acting on one, read Open work in the worklog skill;\n`worklog show <id>` for one, `worklog due`, run here, for all:\n";
 const CLOSING: &str = "Durable facts and ideas, by name where they fit and counted where not —\n\
      `worklog facts <topic>` for a topic's facts,\n\
      `worklog ideas <topic>` for a topic's ideas,\n\
      `worklog show <topic>/<name>` for one,\n\
      `worklog followups <topic>` for open work.\n";
-
-fn cut(text: &str) -> String {
-    if text.chars().count() <= SUMMARY_CHARS {
-        return text.to_owned();
-    }
-    let kept: String = text.chars().take(SUMMARY_CHARS - 1).collect();
-    format!("{}…", kept.trim_end())
-}
 
 fn wrapped(items: &[&str]) -> String {
     let mut lines: Vec<String> = Vec::new();
@@ -100,7 +91,7 @@ const FORMS: usize = 4;
 fn forms(topic: &Loaded) -> [String; FORMS] {
     let mut head = format!("{} — {}:", topic.label, via(&topic.via));
     if !topic.summary.is_empty() {
-        let _ = write!(head, " {}", cut(&topic.summary));
+        let _ = write!(head, " {}", topic.summary);
     }
     head.push('\n');
     let facts = if topic.facts.is_empty() && topic.ideas.is_empty() {
@@ -194,10 +185,8 @@ impl Page {
     fn of(context: &Context) -> Page {
         let mut due = Vec::new();
         for followup in &context.due {
-            let mut shown = followup.clone();
-            shown.row.summary = cut(&shown.row.summary);
             let mut line = String::new();
-            followup_line(&mut line, &shown);
+            followup_line(&mut line, followup);
             due.push(line);
         }
         let mut counts = Vec::new();
@@ -573,26 +562,15 @@ mod tests {
     }
 
     #[test]
-    fn a_long_summary_is_cut_at_96_characters_on_a_due_line_and_in_a_topic_s_header() {
-        let (long, fits) = ("é".repeat(97), "é".repeat(96));
-        let kept = format!("{}…", "é".repeat(95));
+    fn a_summary_is_printed_whole_on_a_due_line_and_in_a_topic_s_header() {
+        let long = "é".repeat(100);
         let mut lamp = loaded("lantern", here(), Vec::new(), Vec::new());
         lamp.summary.clone_from(&long);
-        let text = context(vec![lamp.clone()], vec![due_on("2026-10-01", &long)]).text();
-        let line = format!("due 2026-10-01  7f3a91c0  {kept}\n");
+        let text = context(vec![lamp], vec![due_on("2026-10-01", &long)]).text();
+        let line = format!("due 2026-10-01  7f3a91c0  {long}\n");
         assert!(text.contains(&line), "{text}");
-        let header = format!("lantern — claimed at ~/projects/lantern: {kept}\n");
+        let header = format!("lantern — claimed at ~/projects/lantern: {long}\n");
         assert!(text.contains(&header), "{text}");
-
-        lamp.summary.clone_from(&fits);
-        let text = context(vec![lamp], vec![due_on("2026-10-01", &fits)]).text();
-        assert!(text.contains(&format!("  {fits}\n")), "{text}");
-        assert!(text.contains(&format!(": {fits}\n")), "{text}");
-
-        let mut spaced = loaded("lantern", here(), Vec::new(), Vec::new());
-        spaced.summary = format!("{} {}", "a".repeat(94), "b".repeat(9));
-        let text = context(vec![spaced], Vec::new()).text();
-        assert!(text.contains(&format!(": {}…\n", "a".repeat(94))), "{text}");
     }
 
     #[test]
@@ -888,7 +866,7 @@ mod tests {
     fn no_session_is_opened_with_more_than_the_budget_and_each_says_what_it_left_out() {
         let overdue = |count: usize| -> Vec<FollowupRow> {
             (0..count)
-                .map(|n| due_on("2026-01-01", &format!("{n} {}", "ü".repeat(96))))
+                .map(|n| due_on("2026-01-01", &format!("{n} {}", "ü".repeat(200))))
                 .collect()
         };
         let crowd = |count: usize| -> Vec<Loaded> {
