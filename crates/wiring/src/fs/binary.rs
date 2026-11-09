@@ -124,7 +124,8 @@ mod tests {
     #[test]
     fn a_binary_is_replaced_whole_with_its_mode_kept_and_nothing_left_beside_it() {
         let kept = tempfile::tempdir().unwrap();
-        let exe = kept.path().join("lantern");
+        let root = fs::canonicalize(kept.path()).unwrap();
+        let exe = root.join("lantern");
         fs::write(&exe, "old").unwrap();
         fs::set_permissions(&exe, fs::Permissions::from_mode(0o750)).unwrap();
 
@@ -135,7 +136,7 @@ mod tests {
         assert_eq!(fs::read(&exe).unwrap(), [0, 159, 10]);
         let mode = fs::metadata(&exe).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o750);
-        assert_eq!(names(kept.path()), ["lantern"]);
+        assert_eq!(names(&root), ["lantern"]);
     }
 
     #[test]
@@ -216,14 +217,15 @@ mod tests {
     #[test]
     fn a_staged_binary_is_run_with_version_and_gone_again_unless_it_is_put() {
         let kept = tempfile::tempdir().unwrap();
-        let exe = script(kept.path(), "lantern", "exit 0");
+        let root = fs::canonicalize(kept.path()).unwrap();
+        let exe = script(&root, "lantern", "exit 0");
         let lantern = binary(&exe);
 
         let answering = b"#!/bin/sh\n[ \"$1\" = --version ] || exit 9\n";
         let staged = lantern.stage(answering).unwrap();
         assert_eq!(ran(staged.as_ref()), Ok(()));
         drop(staged);
-        assert_eq!(names(kept.path()), ["lantern"]);
+        assert_eq!(names(&root), ["lantern"]);
 
         let failing = b"#!/bin/sh\necho 'no room' >&2\nexit 3\n";
         let staged = lantern.stage(failing).unwrap();
@@ -237,13 +239,13 @@ mod tests {
         let staged = lantern.stage(&[0, 159, 10]).unwrap();
         assert!(ran(staged.as_ref()).is_err());
         drop(staged);
-        assert_eq!(names(kept.path()), ["lantern"]);
+        assert_eq!(names(&root), ["lantern"]);
 
         let staged = lantern.stage(answering).unwrap();
         ran(staged.as_ref()).unwrap();
         assert_eq!(staged.put(), Ok(exe.display().to_string()));
         assert_eq!(fs::read(&exe).unwrap(), answering);
-        assert_eq!(names(kept.path()), ["lantern"]);
+        assert_eq!(names(&root), ["lantern"]);
     }
 
     fn wrote(lines: &[&str]) -> Refreshed {
