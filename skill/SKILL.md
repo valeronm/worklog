@@ -126,13 +126,13 @@ stderr with exit 1; a usage error exits 2.
 1. Put each doable item of open work from this session to the user, one
    question per item naming the item, what doing it involves and how large
    it is, with three options: **do it now**, in this session; **record
-   it**; **drop it**. Each option carries its reason. A drop's reason goes
-   on the entry's `Triage:` line, and a reason that will still hold in
-   later sessions is also written as a fact. Before asking, `worklog
-   search` the item, and if it was dropped or recorded before, say when and
-   why. Never withhold an item because it seemed not worth asking, and
-   never ask the same item twice. A silently recorded item is a delay
-   decision the user never made.
+   it**, with a proposed trigger; **drop it**. Each option carries its
+   reason. A drop's reason goes on the entry's `Triage:` line, and a
+   reason that will still hold in later sessions is also written as a
+   fact. Before asking, `worklog search` the item, and if it was dropped
+   or recorded before, say when and why. Never withhold an item because it
+   seemed not worth asking, and never ask the same item twice. A silently
+   recorded item is a delay decision the user never made.
 2. Do what the user said to do now, before opening the entry: no draft
    waits on the answers, and the entry records that work. A do-it-now item
    that grows past the size it was asked at goes back to the user before
@@ -200,14 +200,22 @@ fits:
 
 A followup's trigger says when it comes up again:
 
-- `worklog trigger <followup> <date> <why>` — a day to look again,
-  not the day the thing is expected, and what to look for then.
+- `worklog trigger <followup> <date> <why>` — a day to look again and
+  what to look for then.
 - `worklog trigger <followup> touching <topic>` — one of its own
   topics; it is due in a session whose directory claims that topic, or a
   topic that is part of it or uses it, through any number of steps. A
   session that only claims what that topic is part of does not bring it
   up. In a session outside every claimed directory, the machine topic and
   the topics claimed `--anywhere` count as claimed there.
+
+A trigger, new or changed, is the user's to set: propose one, with what
+it rests on, in the question that triages the item, and write the
+followup or run `trigger` once they answer. A proposed day is the first
+on which what the followup waits for can have happened, worked out from
+evidence: a release or delivery date, a schedule, how long the same thing
+took before. Where nothing dates it, propose the topic whose next session
+would show it; a day picked as a round interval from today is a guess.
 
 `new followup` takes several `--topics` separated by commas, and `--about
 <document>` for the document the followup is about. With `--summary` it
