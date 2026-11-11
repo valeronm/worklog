@@ -15,7 +15,7 @@ use std::fmt::Write as _;
 use serde::Serialize;
 
 use super::json::{Pinned, nothing, printed};
-use worklog_app::draft::{DraftRow, Opener};
+use worklog_app::draft::{DraftRow, Opener, ShownDraft};
 use worklog_app::followup::Made;
 use worklog_app::{DraftRef, Failure, Row, Written, counted};
 use worklog_render::{change_or_ending, ended, written};
@@ -66,7 +66,7 @@ impl From<Failure> for Stopped {
 pub(super) trait Render {
     fn text(&self) -> String;
 
-    /// What a person may act on that is no part of the data asked for.
+    /// What a person reads beside the data asked for.
     fn notes(&self) -> Vec<String> {
         Vec::new()
     }
@@ -164,6 +164,17 @@ impl Render for Vec<Written> {
 impl Render for DraftRef {
     fn text(&self) -> String {
         format!("{}\n", self.location)
+    }
+}
+
+impl Render for ShownDraft {
+    fn text(&self) -> String {
+        format!("{}\n", self.location)
+    }
+
+    fn notes(&self) -> Vec<String> {
+        let text = self.text.strip_suffix('\n').unwrap_or(&self.text);
+        vec![format!("the draft holds:\n{text}")]
     }
 }
 

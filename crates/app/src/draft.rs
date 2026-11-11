@@ -10,6 +10,7 @@ use crate::heads::label_or_short;
 use crate::live::open;
 use crate::lookup::{Lookup, draft_open};
 use crate::rules::{name_is_free, referencable};
+use crate::show;
 use crate::{Deps, DraftRef, Failed, Failure, ReadDeps, kind_named, text};
 use worklog_domain::draft::{Draft, Listed};
 use worklog_domain::id::{DocumentId, is_id_prefix};
@@ -152,8 +153,16 @@ pub(super) fn refuse_open(deps: &ReadDeps, id: &DocumentId, label: &str) -> Resu
     Ok(())
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct ShownDraft {
+    pub document: DocumentId,
+    #[serde(rename = "path")]
+    pub location: String,
+    pub text: String,
+}
+
 /// Refuses a claim, an ended, forked or unreadable document, and one that has a draft open.
-pub fn checkout(deps: &Deps, address: &str) -> Result<DraftRef, Failure> {
+pub fn checkout(deps: &Deps, address: &str) -> Result<ShownDraft, Failure> {
     let lookup = Lookup::new(deps.read().store);
     let target = open(deps, &lookup, address)?;
     let kind = KindOf::of(&target.head.envelope.kind)?;
@@ -161,7 +170,17 @@ pub fn checkout(deps: &Deps, address: &str) -> Result<DraftRef, Failure> {
         return Err(Failure::at(&target.label, "a claim is never edited"));
     }
     target.unended()?;
-    open_draft(deps, opened(&lookup, &target.head, kind)?)
+    open_shown(deps, opened(&lookup, &target.head, kind)?, &target.label)
+}
+
+pub(super) fn open_shown(deps: &Deps, draft: Draft, label: &str) -> Result<ShownDraft, Failure> {
+    let text = show::render(&draft, label)?;
+    let DraftRef { document, location } = open_draft(deps, draft)?;
+    Ok(ShownDraft {
+        document,
+        location,
+        text,
+    })
 }
 
 pub(super) fn opened(lookup: &Lookup, version: &Version, kind: KindOf) -> Result<Draft, Failure> {
@@ -746,16 +765,10 @@ mod tests {
         let lantern = checkout(&world.deps(), "lantern").unwrap();
         world.host.set_session(None);
         let phone = new(&world.deps(), &New::Topic { name: "phone" }).unwrap();
-        let opened_in = |opened: &DraftRef| {
-            world
-                .drafts
-                .read(&opened.document)
-                .unwrap()
-                .unwrap()
-                .opened_in
-        };
-        assert_eq!(opened_in(&lantern), Some(lamp_session()));
-        assert_eq!(opened_in(&phone), None);
+        let opened_in =
+            |document: &DocumentId| world.drafts.read(document).unwrap().unwrap().opened_in;
+        assert_eq!(opened_in(&lantern.document), Some(lamp_session()));
+        assert_eq!(opened_in(&phone.document), None);
     }
 
     #[test]

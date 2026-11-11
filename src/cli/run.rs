@@ -800,7 +800,7 @@ mod tests {
 
         let listed = fixture.text(&["history", "lantern"]);
         let version = &listed[..12];
-        fixture.text(&["checkout", "lantern"]);
+        assert_eq!(fixture.run(&["checkout", "lantern"]).unwrap().exit, 0);
         assert_eq!(
             fixture.text(&["diff", "lantern"]),
             format!("--- {version}\n+++ lantern\nno changes\n")

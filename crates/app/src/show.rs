@@ -323,7 +323,7 @@ fn resolve(lookup: &Lookup, address: &str) -> Result<Resolved, Failure> {
     resolved(lookup, address)?.ok_or_else(|| names_no_document(address))
 }
 
-fn render(draft: &Draft, what: &str) -> Result<String, Failure> {
+pub(super) fn render(draft: &Draft, what: &str) -> Result<String, Failure> {
     draft.text().map_err(|error| Failure::at(what, error))
 }
 

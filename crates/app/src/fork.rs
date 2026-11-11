@@ -1,7 +1,7 @@
-use crate::draft::{names, open_draft, refuse_open};
+use crate::draft::{ShownDraft, names, open_shown, refuse_open};
 use crate::heads::row_head;
 use crate::lookup::{Lookup, no_head_reads, unreadable};
-use crate::{Deps, DraftRef, Failure};
+use crate::{Deps, Failure};
 use worklog_domain::document::State;
 use worklog_domain::draft::Draft;
 use worklog_schema::{KindOf, step};
@@ -9,7 +9,7 @@ use worklog_schema::{KindOf, step};
 /// Opens a draft with every head as a parent, holding the fields and body of the head the
 /// document is shown from. Refuses a document that is not forked, one with a draft open, one
 /// holding an unreadable version, and a fork no head of which reads as a record.
-pub fn resolve(deps: &Deps, address: &str) -> Result<DraftRef, Failure> {
+pub fn resolve(deps: &Deps, address: &str) -> Result<ShownDraft, Failure> {
     let lookup = Lookup::new(deps.read().store);
     let id = lookup.one(address)?;
     let label = lookup.label(&id)?;
@@ -29,7 +29,7 @@ pub fn resolve(deps: &Deps, address: &str) -> Result<DraftRef, Failure> {
     let mut draft = Draft::of(&shown);
     draft.parents = heads.iter().map(|head| head.id.clone()).collect();
     draft.fields = names(&lookup, &step::shown(&shown.fields), kind)?;
-    open_draft(deps, draft)
+    open_shown(deps, draft, &label)
 }
 
 #[cfg(test)]

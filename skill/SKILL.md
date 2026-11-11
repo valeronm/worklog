@@ -61,8 +61,9 @@ what happens next, the triage under Open work.
 1. `worklog new topic <name>`, `worklog new fact <topic>/<name>`,
    `worklog new idea <topic>/<name>`, `worklog new entry <name>`,
    or `worklog checkout <target>` for an existing document. Each
-   prints the draft's path. A name is lowercase letters, digits and
-   hyphens, with at least one letter and no date at its start.
+   prints the draft's path, and `checkout` the draft as it stands on
+   stderr. A name is lowercase letters, digits and hyphens, with at least
+   one letter and no date at its start.
 2. Read the file at that path, then edit it: it lives outside the working
    directory, and an edit tool refuses a file it has not read. The draft
    is the document's fields between two `+++` lines, then its body. The
@@ -402,13 +403,13 @@ so the notice goes away, with the document unread, decides nothing.
 A fork is a document with two or more current versions, written on
 different machines before they synced. `worklog forks` lists each
 with its versions, and `show` prints them all. `worklog resolve
-<target>` opens a draft over every one of them, holding the text of one;
-`worklog diff <target>` shows that draft against each in turn, with
-`no changes` under one it equals. Edit the draft into what should stand
-and `save`; where the versions disagree on substance, put the choice to
-the user. A forked document takes no other change until resolved. Neither
-does one holding a version this binary cannot read: report it and leave
-it.
+<target>` opens a draft over every one of them, holding the text of one,
+and prints it on stderr as `checkout` does; `worklog diff <target>`
+shows that draft against each in turn, with `no changes` under one it
+equals. Edit the draft into what should stand and `save`; where the
+versions disagree on substance, put the choice to the user. A forked
+document takes no other change until resolved. Neither does one holding
+a version this binary cannot read: report it and leave it.
 
 `worklog drafts` lists the drafts open on this machine, this session's
 and any other's: a draft is the session's that opened it. Each line says

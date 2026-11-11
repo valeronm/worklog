@@ -185,10 +185,18 @@ impl Host {
     }
 
     fn drafted(&self, args: &[&str], edits: &[(&str, &str)]) -> PathBuf {
-        let printed = self.ok(args);
+        let ran = self.run(args);
+        assert_eq!(ran.code, Some(0), "{args:?}: {}", ran.stderr);
+        let printed = ran.stdout;
         let path = PathBuf::from(printed.strip_suffix('\n').expect("one line"));
         assert!(path.starts_with(self.root.join("next/drafts")), "{printed}");
         let mut text = fs::read_to_string(&path).expect("the draft");
+        let shown = format!("worklog: the draft holds:\n{text}");
+        assert!(
+            ran.stderr.is_empty() || ran.stderr == shown,
+            "{args:?}: {}",
+            ran.stderr
+        );
         for (from, to) in edits {
             assert!(text.contains(from), "{from:?} in {text}");
             text = text.replacen(from, to, 1);
@@ -1303,7 +1311,12 @@ fn a_command_that_opens_lists_or_drops_a_draft_prints_one_json_value() {
     assert_eq!(saved["document"], opened["document"]);
     assert_eq!(host.json(&["drafts"]), Value::Array(Vec::new()));
 
-    assert_eq!(host.json(&["checkout", "lantern"]), opened);
+    let checked_out = host.json(&["checkout", "lantern"]);
+    let mut expected = opened.clone();
+    expected["text"] = fs::read_to_string(opened["path"].as_str().unwrap())
+        .unwrap()
+        .into();
+    assert_eq!(checked_out, expected);
     assert_eq!(host.json(&["discard", "lantern"]), Value::Null);
 
     fill(&host.json(&["new", "fact", "lantern/relay"]), &[SUMMARY]);
@@ -1466,7 +1479,8 @@ fn a_fork_is_listed_and_resolved_under_json() {
     assert_eq!(forks[0]["heads"].as_array().map(Vec::len), Some(2));
     let opened = desk.json(&["resolve", "lamp"]);
     assert_eq!(opened["document"], forks[0]["document"], "{opened}");
-    assert!(Path::new(opened["path"].as_str().unwrap()).is_file());
+    let text = fs::read_to_string(opened["path"].as_str().unwrap()).unwrap();
+    assert_eq!(opened["text"], text.as_str(), "{opened}");
 }
 
 #[test]
@@ -3593,10 +3607,21 @@ fn show_and_history_offer_an_ended_document_where_no_live_one_matches_what_was_t
 }
 
 #[test]
+fn a_checkout_prints_its_path_and_shows_the_draft_on_stderr() {
+    let host = Host::stocked();
+    let ran = host.run(&["checkout", "lantern"]);
+    assert_eq!(ran.code, Some(0), "{}", ran.stderr);
+    let path = ran.stdout.strip_suffix('\n').expect("one line");
+    let text = fs::read_to_string(path).expect("the draft");
+    assert!(text.contains("summary = "), "{text}");
+    assert_eq!(ran.stderr, format!("worklog: the draft holds:\n{text}"));
+}
+
+#[test]
 fn a_draft_that_does_not_read_is_counted_listed_and_discarded() {
     let host = Host::stocked();
-    let path = host.ok(&["checkout", "lantern"]);
-    fs::write(path.trim_end(), "name: lantern\n").unwrap();
+    let path = host.drafted(&["checkout", "lantern"], &[]);
+    fs::write(path, "name: lantern\n").unwrap();
 
     assert!(host.ok(&["context"]).contains("1 draft left open"));
     host.ok(&["new", "topic", "phone"]);

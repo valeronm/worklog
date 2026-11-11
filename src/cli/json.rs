@@ -45,7 +45,7 @@ mod tests {
     use worklog_app::activity::{self, Activity};
     use worklog_app::check::Check;
     use worklog_app::context::Context;
-    use worklog_app::draft::DraftRow;
+    use worklog_app::draft::{DraftRow, ShownDraft};
     use worklog_app::followup::{Made, NewFollowup, TriggerArg};
     use worklog_app::list::{ClaimRow, EntryRow, FactRow, ForkRow, TopicRow};
     use worklog_app::machines::PLACEHOLDER;
@@ -138,6 +138,7 @@ mod tests {
         a_stored_version_is_its_document_its_label_and_its_whole_hash: Written = stored,
         the_versions_a_move_stores_are_listed: Vec<Written> = moved,
         a_draft_opened_is_its_document_and_its_path: DraftRef = opened,
+        a_draft_checked_out_is_its_document_its_path_and_its_text: ShownDraft = checked_out,
         a_listed_draft_holds_its_kind_its_label_its_path_its_opener_and_when_it_was_touched:
             Vec<DraftRow> = drafts,
         a_draft_discarded_is_null: () = discarded,
@@ -385,10 +386,22 @@ mod tests {
     }
 
     fn opened() -> Vec<(DraftRef, Value)> {
-        let (world, lantern) = world();
-        let opened = draft::checkout(&world.deps(), "lantern").unwrap();
-        let expected = json!({"document": lantern, "path": format!("memory:{lantern}")});
+        let (world, _) = world();
+        let opened = draft::new(&world.deps(), &draft::New::Topic { name: "phone" }).unwrap();
+        let phone = opened.document.clone();
+        let expected = json!({"document": phone, "path": format!("memory:{phone}")});
         vec![(opened, expected)]
+    }
+
+    fn checked_out() -> Vec<(ShownDraft, Value)> {
+        let (world, lantern) = world();
+        let checked_out = draft::checkout(&world.deps(), "lantern").unwrap();
+        let expected = json!({
+            "document": lantern,
+            "path": format!("memory:{lantern}"),
+            "text": "+++\nname = \"lantern\"\nsummary = \"s\"\n+++\n\n",
+        });
+        vec![(checked_out, expected)]
     }
 
     fn drafts() -> Vec<(Vec<DraftRow>, Value)> {
