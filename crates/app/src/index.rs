@@ -169,13 +169,19 @@ impl Topics {
     }
 
     pub(super) fn reach_from(&self, from: &[DocumentId]) -> Vec<Reached> {
-        let starts: Vec<DocumentId> = from
-            .iter()
-            .filter(|id| self.unended(id).is_some())
-            .cloned()
-            .collect();
-        let mut reached = graph::reach_from(&starts, |id| self.edges(id));
-        reached.retain(|(id, _)| self.unended(id).is_some());
+        self.walk(from, None)
+    }
+
+    pub(super) fn reach_from_short_of(&self, from: &DocumentId, past: &DocumentId) -> Vec<Reached> {
+        self.walk(core::slice::from_ref(from), Some(past))
+    }
+
+    fn walk(&self, from: &[DocumentId], past: Option<&DocumentId>) -> Vec<Reached> {
+        let is_kept = |id: &DocumentId| Some(id) != past && self.unended(id).is_some();
+        let starts: Vec<DocumentId> = from.iter().filter(|id| is_kept(id)).cloned().collect();
+        let edges = |id: &DocumentId| (Some(id) != past).then(|| self.edges(id)).flatten();
+        let mut reached = graph::reach_from(&starts, edges);
+        reached.retain(|(id, _)| is_kept(id));
         reached
     }
 }

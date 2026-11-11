@@ -27,7 +27,8 @@ pub struct Context {
     /// Where the session is, in the form a claim's directory is compared in.
     pub directory: String,
     /// The claimed topics, closest directory first, then what they reach, then what the
-    /// machine topic reaches.
+    /// machine topic reaches, then the parts of the machine topic whose other wholes loaded,
+    /// each with what it reaches.
     pub topics: Vec<Loaded>,
     /// Filed on a loaded topic that counts or on anything part of a claimed one, by date, then
     /// those waiting on a topic.
@@ -127,12 +128,29 @@ impl<'a> Scope<'a> {
         }
         let mut counted: BTreeSet<DocumentId> = vias.iter().map(|(id, _)| id.clone()).collect();
         for (id, from) in topics.reach_from(core::slice::from_ref(&machine)) {
-            if vias.iter().all(|(loaded, _)| *loaded != id) {
+            if position(&vias, &id).is_none() {
                 let from = from.map(label);
                 vias.push((id.clone(), Via::Machine { from }));
             }
             if !claimed.in_directory {
                 counted.insert(id);
+            }
+        }
+        let mut pairs: Vec<DocumentId> = (topics.direct_parts(&machine).into_iter())
+            .filter(|part| other_wholes(&topics, part, &machine).next().is_some())
+            .collect();
+        pairs.sort_by_cached_key(|part| topics.label(part));
+        while let Some((at, whole)) = next_pair(&topics, &machine, &pairs, &vias) {
+            let pair = pairs.remove(at);
+            let counts = counted.contains(&whole);
+            for (id, from) in topics.reach_from_short_of(&pair, &machine) {
+                if position(&vias, &id).is_none() {
+                    let from = label(from.unwrap_or_else(|| whole.clone()));
+                    vias.push((id.clone(), Via::Edge { from }));
+                }
+                if counts {
+                    counted.insert(id);
+                }
             }
         }
         let mut may_be_due = counted.clone();
@@ -252,6 +270,39 @@ pub fn due(deps: &ReadDeps, directory: &str) -> Result<Vec<FollowupRow>, Failure
     let scope = Scope::of(deps, directory)?;
     let followups = filed_by_topic(&scope.lookup, KindOf::Followup, &scope.may_be_due)?;
     Ok(scope.open_work(&followups)?.due)
+}
+
+fn position(vias: &[(DocumentId, Via)], id: &DocumentId) -> Option<usize> {
+    vias.iter().position(|(loaded, _)| loaded == id)
+}
+
+fn next_pair(
+    topics: &Topics,
+    machine: &DocumentId,
+    pairs: &[DocumentId],
+    vias: &[(DocumentId, Via)],
+) -> Option<(usize, DocumentId)> {
+    pairs.iter().enumerate().find_map(|(at, pair)| {
+        if position(vias, pair).is_some() {
+            return None;
+        }
+        let loaded: Option<Vec<(usize, &DocumentId)>> = other_wholes(topics, pair, machine)
+            .map(|whole| position(vias, whole).map(|loaded_at| (loaded_at, whole)))
+            .collect();
+        let (_, first) = loaded?.into_iter().min()?;
+        Some((at, first.clone()))
+    })
+}
+
+fn other_wholes<'t>(
+    topics: &'t Topics,
+    part: &DocumentId,
+    machine: &'t DocumentId,
+) -> impl Iterator<Item = &'t DocumentId> {
+    topics
+        .part_of(part)
+        .iter()
+        .filter(move |whole| *whole != machine)
 }
 
 type Parts<'l> = BTreeMap<&'l DocumentId, Vec<(DocumentId, String, BTreeSet<DocumentId>)>>;
@@ -695,6 +746,67 @@ mod tests {
                 ("lantern", through(&relay, "relay"))
             ]
         );
+    }
+
+    #[test]
+    fn a_part_of_the_machine_topic_loads_where_its_other_wholes_load() {
+        let (world, [lantern, atlas, phone]) = world_of(["lantern", "atlas", "phone"]);
+        let machine = world.machine();
+        let relay = topic(&world, "relay", &uses(&[&phone]));
+        let edges = format!("{}{}", part_of(&[&machine, &lantern]), uses(&[&relay]));
+        let pair = topic(&world, "compass", &edges);
+        topic(&world, "globe", &part_of(&[&machine, &lantern, &atlas]));
+        topic(&world, "wick", &part_of(&[&phone, &lantern]));
+        claim(&world, &lantern, "/work");
+
+        assert_eq!(
+            loaded(&at(&world, "/work")),
+            [
+                ("lantern", claimed("/work")),
+                ("desk", Via::Machine { from: None }),
+                ("compass", via(&lantern, "lantern")),
+                ("relay", via(&pair, "compass")),
+                ("phone", via(&relay, "relay"))
+            ]
+        );
+        assert_eq!(
+            loaded(&at(&world, "/other")),
+            [("desk", Via::Machine { from: None })]
+        );
+    }
+
+    #[test]
+    fn a_part_of_the_machine_topic_counts_its_open_work_where_its_other_whole_counts() {
+        let (world, [lantern, atlas]) = world_of(["lantern", "atlas"]);
+        let machine = world.machine();
+        let pair = topic(&world, "compass", &part_of(&[&machine, &lantern]));
+        world.amend(&machine, &topic_fields("desk", &uses(&[&lantern])), "\n");
+        claim(&world, &lantern, "/work");
+        claim(&world, &atlas, "/atlas");
+        followup(&world, &[&pair], "compass due", &dated("2026-10-01"));
+
+        assert_eq!(summaries(&at(&world, "/work").due), ["compass due"]);
+        assert_eq!(summaries(&at(&world, "/other").due), ["compass due"]);
+        let inside = at(&world, "/atlas");
+        assert_eq!(of(&inside, "compass").via, via(&lantern, "lantern"));
+        assert_eq!(summaries(&inside.due), Vec::<&str>::new());
+        assert_eq!(inside.open_count, 0);
+    }
+
+    #[test]
+    fn what_a_part_of_the_machine_topic_reaches_counts_though_the_machine_loaded_it_first() {
+        let (world, [lantern, relay]) = world_of(["lantern", "relay"]);
+        let machine = world.machine();
+        let edges = format!("{}{}", part_of(&[&machine, &lantern]), uses(&[&relay]));
+        topic(&world, "compass", &edges);
+        world.amend(&machine, &topic_fields("desk", &uses(&[&relay])), "\n");
+        claim(&world, &lantern, "/work");
+        followup(&world, &[&relay], "relay open", "");
+        followup(&world, &[&machine], "desk open", "");
+
+        let inside = at(&world, "/work");
+        assert_eq!(of(&inside, "relay").via, through(&machine, "desk"));
+        assert_eq!(inside.open_count, 1);
     }
 
     #[test]

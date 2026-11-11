@@ -228,6 +228,10 @@ it by whole path components.
    first, each topic loaded once and an ended one not at all.
 4. The machine topic loads in every session, with what it reaches the same
    way.
+5. A direct part of the machine topic whose other wholes have all loaded
+   loads too, reached from the first of them to load, with what it reaches
+   the same way, until no such part is left. A part whose only whole is
+   the machine topic does not.
 
 A loaded topic comes with its summary and the facts and ideas filed on it.
 A part of it that is not loaded is shown as counts: what is filed on the
@@ -237,7 +241,9 @@ A session is shown as due the followups filed on a topic loaded from a
 claim or on anything that is part of a claimed topic. Where no claimed
 directory covers the session, what the machine topic reaches counts as
 loaded from a claim too; in a claimed directory the machine topic and what
-only it reaches bring their facts and not their open work. Among those, a
+only it reaches bring their facts and not their open work. A part loaded
+by rule 5 and what it reaches other than through the machine topic bring
+their open work where the whole it was reached from does. Among those, a
 followup with a date is due from that day on, and one touching a topic is
 due where that topic was loaded from a claim, which is a session in the
 topic, in a part of it or in a topic that uses it.

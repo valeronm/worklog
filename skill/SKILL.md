@@ -26,7 +26,8 @@ a rename, or by the start of its id, which every listing prints.
 A session opens with `worklog context`: what is due now, any forked
 document among what it loads, how many drafts and followups are open, then
 each topic the session loads: the topics claimed for its directory, the
-machine's topic, and the topics those are part of or use. A topic comes
+machine's topic, the topics those are part of or use, and a part of the
+machine's topic whose other wholes all load. A topic comes
 with its summary, its facts and ideas by name or, where the names would
 not fit, by count, and its parts as counts of what is filed on them. A
 long opener leaves topics out and says so; `worklog context --json`
@@ -286,9 +287,11 @@ A machine is set up once, by the user: `worklog init` asks for the store
 and the machine topic, and the user answers. Until then every command
 that uses the store is refused, and `context` prints only a note saying so
 and exits 0. The machine topic loads in every session on that machine;
-facts about the machine go under it. When `context` reports that the
-machine topic has no summary, write one from what the machine is
-(`worklog checkout <name>`, edit the draft, `worklog save <name>`).
+facts about the machine go under it. A fact that holds for a topic on
+this machine alone goes under a topic that is part of both. When
+`context` reports that the machine topic has no summary, write one from
+what the machine is (`worklog checkout <name>`, edit the draft,
+`worklog save <name>`).
 
 A claim places a topic in a directory of this machine: `worklog claim
 <topic>` from inside the checkout, or `worklog claim <topic> <dir>`.
