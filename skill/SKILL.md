@@ -17,8 +17,8 @@ and written only through `worklog`. Five kinds:
 - **entry** — one piece of work as it was done, dated; a day holds as many
   as there were tasks. Known as `<date>-<name>`, `2026-09-04-lamp-driver`,
   and filed under the topics the work touched.
-- **followup** — open work, filed under one or more topics. It has no
-  name and is known by its id.
+- **followup** — open work with a trigger for when it comes up again,
+  filed under one or more topics. It has no name and is known by its id.
 
 A command takes a document by its name as above, by a name it had before
 a rename, or by the start of its id, which every listing prints.
@@ -240,10 +240,15 @@ fits:
 
 1. Can it be done or decided now? Then do it, or put it to the user.
 2. Is it already answered? Then `done` it, naming what dissolved it.
-3. Does an idea already hold the work, and the followup no plan for it?
+3. Is it something learned, with no work left in it? Then it is a fact:
+   write it, with no question to the user.
+4. Does an idea already hold the work, and the followup no plan for it?
    Then `drop` it and let the entry's `Triage:` line link the idea.
-4. Is something waiting on it? Then it is a followup with its trigger.
-5. Otherwise it is an idea.
+5. Does it wait on something, does something wait on it, is it work in
+   progress, or is it a check or a measurement to run? Then it is a
+   followup with its trigger.
+6. Otherwise it is an idea: an improvement nothing waits on, or a design
+   choice put off, written with the choice named as open.
 
 A followup's trigger says when it comes up again:
 
@@ -258,11 +263,23 @@ A followup's trigger says when it comes up again:
 
 A trigger, new or changed, is the user's to set: propose one, with what
 it rests on, in the question that triages the item, and write the
-followup or run `trigger` once they answer. A proposed day is the first
-on which what the followup waits for can have happened, worked out from
-evidence: a release or delivery date, a schedule, how long the same thing
-took before. Where nothing dates it, propose the topic whose next session
-would show it; a day picked as a round interval from today is a guess.
+followup or run `trigger` once they answer. A user who says to record an
+item outside such a question has settled the item and not its trigger:
+propose one and wait for the answer. The proposal is the trigger as it
+will be stored, a day or one of the followup's topics, and the followup is
+written with that one.
+
+A day is for a followup that waits on something: the first day on which
+that thing can have happened, worked out from evidence such as a release
+or delivery date, a schedule, or how long the same thing took before. A
+trigger holds no event. An event with no known day, such as a release, a
+reply or a file changing, goes in the trigger's `why`, and the day is the
+first on which it is worth checking whether the event has happened. A day
+picked as a round interval from today is a guess.
+
+A topic is for a followup the next session in that topic can and should
+take up: work in progress, or a check or a measurement that session can
+run.
 
 `new followup` takes several `--topics` separated by commas, and `--about
 <document>` for the document the followup is about. With `--summary` it
