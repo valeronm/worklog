@@ -45,7 +45,11 @@ on.
 ## When to write
 
 - **Capture**: the user asks to log work, or a substantive piece of work has
-  just finished.
+  just finished: it was pushed, merged or released, the user called it
+  done, or the session is about to turn to something else. Work with no
+  commit finishes too: a question researched to its answer, a fault traced
+  to its cause, a build or an install completed, a decision or a purchase
+  made. A long session captures at each such point.
 - **Record**: the user states something that outlives the conversation and
   no work happened: a fact, a decision, an unbuilt idea. Write or update the
   fact or the idea; no entry.
@@ -138,45 +142,73 @@ stderr with exit 1; a usage error exits 2.
 
 ## Capture — an entry for work done
 
-1. Put each doable item of open work from this session to the user, one
-   question per item naming the item, what doing it involves and how large
-   it is, with three options: **do it now**, in this session; **record
-   it**, with a proposed trigger; **drop it**. Each option carries its
-   reason. A drop's reason goes on the entry's `Triage:` line, and a
-   reason that will still hold in later sessions is also written as a
-   fact. Before asking, `worklog search` the item, and if it was dropped
-   or recorded before, say when and why. Never withhold an item because it
-   seemed not worth asking, and never ask the same item twice. A silently
+Where the skill was loaded long before the capture, load it again first:
+the steps run in this order, and the items are put to the user before
+anything is written.
+
+1. List each doable item of open work from this session. Include each
+   item an open followup already holds and each review finding the session
+   chose not to act on. Check each against the code or the data it names,
+   and `worklog search` it for whether it was dropped or recorded before.
+   Never withhold an item because it seemed not worth asking: a silently
    recorded item is a delay decision the user never made.
-2. Do what the user said to do now, before opening the entry: no draft
+2. Put each item to the user, one question per item and never twice in
+   one capture. The question says what the item is, what was seen or left
+   undone and what turns on it, in words the user knows and not a label
+   the session coined, then what doing it involves and how large it is,
+   and when and why it was dropped or recorded before, if it was. Its
+   options, each with its reason:
+   - **do it now**, in this session;
+   - **record it**, as a followup with a proposed trigger or as an idea:
+     the triage under Open work says which;
+   - **drop it**.
+
+   For an item a followup already holds, the question names the followup,
+   and its record option is to keep the item there, under its trigger or a
+   new one. An option that cannot happen in the session is left out, and
+   the question says which one and why. A drop's reason goes on the entry's
+   `Triage:` line, and a reason that will still hold in later sessions is
+   also written as a fact.
+3. Do what the user said to do now, before opening the entry: no draft
    waits on the answers, and the entry records that work. A do-it-now item
    that grows past the size it was asked at goes back to the user before
-   it goes on.
-3. `worklog new entry <name>`, with `--date <YYYY-MM-DD>` for work
+   it goes on, and so does one still unfinished when the entry is due.
+4. `worklog new entry <name>`, with `--date <YYYY-MM-DD>` for work
    of another day; edit the draft. `date` and `machine` are filled. Set
    `topics` to the topics the work touched, `topics = ["lantern"]`, which
    a listing or a search by topic finds the entry by, and `summary`,
    which every listing shows. Body sections: **What / Why / Changes /
    Notes**. Record what was non-obvious: decisions, gotchas, why not the
-   other way. Never git state. Notes holds one unwrapped line opening
-   `Triage:` naming each item put to the user with its outcome, an idea to
-   be recorded by its link `[[<topic>/<name>]]`, or `Triage: nothing
-   open`; for example `Triage: dimmer curve, done;
+   other way. An entry for research gives its sources as URLs. Never
+   restate what git holds: the branch, what is committed or pushed, how
+   many commits. A commit's hash is a reference to it and may be given.
+   Notes holds one unwrapped line opening `Triage:` naming each item put
+   to the user with its outcome, an idea to be recorded by its link
+   `[[<topic>/<name>]]`, or `Triage: nothing open`; for example `Triage: dimmer curve, done;
    [[lantern/relay-debounce]], recorded; firmware signing, dropped, the
    bootloader takes no other key.` Link each fact to be promoted as
    `[[<topic>/<name>]]`.
-4. `diff`, then `save`, each with the entry's `<date>-<name>`.
-5. Record each item the user said to record, where the triage under Open
-   work puts it: a followup, one each, `worklog new followup --topics
+5. `save` with the entry's `<date>-<name>`.
+6. Record each item the user said to record, as its question proposed: a
+   followup, one each, `worklog new followup --topics
    <topic> --summary "<what is open>" --body "<the rest of it>" --entry
    <date>-<name> --look-again <date> --why "<what to look for>"`, or
    `--touching <topic>` in place of the date and its why; or an idea,
    `worklog new idea <topic>/<name>`.
-6. Reconcile: `worklog followups <topic>` for the topics this work
+7. Reconcile: `worklog followups <topic>` for the topics this work
    touched; `done` what it completed with a note naming what dissolved it,
-   `trigger` what it moved, `drop` what it made moot.
-7. Promote what outlives the entry into a fact. What turns up after the
-   save is added with `worklog checkout <date>-<name>` and a save again.
+   `trigger` what it moved, to the trigger the user set, `drop` what it
+   made moot, and rewrite the body of one it advanced and left open
+   (`checkout`, `save`) to where the work now stands.
+8. Promote what outlives the entry into a fact. What turns up after the
+   save is added with `worklog checkout <date>-<name>` and a save again;
+   open work that turns up then is put to the user as in steps 1 and 2,
+   and its outcome goes on the `Triage:` line.
+9. Close by telling the user what the capture came to, in three groups:
+   **done**, the items done in the session and the followups closed;
+   **recorded**, each with how, a followup and its trigger, an idea, or a
+   fact written or updated; **dropped**, each with its reason. A group
+   with nothing in it says so.
 
 ## Open work
 
