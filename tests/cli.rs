@@ -1207,6 +1207,40 @@ fn a_fork_is_resolved_through_a_draft() {
 }
 
 #[test]
+fn show_prints_a_body_alone_when_asked() {
+    let host = Host::stocked();
+    host.drafted(
+        &["checkout", "lantern/fuse"],
+        &[("**Why:** ", "**Why:** It blew, see [[lantern/relay]].")],
+    );
+    host.ok(&["save", "lantern/fuse"]);
+
+    let body = host.ok(&["show", "lantern/fuse", "--body"]);
+    assert!(body.contains("**Why:** It blew, see"), "{body}");
+    assert!(!body.contains("+++"), "{body}");
+    let shown = host.json(&["show", "lantern/fuse"]);
+    assert_eq!(shown["heads"][0]["body"], body.as_str(), "{shown}");
+
+    assert!(
+        host.ok(&["show", "lantern/relay"])
+            .contains("==== linked from")
+    );
+    assert!(
+        !host
+            .ok(&["show", "lantern/relay", "--body"])
+            .contains("====")
+    );
+    let asked_twice = host.run(&["show", "lantern", "--body", "--json"]);
+    assert_eq!(asked_twice.code, Some(2), "{}", asked_twice.stderr);
+
+    host.ok(&["end", "lantern/fuse", "false", "It never held."]);
+    let ended = host.run(&["show", "lantern/fuse", "--body"]);
+    assert_eq!(ended.stdout, body);
+    assert_eq!(ended.stderr, "worklog: lantern/fuse: ended false\n");
+    assert_eq!(ended.code, Some(0));
+}
+
+#[test]
 fn a_refusal_is_on_stderr_alone_with_exit_one() {
     let host = Host::set_up("desk");
     assert_refused(

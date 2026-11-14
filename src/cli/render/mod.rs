@@ -22,6 +22,7 @@ use worklog_render::{change_or_ending, ended, written};
 
 #[cfg(test)]
 pub(super) use context::{CONTEXT_BYTES, DUE};
+pub(super) use documents::Bodies;
 pub(super) use listings::Refusals;
 #[cfg(test)]
 pub(super) use testing::assert_fits;

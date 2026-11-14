@@ -2,7 +2,7 @@ use std::path::Path;
 
 use super::Environment;
 use super::args::{ChangeCommand, Command, DraftCommand, ListCommand, NewWhat, ReadCommand};
-use super::render::{Output, Refusals, output, output_as};
+use super::render::{Bodies, Output, Refusals, output, output_as};
 use worklog_app::followup::{NewFollowup, TriggerArg};
 use worklog_app::search::Query;
 use worklog_app::{
@@ -183,8 +183,15 @@ fn read(
     command: &ReadCommand,
 ) -> Result<Output, Failure> {
     Ok(match command {
-        ReadCommand::Show { target, ended } => {
+        ReadCommand::Show {
+            target,
+            ended,
+            body,
+        } => {
             let mut shown = show::show(deps, target)?;
+            if *body {
+                return Ok(output_as(&shown, &Bodies(&shown), json));
+            }
             if let show::Shown::Document(document) = &mut shown {
                 document.linked_from = show::linked_from(deps, &document.document, *ended)?;
             }

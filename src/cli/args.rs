@@ -68,7 +68,7 @@ impl Cli {
         command
     }
 
-    /// `--json` is refused beside a command of `NO_JSON`.
+    /// `--json` is refused beside a command of `NO_JSON` and beside `show --body`.
     pub fn parsed<I, T>(args: I) -> Result<Cli, clap::Error>
     where
         I: IntoIterator<Item = T>,
@@ -77,11 +77,16 @@ impl Cli {
         let matches = Cli::command().try_get_matches_from(args)?;
         let cli =
             Cli::from_arg_matches(&matches).map_err(|error| error.format(&mut Cli::command()))?;
-        let named = matches.subcommand_name();
-        if let Some(command) = named.filter(|name| cli.json && NO_JSON.contains(name)) {
+        let no_json = match &cli.command {
+            Invoked::Run(Command::Read(ReadCommand::Show { body: true, .. })) => Some("--body"),
+            _ => (matches.subcommand_name()).filter(|name| NO_JSON.contains(name)),
+        };
+        if cli.json
+            && let Some(beside) = no_json
+        {
             return Err(Cli::command().error(
                 ErrorKind::ArgumentConflict,
-                format!("the argument '--json' cannot be used with '{command}'"),
+                format!("the argument '--json' cannot be used with '{beside}'"),
             ));
         }
         Ok(cli)
@@ -369,6 +374,9 @@ pub enum ReadCommand {
         /// Ended documents linking it too
         #[arg(long)]
         ended: bool,
+        /// Its body alone, without its fields or the documents linking it
+        #[arg(long, conflicts_with = "ended")]
+        body: bool,
     },
     /// Every version of a document
     History {
@@ -614,6 +622,18 @@ mod tests {
         assert!(parsed("worklog --json topics").unwrap().json);
         assert!(parsed("worklog topics --json").unwrap().json);
         assert!(!parsed("worklog topics").unwrap().json);
+    }
+
+    #[test]
+    fn a_body_alone_is_not_json_and_comes_without_what_links_it() {
+        for line in [
+            "worklog show lantern --body --json",
+            "worklog --json show lantern --body",
+            "worklog show lantern --body --ended",
+        ] {
+            assert_eq!(refused(line), ErrorKind::ArgumentConflict, "{line}");
+        }
+        assert!(parsed("worklog show lantern --body").is_ok());
     }
 
     #[test]

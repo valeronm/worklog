@@ -6,7 +6,7 @@ use worklog_app::{Reference, counted};
 use worklog_domain::id::VersionId;
 use worklog_domain::version::Stamp;
 use worklog_render::diff::{UNTERMINATED, hunks};
-use worklog_render::{against, unread_notes};
+use worklog_render::{against, ended, unread_notes};
 use worklog_schema::KindOf;
 
 fn naming(
@@ -24,7 +24,7 @@ fn naming(
     ]
 }
 
-fn named(text: &mut String, version: &ShownVersion) {
+fn headed(text: &mut String, version: &ShownVersion, held: &str) {
     let fields = naming(
         &version.version,
         &version.written,
@@ -33,8 +33,8 @@ fn named(text: &mut String, version: &ShownVersion) {
         version.ended.as_deref(),
     );
     let _ = writeln!(text, "==== {}", fields.join("  "));
-    text.push_str(&version.text);
-    if !version.text.is_empty() && !version.text.ends_with('\n') {
+    text.push_str(held);
+    if !held.is_empty() && !held.ends_with('\n') {
         text.push('\n');
     }
 }
@@ -76,14 +76,16 @@ impl Render for Shown {
                 let ended = document.heads.iter().any(|head| head.ended.is_some());
                 for head in &document.heads {
                     if document.forked || ended {
-                        named(&mut text, head);
+                        headed(&mut text, head, &head.text);
                     } else {
                         text.push_str(&head.text);
                     }
                 }
                 linked_from(&mut text, &document.linked_from);
             }
-            Shown::Version(compared) => named(&mut text, &compared.version),
+            Shown::Version(compared) => {
+                headed(&mut text, &compared.version, &compared.version.text);
+            }
         }
         text
     }
@@ -95,6 +97,41 @@ impl Render for Shown {
         let mut notes = unread(&document.label, &document.unreadable);
         if document.forked {
             notes.push(format!("{}: forked: resolve it", document.label));
+        }
+        notes
+    }
+}
+
+pub(in super::super) struct Bodies<'a>(pub(in super::super) &'a Shown);
+
+impl Render for Bodies<'_> {
+    // Only a fork's bodies are headed: one body has nothing to be told apart from.
+    fn text(&self) -> String {
+        match self.0 {
+            Shown::Document(document) if document.forked => {
+                let mut text = String::new();
+                for head in &document.heads {
+                    headed(&mut text, head, &head.body);
+                }
+                text
+            }
+            Shown::Document(document) => {
+                (document.heads.iter().map(|head| head.body.as_str())).collect()
+            }
+            Shown::Version(compared) => compared.version.body.clone(),
+        }
+    }
+
+    // A fork's headings carry each head's ending.
+    fn notes(&self) -> Vec<String> {
+        let mut notes = self.0.notes();
+        let (label, reason) = match self.0 {
+            Shown::Document(document) if document.forked => return notes,
+            Shown::Document(document) => (&document.label, &document.ended),
+            Shown::Version(compared) => (&compared.label, &compared.document_ended),
+        };
+        if let Some(reason) = reason {
+            notes.push(format!("{label}: {}", ended(reason)));
         }
         notes
     }
@@ -323,6 +360,64 @@ mod tests {
             )
         );
         assert_eq!(shown.notes(), Vec::<String>::new());
+    }
+
+    fn bodied(seed: &[u8], body: &str) -> ShownVersion {
+        let mut version = version(seed, &format!("+++\nname = \"lantern\"\n+++\n{body}"));
+        body.clone_into(&mut version.body);
+        version
+    }
+
+    #[test]
+    fn a_body_alone_leaves_out_the_fields_and_what_links_the_document() {
+        let mut held = document(vec![bodied(b"left", "The wick.\n")]);
+        held.linked_from = vec![linker(1, KindOf::Topic, "atlas", &["part_of"])];
+        let shown = Shown::Document(held);
+        assert_eq!(Bodies(&shown).text(), "The wick.\n");
+        assert_eq!(Bodies(&shown).notes(), Vec::<String>::new());
+
+        let version = alone(bodied(b"left", "The wick.\n"));
+        assert_eq!(Bodies(&version).text(), "The wick.\n");
+    }
+
+    #[test]
+    fn a_body_with_no_heading_notes_that_its_document_is_ended() {
+        let retired = || Some("retired".to_owned());
+        let mut ended = bodied(b"left", "The wick.\n");
+        ended.ended = retired();
+        let mut held = document(vec![ended.clone()]);
+        held.ended = retired();
+        let shown = Shown::Document(held.clone());
+        assert_eq!(Bodies(&shown).text(), "The wick.\n");
+        assert_eq!(Bodies(&shown).notes(), ["lantern: ended retired"]);
+
+        let Shown::Version(mut compared) = alone(bodied(b"left", "The wick.\n")) else {
+            panic!("a version");
+        };
+        compared.document_ended = retired();
+        let version = Shown::Version(compared);
+        assert_eq!(Bodies(&version).notes(), ["lantern: ended retired"]);
+
+        held.heads.push(ended);
+        held.forked = true;
+        let fork = Shown::Document(held);
+        assert!(Bodies(&fork).text().contains("ended retired\nThe wick.\n"));
+        assert_eq!(Bodies(&fork).notes(), ["lantern: forked: resolve it"]);
+    }
+
+    #[test]
+    fn the_bodies_of_a_fork_come_each_under_its_head_with_the_fork_noted() {
+        let heads = vec![bodied(b"left", "left\n"), bodied(b"right", "right")];
+        let shown = Shown::Document(document(heads));
+        assert_eq!(
+            Bodies(&shown).text(),
+            format!(
+                "==== {}  {SHOWN}  desk  save\nleft\n==== {}  {SHOWN}  desk  save\nright\n",
+                short(b"left"),
+                short(b"right")
+            )
+        );
+        assert_eq!(Bodies(&shown).notes(), ["lantern: forked: resolve it"]);
     }
 
     #[test]

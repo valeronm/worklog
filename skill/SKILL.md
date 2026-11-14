@@ -414,11 +414,11 @@ Tell the user what was found that bears on the work, citing names.
 - `worklog show <target>` prints a document as it stands, then
   under `==== linked from` the live documents that link it or refer to
   it, with the entries that do counted, `--ended` for the ended ones
-  too; `worklog history <target>` prints its versions, each with an
-  id. Given
+  too, and with `--body` its body alone, to hand a plan to another tool;
+  `worklog history <target>` prints its versions, each with an id. Given
   the start of such an id, `worklog show <id>` prints that version,
-  `worklog diff <id>` what it changed, and `worklog diff <id>
-  <id>` what changed between two.
+  `worklog diff <id>` what it changed, and `worklog diff <id> <id>` what
+  changed between two.
 
 Answer a "what did we do about X" question by reading the matching
 documents and reconstructing what changed, when and why, citing names. If
