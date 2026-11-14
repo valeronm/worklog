@@ -103,9 +103,10 @@ it stops being true.
 summary or the body does the same, unless the draft changed the date
 itself.
 
-An idea is a fact with `idea = true`: a settled design not yet built, kept
-with its reasoning. It is listed apart from the facts and ends for reasons
-of its own. Clearing `idea` in a draft makes it a fact, with the same id.
+An idea is a fact with `idea = true`: a design not yet built, kept with
+its reasoning and saying what in it is settled and what is still open. It
+is listed apart from the facts and ends for reasons of its own. Clearing
+`idea` in a draft makes it a fact, with the same id.
 
 ## Entry
 

@@ -103,7 +103,7 @@ fn forms(topic: &Loaded) -> [String; FORMS] {
         listed("", &names(&topic.facts), "fact", "facts")
     };
     let ideas = listed(
-        "Ideas — unbuilt, kept with their settled design; opened like a fact:\n",
+        "Ideas — unbuilt designs, settled or still open; opened like a fact:\n",
         &names(&topic.ideas),
         "idea",
         "ideas",
@@ -302,7 +302,7 @@ mod tests {
     use worklog_app::{FollowupRow, TriggerShown};
     use worklog_domain::testing::{atlas, lantern};
 
-    const IDEAS: &str = "Ideas — unbuilt, kept with their settled design; opened like a fact:\n";
+    const IDEAS: &str = "Ideas — unbuilt designs, settled or still open; opened like a fact:\n";
     const PARTS: &str = "Parts, with their facts, ideas and open followups:\n";
     const FORKED: &str = "Forked — `worklog forks` lists each with its id, \
                           `worklog resolve <id>` opens one: ";

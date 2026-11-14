@@ -232,7 +232,7 @@ pub enum NewWhat {
     Topic { name: String },
     /// A fact under a topic, as `<topic>/<name>`
     Fact { address: String },
-    /// An idea under a topic, as `<topic>/<name>`: a settled design not yet built
+    /// An idea under a topic, as `<topic>/<name>`: a design not yet built
     Idea { address: String },
     /// An entry for work done, dated today
     Entry {

@@ -12,8 +12,8 @@ and written only through `worklog`. Five kinds:
   name: `lantern`. A machine has a topic too.
 - **fact** — one thing that is true now, filed under one topic and known
   as `<topic>/<name>`: `lantern/relay-pin-is-fixed`.
-- **idea** — a settled design not yet built, filed and known as a fact
-  is: `lantern/dimmer`.
+- **idea** — a design not yet built, saying what in it is settled and what
+  is still open, filed and known as a fact is: `lantern/dimmer`.
 - **entry** — one piece of work as it was done, dated; a day holds as many
   as there were tasks. Known as `<date>-<name>`, `2026-09-04-lamp-driver`,
   and filed under the topics the work touched.

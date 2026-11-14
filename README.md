@@ -23,7 +23,8 @@ tool or anything else you work on. The records are:
 
 - **facts**: what's true now, such as a decision and its reasons, or what
   an experiment ruled out
-- **ideas**: designs you've settled on but haven't built yet
+- **ideas**: designs you haven't built yet, with what's settled in them
+  and what's still open
 - **entries**: work you've done, dated, with what was decided along the
   way
 - **followups**: things to come back to, which can be set to come up

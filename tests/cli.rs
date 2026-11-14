@@ -955,7 +955,7 @@ fn a_session_opens_on_what_is_due_then_the_topics_of_its_directory() {
             "1 open followup not due — `worklog followups <topic>`\n",
             "lantern — claimed at ~/projects/lantern: A thing\n\
              \x20 fuse, relay\n\
-             Ideas — unbuilt, kept with their settled design; opened like a fact:\n\
+             Ideas — unbuilt designs, settled or still open; opened like a fact:\n\
              \x20 dimmer\n",
             DESK,
         ])
