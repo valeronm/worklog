@@ -37,6 +37,11 @@ Read a fact before relying on it: `worklog show <topic>/<name>`. A
 session handing work to a subagent gives it the facts that work rests on,
 since a subagent opens with none.
 
+Another session or machine may write to the store while this one runs.
+Before relying on a document read much earlier in the session, run
+`worklog log` and read again each document it lists that the work rests
+on.
+
 ## When to write
 
 - **Capture**: the user asks to log work, or a substantive piece of work has
@@ -63,7 +68,11 @@ what happens next, the triage under Open work.
    or `worklog checkout <target>` for an existing document. Each
    prints the draft's path, and `checkout` the draft as it stands on
    stderr. A name is lowercase letters, digits and hyphens, with at least
-   one letter and no date at its start.
+   one letter and no date at its start. Before `new fact` or `new idea`,
+   `worklog search <term> --topic <topic>` for what it is about, under
+   each word it goes by, and where that finds nothing read the summaries
+   in `worklog facts <topic>` and `worklog ideas <topic>`; where a fact or
+   an idea already holds it, `checkout` that one instead.
 2. Read the file at that path, then edit it: it lives outside the working
    directory, and an edit tool refuses a file it has not read. The draft
    is the document's fields between two `+++` lines, then its body. The
@@ -76,11 +85,16 @@ what happens next, the triage under Open work.
    holds `topic` and `confirmed`, and an idea's `idea = true` besides. A
    followup's holds `topics`, its trigger as `look_again` with `why` or as
    `touching`, and `entry` and `about`, which never change once stored.
-3. `worklog diff <target>` shows the draft against what it started
-   from; read it once to check the edit landed as meant.
+3. For a checked-out document, `worklog diff <target>` shows the draft
+   against what it started from: read its output once to check the edit
+   landed as meant. A new document needs none, since its diff is the
+   draft over again.
 4. `worklog save <target>` checks the draft and stores it as the
    document's next version. A refusal says what is wrong; the draft stays
-   for another edit. `worklog discard <target>` deletes the draft.
+   for another edit. `worklog discard <target>` deletes the draft. A save
+   refuses what `check` calls a problem, so it needs no `worklog check`
+   after it, unless it added a link outside an entry: `save` stores a link
+   that would draw a notice and does not report it.
 
 A draft is taken by its document's name or id; its path is only for the
 edit. If `save` says the document moved on since the draft was checked
@@ -259,6 +273,10 @@ Writing one well:
 - Verify before distilling. Turning an older record into a fact means
   checking every claim against the code first; a stale source can assert
   the opposite of the evidence it cites.
+- Write what was observed and what the user said, which the code alone
+  cannot give back. An inference from either is not a fact until the user
+  confirms the claim, and an option that was only weighed is written as
+  weighed, not as decided.
 - Split a fact on lifespan, not on the document it came from. An intention
   ends when it is built; the alternatives it rejected stay true.
 - Strip implementation detail from an idea, since it names code that gets
