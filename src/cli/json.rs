@@ -372,7 +372,12 @@ mod tests {
         let verified = amend::verify(&world.deps(), "lantern/relay").unwrap();
         let version = head_id(&world, &relay);
         assert!(version.as_str().starts_with("b3-"));
-        let expected = json!({"document": relay, "label": "lantern/relay", "version": version});
+        let expected = json!({
+            "document": relay,
+            "label": "lantern/relay",
+            "version": version,
+            "stale_links": [],
+        });
         vec![(verified, expected)]
     }
 
@@ -381,7 +386,12 @@ mod tests {
         let relay = fact(&world, &lantern, "relay", "");
         let moved = bulk::move_to(&world.deps(), &["lantern/relay"], "lantern", "atlas").unwrap();
         let version = head_id(&world, &relay);
-        let expected = json!([{"document": relay, "label": "atlas/relay", "version": version}]);
+        let expected = json!([{
+            "document": relay,
+            "label": "atlas/relay",
+            "version": version,
+            "stale_links": [],
+        }]);
         vec![(moved, expected)]
     }
 
@@ -470,7 +480,7 @@ mod tests {
         let mut what = NewFollowup {
             topics: &["lantern"],
             summary: Some("Order a fuse"),
-            body: None,
+            body: Some("See [[lantern/spare]].\n"),
             entry: None,
             about: None,
             trigger: Some(TriggerArg::Touching("lantern")),
@@ -483,9 +493,15 @@ mod tests {
             "document": written.document,
             "label": written.document.short(),
             "version": head(&world, &written.document).id,
+            "stale_links": [{
+                "text": "lantern/spare",
+                "target": null,
+                "what": "resolves to nothing",
+            }],
         });
 
         what.summary = None;
+        what.body = None;
         let opened = followups::new_followup(&deps, &what).unwrap();
         let Made::Draft(drafted) = &opened else {
             panic!("a followup with no summary is drafted");

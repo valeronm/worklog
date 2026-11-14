@@ -10,6 +10,7 @@ use crate::draft::{DraftRow, OpenDraft};
 use crate::heads::read_or_skip;
 use crate::lookup::{Lookup, Stored};
 use crate::rows::{Reference, Row};
+use crate::rules::{Misfit, StaleLink};
 use crate::show::{HistoryRow, ShownVersion};
 use crate::usage::{AgentUsage, CommandCount};
 use crate::{Deps, Failure};
@@ -318,6 +319,12 @@ pub fn to(document: &DocumentId, label: &str) -> Reference {
 #[must_use]
 pub fn to_ended(document: &DocumentId, label: &str, reason: &str) -> Reference {
     Reference::to(document, label.to_owned(), Some(reason.to_owned()))
+}
+
+/// A link to the ended document given, or to nothing.
+#[must_use]
+pub fn stale_link(text: &str, ended: Option<Reference>) -> StaleLink {
+    StaleLink::new(text, ended.map(|to| (to, Misfit::Ended)))
 }
 
 #[must_use]

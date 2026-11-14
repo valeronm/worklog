@@ -13,8 +13,10 @@ use crate::heads::{
     Read, filed_on, heads_not_ended, read_or_skip, readable_heads, row_head, texts, topic_edges,
 };
 use crate::lookup::{Lookup, forked, no_head_reads, unreadable, with_article};
-use crate::rules::{closing_edge, fits, holds_topic_open, name_is_free_as};
-use crate::{Deps, Failed, Failure, Written, counted, kind_named};
+use crate::rules::{
+    closing_edge, fits, holds_topic_open, links_are_checked, name_is_free_as, stale_link,
+};
+use crate::{Deps, Failed, Failure, StaleLink, Written, counted, kind_named};
 use worklog_domain::document::{Document, State};
 use worklog_domain::draft::Draft;
 use worklog_domain::id::{DocumentId, VersionId};
@@ -89,10 +91,13 @@ pub(super) fn stepped(
     target.checked(deps, &next, body, label, Fork::Refused)
 }
 
+type NewLink<'l> = (&'l String, &'l Option<DocumentId>);
+
 // A version that passed every check against the store as it was, not stored yet.
 pub(super) struct Admitted {
     version: Version,
     label: String,
+    stale_links: Vec<StaleLink>,
 }
 
 impl Admitted {
@@ -292,6 +297,7 @@ impl<'a, 'b> Target<'a, 'b> {
         self.admits(fork)?;
         let fields = next.fields();
         let links = self.linked(&fields, body)?;
+        let new = self.new_links(&links);
         if next.ending.is_some() {
             if next.content.kind() == KindOf::Topic {
                 self.dependents()?;
@@ -301,7 +307,7 @@ impl<'a, 'b> Target<'a, 'b> {
             name_is_free_as(self.lookup, self.document.id(), &self.what, &next.content)?;
             self.closes_no_cycle(&next.content)?;
             self.keeps_a_trigger(&next.content)?;
-            self.bare_links_name_a_topic(&next.content, &links)?;
+            self.bare_links_name_a_topic(&next.content, &new)?;
         }
         if fork == Fork::Refused
             && let [head] = self.document.heads().as_slice()
@@ -313,9 +319,15 @@ impl<'a, 'b> Target<'a, 'b> {
                 Origin::Direct => self.refusal("nothing would change"),
             });
         }
+        let stale_links = if next.ending.is_none() {
+            self.stale_links(next.content.kind(), &new)?
+        } else {
+            Vec::new()
+        };
         let id = self.document.id();
         Ok(Admitted {
             label: self.lookup.label_of(&next.content, id)?,
+            stale_links,
             version: self.composed(deps, fields, links, body, label)?,
         })
     }
@@ -416,16 +428,13 @@ impl<'a, 'b> Target<'a, 'b> {
         }
     }
 
-    // A bare name is a topic's address whatever document holds the link; one a head already
-    // holds, resolved or not, is left as it is.
-    fn bare_links_name_a_topic(&self, content: &Content, links: &Links) -> Result<(), Failure> {
-        let heads = self.document.heads();
-        let held = |text: &str| heads.iter().any(|head| head.links.0.contains_key(text));
-        for (text, found) in &links.0 {
+    // A bare name is a topic's address whatever document holds the link.
+    fn bare_links_name_a_topic(&self, content: &Content, new: &[NewLink]) -> Result<(), Failure> {
+        for (text, found) in new {
             let Ok(Address::Topic(name)) = Address::parse(text) else {
                 continue;
             };
-            if found.is_some() || held(text) {
+            if found.is_some() {
                 continue;
             }
             let mut meant = Vec::new();
@@ -446,6 +455,25 @@ impl<'a, 'b> Target<'a, 'b> {
             }
         }
         Ok(())
+    }
+
+    // A link a head already holds, resolved or not, was judged when that head was saved.
+    fn new_links<'l>(&self, links: &'l Links) -> Vec<NewLink<'l>> {
+        let heads = self.document.heads();
+        (links.0.iter())
+            .filter(|(text, _)| !heads.iter().any(|head| head.links.0.contains_key(*text)))
+            .collect()
+    }
+
+    fn stale_links(&self, kind: KindOf, new: &[NewLink]) -> Result<Vec<StaleLink>, Failure> {
+        let unended = links_are_checked(kind);
+        let mut stale = Vec::new();
+        for (text, found) in new {
+            stale.extend(stale_link(self.lookup, text, found.as_ref(), |id| {
+                fits(self.lookup, id, None, unended)
+            })?);
+        }
+        Ok(stale)
     }
 
     fn linked(&self, fields: &Fields, body: &str) -> Result<Links, Failure> {
@@ -879,6 +907,72 @@ mod tests {
                 ("unknown".to_owned(), None),
             ]
         );
+    }
+
+    fn stale(written: &Written) -> Vec<String> {
+        (written.stale_links.iter())
+            .map(StaleLink::to_string)
+            .collect()
+    }
+
+    #[test]
+    fn a_save_gives_back_its_new_links_that_lead_nowhere_or_to_an_ended_document() {
+        let (world, lantern) = world();
+        let deps = world.deps();
+        fact(&world, &lantern, "relay-pin", "");
+        fact(&world, &lantern, "old-pin", ENDED_FACT);
+        let phone = topic(&world, "phone", "");
+        draft::checkout(&deps, "phone").unwrap();
+        edit(&world, &phone, |draft| {
+            "See [[lantern/relay-pin]], [[lantern/old-pin]] and [[lantern/spare]].\n"
+                .clone_into(&mut draft.body);
+        });
+        let written = save(&deps, "phone").unwrap();
+        assert_eq!(
+            stale(&written),
+            [
+                "link lantern/old-pin: lantern/old-pin is ended",
+                "link lantern/spare: resolves to nothing"
+            ]
+        );
+
+        draft::checkout(&deps, "phone").unwrap();
+        edit(&world, &phone, |draft| {
+            draft.body.push_str("And [[unknown]].\n");
+        });
+        let again = save(&deps, "phone").unwrap();
+        assert_eq!(stale(&again), ["link unknown: resolves to nothing"]);
+    }
+
+    #[test]
+    fn a_new_link_to_a_document_no_head_of_which_reads_is_stale() {
+        let (world, _) = world();
+        let deps = world.deps();
+        let broken = world.put("topic", "name = \"atlas\"\n", "\n");
+        let phone = topic(&world, "phone", "");
+        draft::checkout(&deps, "phone").unwrap();
+        edit(&world, &phone, |draft| {
+            draft.body = format!("See [[{broken}]].\n");
+        });
+        let written = save(&deps, "phone").unwrap();
+        assert_eq!(
+            stale(&written),
+            [format!("link {broken}: {} does not read", broken.short())]
+        );
+    }
+
+    #[test]
+    fn an_entry_s_link_to_an_ended_document_is_no_stale_link_and_one_to_nothing_is() {
+        let (world, lantern) = world();
+        let deps = world.deps();
+        fact(&world, &lantern, "old-pin", ENDED_FACT);
+        let driver = entry(&world, "2026-10-08", "lamp-driver", &[&lantern]);
+        draft::checkout(&deps, "2026-10-08-lamp-driver").unwrap();
+        edit(&world, &driver, |draft| {
+            "Fixed [[lantern/old-pin]]; see [[lantern/spare]].\n".clone_into(&mut draft.body);
+        });
+        let written = save(&deps, "2026-10-08-lamp-driver").unwrap();
+        assert_eq!(stale(&written), ["link lantern/spare: resolves to nothing"]);
     }
 
     #[test]

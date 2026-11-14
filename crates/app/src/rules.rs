@@ -1,12 +1,16 @@
+use alloc::borrow::ToOwned;
 use alloc::format;
 use alloc::rc::Rc;
+use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::borrow::Borrow;
 use core::fmt;
 
-use crate::Failure;
+use serde::Serialize;
+
 use crate::heads::{all_ended, kind_of, readable_heads, unended_heads};
 use crate::lookup::{Lookup, no_such_document, not_a};
+use crate::{Failure, rows};
 use worklog_domain::document::{Document, State};
 use worklog_domain::id::DocumentId;
 use worklog_schema::graph::{Edges, closes_cycle};
@@ -29,6 +33,66 @@ impl fmt::Display for Misfit {
             Misfit::Unread => f.write_str("does not read"),
             Misfit::Ended => f.write_str("is ended"),
         }
+    }
+}
+
+/// Printed as the line `check` reports the link with.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct StaleLink {
+    /// The target between the brackets with the spaces around it trimmed and its case kept.
+    text: String,
+    /// `None` when the link resolves to nothing.
+    target: Option<rows::Reference>,
+    /// The rest of the line.
+    what: String,
+}
+
+impl StaleLink {
+    pub(super) fn new(text: &str, unfit: Option<(rows::Reference, Misfit)>) -> StaleLink {
+        let (target, what) = match unfit {
+            Some((target, misfit)) => (Some(target), misfit.to_string()),
+            None => (None, "resolves to nothing".to_owned()),
+        };
+        StaleLink {
+            text: text.to_owned(),
+            target,
+            what,
+        }
+    }
+}
+
+impl fmt::Display for StaleLink {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "link {}: ", self.text)?;
+        if let Some(target) = &self.target {
+            write!(f, "{} ", target.label)?;
+        }
+        f.write_str(&self.what)
+    }
+}
+
+pub(super) fn stale_link(
+    lookup: &Lookup,
+    text: &str,
+    found: Option<&DocumentId>,
+    misfit: impl FnOnce(&DocumentId) -> Result<Option<Misfit>, Failure>,
+) -> Result<Option<StaleLink>, Failure> {
+    let unfit = match found {
+        None => None,
+        Some(id) => match misfit(id)? {
+            None => return Ok(None),
+            Some(Misfit::Missing) => None,
+            Some(misfit) => Some((lookup.reference(id)?, misfit)),
+        },
+    };
+    Ok(Some(StaleLink::new(text, unfit)))
+}
+
+// An entry's links cite what was true on its day, and a claim holds none.
+pub(super) fn links_are_checked(kind: KindOf) -> bool {
+    match kind {
+        KindOf::Topic | KindOf::Fact | KindOf::Followup => true,
+        KindOf::Entry | KindOf::Claim => false,
     }
 }
 

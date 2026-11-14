@@ -154,11 +154,21 @@ impl Render for Written {
     fn text(&self) -> String {
         format!("{} {}\n", self.label, self.version.short())
     }
+
+    fn notes(&self) -> Vec<String> {
+        (self.stale_links.iter())
+            .map(|link| format!("{}: {link}", self.label))
+            .collect()
+    }
 }
 
 impl Render for Vec<Written> {
     fn text(&self) -> String {
         self.iter().map(Render::text).collect()
+    }
+
+    fn notes(&self) -> Vec<String> {
+        self.iter().flat_map(Render::notes).collect()
     }
 }
 
@@ -184,6 +194,13 @@ impl Render for Made {
         match self {
             Made::Written(written) => written.text(),
             Made::Draft(draft) => draft.text(),
+        }
+    }
+
+    fn notes(&self) -> Vec<String> {
+        match self {
+            Made::Written(written) => written.notes(),
+            Made::Draft(draft) => draft.notes(),
         }
     }
 }
@@ -250,10 +267,11 @@ fn age(seconds: u64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::testing::{row, stamp};
+    use super::testing::{row, stamp, to_ended};
     use super::*;
     use worklog_app::draft::{BrokenRow, OpenDraft};
     use worklog_app::show::{Shown, ShownDocument, Unread};
+    use worklog_app::testing::stale_link;
     use worklog_domain::id::VersionId;
     use worklog_domain::testing::{atlas, lantern};
     use worklog_domain::version::Stamp;
@@ -263,6 +281,7 @@ mod tests {
             document: lantern(),
             label: label.to_owned(),
             version: VersionId::of(b"lantern"),
+            stale_links: Vec::new(),
         }
     }
 
@@ -336,6 +355,27 @@ mod tests {
         assert_eq!(Vec::<Written>::new().text(), "");
         assert_eq!(Made::Written(one.clone()).text(), one.text());
         assert_eq!(Made::Draft(draft()).text(), draft().text());
+    }
+
+    #[test]
+    fn a_stored_version_notes_each_of_its_stale_links() {
+        let mut fuse = stored("lantern/fuse");
+        fuse.stale_links = vec![
+            stale_link(
+                "lantern/old-pin",
+                Some(to_ended("lantern/old-pin", "false")),
+            ),
+            stale_link("lantern/spare", None),
+        ];
+        let notes = [
+            "lantern/fuse: link lantern/old-pin: lantern/old-pin is ended",
+            "lantern/fuse: link lantern/spare: resolves to nothing",
+        ];
+        assert_eq!(fuse.notes(), notes);
+        assert_eq!(Made::Written(fuse.clone()).notes(), notes);
+        assert_eq!(vec![stored("lantern/relay"), fuse].notes(), notes);
+        assert_eq!(stored("lantern/relay").notes(), Vec::<String>::new());
+        assert_eq!(Made::Draft(draft()).notes(), Vec::<String>::new());
     }
 
     #[test]

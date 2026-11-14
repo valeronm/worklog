@@ -21,6 +21,7 @@ impl<'a> Writer<'a> {
             document: header.envelope.document,
             label: admitted.label,
             version: header.id,
+            stale_links: admitted.stale_links,
         })
     }
 }

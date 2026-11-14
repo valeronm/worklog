@@ -200,8 +200,10 @@ meant; a link a head already holds is not checked again.
 `check` reads the links of each topic, fact and followup that is not
 ended, and gives a notice for one that leads nowhere or to an ended
 document. An entry's links are citations of what was true on its date and
-are not checked. A page shows every link to a document that has ended
-struck through, in an entry too.
+are not checked. A save notes each link no head held that leads nowhere,
+an entry's too, and outside an entry each one to an ended document. A page
+shows every link to a document that has ended struck through, in an entry
+too.
 
 A document is linked from each other document that links it or holds
 its id in a field other than the topics it is filed under and its

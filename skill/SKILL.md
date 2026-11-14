@@ -96,9 +96,10 @@ what happens next, the triage under Open work.
 4. `worklog save <target>` checks the draft and stores it as the
    document's next version. A refusal says what is wrong; the draft stays
    for another edit. `worklog discard <target>` deletes the draft. A save
-   refuses what `check` calls a problem, so it needs no `worklog check`
-   after it, unless it added a link outside an entry: `save` stores a link
-   that would draw a notice and does not report it.
+   needs no `worklog check` after it: it refuses what `check` calls a
+   problem, and it notes on stderr each new link that leads nowhere or,
+   outside an entry, to an ended document. Correct a link that was
+   mistyped; one written before its target exists may stay.
 
 A draft is taken by its document's name or id; its path is only for the
 edit. If `save` says the document moved on since the draft was checked

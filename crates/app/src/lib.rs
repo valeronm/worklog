@@ -7,6 +7,7 @@ extern crate alloc;
 use alloc::borrow::ToOwned;
 use alloc::format;
 use alloc::string::{String, ToString};
+use alloc::vec::Vec;
 use core::cell::RefCell;
 use core::fmt;
 
@@ -51,6 +52,7 @@ pub mod usage;
 
 pub use lookup::Stored;
 pub use rows::{Addressed, FollowupRow, Reference, Row, TriggerShown};
+pub use rules::StaleLink;
 
 /// Read access to stored documents, drafts, usage, host state, and the clock.
 ///
@@ -252,6 +254,9 @@ pub struct Written {
     /// The document's label as of the stored version.
     pub label: String,
     pub version: VersionId,
+    /// The links no head held that resolve to nothing or to a document that does not read,
+    /// and outside an entry those to an ended document.
+    pub stale_links: Vec<StaleLink>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

@@ -381,7 +381,8 @@ fn fill(opened: &Value, edits: &[(&str, &str)]) {
 
 fn assert_written(written: &Value, label: &str) {
     let keys: Vec<&String> = written.as_object().expect("an object").keys().collect();
-    assert_eq!(keys, ["document", "label", "version"], "{written}");
+    let held = ["document", "label", "version", "stale_links"];
+    assert_eq!(keys, held, "{written}");
     assert!(
         is_hex(written["document"].as_str().unwrap(), 32),
         "{written}"
@@ -1277,6 +1278,61 @@ fn show_prints_a_body_alone_when_asked() {
 }
 
 #[test]
+fn a_save_notes_each_new_link_that_is_stale_and_stores_the_version() {
+    let host = Host::stocked();
+    host.drafted(
+        &["checkout", "lantern/fuse"],
+        &[(
+            "**Why:** ",
+            "**Why:** See [[lantern/relay]] and [[lantern/spare]].",
+        )],
+    );
+    let saved = host.run(&["save", "lantern/fuse"]);
+    assert_stored(&saved.stdout, "lantern/fuse");
+    assert_eq!(
+        saved.stderr,
+        "worklog: lantern/fuse: link lantern/spare: resolves to nothing\n"
+    );
+    assert_eq!(saved.code, Some(0));
+
+    host.drafted(
+        &["checkout", "lantern/fuse"],
+        &[("**How to apply:** ", "**How to apply:** Swap it.")],
+    );
+    assert_stored(&host.ok(&["save", "lantern/fuse"]), "lantern/fuse");
+
+    host.ok(&["end", "lantern/relay", "false", "It never held."]);
+    host.drafted(
+        &["checkout", "lantern/dimmer"],
+        &[("**Why:** ", "**Why:** After [[lantern/relay]].")],
+    );
+    let saved = host.json(&["save", "lantern/dimmer"]);
+    let stale = &saved["stale_links"];
+    assert_eq!(stale[0]["text"], "lantern/relay", "{saved}");
+    assert_eq!(stale[0]["target"]["ended"], "false", "{saved}");
+    assert_eq!(stale[0]["what"], "is ended", "{saved}");
+
+    let stored = host.run(&[
+        "new",
+        "followup",
+        "--topics",
+        "lantern",
+        "--touching",
+        "lantern",
+        "--summary",
+        "Check the driver",
+        "--body",
+        "See [[atlas/spare]].",
+    ]);
+    assert_eq!(stored.code, Some(0), "{}", stored.stderr);
+    let (id, _) = halves(&stored.stdout);
+    assert_eq!(
+        stored.stderr,
+        format!("worklog: {id}: link atlas/spare: resolves to nothing\n")
+    );
+}
+
+#[test]
 fn a_refusal_is_on_stderr_alone_with_exit_one() {
     let host = Host::set_up("desk");
     assert_refused(
@@ -1636,7 +1692,13 @@ fn a_link_written_before_its_target_resolves_once_the_target_is_stored() {
     let mut text = fs::read_to_string(&draft).unwrap();
     text.push_str("See [[lantern/relay-pin]] and [[atlas]].\n");
     fs::write(&draft, text).unwrap();
-    host.ok(&["save", "phone"]);
+    let saved = host.run(&["save", "phone"]);
+    assert_eq!(saved.code, Some(0), "{}", saved.stderr);
+    assert_eq!(
+        saved.stderr,
+        "worklog: phone: link atlas: resolves to nothing\n\
+         worklog: phone: link lantern/relay-pin: resolves to nothing\n"
+    );
 
     let targets = |host: &Host| -> Vec<Value> {
         let shown = host.json(&["show", "phone"]);

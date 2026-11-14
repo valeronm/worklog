@@ -10,7 +10,9 @@ use serde::Serialize;
 use crate::heads::{kind_of, texts, unended_heads, unread_heads};
 use crate::index::Topics;
 use crate::lookup::Lookup;
-use crate::rules::{Misfit, closing_edge, fits, holds_topic_open, other_holders};
+use crate::rules::{
+    Misfit, closing_edge, fits, holds_topic_open, links_are_checked, other_holders, stale_link,
+};
 use crate::{Failure, ReadDeps, counted};
 use worklog_domain::document::Document;
 use worklog_domain::id::DocumentId;
@@ -160,13 +162,6 @@ fn unfolded(content: &Content, (machine, home): &Here) -> Option<String> {
     })
 }
 
-fn links_are_checked(kind: KindOf) -> bool {
-    match kind {
-        KindOf::Topic | KindOf::Fact | KindOf::Followup => true,
-        KindOf::Entry | KindOf::Claim => false,
-    }
-}
-
 fn labeled(lookup: &Lookup, found: Reported) -> Result<Vec<Finding>, Failure> {
     let mut findings = Vec::new();
     for (id, what) in found {
@@ -244,16 +239,11 @@ fn name_held_twice(
 fn links(lookup: &Lookup, fits: &mut Fits, head: &Header) -> Result<Vec<String>, Failure> {
     let mut stale = Vec::new();
     for (name, stored) in &head.links.0 {
-        let nothing = format!("link {name}: resolves to nothing");
-        let Some(id) = lookup.linked_now(name, stored.as_ref())? else {
-            stale.push(nothing);
-            continue;
-        };
-        match fits.of(lookup, &id, None, true)? {
-            Some(Misfit::Missing) => stale.push(nothing),
-            Some(misfit) => stale.push(format!("link {name}: {} {misfit}", lookup.label(&id)?)),
-            None => {}
-        }
+        let found = lookup.linked_now(name, stored.as_ref())?;
+        let link = stale_link(lookup, name, found.as_ref(), |id| {
+            fits.of(lookup, id, None, true)
+        })?;
+        stale.extend(link.map(|link| link.to_string()));
     }
     Ok(stale)
 }
