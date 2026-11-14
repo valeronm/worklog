@@ -56,7 +56,12 @@ fn opened(deps: &Deps, json: bool, new: &draft::New) -> Result<Output, Failure> 
     Ok(output(&draft::new(deps, new)?, json))
 }
 
-fn new(deps: &Deps, json: bool, what: &NewWhat) -> Result<Output, Failure> {
+fn new(
+    deps: &Deps,
+    environment: &Environment,
+    json: bool,
+    what: &NewWhat,
+) -> Result<Output, Failure> {
     match what {
         NewWhat::Topic { name } => opened(deps, json, &draft::New::Topic { name }),
         NewWhat::Fact { address } => opened(
@@ -87,6 +92,7 @@ fn new(deps: &Deps, json: bool, what: &NewWhat) -> Result<Output, Failure> {
             topics,
             summary,
             body,
+            body_file,
             look_again,
             why,
             touching,
@@ -99,10 +105,13 @@ fn new(deps: &Deps, json: bool, what: &NewWhat) -> Result<Output, Failure> {
                 (_, _, Some(topic)) => Some(TriggerArg::Touching(topic)),
                 _ => None,
             };
+            let filed = (body_file.as_deref())
+                .map(|path| environment.given_text(path))
+                .transpose()?;
             let what = NewFollowup {
                 topics: &topics,
                 summary: summary.as_deref(),
-                body: body.as_deref(),
+                body: body.as_deref().or(filed.as_deref()),
                 entry: entry.as_deref(),
                 about: about.as_deref(),
                 trigger,
@@ -112,9 +121,14 @@ fn new(deps: &Deps, json: bool, what: &NewWhat) -> Result<Output, Failure> {
     }
 }
 
-fn drafted(deps: &Deps, json: bool, command: &DraftCommand) -> Result<Output, Failure> {
+fn drafted(
+    deps: &Deps,
+    environment: &Environment,
+    json: bool,
+    command: &DraftCommand,
+) -> Result<Output, Failure> {
     Ok(match command {
-        DraftCommand::New { what } => new(deps, json, what)?,
+        DraftCommand::New { what } => new(deps, environment, json, what)?,
         DraftCommand::Checkout { target } => output(&draft::checkout(deps, target)?, json),
         DraftCommand::Save { target } => output(&save::save(deps, target)?, json),
         DraftCommand::Discard { target } => output(&draft::discard(deps, target)?, json),
@@ -286,7 +300,7 @@ pub(super) fn run(
     command: &Command,
 ) -> Result<Output, Failure> {
     match command {
-        Command::Draft(command) => drafted(deps, json, command),
+        Command::Draft(command) => drafted(deps, environment, json, command),
         Command::Change(command) => changed(deps, environment, json, command),
         Command::Read(command) => read(&deps.read(), environment, json, command),
         Command::List(command) => listed(&deps.read(), json, command),

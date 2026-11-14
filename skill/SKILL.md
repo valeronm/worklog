@@ -284,7 +284,9 @@ run.
 `new followup` takes several `--topics` separated by commas, and `--about
 <document>` for the document the followup is about. With `--summary` it
 is stored at once and its id printed, with what `--body` holds as its
-body; without, a draft opens, saved by the id `worklog drafts` shows.
+body, or for a body of more than a line or two what the file at
+`--body-file <path>` holds, `-` being the input; without, a draft opens,
+saved by the id `worklog drafts` shows.
 
 A plan for open work is the body of its followup, `--about` the idea it
 builds, whatever place another tool suggests: the next session finds it

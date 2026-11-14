@@ -397,6 +397,11 @@ pub fn drafts(variable: &dyn Fn(&str) -> Option<OsString>) -> Result<PathBuf, Fa
     Ok(Paths::resolved(variable)?.drafts)
 }
 
+/// The text of the file at `path`, refused where the file is missing or is not UTF-8.
+pub fn text_at(path: &Path) -> Result<String, Failure> {
+    std::fs::read_to_string(path).map_err(|error| Failure::at(path.display(), error))
+}
+
 /// Codex grants no writable root that is missing.
 pub fn make_drafts(drafts: &Path) -> Result<(), Failure> {
     Ok(fs::make_dir(drafts)?)

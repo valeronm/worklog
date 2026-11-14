@@ -891,6 +891,42 @@ fn a_followup_stored_at_once_takes_a_body_only_beside_a_summary() {
 }
 
 #[test]
+fn a_followup_stored_at_once_reads_its_body_from_a_file_or_the_input() {
+    let host = Host::set_up("desk");
+    host.topic("lantern");
+    let plan = "1. Fit the lens.\n2. Wire the relay; see [[lantern]].\n";
+    let typed = host.followup_with("Check the driver", &["--body", plan]);
+    let body = host.ok(&["show", &typed, "--body"]);
+    assert!(body.contains("2. Wire the relay"), "{body}");
+
+    fs::write(host.home().join("plan.md"), plan).unwrap();
+    let filed = host.followup_with("Check the lens", &["--body-file", "plan.md"]);
+    assert_eq!(host.ok(&["show", &filed, "--body"]), body);
+
+    let line = [
+        "new",
+        "followup",
+        "--topics",
+        "lantern",
+        "--touching",
+        "lantern",
+        "--summary",
+    ];
+    let piped = [&line[..], &["Check the wick", "--body-file", "-"]].concat();
+    let ran = fed(host.program(&binary()), &host.home(), &piped, plan);
+    assert_eq!((ran.stderr.as_str(), ran.code), ("", Some(0)));
+    let (id, _) = halves(&ran.stdout);
+    assert_eq!(host.ok(&["show", id, "--body"]), body);
+
+    let open = host.ok(&["followups", "lantern"]);
+    let missing = [&line[..], &["Check the fuse", "--body-file", "missing.md"]].concat();
+    let ran = host.run(&missing);
+    assert_eq!((ran.stdout.as_str(), ran.code), ("", Some(1)));
+    assert!(ran.stderr.contains("missing.md"), "{}", ran.stderr);
+    assert_eq!(host.ok(&["followups", "lantern"]), open);
+}
+
+#[test]
 fn a_new_summary_past_the_limit_is_refused() {
     let host = Host::set_up("desk");
     host.topic("lantern");

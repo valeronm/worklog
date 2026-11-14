@@ -257,6 +257,15 @@ pub enum NewWhat {
         /// The rest of it, stored as the body beside --summary
         #[arg(long, requires = "summary")]
         body: Option<String>,
+        /// A file holding the body, or `-` for the input
+        #[arg(
+            long,
+            value_name = "PATH",
+            value_hint = ValueHint::FilePath,
+            requires = "summary",
+            conflicts_with = "body"
+        )]
+        body_file: Option<PathBuf>,
         /// The day to look at it again, `YYYY-MM-DD`
         #[arg(long, requires = "why", conflicts_with = "touching")]
         look_again: Option<String>,
@@ -646,6 +655,28 @@ mod tests {
             panic!("expected a new followup");
         };
         assert_eq!(topics, ["lantern", "atlas"]);
+    }
+
+    #[test]
+    fn a_followup_s_body_is_given_on_the_line_or_in_a_file_and_only_beside_a_summary() {
+        let stored = "worklog new followup --topics lantern --summary s";
+        let Invoked::Run(Command::Draft(DraftCommand::New {
+            what: NewWhat::Followup { body_file, .. },
+        })) = parsed(&format!("{stored} --body-file plan.md"))
+            .unwrap()
+            .command
+        else {
+            panic!("expected a new followup");
+        };
+        assert_eq!(body_file, Some(PathBuf::from("plan.md")));
+        assert_eq!(
+            refused("worklog new followup --topics lantern --body-file plan.md"),
+            ErrorKind::MissingRequiredArgument
+        );
+        assert_eq!(
+            refused(&format!("{stored} --body b --body-file plan.md")),
+            ErrorKind::ArgumentConflict
+        );
     }
 
     #[test]

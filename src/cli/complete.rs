@@ -531,14 +531,16 @@ mod tests {
     }
 
     #[test]
-    fn a_directory_is_offered_where_one_is_taken_and_a_file_nowhere() {
-        let mut directories = Vec::new();
+    fn a_directory_is_offered_where_one_is_taken_and_a_file_where_one_is_read() {
+        let (mut directories, mut files) = (Vec::new(), Vec::new());
         for (named, argument) in every_argument() {
             match argument.get_value_hint() {
                 ValueHint::DirPath => directories.push(named),
+                ValueHint::FilePath => files.push(named),
                 hint => assert_eq!(hint, ValueHint::Unknown, "{named}"),
             }
         }
+        assert_eq!(files, ["new followup body_file"]);
         assert_eq!(
             directories,
             [

@@ -54,9 +54,21 @@ struct Environment<'a> {
     /// `None` on a terminal and where the input is not closed within `HOOK_WAIT`; otherwise at
     /// most `HOOK_INPUT` bytes of it.
     hook_input: &'a dyn Fn() -> Option<String>,
+    /// The whole input, refused on a terminal.
+    input: &'a dyn Fn() -> Result<String, Failure>,
 }
 
+const INPUT: &str = "-";
+
 impl Environment<'_> {
+    fn given_text(&self, given: &Path) -> Result<String, Failure> {
+        if given == Path::new(INPUT) {
+            (self.input)()
+        } else {
+            worklog_wiring::text_at(&self.joined(given)?)
+        }
+    }
+
     fn working(&self) -> Result<&Path, Failure> {
         self.cwd
             .as_deref()
@@ -108,6 +120,16 @@ fn piped_input() -> Option<String> {
     read.recv_timeout(HOOK_WAIT).ok()
 }
 
+fn whole_input() -> Result<String, Failure> {
+    let mut input = std::io::stdin();
+    if input.is_terminal() {
+        return Err(Failure::at(INPUT, "the input is a terminal"));
+    }
+    let mut text = String::new();
+    (input.read_to_string(&mut text)).map_err(|error| Failure::at("the input", error))?;
+    Ok(text)
+}
+
 /// Runs the process's own command line and returns its exit code.
 #[must_use]
 pub fn main() -> i32 {
@@ -126,6 +148,7 @@ pub fn main() -> i32 {
         binary_at: &|path| worklog_wiring::binary(path, NAME),
         terminal: (typed.as_ref()).map(|typed| -> &RefCell<dyn BufRead> { typed }),
         hook_input: &piped_input,
+        input: &whole_input,
     };
     let args: Vec<OsString> = std::env::args_os().collect();
     let cwd = environment.cwd.as_deref();
@@ -418,6 +441,7 @@ mod tests {
             binary_at: &IN_MEMORY,
             terminal: None,
             hook_input: &|| None,
+            input: &|| Ok(String::new()),
         }
     }
 
@@ -505,6 +529,7 @@ mod tests {
                 binary_at: self.binary_at,
                 terminal: answers,
                 hook_input: &|| None,
+                input: &|| Ok(String::new()),
             };
             let mut args = vec![self.invoked.clone()];
             args.extend(line.iter().map(OsString::from));
