@@ -20,7 +20,7 @@ use worklog_app::bulk::Moved;
 use worklog_app::draft::{DraftRow, Opener, ShownDraft};
 use worklog_app::followup::Made;
 use worklog_app::show::Linker;
-use worklog_app::{DraftRef, Failure, Reference, Row, Written, counted};
+use worklog_app::{DraftRef, Failure, Partly, Reference, Row, Written, counted};
 use worklog_domain::id::VersionId;
 use worklog_render::{change_or_ending, ended, written};
 use worklog_schema::Category;
@@ -87,6 +87,22 @@ pub(super) trait Render {
 /// since it carries what they say.
 pub(super) fn output<T: Render + Serialize + Pinned>(result: &T, json: bool) -> Output {
     output_as(result, result, json)
+}
+
+pub(super) fn output_or_stopped<T>(
+    result: Result<T, Partly<T>>,
+    json: bool,
+) -> Result<Output, Stopped>
+where
+    T: Render + Serialize + Pinned,
+{
+    match result {
+        Ok(done) => Ok(output(&done, json)),
+        Err(partly) => Err(Stopped {
+            done: partly.done.map(|done| output(&*done, json)),
+            failure: partly.failure,
+        }),
+    }
 }
 
 /// The text of `view` with its notes, or under `json` `result` itself, which drops any note

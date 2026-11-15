@@ -5,6 +5,7 @@
 extern crate alloc;
 
 use alloc::borrow::ToOwned;
+use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
@@ -176,6 +177,22 @@ impl<'a> Deps<'a> {
             clock: self.clock,
             host: self.host,
             usage: self.usage,
+        }
+    }
+}
+
+/// A failure that leaves a result behind; `done` holds it, `None` when it left none.
+#[derive(Debug)]
+pub struct Partly<T> {
+    pub done: Option<Box<T>>,
+    pub failure: Failure,
+}
+
+impl<T> From<Failure> for Partly<T> {
+    fn from(failure: Failure) -> Partly<T> {
+        Partly {
+            done: None,
+            failure,
         }
     }
 }

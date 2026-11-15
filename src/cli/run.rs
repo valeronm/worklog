@@ -6,10 +6,10 @@ use super::args::{ChangeCommand, Command, DraftCommand, ListCommand, NewWhat, Re
 use super::json::Pinned;
 use super::render::{
     Bodies, EachBody, Found, Listed, Output, Refusals, Render, Stopped, output, output_as,
+    output_or_stopped,
 };
 use super::{Environment, exit_code, said};
-use worklog_app::bulk::Halted;
-use worklog_app::followup::{Made, NewFollowup, TriggerArg, Unstored};
+use worklog_app::followup::{NewFollowup, TriggerArg};
 use worklog_app::search::Query;
 use worklog_app::show::Linkers;
 use worklog_app::{
@@ -123,16 +123,7 @@ fn new(
                 about: about.as_deref(),
                 trigger,
             };
-            match followup::new_followup(deps, &what) {
-                Ok(made) => output(&made, json),
-                Err(Unstored::Failed(failure)) => return Err(failure.into()),
-                Err(Unstored::Kept { draft, refusal }) => {
-                    return Err(Stopped {
-                        done: Some(output(&Made::Draft(draft), json)),
-                        failure: refusal,
-                    });
-                }
-            }
+            output_or_stopped(followup::new_followup(deps, &what), json)?
         }
     })
 }
@@ -169,13 +160,7 @@ fn changed(
         ChangeCommand::Rename { target, name } => amend::rename(deps, target, name)?,
         ChangeCommand::Move { from, to, targets } => {
             let targets: Vec<&str> = targets.iter().map(String::as_str).collect();
-            return match bulk::move_to(deps, &targets, from, to) {
-                Ok(moved) => Ok(output(&moved, json)),
-                Err(Halted { done, failure }) => Err(Stopped {
-                    done: done.map(|done| output(&*done, json)),
-                    failure,
-                }),
-            };
+            return output_or_stopped(bulk::move_to(deps, &targets, from, to), json);
         }
         ChangeCommand::Verify { fact } => amend::verify(deps, fact)?,
         ChangeCommand::End {

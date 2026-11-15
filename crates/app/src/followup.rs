@@ -1,4 +1,5 @@
 use alloc::borrow::ToOwned;
+use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec;
@@ -12,7 +13,7 @@ use crate::live::open;
 use crate::lookup::Lookup;
 use crate::rules::referencable;
 use crate::save::stepped;
-use crate::{Deps, DraftRef, Failure, Written, day_given, kind_named, text};
+use crate::{Deps, DraftRef, Failure, Partly, Written, day_given, kind_named, text};
 use worklog_domain::draft::Draft;
 use worklog_domain::id::DocumentId;
 use worklog_domain::version::Fields;
@@ -34,21 +35,10 @@ pub struct NewFollowup<'a> {
     pub trigger: Option<TriggerArg<'a>>,
 }
 
+#[derive(Debug)]
 pub enum Made {
     Written(Written),
     Draft(DraftRef),
-}
-
-#[derive(Debug)]
-pub enum Unstored {
-    Failed(Failure),
-    Kept { draft: DraftRef, refusal: Failure },
-}
-
-impl From<Failure> for Unstored {
-    fn from(failure: Failure) -> Unstored {
-        Unstored::Failed(failure)
-    }
 }
 
 impl Serialize for Made {
@@ -89,7 +79,7 @@ fn touched(lookup: &Lookup, address: &str, topics: &[DocumentId]) -> Result<Stri
 
 /// Stored at once when a summary is given, otherwise opened as a draft. A summary past the
 /// limit is refused with a draft kept, so the body given with it is not lost.
-pub fn new_followup(deps: &Deps, what: &NewFollowup) -> Result<Made, Unstored> {
+pub fn new_followup(deps: &Deps, what: &NewFollowup) -> Result<Made, Partly<Made>> {
     if what.topics.is_empty() {
         return Err(Failure::Usage("a followup names a topic".to_owned()).into());
     }
@@ -155,9 +145,9 @@ pub fn new_followup(deps: &Deps, what: &NewFollowup) -> Result<Made, Unstored> {
             return Ok(Made::Draft(draft));
         };
         let kept = format!("{past_limit}; nothing is stored, and a draft holds what was given");
-        return Err(Unstored::Kept {
-            draft,
-            refusal: Failure::at(label, kept),
+        return Err(Partly {
+            done: Some(Box::new(Made::Draft(draft))),
+            failure: Failure::at(label, kept),
         });
     }
     let admitted = stepped(deps, &lookup, &id, &kind, &fields, &body, "new")?;
@@ -201,18 +191,13 @@ mod tests {
     }
 
     fn new_followup(deps: &Deps, what: &NewFollowup) -> Result<Made, Failure> {
-        super::new_followup(deps, what).map_err(|unstored| match unstored {
-            Unstored::Failed(failure)
-            | Unstored::Kept {
-                refusal: failure, ..
-            } => failure,
-        })
+        super::new_followup(deps, what).map_err(|partly| partly.failure)
     }
 
     fn written(made: Result<Made, Failure>) -> Written {
         match made {
             Ok(Made::Written(written)) => written,
-            other => panic!("expected a stored followup, got {:?}", other.map(|_| ())),
+            other => panic!("expected a stored followup, got {other:?}"),
         }
     }
 

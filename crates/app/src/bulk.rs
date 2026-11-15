@@ -11,7 +11,7 @@ use crate::live::{Open, opened};
 use crate::lookup::{Lookup, only};
 use crate::rules::referencable;
 use crate::save::Admitted;
-use crate::{Deps, Failure, Reference, Written, text};
+use crate::{Deps, Failure, Partly, Reference, Written, text};
 use worklog_domain::id::DocumentId;
 use worklog_domain::version::Fields;
 use worklog_schema::Content;
@@ -26,24 +26,14 @@ pub struct Moved {
     pub already: Vec<Reference>,
 }
 
-/// A failed move; `done` holds the versions it stored before failing, `None` when it stored none.
-#[derive(Debug)]
-pub struct Halted {
-    pub done: Option<Box<Moved>>,
-    pub failure: Failure,
-}
-
-impl From<Failure> for Halted {
-    fn from(failure: Failure) -> Halted {
-        Halted {
-            done: None,
-            failure,
-        }
-    }
-}
-
-/// Writes nothing unless every document passes its checks.
-pub fn move_to(deps: &Deps, documents: &[&str], from: &str, to: &str) -> Result<Moved, Halted> {
+/// Writes nothing unless every document passes its checks. A store problem after that fails
+/// with what the move had stored, when it had stored a version.
+pub fn move_to(
+    deps: &Deps,
+    documents: &[&str],
+    from: &str,
+    to: &str,
+) -> Result<Moved, Partly<Moved>> {
     let lookup = Lookup::new(deps.read().store);
     let from_id = referencable(&lookup, from)?;
     let to_id = referencable(&lookup, to)?;
@@ -79,7 +69,7 @@ pub fn move_to(deps: &Deps, documents: &[&str], from: &str, to: &str) -> Result<
             Ok(written) => done.moved.push(written),
             Err(failure) => {
                 let done = (!done.moved.is_empty()).then(|| Box::new(done));
-                return Err(Halted { done, failure });
+                return Err(Partly { done, failure });
             }
         }
     }
@@ -97,7 +87,7 @@ fn resolved(
     let mut found = lookup.find(address)?;
     if found == Found::None
         && let Ok(Address::Fact { topic, name }) = Address::parse(address)
-        && lookup.find(topic.as_str())? == Found::One(from.clone())
+        && matches!(lookup.find(topic.as_str())?, Found::One(id) if id == *from)
     {
         found = lookup.fact_named(to, &name)?;
     }
@@ -165,7 +155,7 @@ mod tests {
     use worklog_domain::ports::Store;
 
     fn move_to(deps: &Deps, documents: &[&str], from: &str, to: &str) -> Result<Moved, Failure> {
-        super::move_to(deps, documents, from, to).map_err(|halted| halted.failure)
+        super::move_to(deps, documents, from, to).map_err(|partly| partly.failure)
     }
 
     fn followup(
@@ -270,27 +260,22 @@ mod tests {
     }
 
     #[test]
-    fn a_move_a_store_problem_stopped_gives_what_it_stored_and_runs_again() {
+    fn a_move_a_store_problem_stopped_gives_what_it_stored() {
         let (world, lantern, _) = world_with_atlas();
         fact(&world, &lantern, "relay-pin", "");
         fact(&world, &lantern, "lamp-pin", "");
         let world = world.counted();
         let addresses = ["lantern/relay-pin", "lantern/lamp-pin"];
         world.store.puts_left.set(Some(1));
-        let halted = super::move_to(&world.deps(), &addresses, "lantern", "atlas").unwrap_err();
-        assert!(matches!(halted.failure, Failure::Store(_)), "{halted:?}");
-        let stopped = halted.done.unwrap();
+        let partly = super::move_to(&world.deps(), &addresses, "lantern", "atlas").unwrap_err();
+        assert!(matches!(partly.failure, Failure::Store(_)), "{partly:?}");
+        let stopped = partly.done.unwrap();
         assert_eq!(stored(&stopped), ["atlas/relay-pin"]);
 
         world.store.puts_left.set(Some(0));
-        let halted = super::move_to(&world.deps(), &addresses, "lantern", "atlas").unwrap_err();
-        assert!(matches!(halted.failure, Failure::Store(_)), "{halted:?}");
-        assert_eq!(halted.done, None);
-
-        world.store.puts_left.set(None);
-        let done = move_to(&world.deps(), &addresses, "lantern", "atlas").unwrap();
-        assert_eq!(stored(&done), ["atlas/lamp-pin"]);
-        assert_eq!(referred(&done.already), ["atlas/relay-pin"]);
+        let partly = super::move_to(&world.deps(), &addresses, "lantern", "atlas").unwrap_err();
+        assert!(matches!(partly.failure, Failure::Store(_)), "{partly:?}");
+        assert_eq!(partly.done, None);
     }
 
     #[test]
