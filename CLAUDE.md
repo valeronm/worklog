@@ -104,14 +104,17 @@ limit.
 ## Output contract
 
 stdout carries data only; refusals and notes go to stderr. Exit 1 is a
-refusal or a store problem, 2 a usage error. A listing that reports
-something a person may act on, a fork among them, still exits 0: the
-listing is the answer. `check` is the command whose exit code means
-something: 1 on a problem, a rule the store must keep, while a notice is a
-judgment call, printed with a `notice:` prefix and counted in the
-summary, and does not move the exit code. `upgrade --check` exits 0
-whether or not a newer release exists, and 1 only when the check itself
-failed.
+refusal or a store problem, 2 a usage error. A command that fails after
+doing part of its work prints what it did on stdout, as JSON under
+`--json`, and the failure goes to stderr with its own exit code. `save`
+and an `init` or `join` that makes a topic are the exceptions: each fails
+with the version it stored unprinted. A listing that reports something a
+person may act on, a fork among them, still exits 0: the listing is the
+answer. `check` is the command whose exit code means something: 1 on a
+problem, a rule the store must keep, while a notice is a judgment call,
+printed with a `notice:` prefix and counted in the summary, and does not
+move the exit code. `upgrade --check` exits 0 whether or not a newer
+release exists, and 1 only when the check itself failed.
 
 `refresh` and `agents refresh` print the paths they wrote on stdout and
 everything else on stderr. The installer and the binary that ran
