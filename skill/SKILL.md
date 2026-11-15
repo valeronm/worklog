@@ -243,8 +243,8 @@ fits:
 2. Is it already answered? Then `done` it, naming what dissolved it.
 3. Is it something learned, with no work left in it? Then it is a fact:
    write it, with no question to the user.
-4. Does an idea already hold the work, and the followup no plan for it?
-   Then `drop` it and let the entry's `Triage:` line link the idea.
+4. Does an idea already hold all of it? Then `drop` it and let the
+   entry's `Triage:` line link the idea.
 5. Does it wait on something, does something wait on it, is it work in
    progress, or is it a check or a measurement to run? Then it is a
    followup with its trigger.
@@ -290,9 +290,8 @@ body, or for a body of more than a line or two what the file at
 saved by the id noted on stderr. A `--summary` past the limit is refused
 and what was given is kept as such a draft: correct its summary and save.
 
-A plan for open work is the body of its followup, `--about` the idea it
-builds, whatever place another tool suggests: the next session finds it
-there.
+A followup for work left half built is `--about` the idea it builds and
+says where the plan is kept.
 
 ## Facts and topics
 
@@ -317,6 +316,9 @@ Which store holds it:
 - An entry holds what is worth having because it happened on a date. Work
   about nothing durable, a form filed, a question answered once, is an
   entry and stops there.
+- An implementation plan stays out of the store, in a file that outlives
+  the session, beside the code it changes: it names that code as it stood
+  when the plan was written. What planning settled goes into an idea.
 
 Writing one well:
 
@@ -425,7 +427,7 @@ Tell the user what was found that bears on the work, citing names.
 - `worklog show <target>` prints a document as it stands, then
   under `==== linked from` the live documents that link it or refer to
   it, with the entries that do counted, `--ended` for the ended ones
-  too, and with `--body` its body alone, to hand a plan to another tool;
+  too, and with `--body` its body alone;
   `worklog history <target>` prints its versions, each with an id. Given
   the start of such an id, `worklog show <id>` prints that version,
   `worklog diff <id>` what it changed, and `worklog diff <id> <id>` what
