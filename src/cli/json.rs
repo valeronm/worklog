@@ -662,7 +662,7 @@ mod tests {
             "row": row(&wiring, "entry", "2026-10-08-wiring", &[to(&lantern, "lantern")]),
             "date": "2026-10-08",
         }]);
-        let listed = list::entries(&world.deps().read(), None, None, None, false).unwrap();
+        let listed = list::entries(&world.deps().read(), None, None, false).unwrap();
         vec![(listed, expected)]
     }
 

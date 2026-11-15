@@ -170,14 +170,13 @@ fn fact_rows(
     Ok(rows)
 }
 
-/// Newest date first, then by name; `limit` cuts after the ordering. Refuses an address that
-/// is not one topic, and includes the entries of its parts. `on` is `YYYY-MM-DD` and keeps
-/// the entries dated that day; anything else is a usage failure.
+/// Newest date first, then by name. Refuses an address that is not one topic, and includes
+/// the entries of its parts. `on` is `YYYY-MM-DD` and keeps the entries dated that day;
+/// anything else is a usage failure.
 pub fn entries(
     deps: &ReadDeps,
     topic: Option<&str>,
     on: Option<&str>,
-    limit: Option<usize>,
     ended: bool,
 ) -> Result<Vec<EntryRow>, Failure> {
     let on = on.map(day_given).transpose()?;
@@ -194,7 +193,6 @@ pub fn entries(
         })
         .collect();
     rows.sort_by(|a, b| (Reverse(a.date), &a.row.label).cmp(&(Reverse(b.date), &b.row.label)));
-    rows.truncate(limit.unwrap_or(usize::MAX));
     Ok(rows)
 }
 
@@ -898,7 +896,7 @@ mod tests {
     }
 
     #[test]
-    fn entries_come_newest_date_first_then_by_name_and_are_limited() {
+    fn entries_come_newest_date_first_then_by_name() {
         let (world, lantern) = world();
         let atlas = topic(&world, "atlas", &part_of(&[&lantern]));
         entry(&world, "2026-10-08", "b-driver", &[&lantern]);
@@ -907,7 +905,7 @@ mod tests {
         entry(&world, "2026-10-09", "m-driver", &[&lantern]);
         let deps = world.deps();
 
-        let all = entries(&deps.read(), None, None, None, false).unwrap();
+        let all = entries(&deps.read(), None, None, false).unwrap();
         assert_eq!(
             labels(&all, |e| &e.row),
             [
@@ -918,27 +916,17 @@ mod tests {
             ]
         );
         assert_eq!(all[0].date, Date::parse("2026-10-09").unwrap());
-        let two = entries(&deps.read(), Some("lantern"), None, Some(2), false).unwrap();
-        assert_eq!(
-            labels(&two, |e| &e.row),
-            ["2026-10-09-m-driver", "2026-10-08-a-driver"]
-        );
-        let under_atlas = entries(&deps.read(), Some("atlas"), None, None, false).unwrap();
+        let under_lantern = entries(&deps.read(), Some("lantern"), None, false).unwrap();
+        assert_eq!(under_lantern, all);
+        let under_atlas = entries(&deps.read(), Some("atlas"), None, false).unwrap();
         assert_eq!(labels(&under_atlas, |e| &e.row), ["2026-10-08-a-driver"]);
-        let on = entries(
-            &deps.read(),
-            Some("lantern"),
-            Some("2026-10-08"),
-            None,
-            false,
-        )
-        .unwrap();
+        let on = entries(&deps.read(), Some("lantern"), Some("2026-10-08"), false).unwrap();
         assert_eq!(
             labels(&on, |e| &e.row),
             ["2026-10-08-a-driver", "2026-10-08-b-driver"]
         );
         assert!(matches!(
-            entries(&deps.read(), None, Some("yesterday"), None, false),
+            entries(&deps.read(), None, Some("yesterday"), false),
             Err(Failure::Usage(_))
         ));
     }

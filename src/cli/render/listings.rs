@@ -1,10 +1,11 @@
 use std::fmt::Write as _;
 
-use super::{INDENT, Render, filed_counts, line, row_fields, row_line, written};
+use super::{INDENT, Render, filed_counts, left_out_note, line, row_fields, row_line, written};
 use worklog_app::list::{ClaimRow, EntryRow, FactRow, ForkRow, TopicRow};
 use worklog_app::usage::MachineUsage;
 use worklog_app::{FollowupRow, Reference, Row, counted};
 use worklog_render::trigger_state;
+use worklog_schema::KindOf;
 
 fn dated(text: &mut String, day: &impl ToString, row: &Row) {
     let mut fields = vec![day.to_string()];
@@ -50,6 +51,21 @@ impl Render for Vec<EntryRow> {
             dated(&mut text, &entry.date, &entry.row);
         }
         text
+    }
+}
+
+pub(in super::super) struct Newest<'a> {
+    pub(in super::super) rows: &'a Vec<EntryRow>,
+    pub(in super::super) left_out: usize,
+}
+
+impl Render for Newest<'_> {
+    fn text(&self) -> String {
+        self.rows.text()
+    }
+
+    fn notes(&self) -> Vec<String> {
+        (left_out_note(&[(KindOf::Entry, self.left_out)]).into_iter()).collect()
     }
 }
 

@@ -318,7 +318,7 @@ mod tests {
             ("facts", |deps| list::facts(deps, None, false).map(drop)),
             ("ideas", |deps| list::ideas(deps, None, false).map(drop)),
             ("entries", |deps| {
-                list::entries(deps, Some("lantern"), None, None, false).map(drop)
+                list::entries(deps, Some("lantern"), None, false).map(drop)
             }),
             ("followups", |deps| {
                 list::followups(deps, None, true).map(drop)

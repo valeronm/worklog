@@ -2,7 +2,7 @@ use std::path::Path;
 
 use super::Environment;
 use super::args::{ChangeCommand, Command, DraftCommand, ListCommand, NewWhat, ReadCommand};
-use super::render::{Bodies, Found, Output, Refusals, output, output_as};
+use super::render::{Bodies, Found, Newest, Output, Refusals, output, output_as};
 use worklog_app::followup::{NewFollowup, TriggerArg};
 use worklog_app::search::Query;
 use worklog_app::{
@@ -297,10 +297,16 @@ fn listed(deps: &ReadDeps, json: bool, command: &ListCommand) -> Result<Output, 
             on,
             n,
             ended,
-        } => output(
-            &list::entries(deps, topic.as_deref(), on.as_deref(), *n, *ended)?,
-            json,
-        ),
+        } => {
+            let mut rows = list::entries(deps, topic.as_deref(), on.as_deref(), *ended)?;
+            let left_out = rows.len().saturating_sub(n.unwrap_or(usize::MAX));
+            rows.truncate(rows.len() - left_out);
+            let newest = Newest {
+                rows: &rows,
+                left_out,
+            };
+            output_as(&rows, &newest, json)
+        }
         ListCommand::Followups { about, ended } => {
             output(&list::followups(deps, about.as_deref(), *ended)?, json)
         }
@@ -805,7 +811,13 @@ mod tests {
         );
         let wired = format!("2026-10-08  {}  2026-10-08-wiring  s\n", wiring.short());
         assert_eq!(fixture.text(&["entries", "lantern"]), wired);
-        assert_eq!(fixture.text(&["entries", "-n", "1"]), wired);
+        assert_eq!(
+            fixture.text(&["entries", "-n", "2"]),
+            fixture.text(&["entries"])
+        );
+        let newest = fixture.run(&["entries", "-n", "1"]).unwrap();
+        assert_eq!(newest.text, wired);
+        assert_eq!(newest.notes, ["left out: 1 entry"]);
         assert_eq!(fixture.text(&["entries", "--on", "2026-10-08"]), wired);
         assert_eq!(fixture.text(&["entries", "--on", "2026-10-06"]), "");
         let grid = fixture.text(&["activity", "phone"]);

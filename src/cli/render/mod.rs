@@ -27,7 +27,7 @@ use worklog_schema::KindOf;
 #[cfg(test)]
 pub(super) use context::{CONTEXT_BYTES, DUE};
 pub(super) use documents::Bodies;
-pub(super) use listings::Refusals;
+pub(super) use listings::{Newest, Refusals};
 pub(super) use search::Found;
 #[cfg(test)]
 pub(super) use testing::assert_fits;

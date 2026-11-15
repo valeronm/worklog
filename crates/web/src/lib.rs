@@ -135,7 +135,7 @@ fn topic_page(deps: &ReadDeps, document: &ShownDocument, query: &Query) -> Resul
         facts: &list::facts(deps, topic, false)?,
         ideas: &list::ideas(deps, topic, false)?,
         followups: &list::followups(deps, topic, false)?,
-        entries: &list::entries(deps, topic, None, None, false)?,
+        entries: &list::entries(deps, topic, None, false)?,
         claims: &list::claims_on(deps, &document.document)?,
     };
     Ok(TopicPage::new(document, &held, section).render()?)
@@ -243,7 +243,7 @@ fn route(deps: &ReadDeps, path: &str, query: &Query) -> Result<Page, Problem> {
         Place::Facts => Listing::facts(&list::facts(deps, topic, ended)?, scope()?).render()?,
         Place::Ideas => Listing::ideas(&list::ideas(deps, topic, ended)?, scope()?).render()?,
         Place::Entries => {
-            Listing::entries(&list::entries(deps, topic, on, None, ended)?, scope()?).render()?
+            Listing::entries(&list::entries(deps, topic, on, ended)?, scope()?).render()?
         }
         Place::Followups => {
             Listing::followups(&list::followups(deps, topic, ended)?, scope()?).render()?
