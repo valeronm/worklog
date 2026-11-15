@@ -1997,6 +1997,18 @@ fn a_listing_is_a_line_a_document_from_its_short_id() {
         hits[4].ends_with("  2026-10-09-wiring  Pin four"),
         "{found}"
     );
+    let brief = host.ok(&["search", "four", "--topic", "lantern", "--brief"]);
+    let rows: Vec<&str> = brief.lines().collect();
+    assert_eq!(rows.len(), 3, "{brief}");
+    assert!(rows[0].ends_with("  lantern/dimmer  Pin four"), "{brief}");
+    assert!(
+        rows[2].ends_with("  2026-10-09-wiring  Pin four"),
+        "{brief}"
+    );
+    let capped = host.run(&["search", "four", "--topic", "lantern", "--brief", "-n", "1"]);
+    assert_eq!(capped.stdout, format!("{}\n{}\n", rows[0], rows[2]));
+    assert_eq!(capped.stderr, "worklog: left out: 1 fact\n");
+    assert_eq!(capped.code, Some(0));
     assert_eq!(host.ok(&["search", "no-such-word"]), "");
 }
 

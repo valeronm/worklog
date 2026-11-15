@@ -68,7 +68,7 @@ impl Cli {
         command
     }
 
-    /// `--json` is refused beside a command of `NO_JSON` and beside `show --body`.
+    /// `--json` is refused beside a command or a flag that has no JSON form.
     pub fn parsed<I, T>(args: I) -> Result<Cli, clap::Error>
     where
         I: IntoIterator<Item = T>,
@@ -79,6 +79,7 @@ impl Cli {
             Cli::from_arg_matches(&matches).map_err(|error| error.format(&mut Cli::command()))?;
         let no_json = match &cli.command {
             Invoked::Run(Command::Read(ReadCommand::Show { body: true, .. })) => Some("--body"),
+            Invoked::Run(Command::Read(ReadCommand::Search { brief: true, .. })) => Some("--brief"),
             _ => (matches.subcommand_name()).filter(|name| NO_JSON.contains(name)),
         };
         if cli.json
@@ -418,6 +419,12 @@ pub enum ReadCommand {
         /// The ended ones too
         #[arg(long)]
         ended: bool,
+        /// One line a document, without its matching lines
+        #[arg(long)]
+        brief: bool,
+        /// At most this many of each kind
+        #[arg(short)]
+        n: Option<usize>,
     },
     /// How many entries each day holds over the last year, or over one year, by week
     Activity {
@@ -643,6 +650,17 @@ mod tests {
             assert_eq!(refused(line), ErrorKind::ArgumentConflict, "{line}");
         }
         assert!(parsed("worklog show lantern --body").is_ok());
+    }
+
+    #[test]
+    fn a_brief_search_is_not_json() {
+        for line in [
+            "worklog search pin --brief --json",
+            "worklog --json search pin --brief",
+        ] {
+            assert_eq!(refused(line), ErrorKind::ArgumentConflict, "{line}");
+        }
+        assert!(parsed("worklog search pin --brief").is_ok());
     }
 
     #[test]

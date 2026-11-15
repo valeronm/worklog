@@ -2,7 +2,7 @@ use std::path::Path;
 
 use super::Environment;
 use super::args::{ChangeCommand, Command, DraftCommand, ListCommand, NewWhat, ReadCommand};
-use super::render::{Bodies, Output, Refusals, output, output_as};
+use super::render::{Bodies, Found, Output, Refusals, output, output_as};
 use worklog_app::followup::{NewFollowup, TriggerArg};
 use worklog_app::search::Query;
 use worklog_app::{
@@ -229,6 +229,8 @@ fn read(
             regex,
             topic,
             ended,
+            brief,
+            n,
         } => {
             let query = Query {
                 term,
@@ -236,7 +238,18 @@ fn read(
                 topic: topic.as_deref(),
                 ended: *ended,
             };
-            output(&search::search(deps, &query)?, json)
+            let matched = search::search(deps, &query)?;
+            let hits = Some(matched.len());
+            let (kept, left_out) = search::capped(matched, n.unwrap_or(usize::MAX));
+            let found = Found {
+                hits: &kept,
+                brief: *brief,
+                left_out: &left_out,
+            };
+            Output {
+                hits,
+                ..output_as(&kept, &found, json)
+            }
         }
         ReadCommand::Context { dir, .. } => {
             let directory = directory(environment, dir.as_deref())?;
@@ -752,6 +765,8 @@ mod tests {
             "torch: names no document"
         );
         assert_eq!(fixture.run(&["search", "lantern"]).unwrap().hits, Some(1));
+        let capped = fixture.run(&["search", "lantern", "-n", "0"]).unwrap();
+        assert_eq!(capped.hits, Some(1));
         assert_eq!(fixture.run(&["topics"]).unwrap().hits, None);
     }
 

@@ -137,8 +137,8 @@ draft of its document is open.
   and followups under the topic `<to>` where they were under `<from>`,
   all of them or none.
 
-`--json` on any command returns the same data structured. Refusals go to
-stderr with exit 1; a usage error exits 2.
+`--json` on any command returns the same data structured, without the
+notes. Refusals go to stderr with exit 1; a usage error exits 2.
 
 ## Capture — an entry for work done
 
@@ -410,6 +410,10 @@ Tell the user what was found that bears on the work, citing names.
   topic cover the whole store, each with `--ended` for the ended ones too;
   `search` takes `--regex` to read the term as a pattern, and `entries`
   `-n <count>` for at most that many.
+- A search of the whole store for a common word prints more than a tool
+  returns in one piece. `search --brief` prints one line a document,
+  without its matching lines, and `search -n <count>` at most that many
+  of each kind, newest first, with a count of the rest on stderr.
 - `worklog log [n]` — the newest versions written anywhere in the
   store, twenty unless told, so what other machines wrote since is one
   call; `--machine <name>` for one machine's writes.

@@ -22,11 +22,13 @@ use worklog_app::show::Linker;
 use worklog_app::{DraftRef, Failure, Row, Written, counted};
 use worklog_domain::id::VersionId;
 use worklog_render::{change_or_ending, ended, written};
+use worklog_schema::KindOf;
 
 #[cfg(test)]
 pub(super) use context::{CONTEXT_BYTES, DUE};
 pub(super) use documents::Bodies;
 pub(super) use listings::Refusals;
+pub(super) use search::Found;
 #[cfg(test)]
 pub(super) use testing::assert_fits;
 
@@ -78,10 +80,6 @@ pub(super) trait Render {
     fn exit(&self) -> i32 {
         0
     }
-
-    fn hits(&self) -> Option<usize> {
-        None
-    }
 }
 
 /// The text of `result` with its notes, or under `json` the result itself with no notes,
@@ -90,7 +88,8 @@ pub(super) fn output<T: Render + Serialize + Pinned>(result: &T, json: bool) -> 
     output_as(result, result, json)
 }
 
-/// The text of `view` with its notes, or under `json` `result` itself with no notes.
+/// The text of `view` with its notes, or under `json` `result` itself, which drops any note
+/// `result` does not carry.
 pub(super) fn output_as<T, V>(result: &T, view: &V, json: bool) -> Output
 where
     T: Render + Serialize + Pinned,
@@ -105,7 +104,7 @@ where
         text,
         notes,
         exit: result.exit(),
-        hits: result.hits(),
+        hits: None,
     }
 }
 
@@ -145,6 +144,14 @@ fn filed_counts(fact_count: usize, idea_count: usize, open_count: usize) -> Opti
 
 fn row_line(text: &mut String, row: &Row) {
     line(text, &row_fields(row, Vec::new()));
+}
+
+fn left_out_note(left_out: &[(KindOf, usize)]) -> Option<String> {
+    let counts: Vec<String> = (left_out.iter())
+        .filter(|(_, count)| *count > 0)
+        .map(|(kind, count)| counted(*count, kind.word(), kind.plural()))
+        .collect();
+    (!counts.is_empty()).then(|| format!("left out: {}", counts.join(", ")))
 }
 
 fn linker_line(text: &mut String, linker: &Linker) {

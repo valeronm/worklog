@@ -1,8 +1,9 @@
 use std::fmt::Write as _;
 
-use super::{INDENT, Render, change_or_ending, line, row_line, written};
+use super::{INDENT, Render, change_or_ending, left_out_note, line, row_line, written};
 use worklog_app::search::{Hit, Log};
 use worklog_render::hit_lines;
+use worklog_schema::KindOf;
 
 impl Render for Vec<Hit> {
     fn text(&self) -> String {
@@ -25,9 +26,30 @@ impl Render for Vec<Hit> {
             })
             .collect()
     }
+}
 
-    fn hits(&self) -> Option<usize> {
-        Some(self.len())
+pub(in super::super) struct Found<'a> {
+    pub(in super::super) hits: &'a Vec<Hit>,
+    pub(in super::super) brief: bool,
+    pub(in super::super) left_out: &'a [(KindOf, usize)],
+}
+
+impl Render for Found<'_> {
+    fn text(&self) -> String {
+        if !self.brief {
+            return self.hits.text();
+        }
+        let mut text = String::new();
+        for hit in self.hits {
+            row_line(&mut text, &hit.row);
+        }
+        text
+    }
+
+    fn notes(&self) -> Vec<String> {
+        let mut notes = self.hits.notes();
+        notes.extend(left_out_note(self.left_out));
+        notes
     }
 }
 
@@ -50,7 +72,6 @@ impl Render for Log {
 
 #[cfg(test)]
 mod tests {
-    use super::super::output;
     use super::super::testing::{WRITTEN, row, stamp, to};
     use super::*;
     use worklog_app::search::{Logged, Matched};
@@ -94,22 +115,24 @@ mod tests {
              \x20   … 2 more\n"
         );
         assert_eq!(Vec::<Hit>::new().text(), "");
-    }
-
-    #[test]
-    fn a_search_says_how_many_documents_it_matched_in_text_and_in_json() {
-        let hit = Hit {
-            row: row(&lantern(), "lantern/relay", "Pin four"),
-            lines: Vec::new(),
-            label_spans: Vec::new(),
-            unread: None,
+        let found = |brief, left_out| Found {
+            hits: &hits,
+            brief,
+            left_out,
         };
-        let hits = vec![hit.clone(), hit];
-        for json in [false, true] {
-            assert_eq!(output(&hits, json).hits, Some(2));
-            assert_eq!(output(&Vec::<Hit>::new(), json).hits, Some(0));
-            assert_eq!(output(&log(Vec::new()), json).hits, None);
-        }
+        assert_eq!(found(false, &[]).text(), hits.text());
+        assert_eq!(
+            found(true, &[]).text(),
+            "7f3a91c0  lantern/relay  Pin four\n\
+             a71a5000  atlas/relay-map  Pin four\n\
+             7f3a91c0  lantern  Pin four\n\
+             a71a5000  atlas  Pin four\n"
+        );
+        assert_eq!(found(true, &[]).notes(), Vec::<String>::new());
+        assert_eq!(
+            found(false, &[(KindOf::Fact, 1), (KindOf::Entry, 12)]).notes(),
+            ["left out: 1 fact, 12 entries"]
+        );
     }
 
     #[test]

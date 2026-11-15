@@ -132,6 +132,29 @@ pub fn search(deps: &ReadDeps, query: &Query) -> Result<Vec<Hit>, Failure> {
     Ok(hits)
 }
 
+/// The first `count` hits of each kind in the order given, and how many each kind left out.
+#[must_use]
+pub fn capped(hits: Vec<Hit>, count: usize) -> (Vec<Hit>, Vec<(KindOf, usize)>) {
+    let mut found: Vec<(KindOf, usize)> = Vec::new();
+    let mut kept = Vec::new();
+    for hit in hits {
+        let kind = hit.row.kind;
+        let at = (found.iter().position(|(held, _)| *held == kind)).unwrap_or_else(|| {
+            found.push((kind, 0));
+            found.len() - 1
+        });
+        found[at].1 += 1;
+        if found[at].1 <= count {
+            kept.push(hit);
+        }
+    }
+    let left_out = (found.into_iter())
+        .filter(|(_, found)| *found > count)
+        .map(|(kind, found)| (kind, found - count))
+        .collect();
+    (kept, left_out)
+}
+
 // A pattern can match an empty stretch, which marks nothing.
 fn spans(matcher: &Regex, text: &str) -> Vec<Range<usize>> {
     (matcher.find_iter(text))
@@ -262,6 +285,29 @@ mod tests {
             },
         )
         .unwrap()
+    }
+
+    #[test]
+    fn a_cap_keeps_the_first_hits_of_each_kind_and_counts_the_rest() {
+        let (world, lantern) = world();
+        for name in ["relay", "fuse", "wick"] {
+            fact(&world, &lantern, name, "");
+        }
+        let hits = find(&world, "lantern");
+        let found = |hits: &[Hit]| labels(hits, |hit| &hit.row);
+        let all = found(&hits);
+        assert_eq!(all.len(), 4, "{all:?}");
+        assert_eq!(all[0], "lantern");
+
+        let (kept, left_out) = capped(hits.clone(), 2);
+        assert_eq!(found(&kept), all[..3]);
+        assert_eq!(left_out, [(KindOf::Fact, 1)]);
+        let (kept, left_out) = capped(hits.clone(), 3);
+        assert_eq!(found(&kept), all);
+        assert_eq!(left_out, []);
+        let (kept, left_out) = capped(hits, 0);
+        assert_eq!(found(&kept), Vec::<String>::new());
+        assert_eq!(left_out, [(KindOf::Topic, 1), (KindOf::Fact, 3)]);
     }
 
     fn texts(hit: &Hit) -> Vec<&str> {
