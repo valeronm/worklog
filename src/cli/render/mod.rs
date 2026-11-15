@@ -200,7 +200,7 @@ impl Render for Made {
     fn notes(&self) -> Vec<String> {
         match self {
             Made::Written(written) => written.notes(),
-            Made::Draft(draft) => draft.notes(),
+            Made::Draft(draft) => vec![format!("the draft is saved by {}", draft.document.short())],
         }
     }
 }
@@ -375,7 +375,6 @@ mod tests {
         assert_eq!(Made::Written(fuse.clone()).notes(), notes);
         assert_eq!(vec![stored("lantern/relay"), fuse].notes(), notes);
         assert_eq!(stored("lantern/relay").notes(), Vec::<String>::new());
-        assert_eq!(Made::Draft(draft()).notes(), Vec::<String>::new());
     }
 
     #[test]

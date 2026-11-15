@@ -287,7 +287,7 @@ run.
 is stored at once and its id printed, with what `--body` holds as its
 body, or for a body of more than a line or two what the file at
 `--body-file <path>` holds, `-` being the input; without, a draft opens,
-saved by the id `worklog drafts` shows.
+saved by the id noted on stderr.
 
 A plan for open work is the body of its followup, `--about` the idea it
 builds, whatever place another tool suggests: the next session finds it

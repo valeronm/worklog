@@ -193,7 +193,9 @@ impl Host {
         let mut text = fs::read_to_string(&path).expect("the draft");
         let shown = format!("worklog: the draft holds:\n{text}");
         assert!(
-            ran.stderr.is_empty() || ran.stderr == shown,
+            ran.stderr.is_empty()
+                || ran.stderr == shown
+                || ran.stderr.starts_with("worklog: the draft is saved by "),
             "{args:?}: {}",
             ran.stderr
         );
@@ -889,6 +891,23 @@ fn a_followup_stored_at_once_takes_a_body_only_beside_a_summary() {
     ]);
     assert_eq!(bare.stdout, "");
     assert_eq!(bare.code, Some(2), "{}", bare.stderr);
+}
+
+#[test]
+fn a_followup_draft_notes_the_id_it_is_saved_by() {
+    let host = Host::set_up("desk");
+    host.topic("lantern");
+    let line = ["new", "followup", "--topics", "lantern"];
+    let ran = host.run(&[&line[..], &["--touching", "lantern"]].concat());
+    assert_eq!(ran.code, Some(0), "{}", ran.stderr);
+    let id = (ran.stderr.strip_prefix("worklog: the draft is saved by "))
+        .and_then(|rest| rest.strip_suffix('\n'))
+        .unwrap_or_else(|| panic!("a note of the id: {:?}", ran.stderr));
+    assert!(is_hex(id, 8), "{id}");
+    let path = ran.stdout.strip_suffix('\n').expect("one line");
+    let text = fs::read_to_string(path).expect("the draft");
+    fs::write(path, text.replacen(SUMMARY.0, SUMMARY.1, 1)).unwrap();
+    assert_stored(&host.ok(&["save", id]), id);
 }
 
 #[test]
