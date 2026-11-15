@@ -143,6 +143,12 @@ fn changed(
     command: &ChangeCommand,
 ) -> Result<Output, Failure> {
     let note = |note: &Option<String>| note.clone().unwrap_or_default();
+    let ended = |target: &str, reason: &str, said: &Option<String>, by: Option<&str>| {
+        Ok(output(
+            &amend::end(deps, target, reason, &note(said), by)?,
+            json,
+        ))
+    };
     let written = match command {
         ChangeCommand::Rename { target, name } => amend::rename(deps, target, name)?,
         ChangeCommand::Move { from, to, targets } => {
@@ -155,16 +161,16 @@ fn changed(
             reason,
             note: said,
             by,
-        } => amend::end(deps, target, reason, &note(said), by.as_deref())?,
+        } => return ended(target, reason, said, by.as_deref()),
         ChangeCommand::Reopen { target } => amend::reopen(deps, target)?,
         ChangeCommand::Done {
             followup,
             note: said,
-        } => amend::end(deps, followup, Reason::Done.word(), &note(said), None)?,
+        } => return ended(followup, Reason::Done.word(), said, None),
         ChangeCommand::Drop {
             followup,
             note: said,
-        } => amend::end(deps, followup, Reason::Dropped.word(), &note(said), None)?,
+        } => return ended(followup, Reason::Dropped.word(), said, None),
         ChangeCommand::Trigger {
             followup,
             when,

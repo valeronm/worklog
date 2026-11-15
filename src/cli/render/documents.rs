@@ -1,6 +1,6 @@
 use std::fmt::Write as _;
 
-use super::{Render, change_or_ending, line, row_fields, written};
+use super::{Render, change_or_ending, line, linker_line, written};
 use worklog_app::show::{Diff, History, Linker, Shown, ShownVersion, Unread};
 use worklog_app::{Reference, counted};
 use worklog_domain::id::VersionId;
@@ -57,7 +57,7 @@ fn linked_from(text: &mut String, linkers: &[Linker]) {
     let (entries, rest): (Vec<_>, Vec<_>) =
         (linkers.iter()).partition(|linker| linker.row.kind == KindOf::Entry);
     for linker in rest {
-        line(text, &row_fields(&linker.row, vec![linker.by.join(",")]));
+        linker_line(text, linker);
     }
     if !entries.is_empty() {
         let _ = writeln!(

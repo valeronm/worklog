@@ -122,10 +122,9 @@ draft of its document is open.
   unless `--ended` is given, and takes no change until `worklog
   reopen <target>` brings it back.
   Ending a document leaves every live document that links it resting on
-  something that is over; `show` lists them before it is ended. After an `end`, a `done` or a `drop`, run
-  `worklog check`, and for each document it names as linking the ended
-  one, read that document whole and decide what became of it, in the
-  same session.
+  something that is over. `end`, `done` and `drop` list them on stderr,
+  entries left out: read each one whole and decide what became of it, in
+  the same session.
 - `worklog done <followup> [note]` and `worklog drop <followup>
   <note>` end a followup; a `drop` note says why the work fell away.
   `worklog trigger`, under Open work, sets when one comes up again.

@@ -212,6 +212,7 @@ and `touching`, and `ended_by`. A fork links what its heads that are not
 ended link, as it is filed where they file it. `show` lists
 those that are not ended, and with `--ended` the rest, and counts the
 entries among them; a document's page lists them all, the entries apart.
+An ending notes those that are not ended, the entries left out.
 A topic's page lists none, since its parts and what is filed on it have
 tabs of their own.
 

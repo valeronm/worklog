@@ -451,8 +451,15 @@ pub fn linked_from(
     target: &DocumentId,
     ended: bool,
 ) -> Result<Vec<Linker>, Failure> {
-    let lookup = Lookup::new(deps.store);
-    let topics = Topics::load(&lookup)?;
+    linkers(&Lookup::new(deps.store), target, ended)
+}
+
+pub(super) fn linkers(
+    lookup: &Lookup,
+    target: &DocumentId,
+    ended: bool,
+) -> Result<Vec<Linker>, Failure> {
+    let topics = Topics::load(lookup)?;
     let (mut matched, mut ways) = (Vec::new(), BTreeMap::new());
     for document in lookup.everything()? {
         if document.id() == target {
@@ -461,7 +468,7 @@ pub fn linked_from(
         let Some(kind) = kind_of(&document) else {
             continue;
         };
-        let by = pointing(&lookup, &document, kind, target, ended)?;
+        let by = pointing(lookup, &document, kind, target, ended)?;
         if !by.is_empty() {
             ways.insert(document.id().clone(), by);
             matched.push(document);

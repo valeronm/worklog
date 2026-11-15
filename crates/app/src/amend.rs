@@ -1,11 +1,26 @@
 use alloc::borrow::ToOwned;
-use alloc::string::ToString;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+
+use serde::Serialize;
 
 use crate::live::open;
 use crate::lookup::Lookup;
+use crate::rules::links_are_checked;
 use crate::save::admit;
+use crate::show::{Linker, linkers};
 use crate::{Deps, Failure, Written, text};
+use worklog_domain::id::{DocumentId, VersionId};
 use worklog_schema::{Content, Ending, Name, Reason};
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Ended {
+    pub document: DocumentId,
+    pub label: String,
+    pub version: VersionId,
+    /// The live documents that link the ended one or hold its id, entries left out.
+    pub linked_from: Vec<Linker>,
+}
 
 pub fn rename(deps: &Deps, address: &str, name: &str) -> Result<Written, Failure> {
     let lookup = Lookup::new(deps.read().store);
@@ -45,7 +60,7 @@ pub fn end(
     reason: &str,
     note: &str,
     by: Option<&str>,
-) -> Result<Written, Failure> {
+) -> Result<Ended, Failure> {
     let lookup = Lookup::new(deps.read().store);
     let target = open(deps, &lookup, address)?;
     let by = by.map(|by| lookup.one(by)).transpose()?;
@@ -63,7 +78,22 @@ pub fn end(
         .clone()
         .end(ending)
         .map_err(|error| Failure::at(&target.label, error))?;
-    admit(deps, &lookup, &target.id, &ended, &target.head.body, reason)
+    // Read before the version is stored: a read failing after it would report the stored ending
+    // as a failure.
+    let mut linked_from = linkers(&lookup, &target.id, false)?;
+    linked_from.retain(|linker| links_are_checked(linker.row.kind));
+    let Written {
+        document,
+        label,
+        version,
+        ..
+    } = admit(deps, &lookup, &target.id, &ended, &target.head.body, reason)?;
+    Ok(Ended {
+        document,
+        label,
+        version,
+        linked_from,
+    })
 }
 
 pub fn reopen(deps: &Deps, address: &str) -> Result<Written, Failure> {

@@ -382,8 +382,16 @@ fn fill(opened: &Value, edits: &[(&str, &str)]) {
 }
 
 fn assert_written(written: &Value, label: &str) {
+    assert_version(written, label, "stale_links");
+}
+
+fn assert_ended(ended: &Value, label: &str) {
+    assert_version(ended, label, "linked_from");
+}
+
+fn assert_version(written: &Value, label: &str, last: &str) {
     let keys: Vec<&String> = written.as_object().expect("an object").keys().collect();
-    let held = ["document", "label", "version", "stale_links"];
+    let held = ["document", "label", "version", last];
     assert_eq!(keys, held, "{written}");
     assert!(
         is_hex(written["document"].as_str().unwrap(), 32),
@@ -1297,6 +1305,43 @@ fn show_prints_a_body_alone_when_asked() {
 }
 
 #[test]
+fn an_ending_notes_the_live_documents_that_link_what_it_ended() {
+    let host = Host::stocked();
+    host.drafted(
+        &["checkout", "lantern/relay"],
+        &[("**Why:** ", "**Why:** It feeds [[lantern/fuse]].")],
+    );
+    host.ok(&["save", "lantern/relay"]);
+    host.drafted(
+        &["new", "entry", "wiring", "--date", "2026-10-09"],
+        &[
+            SUMMARY,
+            ("topics = []", "topics = [\"lantern\"]"),
+            ("## What\n", "## What\n\nFitted [[lantern/fuse]].\n"),
+        ],
+    );
+    host.ok(&["save", "2026-10-09-wiring"]);
+    let ordered = host.followup_with("Order a fuse", &["--about", "lantern/fuse"]);
+
+    let ended = host.run(&["end", "lantern/fuse", "false", "It blew"]);
+    assert_stored(&ended.stdout, "lantern/fuse");
+    assert_eq!(ended.code, Some(0));
+    let (head, rows) = ended.stderr.split_once('\n').expect("several lines");
+    assert_eq!(head, "worklog: lantern/fuse is still linked from:");
+    let mut rows: Vec<&str> = rows.lines().collect();
+    rows.sort_unstable();
+    let relay = host.row("lantern/relay", "lantern/relay  Pin four  link");
+    let followup = format!("{ordered}  Order a fuse  about");
+    let mut linking = [relay.trim_end(), followup.as_str()];
+    linking.sort_unstable();
+    assert_eq!(rows, linking);
+
+    let done = host.run(&["done", &ordered, "It arrived"]);
+    assert_stored(&done.stdout, &ordered);
+    assert_eq!(done.stderr, "");
+}
+
+#[test]
 fn a_save_notes_each_new_link_that_is_stale_and_stores_the_version() {
     let host = Host::stocked();
     host.drafted(
@@ -1320,7 +1365,8 @@ fn a_save_notes_each_new_link_that_is_stale_and_stores_the_version() {
     );
     assert_stored(&host.ok(&["save", "lantern/fuse"]), "lantern/fuse");
 
-    host.ok(&["end", "lantern/relay", "false", "It never held."]);
+    let ended = host.run(&["end", "lantern/relay", "false", "It never held."]);
+    assert_eq!(ended.code, Some(0), "{}", ended.stderr);
     host.drafted(
         &["checkout", "lantern/dimmer"],
         &[("**Why:** ", "**Why:** After [[lantern/relay]].")],
@@ -1526,7 +1572,7 @@ fn a_command_that_changes_a_document_prints_its_stored_version_as_json() {
     assert_eq!(moved.as_array().map(Vec::len), Some(2), "{moved}");
     assert_written(&moved[0], "atlas/relay-pin");
     assert_written(&moved[1], "atlas/fuse");
-    assert_written(
+    assert_ended(
         &host.json(&["end", "atlas/fuse", "false", "It was three amps"]),
         "atlas/fuse",
     );
@@ -1539,8 +1585,8 @@ fn a_command_that_changes_a_document_prints_its_stored_version_as_json() {
         &host.json(&["trigger", &second, "touching", "lantern"]),
         &second,
     );
-    assert_written(&host.json(&["done", &first]), &first);
-    assert_written(&host.json(&["drop", &second, "No longer wanted"]), &second);
+    assert_ended(&host.json(&["done", &first]), &first);
+    assert_ended(&host.json(&["drop", &second, "No longer wanted"]), &second);
 
     let project = host.home().join("projects/lantern");
     let claim = "lantern at ~/projects/lantern";
@@ -1773,7 +1819,8 @@ fn a_link_to_a_document_that_ended_is_shown_as_ended_in_json_and_on_the_page() {
     assert_eq!(links(&host), live);
     let before = host.ok(&["show", "phone"]);
 
-    host.ok(&["end", "lantern/fuse", "superseded", "The relay holds it"]);
+    let ended = host.run(&["end", "lantern/fuse", "superseded", "The relay holds it"]);
+    assert_eq!(ended.code, Some(0), "{}", ended.stderr);
     assert_eq!(
         links(&host),
         [

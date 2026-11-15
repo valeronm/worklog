@@ -15,9 +15,12 @@ use std::fmt::Write as _;
 use serde::Serialize;
 
 use super::json::{Pinned, nothing, printed};
+use worklog_app::amend::Ended;
 use worklog_app::draft::{DraftRow, Opener, ShownDraft};
 use worklog_app::followup::Made;
+use worklog_app::show::Linker;
 use worklog_app::{DraftRef, Failure, Row, Written, counted};
+use worklog_domain::id::VersionId;
 use worklog_render::{change_or_ending, ended, written};
 
 #[cfg(test)]
@@ -144,15 +147,23 @@ fn row_line(text: &mut String, row: &Row) {
     line(text, &row_fields(row, Vec::new()));
 }
 
+fn linker_line(text: &mut String, linker: &Linker) {
+    line(text, &row_fields(&linker.row, vec![linker.by.join(",")]));
+}
+
 impl Render for () {
     fn text(&self) -> String {
         String::new()
     }
 }
 
+fn stored_line(label: &str, version: &VersionId) -> String {
+    format!("{label} {}\n", version.short())
+}
+
 impl Render for Written {
     fn text(&self) -> String {
-        format!("{} {}\n", self.label, self.version.short())
+        stored_line(&self.label, &self.version)
     }
 
     fn notes(&self) -> Vec<String> {
@@ -169,6 +180,24 @@ impl Render for Vec<Written> {
 
     fn notes(&self) -> Vec<String> {
         self.iter().flat_map(Render::notes).collect()
+    }
+}
+
+impl Render for Ended {
+    fn text(&self) -> String {
+        stored_line(&self.label, &self.version)
+    }
+
+    fn notes(&self) -> Vec<String> {
+        if self.linked_from.is_empty() {
+            return Vec::new();
+        }
+        let mut rows = String::new();
+        for linker in &self.linked_from {
+            linker_line(&mut rows, linker);
+        }
+        let rows = rows.trim_end();
+        vec![format!("{} is still linked from:\n{rows}", self.label)]
     }
 }
 
@@ -272,7 +301,6 @@ mod tests {
     use worklog_app::draft::{BrokenRow, OpenDraft};
     use worklog_app::show::{Shown, ShownDocument, Unread};
     use worklog_app::testing::stale_link;
-    use worklog_domain::id::VersionId;
     use worklog_domain::testing::{atlas, lantern};
     use worklog_domain::version::Stamp;
 

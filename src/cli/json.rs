@@ -52,8 +52,9 @@ mod tests {
     use worklog_app::search::{Hit, Log, Query};
     use worklog_app::show::{Diff, History, Shown};
     use worklog_app::testing::{
-        ENDED as RETIRED, ENDED_FACT, NOW, World, claim_fields, entry, fact, followup, fork, head,
-        head_id, part_of, topic, topic_fields, uses, world, world_with_atlas, written_at,
+        ENDED as RETIRED, ENDED_FACT, NOW, World, claim_fields, entry, fact, fact_fields, followup,
+        fork, head, head_id, part_of, topic, topic_fields, uses, world, world_with_atlas,
+        written_at,
     };
     use worklog_app::upgrade::{Checked, Upgrade};
     use worklog_app::usage::MachineUsage;
@@ -137,6 +138,7 @@ mod tests {
     pinned! {
         a_stored_version_is_its_document_its_label_and_its_whole_hash: Written = stored,
         the_versions_a_move_stores_are_listed: Vec<Written> = moved,
+        an_ending_is_the_version_stored_and_what_still_links_the_document: amend::Ended = ended,
         a_draft_opened_is_its_document_and_its_path: DraftRef = opened,
         a_draft_checked_out_is_its_document_its_path_and_its_text: ShownDraft = checked_out,
         a_listed_draft_holds_its_kind_its_label_its_path_its_opener_and_when_it_was_touched:
@@ -379,6 +381,29 @@ mod tests {
             "stale_links": [],
         });
         vec![(verified, expected)]
+    }
+
+    fn ended() -> Vec<(amend::Ended, Value)> {
+        let (world, lantern) = world();
+        let relay = fact(&world, &lantern, "relay", "");
+        let fuse = fact(&world, &lantern, "fuse", "");
+        world.amend_linking(
+            &fuse,
+            &fact_fields(&lantern, "fuse", "s", ""),
+            "See [[lantern/relay]].\n",
+            &[("lantern/relay", Some(&relay))],
+        );
+        let ended = amend::end(&world.deps(), "lantern/relay", "false", "n", None).unwrap();
+        let expected = json!({
+            "document": relay,
+            "label": "lantern/relay",
+            "version": head_id(&world, &relay),
+            "linked_from": [{
+                "row": row(&fuse, "fact", "lantern/fuse", &[to(&lantern, "lantern")]),
+                "by": ["link"],
+            }],
+        });
+        vec![(ended, expected)]
     }
 
     fn moved() -> Vec<(Vec<Written>, Value)> {
