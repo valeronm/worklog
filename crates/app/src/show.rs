@@ -15,7 +15,7 @@ use toml::Value;
 use crate::draft::{draft_label, found_draft, no_draft, opened, shown_as};
 use crate::heads::{ended_for, ended_of, holding_heads, is_forked, kind_of, row_head, texts};
 use crate::index::Topics;
-use crate::lookup::{Lookup, names_no_document};
+use crate::lookup::{Lookup, held_by_several, names_no_document};
 use crate::rows::{self, Reference, Row};
 use crate::{Failure, ReadDeps};
 use worklog_domain::document::{Document, Unreadable};
@@ -288,7 +288,7 @@ enum Resolved {
 fn resolved(lookup: &Lookup, address: &str) -> Result<Option<Resolved>, Failure> {
     match lookup.find(address)? {
         Found::One(id) => Ok(Some(Resolved::Document(id))),
-        Found::Collision(_) => lookup.one(address).map(|id| Some(Resolved::Document(id))),
+        Found::Collision(ids) => Err(held_by_several(address, &ids)),
         Found::None if is_id_prefix(address) => {
             let mut held = lookup.versions_under(address)?;
             match held.len() {

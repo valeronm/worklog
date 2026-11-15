@@ -8,7 +8,7 @@ use toml::Value;
 
 use crate::heads::label_or_short;
 use crate::live::open;
-use crate::lookup::{Lookup, draft_open};
+use crate::lookup::{Lookup, draft_open, held_by_several};
 use crate::rules::{name_is_free, referencable};
 use crate::show;
 use crate::{Deps, DraftRef, Failed, Failure, ReadDeps, kind_named, text};
@@ -324,9 +324,7 @@ fn drafted_document(
                 return Ok(Some(id));
             }
         }
-        Ok(Found::Collision(_)) => {
-            lookup.one(address)?;
-        }
+        Ok(Found::Collision(ids)) => return Err(held_by_several(address, &ids)),
         Ok(Found::None) | Err(Failure::Usage(_)) => {}
         Err(other) => return Err(other),
     }
