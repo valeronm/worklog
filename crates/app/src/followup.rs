@@ -16,6 +16,7 @@ use crate::{Deps, DraftRef, Failure, Written, day_given, kind_named, text};
 use worklog_domain::draft::Draft;
 use worklog_domain::id::DocumentId;
 use worklog_domain::version::Fields;
+use worklog_schema::step::summary_past_limit;
 use worklog_schema::{Content, KindOf};
 
 pub enum TriggerArg<'a> {
@@ -36,6 +37,18 @@ pub struct NewFollowup<'a> {
 pub enum Made {
     Written(Written),
     Draft(DraftRef),
+}
+
+#[derive(Debug)]
+pub enum Unstored {
+    Failed(Failure),
+    Kept { draft: DraftRef, refusal: Failure },
+}
+
+impl From<Failure> for Unstored {
+    fn from(failure: Failure) -> Unstored {
+        Unstored::Failed(failure)
+    }
 }
 
 impl Serialize for Made {
@@ -74,15 +87,15 @@ fn touched(lookup: &Lookup, address: &str, topics: &[DocumentId]) -> Result<Stri
     Ok(topic.to_string())
 }
 
-/// Stored at once when a summary is given, otherwise opened as a draft.
-pub fn new_followup(deps: &Deps, what: &NewFollowup) -> Result<Made, Failure> {
+/// Stored at once when a summary is given, otherwise opened as a draft. A summary past the
+/// limit is refused with a draft kept, so the body given with it is not lost.
+pub fn new_followup(deps: &Deps, what: &NewFollowup) -> Result<Made, Unstored> {
     if what.topics.is_empty() {
-        return Err(Failure::Usage("a followup names a topic".to_owned()));
+        return Err(Failure::Usage("a followup names a topic".to_owned()).into());
     }
     if what.body.is_some() && what.summary.is_none() {
-        return Err(Failure::Usage(
-            "a body is given with a summary; without one it is written in the draft".to_owned(),
-        ));
+        let body_alone = "a body is given with a summary; without one it is written in the draft";
+        return Err(Failure::Usage(body_alone.to_owned()).into());
     }
     let lookup = Lookup::new(deps.read().store);
     let topics = what
@@ -92,7 +105,8 @@ pub fn new_followup(deps: &Deps, what: &NewFollowup) -> Result<Made, Failure> {
         .collect::<Result<Vec<_>, _>>()?;
     let entry = what.entry.map(|entry| lookup.one(entry)).transpose()?;
     let about = what.about.map(|about| lookup.one(about)).transpose()?;
-    let shown = what.summary.is_none();
+    let past_limit = what.summary.and_then(summary_past_limit);
+    let shown = what.summary.is_none() || past_limit.is_some();
     let reference = |id: &DocumentId| {
         if shown {
             named(&lookup, id)
@@ -129,15 +143,23 @@ pub fn new_followup(deps: &Deps, what: &NewFollowup) -> Result<Made, Failure> {
     }
     fields.insert("summary".to_owned(), text(what.summary.unwrap_or_default()));
     let kind = kind_named(KindOf::Followup);
-    let id = deps.ids.mint()?;
-    if what.summary.is_none() {
-        let draft = Draft::first(id, kind, fields, "\n".to_owned());
-        return Ok(Made::Draft(open_draft(deps, draft)?));
-    }
+    let id = deps.ids.mint().map_err(Failure::from)?;
     let body = match what.body.map(str::trim) {
         Some(body) if !body.is_empty() => format!("\n{body}\n"),
         _ => "\n".to_owned(),
     };
+    if shown {
+        let label = format!("new {kind}");
+        let draft = open_draft(deps, Draft::first(id, kind, fields, body))?;
+        let Some(past_limit) = past_limit else {
+            return Ok(Made::Draft(draft));
+        };
+        let kept = format!("{past_limit}; nothing is stored, and a draft holds what was given");
+        return Err(Unstored::Kept {
+            draft,
+            refusal: Failure::at(label, kept),
+        });
+    }
     let admitted = stepped(deps, &lookup, &id, &kind, &fields, &body, "new")?;
     Ok(Made::Written(admitted.store(deps)?))
 }
@@ -176,6 +198,15 @@ mod tests {
             Content::Followup(followup) => followup,
             other => panic!("expected a followup, got {other:?}"),
         }
+    }
+
+    fn new_followup(deps: &Deps, what: &NewFollowup) -> Result<Made, Failure> {
+        super::new_followup(deps, what).map_err(|unstored| match unstored {
+            Unstored::Failed(failure)
+            | Unstored::Kept {
+                refusal: failure, ..
+            } => failure,
+        })
     }
 
     fn written(made: Result<Made, Failure>) -> Written {

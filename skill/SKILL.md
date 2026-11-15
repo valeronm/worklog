@@ -85,7 +85,8 @@ what happens next, the triage under Open work.
    name. `summary` is the claim alone: one line of at most 100
    characters, never empty and with no link in it, and the why goes in the
    body. One that is longer or holds a link is refused when it is new or
-   changed. A field the kind does not have is refused. A fact's draft
+   changed, and the refusal quotes what of it is past the limit. A field
+   the kind does not have is refused. A fact's draft
    holds `topic` and `confirmed`, and an idea's `idea = true` besides. A
    followup's holds `topics`, its trigger as `look_again` with `why` or as
    `touching`, and `entry` and `about`, which never change once stored.
@@ -286,7 +287,8 @@ run.
 is stored at once and its id printed, with what `--body` holds as its
 body, or for a body of more than a line or two what the file at
 `--body-file <path>` holds, `-` being the input; without, a draft opens,
-saved by the id noted on stderr.
+saved by the id noted on stderr. A `--summary` past the limit is refused
+and what was given is kept as such a draft: correct its summary and save.
 
 A plan for open work is the body of its followup, `--about` the idea it
 builds, whatever place another tool suggests: the next session finds it

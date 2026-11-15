@@ -955,14 +955,39 @@ fn a_followup_stored_at_once_reads_its_body_from_a_file_or_the_input() {
 }
 
 #[test]
-fn a_new_summary_past_the_limit_is_refused() {
+fn a_followup_whose_summary_is_past_the_limit_is_refused_and_kept_as_a_draft() {
     let host = Host::set_up("desk");
     host.topic("lantern");
-    let long = "a".repeat(101);
-    assert_refused(
-        &host.run(&["new", "followup", "--topics", "lantern", "--summary", &long]),
-        1,
-        "worklog: new followup: `summary` is 101 characters long; at most 100 are stored\n",
+    let long = format!("{}bc", "a".repeat(100));
+    let line = ["new", "followup", "--topics", "lantern"];
+    let rest = ["--touching", "lantern", "--summary", &long];
+    let ran = host.run(&[&line[..], &rest, &["--body", "Fit the lens."]].concat());
+    assert_eq!(ran.code, Some(1), "{}", ran.stderr);
+    let path = ran.stdout.strip_suffix('\n').expect("one line");
+    let id = Path::new(path).file_stem().unwrap().to_str().unwrap();
+    assert_eq!(
+        ran.stderr,
+        format!(
+            "worklog: the draft is saved by {}\n\
+             worklog: new followup: `summary` is 102 characters long; at most 100 are stored, \
+             and `bc` is past them; nothing is stored, and a draft holds what was given\n",
+            &id[..8]
+        )
+    );
+    assert_eq!(host.ok(&["followups"]), "");
+
+    let text = fs::read_to_string(path).expect("the draft");
+    fs::write(path, text.replacen(&long, "Check the lens", 1)).unwrap();
+    assert_stored(&host.ok(&["save", id]), &id[..8]);
+    assert_eq!(host.ok(&["show", id, "--body"]), "\nFit the lens.\n");
+
+    let drafted = host.run(&[&line[..], &rest, &["--json"]].concat());
+    assert_eq!(drafted.code, Some(1), "{}", drafted.stderr);
+    assert!(one_value(&drafted.stdout).is_some(), "{}", drafted.stdout);
+    assert!(
+        drafted
+            .stderr
+            .starts_with("worklog: new followup: `summary` is 102")
     );
 }
 

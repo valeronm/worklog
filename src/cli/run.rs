@@ -5,7 +5,7 @@ use super::render::{
     Bodies, EachBody, Found, Newest, Output, Refusals, Stopped, output, output_as,
 };
 use super::{Environment, exit_code, said};
-use worklog_app::followup::{NewFollowup, TriggerArg};
+use worklog_app::followup::{Made, NewFollowup, TriggerArg, Unstored};
 use worklog_app::search::Query;
 use worklog_app::show::Linkers;
 use worklog_app::{
@@ -64,9 +64,9 @@ fn new(
     environment: &Environment,
     json: bool,
     what: &NewWhat,
-) -> Result<Output, Failure> {
-    match what {
-        NewWhat::Topic { name } => opened(deps, json, &draft::New::Topic { name }),
+) -> Result<Output, Stopped> {
+    Ok(match what {
+        NewWhat::Topic { name } => opened(deps, json, &draft::New::Topic { name })?,
         NewWhat::Fact { address } => opened(
             deps,
             json,
@@ -74,7 +74,7 @@ fn new(
                 address,
                 idea: false,
             },
-        ),
+        )?,
         NewWhat::Idea { address } => opened(
             deps,
             json,
@@ -82,7 +82,7 @@ fn new(
                 address,
                 idea: true,
             },
-        ),
+        )?,
         NewWhat::Entry { name, date } => opened(
             deps,
             json,
@@ -90,7 +90,7 @@ fn new(
                 name,
                 date: date.as_deref(),
             },
-        ),
+        )?,
         NewWhat::Followup {
             topics,
             summary,
@@ -119,9 +119,18 @@ fn new(
                 about: about.as_deref(),
                 trigger,
             };
-            Ok(output(&followup::new_followup(deps, &what)?, json))
+            match followup::new_followup(deps, &what) {
+                Ok(made) => output(&made, json),
+                Err(Unstored::Failed(failure)) => return Err(failure.into()),
+                Err(Unstored::Kept { draft, refusal }) => {
+                    return Err(Stopped {
+                        done: Some(output(&Made::Draft(draft), json)),
+                        failure: refusal,
+                    });
+                }
+            }
         }
-    }
+    })
 }
 
 fn drafted(
@@ -129,7 +138,7 @@ fn drafted(
     environment: &Environment,
     json: bool,
     command: &DraftCommand,
-) -> Result<Output, Failure> {
+) -> Result<Output, Stopped> {
     Ok(match command {
         DraftCommand::New { what } => new(deps, environment, json, what)?,
         DraftCommand::Checkout { target } => output(&draft::checkout(deps, target)?, json),

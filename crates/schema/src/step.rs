@@ -105,6 +105,20 @@ pub fn next(
 
 const SUMMARY_LIMIT: usize = 100;
 
+/// The refusal of a summary longer than a version stores, naming what of it is past the limit.
+#[must_use]
+pub fn summary_past_limit(summary: &str) -> Option<SchemaError> {
+    let (at, _) = summary.char_indices().nth(SUMMARY_LIMIT)?;
+    let (length, over) = (summary.chars().count(), &summary[at..]);
+    Some(SchemaError::field(
+        "summary",
+        format!(
+            "is {length} characters long; at most {SUMMARY_LIMIT} are stored, and `{over}` is \
+             past them"
+        ),
+    ))
+}
+
 fn refuse_summary(was: Option<&Content>, is: &Content) -> Result<(), SchemaError> {
     let Some(summary) = is.summary() else {
         return Ok(());
@@ -112,12 +126,8 @@ fn refuse_summary(was: Option<&Content>, is: &Content) -> Result<(), SchemaError
     if was.and_then(Content::summary) == Some(summary) {
         return Ok(());
     }
-    let length = summary.chars().count();
-    if length > SUMMARY_LIMIT {
-        return Err(SchemaError::field(
-            "summary",
-            format!("is {length} characters long; at most {SUMMARY_LIMIT} are stored"),
-        ));
+    if let Some(past_limit) = summary_past_limit(summary) {
+        return Err(past_limit);
     }
     if !links(summary).is_empty() {
         return Err(SchemaError::field(
@@ -205,11 +215,20 @@ mod tests {
         };
         let fits = "é".repeat(SUMMARY_LIMIT);
         let long = format!("{fits}é");
-        let too_long = "`summary` is 101 characters long; at most 100 are stored";
+        let too_long = |over: &str| {
+            format!(
+                "`summary` is 101 characters long; at most 100 are stored, and `{over}` is past them"
+            )
+        };
         let linked = "`summary` holds a link; a link goes in the body";
         assert!(first(&fits).is_ok());
         assert!(first("Quotes `[[atlas]]`").is_ok());
-        assert_eq!(refused(first(&long)), too_long);
+        assert_eq!(refused(first(&long)), too_long("é"));
+        let wordy = format!("{}relay pin", "a".repeat(SUMMARY_LIMIT - 4));
+        assert_eq!(
+            refused(first(&wordy)),
+            "`summary` is 105 characters long; at most 100 are stored, and `y pin` is past them"
+        );
         assert_eq!(refused(first("See [[atlas]]")), linked);
 
         for held in [long.as_str(), "See [[atlas]]"] {
@@ -221,7 +240,7 @@ mod tests {
                 |summary: &str| after(&parent, &fact_draft("relay", summary, "2026-09-04"), true);
             assert_eq!(step(held).unwrap().content.summary(), Some(held));
             assert!(step("The relay pin is fixed").is_ok());
-            assert_eq!(refused(step(&"a".repeat(SUMMARY_LIMIT + 1))), too_long);
+            assert_eq!(refused(step(&"a".repeat(SUMMARY_LIMIT + 1))), too_long("a"));
             assert_eq!(refused(step("Now see [[atlas]]")), linked);
         }
     }
