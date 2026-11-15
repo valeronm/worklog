@@ -6,7 +6,7 @@ use std::path::Path;
 use clap::{CommandFactory as _, Subcommand as _};
 
 use super::args::{Cli, HostCommand, ToolCommand};
-use super::render::Output;
+use super::render::{Output, Stopped};
 use super::{Environment, exit_code, said};
 use worklog_app::record::{Outcome, Run, record};
 use worklog_app::{Deps, Failure};
@@ -75,14 +75,14 @@ pub(super) fn failed(failure: &Failure) -> Outcome {
     }
 }
 
-pub(super) fn outcome(answer: &Result<Output, Failure>) -> Outcome {
+pub(super) fn outcome(answer: &Result<Output, Stopped>) -> Outcome {
     match answer {
         Ok(output) => Outcome {
             exit: output.exit,
             refusal: None,
             hits: output.hits,
         },
-        Err(failure) => failed(failure),
+        Err(stopped) => failed(&stopped.failure),
     }
 }
 

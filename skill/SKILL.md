@@ -425,7 +425,9 @@ Tell the user what was found that bears on the work, citing names.
   `worklog history <target>` prints its versions, each with an id. Given
   the start of such an id, `worklog show <id>` prints that version,
   `worklog diff <id>` what it changed, and `worklog diff <id> <id>` what
-  changed between two.
+  changed between two. `show` takes several targets and prints each
+  under a line naming it; one it cannot show is refused on stderr, the
+  rest are still printed, and the call fails.
 
 Answer a "what did we do about X" question by reading the matching
 documents and reconstructing what changed, when and why, citing names. If

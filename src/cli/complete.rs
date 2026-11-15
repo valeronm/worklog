@@ -511,7 +511,7 @@ mod tests {
                 "trigger when",
                 "claim topic",
                 "unclaim topic",
-                "show target",
+                "show targets",
                 "history target",
                 "diff target",
                 "log machine",

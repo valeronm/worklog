@@ -159,6 +159,7 @@ mod tests {
         a_log_holds_its_machine_the_machines_and_null_for_a_row_its_document_does_not_read_as: Log =
             logged,
         a_shown_document_and_a_shown_version_are_told_apart_by_type: Shown = shown,
+        several_shown_are_listed_in_the_order_given: Vec<Shown> = shown_each,
         a_history_holds_its_versions_and_why_each_unreadable_one_is: History = history,
         a_diff_holds_the_version_each_side_is_against_and_the_text_after: Diff = diffs,
         a_context_says_by_type_what_loaded_each_topic: Context = contexts,
@@ -1170,6 +1171,11 @@ mod tests {
         });
         let of_unread = show::show(&world.deps().read(), atlas().short()).unwrap();
         (of_unread, unread)
+    }
+
+    fn shown_each() -> Vec<(Vec<Shown>, Value)> {
+        let (each, expected): (Vec<Shown>, Vec<Value>) = shown().into_iter().unzip();
+        vec![(each, Value::Array(expected))]
     }
 
     fn shown() -> Vec<(Shown, Value)> {

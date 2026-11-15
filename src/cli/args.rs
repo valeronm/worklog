@@ -376,11 +376,11 @@ pub enum ChangeCommand {
 
 #[derive(Subcommand)]
 pub enum ReadCommand {
-    /// Print a document as it stands, every head of a fork, or one version by its id, with
+    /// Print each document as it stands, every head of a fork, or one version by its id, with
     /// the documents linking it
     Show {
-        #[arg(add = complete::shown())]
-        target: String,
+        #[arg(required = true, add = complete::shown())]
+        targets: Vec<String>,
         /// Ended documents linking it too
         #[arg(long)]
         ended: bool,

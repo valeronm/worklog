@@ -2013,6 +2013,52 @@ fn a_listing_is_a_line_a_document_from_its_short_id() {
 }
 
 #[test]
+fn show_prints_several_documents_in_the_order_given_and_refuses_each_it_cannot() {
+    let host = Host::stocked();
+    let relay = host.ok(&["show", "lantern/relay"]);
+    let fuse = host.ok(&["show", "lantern/fuse"]);
+    assert_eq!(
+        host.ok(&["show", "lantern/fuse", "lantern/relay"]),
+        format!("======== lantern/fuse\n{fuse}======== lantern/relay\n{relay}")
+    );
+    let body = host.ok(&["show", "lantern/relay", "--body"]);
+    assert_eq!(
+        host.ok(&["show", "lantern/relay", "lantern/relay", "--body"]),
+        format!("======== lantern/relay\n{body}======== lantern/relay\n{body}")
+    );
+    let one = |target| host.json(&["show", target]);
+    assert_eq!(
+        host.json(&["show", "lantern/fuse", "lantern/relay"]),
+        Value::Array(vec![one("lantern/fuse"), one("lantern/relay")])
+    );
+
+    let spare = host.run(&["show", "lantern/spare"]);
+    let wick = host.run(&["show", "lantern/wick"]);
+    assert_eq!((spare.stdout.as_str(), spare.code), ("", Some(1)));
+    let partly = host.run(&["show", "lantern/spare", "lantern/relay", "lantern/wick"]);
+    assert_eq!(partly.stdout, format!("======== lantern/relay\n{relay}"));
+    assert_eq!(partly.stderr, format!("{}{}", spare.stderr, wick.stderr));
+    assert_eq!(partly.code, Some(1));
+    let json = [&["show", "lantern/spare", "lantern/relay"][..], &["--json"]].concat();
+    let partly = host.run(&json);
+    assert_eq!(
+        one_value(&partly.stdout),
+        Some(Value::Array(vec![one("lantern/relay")]))
+    );
+    assert_eq!(partly.stderr, spare.stderr);
+    assert_eq!(partly.code, Some(1));
+
+    let unnamed = host.run(&["show", ""]);
+    assert_eq!(unnamed.code, Some(2), "{}", unnamed.stderr);
+    for targets in [["", "lantern/spare"], ["lantern/spare", ""]] {
+        let mixed = host.run(&[&["show", "lantern/relay"][..], &targets].concat());
+        assert_eq!(mixed.stdout, format!("======== lantern/relay\n{relay}"));
+        assert_eq!(mixed.stderr, format!("{}{}", spare.stderr, unnamed.stderr));
+        assert_eq!(mixed.code, Some(2), "{targets:?}");
+    }
+}
+
+#[test]
 fn a_document_is_read_as_its_text_its_versions_and_their_difference() {
     let host = Host::stocked();
     let live = host.ok(&["show", "lantern/relay"]);
@@ -3699,7 +3745,7 @@ const SOURCED: [(&str, &[&str], Source); 37] = [
     ("trigger when", &["trigger", "0a1b", ""], Source::Triggers),
     ("claim topic", &["claim", ""], Source::Topics),
     ("unclaim topic", &["unclaim", ""], Source::Topics),
-    ("show target", &["show", ""], Source::Documents),
+    ("show targets", &["show", ""], Source::Documents),
     ("history target", &["history", ""], Source::Documents),
     ("diff target", &["diff", ""], Source::Drafts),
     ("log machine", &["log", "--machine", ""], Source::Machines),

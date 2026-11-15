@@ -1,6 +1,6 @@
 use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
-use alloc::collections::BTreeMap;
+use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::format;
 use alloc::rc::Rc;
 use alloc::string::{String, ToString};
@@ -410,29 +410,25 @@ fn shown_version(lookup: &Lookup, version: &Version, head: bool) -> Result<Shown
     })
 }
 
-fn links_to(lookup: &Lookup, head: &Header, target: &DocumentId) -> Result<bool, Failure> {
-    for (text, stored) in &head.links.0 {
-        if lookup.linked_now(text, stored.as_ref())?.as_ref() == Some(target) {
-            return Ok(true);
+fn linked(lookup: &Lookup, heads: &[&Header]) -> Result<BTreeSet<DocumentId>, Failure> {
+    let mut linked = BTreeSet::new();
+    for head in heads {
+        for (text, stored) in &head.links.0 {
+            linked.extend(lookup.linked_now(text, stored.as_ref())?);
         }
     }
-    Ok(false)
+    Ok(linked)
 }
 
 fn pointing(
-    lookup: &Lookup,
-    document: &Document,
+    heads: &[&Header],
+    linked: &BTreeSet<DocumentId>,
     kind: KindOf,
     target: &DocumentId,
-    ended: bool,
-) -> Result<Vec<String>, Failure> {
-    let heads = holding_heads(document, kind, ended);
+) -> Vec<String> {
     let mut by = Vec::new();
-    for head in &heads {
-        if links_to(lookup, head, target)? {
-            by.push("link".to_owned());
-            break;
-        }
+    if linked.contains(target) {
+        by.push("link".to_owned());
     }
     let holds =
         |key: &str| (heads.iter()).any(|head| texts(&head.fields, key).contains(&target.as_str()));
@@ -441,7 +437,7 @@ fn pointing(
             .filter(|key| holds(key))
             .map(str::to_owned),
     );
-    Ok(by)
+    by
 }
 
 /// The documents linking `target`, the ended ones too when `ended`: entries last and the
@@ -459,23 +455,49 @@ pub(super) fn linkers(
     target: &DocumentId,
     ended: bool,
 ) -> Result<Vec<Linker>, Failure> {
+    let targets = BTreeSet::from([target.clone()]);
+    let mut linkers = linkers_of_each(lookup, &targets, ended)?;
+    Ok(linkers.remove(target).unwrap_or_default())
+}
+
+type Linking = (Vec<Rc<Document>>, BTreeMap<DocumentId, Vec<String>>);
+
+// Every document's heads are read once, whatever the number of targets.
+fn linkers_of_each(
+    lookup: &Lookup,
+    targets: &BTreeSet<DocumentId>,
+    ended: bool,
+) -> Result<BTreeMap<DocumentId, Vec<Linker>>, Failure> {
     let topics = Topics::load(lookup)?;
-    let (mut matched, mut ways) = (Vec::new(), BTreeMap::new());
+    let mut linking: BTreeMap<&DocumentId, Linking> =
+        (targets.iter().map(|target| (target, Linking::default()))).collect();
     for document in lookup.everything()? {
-        if document.id() == target {
-            continue;
-        }
         let Some(kind) = kind_of(&document) else {
             continue;
         };
-        let by = pointing(lookup, &document, kind, target, ended)?;
-        if !by.is_empty() {
-            ways.insert(document.id().clone(), by);
-            matched.push(document);
+        let heads = holding_heads(&document, kind, ended);
+        let linked = linked(lookup, &heads)?;
+        for (target, (matched, ways)) in &mut linking {
+            let by = pointing(&heads, &linked, kind, target);
+            if document.id() != *target && !by.is_empty() {
+                ways.insert(document.id().clone(), by);
+                matched.push(Rc::clone(&document));
+            }
         }
     }
+    let ordered = (linking.into_iter())
+        .map(|(target, (matched, ways))| (target.clone(), ordered(&topics, &matched, ways, ended)));
+    Ok(ordered.collect())
+}
+
+fn ordered(
+    topics: &Topics,
+    matched: &[Rc<Document>],
+    mut ways: BTreeMap<DocumentId, Vec<String>>,
+    ended: bool,
+) -> Vec<Linker> {
     let (mut rest, mut entries) = (Vec::new(), Vec::new());
-    for shown in rows::shown(&topics, &matched, ended) {
+    for shown in rows::shown(topics, matched, ended) {
         let by = ways.remove(&shown.row.document).unwrap_or_default();
         let linker = Linker { row: shown.row, by };
         match shown.record.content {
@@ -488,7 +510,7 @@ pub(super) fn linkers(
         (Reverse(*a), &first.row.label).cmp(&(Reverse(*b), &second.row.label))
     });
     rest.extend(entries.into_iter().map(|(_, linker)| linker));
-    Ok(rest)
+    rest
 }
 
 fn is_head(document: &Document, version: &Header) -> bool {
@@ -513,8 +535,52 @@ fn held(
 /// nothing or several documents or versions, and a version whose file does not read. An ended
 /// or unreadable document is shown too.
 pub fn show(deps: &ReadDeps, address: &str) -> Result<Shown, Failure> {
+    shown(&Lookup::new(deps.store), address)
+}
+
+/// Which documents linking a shown one `show_each` gives with it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Linkers {
+    None,
+    Live,
+    EndedToo,
+}
+
+/// Each of `targets` as `show` gives it, or the failure that kept it from being shown, in the
+/// order given, and unless `linkers` is `None` with what links each document as `linked_from`
+/// gives it. A store problem fails the whole call.
+pub fn show_each(
+    deps: &ReadDeps,
+    targets: &[&str],
+    linkers: Linkers,
+) -> Result<Vec<Result<Shown, Failure>>, Failure> {
     let lookup = Lookup::new(deps.store);
-    let resolved = resolve(&lookup, address)?;
+    let mut each = Vec::new();
+    for target in targets {
+        match shown(&lookup, target) {
+            Err(failure @ Failure::Store(_)) => return Err(failure),
+            shown => each.push(shown),
+        }
+    }
+    if linkers == Linkers::None {
+        return Ok(each);
+    }
+    let mut documents: Vec<&mut ShownDocument> = (each.iter_mut())
+        .filter_map(|shown| match shown {
+            Ok(Shown::Document(document)) => Some(document),
+            _ => None,
+        })
+        .collect();
+    let targets = (documents.iter().map(|document| document.document.clone())).collect();
+    let linking = linkers_of_each(&lookup, &targets, linkers == Linkers::EndedToo)?;
+    for document in &mut documents {
+        document.linked_from = linking.get(&document.document).cloned().unwrap_or_default();
+    }
+    Ok(each)
+}
+
+fn shown(lookup: &Lookup, address: &str) -> Result<Shown, Failure> {
+    let resolved = resolve(lookup, address)?;
     match resolved {
         Resolved::Document(id) => {
             let document = lookup.headers(&id)?;
@@ -524,7 +590,7 @@ pub fn show(deps: &ReadDeps, address: &str) -> Result<Shown, Failure> {
                 .into_iter()
                 .map(|head| {
                     let head = lookup.version(&id, &head.id, address)?;
-                    shown_version(&lookup, &head, true)
+                    shown_version(lookup, &head, true)
                 })
                 .collect::<Result<_, _>>()?;
             let speaking = row_head(&document).map(|(_, record)| record);
@@ -545,14 +611,14 @@ pub fn show(deps: &ReadDeps, address: &str) -> Result<Shown, Failure> {
         }
         Resolved::Version { document, version } => {
             let held_document = lookup.headers(&document)?;
-            let version = held(&lookup, &held_document, &version, address)?;
+            let version = held(lookup, &held_document, &version, address)?;
             let head = is_head(&held_document, &version);
             let of = lookup.reference(&document)?;
             Ok(Shown::Version(Box::new(Compared {
                 document_ended: of.ended().map(str::to_owned),
                 label: of.label,
-                sides: against_parents(&lookup, &held_document, &version, address)?,
-                version: shown_version(&lookup, &version, head)?,
+                sides: against_parents(lookup, &held_document, &version, address)?,
+                version: shown_version(lookup, &version, head)?,
                 document,
             })))
         }
@@ -743,6 +809,7 @@ pub fn diff(deps: &ReadDeps, first: &str, second: Option<&str>) -> Result<Diff, 
 mod tests {
     use super::*;
     use crate::draft::{checkout, draft_for};
+    use crate::lookup::Stored;
     use crate::testing::{
         ENDED, ENDED_FACT, REMOVED, TOPIC, World, entry, entry_fields, fact, fact_fields, followup,
         fork, head, head_id, open_row, part_of, refused, stored, to, to_ended, topic, topic_fields,
@@ -751,7 +818,7 @@ mod tests {
     use worklog_domain::draft::Draft;
     use worklog_domain::id::VersionId;
     use worklog_domain::ports::{Clock, Drafts, DraftsRead, Store, StoreRead};
-    use worklog_domain::testing::{after, first, lantern};
+    use worklog_domain::testing::{FailingStore, after, first, lantern};
     use worklog_domain::version::ReadError;
 
     fn shown_document(world: &World, address: &str) -> ShownDocument {
@@ -1871,6 +1938,55 @@ mod tests {
         let body = format!("See [[{}]].\n", target.0);
         world.amend_linking(&id, &fact_fields(topic, name, "s", rest), &body, &[target]);
         id
+    }
+
+    #[test]
+    fn several_targets_are_each_shown_or_refused_with_what_links_each() {
+        let (world, lantern) = world();
+        let atlas = topic(&world, "atlas", "");
+        linking_fact(&world, &lantern, "relay-pin", "", ("atlas", Some(&atlas)));
+        linking_fact(&world, &lantern, "fuse", "", ("lantern", Some(&lantern)));
+        let ended = fact(&world, &lantern, "wick", ENDED_FACT);
+        let fields = fact_fields(&lantern, "wick", "s", ENDED_FACT);
+        world.amend_linking(
+            &ended,
+            &fields,
+            "See [[atlas]].\n",
+            &[("atlas", Some(&atlas))],
+        );
+        let deps = world.deps();
+        let targets = ["atlas", "phone", "lantern", "atlas"];
+        let linked = |shown: &Result<Shown, Failure>| match shown {
+            Ok(Shown::Document(document)) => document.linked_from.clone(),
+            other => panic!("expected a document, got {other:?}"),
+        };
+
+        for (linkers, ended) in [(Linkers::Live, false), (Linkers::EndedToo, true)] {
+            let each = show_each(&deps.read(), &targets, linkers).unwrap();
+            assert_eq!(each.len(), 4);
+            assert_eq!(linked(&each[0]), linkers_of(&world, "atlas", ended));
+            assert_eq!(linked(&each[0]).len(), if ended { 2 } else { 1 });
+            assert_eq!(linked(&each[2]), linkers_of(&world, "lantern", ended));
+            assert_eq!(linked(&each[3]), linked(&each[0]));
+            let Err(Failure::Refused(text)) = &each[1] else {
+                panic!("a target naming nothing is refused alone: {:?}", each[1]);
+            };
+            assert!(text.contains("phone"), "{text}");
+        }
+        let bare = show_each(&deps.read(), &targets, Linkers::None).unwrap();
+        assert_eq!(linked(&bare[0]), []);
+        assert_eq!(bare[0], show(&deps.read(), "atlas"));
+    }
+
+    #[test]
+    fn a_store_problem_fails_every_target() {
+        let (world, _) = world();
+        let deps = ReadDeps {
+            store: Stored::new(&FailingStore),
+            ..world.deps().read()
+        };
+        let each = show_each(&deps, &["lantern", "phone"], Linkers::Live);
+        assert!(matches!(each, Err(Failure::Store(_))), "{each:?}");
     }
 
     fn by(how: &[&str]) -> Vec<String> {

@@ -1,10 +1,13 @@
 use std::path::Path;
 
-use super::Environment;
 use super::args::{ChangeCommand, Command, DraftCommand, ListCommand, NewWhat, ReadCommand};
-use super::render::{Bodies, Found, Newest, Output, Refusals, output, output_as};
+use super::render::{
+    Bodies, EachBody, Found, Newest, Output, Refusals, Stopped, output, output_as,
+};
+use super::{Environment, exit_code, said};
 use worklog_app::followup::{NewFollowup, TriggerArg};
 use worklog_app::search::Query;
+use worklog_app::show::Linkers;
 use worklog_app::{
     Deps, Failure, ReadDeps, activity, amend, bulk, check, claim, context, draft, followup, fork,
     list, save, search, show, usage,
@@ -196,27 +199,68 @@ fn changed(
     Ok(output(&written, json))
 }
 
+// Several targets are each shown or refused, so one that names nothing costs no second call.
+fn shown(
+    deps: &ReadDeps,
+    json: bool,
+    targets: &[String],
+    ended: bool,
+    body: bool,
+) -> Result<Output, Stopped> {
+    let linkers = match (body, ended) {
+        (true, _) => Linkers::None,
+        (false, false) => Linkers::Live,
+        (false, true) => Linkers::EndedToo,
+    };
+    let addresses: Vec<&str> = targets.iter().map(String::as_str).collect();
+    let mut each = show::show_each(deps, &addresses, linkers)?;
+    if let [_] = each[..] {
+        let shown = each.remove(0)?;
+        return Ok(if body {
+            output_as(&shown, &Bodies(&shown), json)
+        } else {
+            output(&shown, json)
+        });
+    }
+    let (mut shown, mut failures) = (Vec::new(), Vec::new());
+    for one in each {
+        match one {
+            Ok(one) => shown.push(one),
+            Err(failure) => failures.push(failure),
+        }
+    }
+    let mut done = if body {
+        output_as(&shown, &EachBody(&shown), json)
+    } else {
+        output(&shown, json)
+    };
+    // The worst failure is the call's, whatever the order its targets came in.
+    let Some(worst) = failures.iter().map(exit_code).max() else {
+        return Ok(done);
+    };
+    let at = failures
+        .iter()
+        .rposition(|failure| exit_code(failure) == worst);
+    let failure = failures.remove(at.unwrap_or_default());
+    done.notes.extend(failures.iter().map(said));
+    Err(Stopped {
+        done: Some(done),
+        failure,
+    })
+}
+
 fn read(
     deps: &ReadDeps,
     environment: &Environment,
     json: bool,
     command: &ReadCommand,
-) -> Result<Output, Failure> {
+) -> Result<Output, Stopped> {
     Ok(match command {
         ReadCommand::Show {
-            target,
+            targets,
             ended,
             body,
-        } => {
-            let mut shown = show::show(deps, target)?;
-            if *body {
-                return Ok(output_as(&shown, &Bodies(&shown), json));
-            }
-            if let show::Shown::Document(document) = &mut shown {
-                document.linked_from = show::linked_from(deps, &document.document, *ended)?;
-            }
-            output(&shown, json)
-        }
+        } => return shown(deps, json, targets, *ended, *body),
         ReadCommand::History { target } => output(&show::history(deps, target)?, json),
         ReadCommand::Diff { target, other } => {
             output(&show::diff(deps, target, other.as_deref())?, json)
@@ -323,13 +367,13 @@ pub(super) fn run(
     environment: &Environment,
     json: bool,
     command: &Command,
-) -> Result<Output, Failure> {
-    match command {
-        Command::Draft(command) => drafted(deps, environment, json, command),
-        Command::Change(command) => changed(deps, environment, json, command),
-        Command::Read(command) => read(&deps.read(), environment, json, command),
-        Command::List(command) => listed(&deps.read(), json, command),
-    }
+) -> Result<Output, Stopped> {
+    Ok(match command {
+        Command::Draft(command) => drafted(deps, environment, json, command)?,
+        Command::Change(command) => changed(deps, environment, json, command)?,
+        Command::Read(command) => read(&deps.read(), environment, json, command)?,
+        Command::List(command) => listed(&deps.read(), json, command)?,
+    })
 }
 
 #[cfg(test)]
@@ -373,6 +417,7 @@ mod tests {
                 ..environment(&|_| None)
             };
             run(&self.world.deps(), &environment, cli.json, command)
+                .map_err(|stopped| stopped.failure)
         }
 
         fn run(&self, line: &[&str]) -> Result<Output, Failure> {

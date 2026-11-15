@@ -417,8 +417,8 @@ mod tests {
                  MissingRequiredArgument",
             ),
             (
-                "worklog show <target> <other>",
-                "`show` is refused: UnknownArgument",
+                "worklog history <target> <other>",
+                "`history` is refused: UnknownArgument",
             ),
             (
                 "worklog facts --regex",

@@ -102,6 +102,49 @@ impl Render for Shown {
     }
 }
 
+fn label(shown: &Shown) -> &str {
+    match shown {
+        Shown::Document(document) => &document.label,
+        Shown::Version(compared) => &compared.label,
+    }
+}
+
+fn each_under_its_label(shown: &[Shown], text_of: impl Fn(&Shown) -> String) -> String {
+    let mut text = String::new();
+    for shown in shown {
+        let _ = writeln!(text, "======== {}", label(shown));
+        text.push_str(&text_of(shown));
+        if !text.ends_with('\n') {
+            text.push('\n');
+        }
+    }
+    text
+}
+
+impl Render for Vec<Shown> {
+    fn text(&self) -> String {
+        each_under_its_label(self, Shown::text)
+    }
+
+    fn notes(&self) -> Vec<String> {
+        self.iter().flat_map(Shown::notes).collect()
+    }
+}
+
+pub(in super::super) struct EachBody<'a>(pub(in super::super) &'a [Shown]);
+
+impl Render for EachBody<'_> {
+    fn text(&self) -> String {
+        each_under_its_label(self.0, |shown| Bodies(shown).text())
+    }
+
+    fn notes(&self) -> Vec<String> {
+        (self.0.iter())
+            .flat_map(|shown| Bodies(shown).notes())
+            .collect()
+    }
+}
+
 pub(in super::super) struct Bodies<'a>(pub(in super::super) &'a Shown);
 
 impl Render for Bodies<'_> {

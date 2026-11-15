@@ -225,7 +225,7 @@ fn ran(
     let deps = adapters.deps();
     let answer = run::run(&deps, environment, json, command);
     let outcome = log::outcome(&answer);
-    let code = finished(answer, out, err);
+    let code = ended(answer, out, err);
     log::ran(words, environment, &deps, outcome);
     code
 }
