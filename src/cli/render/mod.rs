@@ -22,12 +22,12 @@ use worklog_app::show::Linker;
 use worklog_app::{DraftRef, Failure, Row, Written, counted};
 use worklog_domain::id::VersionId;
 use worklog_render::{change_or_ending, ended, written};
-use worklog_schema::KindOf;
+use worklog_schema::Category;
 
 #[cfg(test)]
 pub(super) use context::{CONTEXT_BYTES, DUE};
 pub(super) use documents::{Bodies, EachBody};
-pub(super) use listings::{Newest, Refusals};
+pub(super) use listings::{Listed, Refusals};
 pub(super) use search::Found;
 #[cfg(test)]
 pub(super) use testing::assert_fits;
@@ -146,10 +146,10 @@ fn row_line(text: &mut String, row: &Row) {
     line(text, &row_fields(row, Vec::new()));
 }
 
-fn left_out_note(left_out: &[(KindOf, usize)]) -> Option<String> {
-    let counts: Vec<String> = (left_out.iter())
+fn left_out_note(left_out: impl IntoIterator<Item = (Category, usize)>) -> Option<String> {
+    let counts: Vec<String> = (left_out.into_iter())
         .filter(|(_, count)| *count > 0)
-        .map(|(kind, count)| counted(*count, kind.word(), kind.plural()))
+        .map(|(of, count)| counted(count, of.word(), of.plural()))
         .collect();
     (!counts.is_empty()).then(|| format!("left out: {}", counts.join(", ")))
 }

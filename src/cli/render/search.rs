@@ -3,7 +3,7 @@ use std::fmt::Write as _;
 use super::{INDENT, Render, change_or_ending, left_out_note, line, row_line, written};
 use worklog_app::search::{Hit, Log};
 use worklog_render::hit_lines;
-use worklog_schema::KindOf;
+use worklog_schema::{Category, KindOf};
 
 impl Render for Vec<Hit> {
     fn text(&self) -> String {
@@ -48,7 +48,8 @@ impl Render for Found<'_> {
 
     fn notes(&self) -> Vec<String> {
         let mut notes = self.hits.notes();
-        notes.extend(left_out_note(self.left_out));
+        let left_out = (self.left_out.iter()).map(|(kind, count)| (Category::Kind(*kind), *count));
+        notes.extend(left_out_note(left_out));
         notes
     }
 }

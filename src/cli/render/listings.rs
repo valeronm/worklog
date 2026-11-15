@@ -5,7 +5,7 @@ use worklog_app::list::{ClaimRow, EntryRow, FactRow, ForkRow, TopicRow};
 use worklog_app::usage::MachineUsage;
 use worklog_app::{FollowupRow, Reference, Row, counted};
 use worklog_render::trigger_state;
-use worklog_schema::KindOf;
+use worklog_schema::Category;
 
 fn dated(text: &mut String, day: &impl ToString, row: &Row) {
     let mut fields = vec![day.to_string()];
@@ -54,18 +54,64 @@ impl Render for Vec<EntryRow> {
     }
 }
 
-pub(in super::super) struct Newest<'a> {
-    pub(in super::super) rows: &'a Vec<EntryRow>,
+/// `by_created` leads each row with the day it was created, and `left_out` counts the rows of
+/// category `of` that a count cut.
+pub(in super::super) struct Listed<'a, R> {
+    pub(in super::super) rows: &'a Vec<R>,
+    pub(in super::super) by_created: bool,
+    pub(in super::super) of: Category,
     pub(in super::super) left_out: usize,
 }
 
-impl Render for Newest<'_> {
+impl<R> Listed<'_, R> {
+    fn left_out(&self) -> Vec<String> {
+        (left_out_note([(self.of, self.left_out)]).into_iter()).collect()
+    }
+}
+
+impl Render for Listed<'_, FactRow> {
+    fn text(&self) -> String {
+        if !self.by_created {
+            return self.rows.text();
+        }
+        let mut text = String::new();
+        for fact in self.rows {
+            dated(&mut text, &fact.created, &fact.row);
+        }
+        text
+    }
+
+    fn notes(&self) -> Vec<String> {
+        self.left_out()
+    }
+}
+
+impl Render for Listed<'_, EntryRow> {
     fn text(&self) -> String {
         self.rows.text()
     }
 
     fn notes(&self) -> Vec<String> {
-        (left_out_note(&[(KindOf::Entry, self.left_out)]).into_iter()).collect()
+        self.left_out()
+    }
+}
+
+impl Render for Listed<'_, FollowupRow> {
+    fn text(&self) -> String {
+        if !self.by_created {
+            return self.rows.text();
+        }
+        let mut text = String::new();
+        for followup in self.rows {
+            let mut fields = vec![followup.created.to_string()];
+            fields.extend(followup_fields(followup));
+            line(&mut text, &fields);
+        }
+        text
+    }
+
+    fn notes(&self) -> Vec<String> {
+        self.left_out()
     }
 }
 
@@ -77,10 +123,14 @@ fn trigger_words(followup: &FollowupRow) -> String {
     }
 }
 
-pub(super) fn followup_line(text: &mut String, followup: &FollowupRow) {
+fn followup_fields(followup: &FollowupRow) -> Vec<String> {
     let mut fields = vec![trigger_words(followup)];
     fields.extend(row_fields(&followup.row, Vec::new()));
-    line(text, &fields);
+    fields
+}
+
+pub(super) fn followup_line(text: &mut String, followup: &FollowupRow) {
+    line(text, &followup_fields(followup));
 }
 
 impl Render for Vec<FollowupRow> {
@@ -444,10 +494,12 @@ mod tests {
         let facts = vec![
             FactRow {
                 row: row(&lantern(), "lantern/relay", "Pin four"),
+                created: date("2026-08-01"),
                 confirmed: date("2026-09-04"),
             },
             FactRow {
                 row: ended,
+                created: date("2026-01-02"),
                 confirmed: date("2026-01-05"),
             },
         ];

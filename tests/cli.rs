@@ -2084,6 +2084,37 @@ fn show_prints_several_documents_in_the_order_given_and_refuses_each_it_cannot()
 }
 
 #[test]
+fn facts_ideas_and_followups_are_listed_newest_first_with_the_day_each_was_created() {
+    let host = Host::stocked();
+    let listed = host.json(&["facts", "lantern"]);
+    let created = listed[0]["created"].as_str().expect("a day").to_owned();
+    assert_eq!(created.len(), "2026-10-09".len(), "{listed}");
+
+    let fuse = host.row("lantern/fuse", "lantern/fuse  Pin four");
+    let relay = host.row("lantern/relay", "lantern/relay  Pin four");
+    assert_eq!(
+        host.ok(&["facts", "lantern", "--newest"]),
+        format!("{created}  {fuse}{created}  {relay}")
+    );
+    let newest = host.run(&["facts", "--newest", "-n", "1"]);
+    assert_eq!(newest.stdout, format!("{created}  {fuse}"));
+    assert_eq!(newest.stderr, "worklog: left out: 1 fact\n");
+    assert_eq!(newest.code, Some(0));
+    let none = host.run(&["ideas", "-n", "0"]);
+    assert_eq!(none.stdout, "");
+    assert_eq!(none.stderr, "worklog: left out: 1 idea\n");
+
+    host.followup("Order a fuse");
+    let plain = host.ok(&["followups"]);
+    assert_eq!(
+        host.ok(&["followups", "--newest", "-n", "1"]),
+        format!("{created}  {plain}")
+    );
+    let cut = host.run(&["followups", "-n", "0"]);
+    assert_eq!(cut.stderr, "worklog: left out: 1 followup\n");
+}
+
+#[test]
 fn a_document_is_read_as_its_text_its_versions_and_their_difference() {
     let host = Host::stocked();
     let live = host.ok(&["show", "lantern/relay"]);

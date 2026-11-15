@@ -1,8 +1,11 @@
 use std::path::Path;
 
+use serde::Serialize;
+
 use super::args::{ChangeCommand, Command, DraftCommand, ListCommand, NewWhat, ReadCommand};
+use super::json::Pinned;
 use super::render::{
-    Bodies, EachBody, Found, Newest, Output, Refusals, Stopped, output, output_as,
+    Bodies, EachBody, Found, Listed, Output, Refusals, Render, Stopped, output, output_as,
 };
 use super::{Environment, exit_code, said};
 use worklog_app::followup::{Made, NewFollowup, TriggerArg, Unstored};
@@ -13,7 +16,7 @@ use worklog_app::{
     list, save, search, show, usage,
 };
 use worklog_domain::usage::Agent;
-use worklog_schema::Reason;
+use worklog_schema::{Category, Date, KindOf, Reason};
 
 fn directory(environment: &Environment, given: Option<&Path>) -> Result<String, Failure> {
     let path = match given {
@@ -333,17 +336,68 @@ fn read(
     })
 }
 
+fn cut<R>(mut rows: Vec<R>, n: Option<usize>) -> (Vec<R>, usize) {
+    let left_out = rows.len().saturating_sub(n.unwrap_or(usize::MAX));
+    rows.truncate(rows.len() - left_out);
+    (rows, left_out)
+}
+
+fn listing<R>(
+    mut rows: Vec<R>,
+    created: fn(&R) -> Date,
+    newest: bool,
+    of: Category,
+    n: Option<usize>,
+    json: bool,
+) -> Output
+where
+    Vec<R>: Render + Serialize + Pinned,
+    for<'a> Listed<'a, R>: Render,
+{
+    if newest {
+        list::newest_first(&mut rows, created);
+    }
+    let (rows, left_out) = cut(rows, n);
+    let listed = Listed {
+        rows: &rows,
+        by_created: newest,
+        of,
+        left_out,
+    };
+    output_as(&rows, &listed, json)
+}
+
 fn listed(deps: &ReadDeps, json: bool, command: &ListCommand) -> Result<Output, Failure> {
     Ok(match command {
         ListCommand::Drafts => output(&draft::drafts(deps)?, json),
         ListCommand::Topics { topic, ended } => {
             output(&list::topics(deps, topic.as_deref(), *ended)?, json)
         }
-        ListCommand::Facts { topic, ended } => {
-            output(&list::facts(deps, topic.as_deref(), *ended)?, json)
+        ListCommand::Facts {
+            topic,
+            ended,
+            newest,
+            n,
+        } => {
+            let facts = list::facts(deps, topic.as_deref(), *ended)?;
+            let of = Category::Kind(KindOf::Fact);
+            listing(facts, |fact| fact.created, *newest, of, *n, json)
         }
-        ListCommand::Ideas { topic, ended } => {
-            output(&list::ideas(deps, topic.as_deref(), *ended)?, json)
+        ListCommand::Ideas {
+            topic,
+            ended,
+            newest,
+            n,
+        } => {
+            let ideas = list::ideas(deps, topic.as_deref(), *ended)?;
+            listing(
+                ideas,
+                |idea| idea.created,
+                *newest,
+                Category::Idea,
+                *n,
+                json,
+            )
         }
         ListCommand::Entries {
             topic,
@@ -351,17 +405,26 @@ fn listed(deps: &ReadDeps, json: bool, command: &ListCommand) -> Result<Output, 
             n,
             ended,
         } => {
-            let mut rows = list::entries(deps, topic.as_deref(), on.as_deref(), *ended)?;
-            let left_out = rows.len().saturating_sub(n.unwrap_or(usize::MAX));
-            rows.truncate(rows.len() - left_out);
-            let newest = Newest {
-                rows: &rows,
-                left_out,
-            };
-            output_as(&rows, &newest, json)
+            let entries = list::entries(deps, topic.as_deref(), on.as_deref(), *ended)?;
+            let of = Category::Kind(KindOf::Entry);
+            listing(entries, |entry| entry.date, false, of, *n, json)
         }
-        ListCommand::Followups { about, ended } => {
-            output(&list::followups(deps, about.as_deref(), *ended)?, json)
+        ListCommand::Followups {
+            about,
+            ended,
+            newest,
+            n,
+        } => {
+            let followups = list::followups(deps, about.as_deref(), *ended)?;
+            let of = Category::Kind(KindOf::Followup);
+            listing(
+                followups,
+                |followup| followup.created,
+                *newest,
+                of,
+                *n,
+                json,
+            )
         }
         ListCommand::Where { topic, machine } => output(
             &list::where_(deps, topic.as_deref(), machine.as_deref())?,

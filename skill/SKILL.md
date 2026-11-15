@@ -411,12 +411,14 @@ Tell the user what was found that bears on the work, citing names.
 - `search`, `facts`, `ideas`, `entries`, `followups` and `topics` with no
   topic cover the whole store, each with `--ended` for the ended ones too;
   `search` takes `--regex` to read the term as a pattern, and `entries`
-  `-n <count>` for at most that many.
+  `-n <count>` for at most that many. `facts`, `ideas` and `followups`
+  take `-n` too, and `--newest` to come by the day each was created,
+  the newest first, each row leading with that day.
 - A search of the whole store for a common word prints more than a tool
   returns in one piece. `search --brief` prints one line a document,
   without its matching lines, and `search -n <count>` at most that many
-  of each kind, newest first. A `-n`, of `search` or of `entries`, notes
-  on stderr how many it left out.
+  of each kind, the most recently written first. A `-n`, of `search` or
+  of a listing, notes on stderr how many it left out.
 - `worklog log [n]` — the newest versions written anywhere in the
   store, twenty unless told, so what other machines wrote since is one
   call; `--machine <name>` for one machine's writes.

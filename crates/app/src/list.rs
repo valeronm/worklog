@@ -42,6 +42,7 @@ pub struct TopicRow {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct FactRow {
     pub row: Row,
+    pub created: Date,
     pub confirmed: Date,
 }
 
@@ -161,6 +162,7 @@ fn fact_rows(
         .filter_map(|shown| match shown.record.content {
             Content::Fact(fact) if fact.idea == ideas => Some(FactRow {
                 row: shown.row,
+                created: fact.created,
                 confirmed: fact.confirmed,
             }),
             _ => None,
@@ -194,6 +196,12 @@ pub fn entries(
         .collect();
     rows.sort_by(|a, b| (Reverse(a.date), &a.row.label).cmp(&(Reverse(b.date), &b.row.label)));
     Ok(rows)
+}
+
+/// Orders `rows` by the day each was created, the newest first, and leaves the rows of one day
+/// in the order they came.
+pub fn newest_first<T>(rows: &mut [T], created: impl Fn(&T) -> Date) {
+    rows.sort_by_key(|row| Reverse(created(row)));
 }
 
 /// `about` names a topic, for the rollup over its parts, or an entry, for the followups that
@@ -929,6 +937,33 @@ mod tests {
             entries(&deps.read(), None, Some("yesterday"), false),
             Err(Failure::Usage(_))
         ));
+    }
+
+    #[test]
+    fn rows_are_put_newest_first_by_the_day_each_was_created() {
+        let (world, lantern) = world();
+        let on = |name: &str, created: &str| {
+            let fields = format!(
+                "name = \"{name}\"\ntopic = \"{lantern}\"\ncreated = {created}\n\
+                 confirmed = 2026-10-09\nsummary = \"s\"\n"
+            );
+            world.put("fact", &fields, "The relay.\n");
+        };
+        on("relay", "2026-09-04");
+        on("wick", "2026-10-01");
+        on("fuse", "2026-10-01");
+        on("lens", "2026-09-20");
+        let mut listed = facts(&world.deps().read(), None, false).unwrap();
+        newest_first(&mut listed, |fact| fact.created);
+        assert_eq!(
+            labels(&listed, |fact| &fact.row),
+            [
+                "lantern/fuse",
+                "lantern/wick",
+                "lantern/lens",
+                "lantern/relay"
+            ]
+        );
     }
 
     #[test]

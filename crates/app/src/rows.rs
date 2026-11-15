@@ -234,6 +234,7 @@ pub enum TriggerShown {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct FollowupRow {
     pub row: Row,
+    pub created: Date,
     pub trigger: Option<TriggerShown>,
     pub due: bool,
     pub entry: Option<Reference>,
@@ -277,6 +278,7 @@ pub(super) fn followup_rows(
         };
         let row = FollowupRow {
             row,
+            created: followup.created,
             trigger,
             due: is_due,
             entry: label(&followup.entry)?,

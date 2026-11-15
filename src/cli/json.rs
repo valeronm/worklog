@@ -635,7 +635,7 @@ mod tests {
         let relay = fact(&world, &lantern, "relay", "");
         let dimmer = fact(&world, &lantern, "dimmer", "idea = true\n");
         let on = [to(&lantern, "lantern")];
-        let filed = |id: &DocumentId, label: &str| json!({"row": row(id, "fact", label, &on), "confirmed": "2026-09-04"});
+        let filed = |id: &DocumentId, label: &str| json!({"row": row(id, "fact", label, &on), "created": "2026-09-04", "confirmed": "2026-09-04"});
         let ended = with(
             row(&fuse, "fact", "lantern/fuse", &on),
             "ended",
@@ -645,7 +645,7 @@ mod tests {
             (
                 list::facts(&deps.read(), None, true).unwrap(),
                 json!([
-                    {"row": ended, "confirmed": "2026-09-04"},
+                    {"row": ended, "created": "2026-09-04", "confirmed": "2026-09-04"},
                     filed(&relay, "lantern/relay"),
                 ]),
             ),
@@ -716,6 +716,7 @@ mod tests {
         let expected = json!([
             {
                 "row": labeled(&dated, on_lantern.clone()),
+                "created": "2026-09-04",
                 "trigger": {
                     "type": "look_again",
                     "on": "2026-10-01",
@@ -727,6 +728,7 @@ mod tests {
             },
             {
                 "row": labeled(&waiting, on_lantern.clone()),
+                "created": "2026-09-04",
                 "trigger": {"type": "touching", "topic": on_lantern},
                 "due": false,
                 "entry": null,
@@ -734,6 +736,7 @@ mod tests {
             },
             {
                 "row": labeled(&bare, on_atlas.clone()),
+                "created": "2026-09-04",
                 "trigger": null,
                 "due": false,
                 "entry": null,
@@ -1387,6 +1390,7 @@ mod tests {
             ],
             "due": [{
                 "row": row(&due, "followup", due.short(), &on),
+                "created": "2026-09-04",
                 "trigger": {"type": "look_again", "on": "2026-10-01", "why": "w"},
                 "due": true,
                 "entry": null,

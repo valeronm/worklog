@@ -489,6 +489,12 @@ pub enum ListCommand {
         /// The ended ones too
         #[arg(long)]
         ended: bool,
+        /// The newest first, by the day each was created
+        #[arg(long)]
+        newest: bool,
+        /// At most this many
+        #[arg(short)]
+        n: Option<usize>,
     },
     /// The ideas, or those under a topic and its parts
     Ideas {
@@ -497,6 +503,12 @@ pub enum ListCommand {
         /// The ended ones too
         #[arg(long)]
         ended: bool,
+        /// The newest first, by the day each was created
+        #[arg(long)]
+        newest: bool,
+        /// At most this many
+        #[arg(short)]
+        n: Option<usize>,
     },
     /// The entries, newest first, or those under a topic and its parts
     Entries {
@@ -520,6 +532,12 @@ pub enum ListCommand {
         /// The ended ones too
         #[arg(long)]
         ended: bool,
+        /// The newest first, by the day each was created
+        #[arg(long)]
+        newest: bool,
+        /// At most this many
+        #[arg(short)]
+        n: Option<usize>,
     },
     /// Where topics are placed on this machine
     Where {

@@ -27,6 +27,7 @@ pub(super) fn look_again(day: &str) -> TriggerShown {
 pub(super) fn followup(summary: &str, trigger: Option<TriggerShown>, due: bool) -> FollowupRow {
     FollowupRow {
         row: row(&lantern(), "7f3a91c0", summary),
+        created: Date::parse("2026-09-04").expect("a date"),
         trigger,
         due,
         entry: Some(to("2026-10-08-wiring")),
