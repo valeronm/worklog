@@ -243,11 +243,12 @@ part and on everything that is part of it.
 
 A session is shown as due the followups filed on a topic loaded from a
 claim or on anything that is part of a claimed topic. Where no claimed
-directory covers the session, what the machine topic reaches counts as
-loaded from a claim too; in a claimed directory the machine topic and what
-only it reaches bring their facts and not their open work. A part loaded
-by rule 5 and what it reaches other than through the machine topic bring
-their open work where the whole it was reached from does. Among those, a
-followup with a date is due from that day on, and one touching a topic is
-due where that topic was loaded from a claim, which is a session in the
-topic, in a part of it or in a topic that uses it.
+directory covers the session, the machine topic counts as a claimed one
+and what it reaches as loaded from a claim; in a claimed directory the
+machine topic and what only it reaches bring their facts and not their
+open work. A part loaded by rule 5 and what it reaches other than through
+the machine topic bring their open work where the whole it was reached
+from does. Among those, a followup with a date is due from that day on,
+and one touching a topic is due where that topic was loaded from a claim,
+which is a session in the topic, in a part of it or in a topic that uses
+it.

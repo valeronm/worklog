@@ -222,9 +222,8 @@ place of the topic lists the followups that arose in it.
 directory, or in the one given: the lines `context` opens with. It covers
 the followups filed on a topic claimed for the session's directory, on
 anything part of one, and on what the claimed topics are part of or use.
-Where no claimed directory covers the session, the topics claimed
-`--anywhere` count as the claimed ones, and it covers those filed on the
-machine's topics too.
+Where no claimed directory covers the session, the machine topic and the
+topics claimed `--anywhere` count as the claimed ones.
 
 A session takes up a due item only where its task bears on it: the item is
 what the task is about, or concerns something the work reads or changes.

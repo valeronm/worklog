@@ -30,8 +30,8 @@ pub struct Context {
     /// machine topic reaches, then the parts of the machine topic whose other wholes loaded,
     /// each with what it reaches.
     pub topics: Vec<Loaded>,
-    /// Filed on a loaded topic that counts or on anything part of a claimed one, by date, then
-    /// those waiting on a topic.
+    /// Filed on a loaded topic that counts or on anything part of a claimed one, or of the
+    /// machine topic when no claim covers `directory`, by date, then those waiting on a topic.
     pub due: Vec<FollowupRow>,
     /// The open followups filed on a loaded topic that counts and not due.
     pub open_count: usize,
@@ -156,6 +156,9 @@ impl<'a> Scope<'a> {
         let mut may_be_due = counted.clone();
         for root in &claimed.order {
             may_be_due.extend(topics.covered(root));
+        }
+        if !claimed.in_directory {
+            may_be_due.extend(topics.covered(&machine));
         }
         Ok(Scope {
             lookup,
@@ -1518,6 +1521,26 @@ mod tests {
         assert!(context.due.is_empty());
         assert_eq!(here(&world, "/work"), []);
         assert_eq!(context.open_count, 0);
+    }
+
+    #[test]
+    fn what_is_due_under_a_part_of_the_machine_topic_is_due_outside_a_claimed_directory() {
+        let (world, [lantern]) = world_of(["lantern"]);
+        let atlas = topic(&world, "atlas", &part_of(&[&world.machine()]));
+        let phone = topic(&world, "phone", &part_of(&[&atlas]));
+        claim(&world, &lantern, "/work");
+        followup(&world, &[&atlas], "part", &dated("2026-10-01"));
+        followup(&world, &[&phone], "part of a part", &dated("2026-10-02"));
+        followup(&world, &[&atlas], "part open", "");
+
+        let outside = at(&world, "/other");
+        assert_eq!(summaries(&outside.due), ["part", "part of a part"]);
+        assert_eq!(here(&world, "/other"), outside.due);
+        assert_eq!(outside.open_count, 0);
+
+        let inside = at(&world, "/work");
+        assert_eq!(summaries(&inside.due), Vec::<&str>::new());
+        assert_eq!(here(&world, "/work"), []);
     }
 
     fn with_due_parts(parts: usize) -> World {
