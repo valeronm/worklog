@@ -17,7 +17,10 @@ pub(super) struct Open {
 }
 
 pub(super) fn open(deps: &Deps, lookup: &Lookup, address: &str) -> Result<Open, Failure> {
-    let id = lookup.one(address)?;
+    opened(deps, lookup, lookup.one(address)?)
+}
+
+pub(super) fn opened(deps: &Deps, lookup: &Lookup, id: DocumentId) -> Result<Open, Failure> {
     let label = lookup.label(&id)?;
     let drafted = is_drafted(&deps.read(), &id)?;
     let (head, record) = lookup.writable(&id, drafted, &label)?;

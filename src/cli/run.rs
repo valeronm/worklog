@@ -8,6 +8,7 @@ use super::render::{
     Bodies, EachBody, Found, Listed, Output, Refusals, Render, Stopped, output, output_as,
 };
 use super::{Environment, exit_code, said};
+use worklog_app::bulk::Halted;
 use worklog_app::followup::{Made, NewFollowup, TriggerArg, Unstored};
 use worklog_app::search::Query;
 use worklog_app::show::Linkers;
@@ -156,7 +157,7 @@ fn changed(
     environment: &Environment,
     json: bool,
     command: &ChangeCommand,
-) -> Result<Output, Failure> {
+) -> Result<Output, Stopped> {
     let note = |note: &Option<String>| note.clone().unwrap_or_default();
     let ended = |target: &str, reason: &str, said: &Option<String>, by: Option<&str>| {
         Ok(output(
@@ -168,7 +169,13 @@ fn changed(
         ChangeCommand::Rename { target, name } => amend::rename(deps, target, name)?,
         ChangeCommand::Move { from, to, targets } => {
             let targets: Vec<&str> = targets.iter().map(String::as_str).collect();
-            return Ok(output(&bulk::move_to(deps, &targets, from, to)?, json));
+            return match bulk::move_to(deps, &targets, from, to) {
+                Ok(moved) => Ok(output(&moved, json)),
+                Err(Halted { done, failure }) => Err(Stopped {
+                    done: done.map(|done| output(&*done, json)),
+                    failure,
+                }),
+            };
         }
         ChangeCommand::Verify { fact } => amend::verify(deps, fact)?,
         ChangeCommand::End {
@@ -546,6 +553,26 @@ mod tests {
             Err(Failure::Refused(text)) => text,
             other => panic!("expected a refusal, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_move_a_store_problem_stops_prints_what_it_stored_before_it_fails() {
+        let Fixture { world, lantern } = Fixture::new();
+        fact(&world, &lantern, "relay", "");
+        fact(&world, &lantern, "fuse", "");
+        let world = world.counted();
+        world.store.puts_left.set(Some(1));
+        let line = ["move", "lantern", "atlas", "lantern/relay", "lantern/fuse"];
+        let cli = Cli::parsed([&[NAME], &line[..]].concat()).expect("a command");
+        let Invoked::Run(command) = &cli.command else {
+            panic!("{line:?} returns no result");
+        };
+        let stopped = run(&world.deps(), &environment(&|_| None), false, command).unwrap_err();
+        assert!(matches!(stopped.failure, Failure::Store(_)), "{stopped:?}");
+        let done = stopped.done.expect("what the move stored");
+        let stored: Vec<&str> = done.text.lines().collect();
+        assert_eq!(stored.len(), 1, "{}", done.text);
+        assert!(stored[0].starts_with("atlas/relay "), "{}", done.text);
     }
 
     #[test]

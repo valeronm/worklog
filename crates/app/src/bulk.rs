@@ -1,68 +1,142 @@
 use alloc::borrow::ToOwned;
+use alloc::boxed::Box;
 use alloc::format;
 use alloc::vec::Vec;
 
+use serde::Serialize;
 use toml::Value;
 
-use crate::live::{Open, open};
-use crate::lookup::Lookup;
+use crate::heads::texts;
+use crate::live::{Open, opened};
+use crate::lookup::{Lookup, only};
 use crate::rules::referencable;
 use crate::save::Admitted;
-use crate::{Deps, Failure, Written, text};
+use crate::{Deps, Failure, Reference, Written, text};
 use worklog_domain::id::DocumentId;
 use worklog_domain::version::Fields;
 use worklog_schema::Content;
+use worklog_schema::address::{Address, Found};
 use worklog_schema::kind::Role;
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Moved {
+    pub to: Reference,
+    pub moved: Vec<Written>,
+    /// The documents left as they stood, being already under `to`.
+    pub already: Vec<Reference>,
+}
+
+/// A failed move; `done` holds the versions it stored before failing, `None` when it stored none.
+#[derive(Debug)]
+pub struct Halted {
+    pub done: Option<Box<Moved>>,
+    pub failure: Failure,
+}
+
+impl From<Failure> for Halted {
+    fn from(failure: Failure) -> Halted {
+        Halted {
+            done: None,
+            failure,
+        }
+    }
+}
+
 /// Writes nothing unless every document passes its checks.
-pub fn move_to(
-    deps: &Deps,
-    documents: &[&str],
-    from: &str,
-    to: &str,
-) -> Result<Vec<Written>, Failure> {
+pub fn move_to(deps: &Deps, documents: &[&str], from: &str, to: &str) -> Result<Moved, Halted> {
     let lookup = Lookup::new(deps.read().store);
     let from_id = referencable(&lookup, from)?;
     let to_id = referencable(&lookup, to)?;
     if from_id == to_id {
-        return Err(Failure::Usage(format!("{from} and {to} are one topic")));
+        return Err(Failure::Usage(format!("{from} and {to} are one topic")).into());
     }
-    let mut moves: Vec<(DocumentId, Admitted)> = Vec::new();
+    let mut listed: Vec<DocumentId> = Vec::new();
+    let mut moves: Vec<Admitted> = Vec::new();
+    let mut done = Moved {
+        to: lookup.reference(&to_id)?,
+        moved: Vec::new(),
+        already: Vec::new(),
+    };
     for address in documents {
-        let target = open(deps, &lookup, address)?;
-        if moves.iter().any(|(listed, _)| *listed == target.id) {
-            return Err(Failure::at(&target.label, "is listed twice"));
+        let target = opened(deps, &lookup, resolved(&lookup, address, &from_id, &to_id)?)?;
+        if listed.contains(&target.id) {
+            return Err(Failure::at(&target.label, "is listed twice").into());
         }
         target.unended()?;
-        let fields = moved(&target, &from_id, &to_id)
-            .ok_or_else(|| Failure::at(&target.label, format!("is not under {from}")))?;
-        let admitted = target.checked(deps, &lookup, &fields, "move")?;
-        moves.push((target.id, admitted));
+        match filing(&target, &from_id, &to_id) {
+            Filing::Under(fields) => {
+                moves.push(target.checked(deps, &lookup, &fields, "move")?);
+            }
+            Filing::Already => done.already.push(lookup.reference(&target.id)?),
+            Filing::Neither => {
+                return Err(Failure::at(&target.label, format!("is not under {from}")).into());
+            }
+        }
+        listed.push(target.id);
     }
-    moves
-        .into_iter()
-        .map(|(_, admitted)| admitted.store(deps))
-        .collect()
+    for admitted in moves {
+        match admitted.store(deps) {
+            Ok(written) => done.moved.push(written),
+            Err(failure) => {
+                let done = (!done.moved.is_empty()).then(|| Box::new(done));
+                return Err(Halted { done, failure });
+            }
+        }
+    }
+    Ok(done)
 }
 
-fn moved(target: &Open, from: &DocumentId, to: &DocumentId) -> Option<Fields> {
-    let mut fields = target.shown();
-    let holds = |value: Option<&Value>| value.and_then(Value::as_str) == Some(from.as_str());
-    let to_text = || text(to.as_str());
-    let kind = target.record.content.kind();
-    let filed_under = kind.key_where(|reference| reference.role == Role::Filed)?;
-    match &target.record.content {
-        Content::Fact(_) if holds(fields.get(filed_under)) => {
-            fields.insert(filed_under.to_owned(), to_text());
+// A fact's address carries its topic, so a fact already moved is not found at the address it
+// was given.
+fn resolved(
+    lookup: &Lookup,
+    address: &str,
+    from: &DocumentId,
+    to: &DocumentId,
+) -> Result<DocumentId, Failure> {
+    let mut found = lookup.find(address)?;
+    if found == Found::None
+        && let Ok(Address::Fact { topic, name }) = Address::parse(address)
+        && lookup.find(topic.as_str())? == Found::One(from.clone())
+    {
+        found = lookup.fact_named(to, &name)?;
+    }
+    only(found, address)
+}
+
+enum Filing {
+    Under(Fields),
+    Already,
+    Neither,
+}
+
+fn filing(target: &Open, from: &DocumentId, to: &DocumentId) -> Filing {
+    let content = &target.record.content;
+    let filed_under = match content {
+        Content::Fact(_) | Content::Entry(_) | Content::Followup(_) => {
+            (content.kind()).key_where(|reference| reference.role == Role::Filed)
         }
-        Content::Entry(_) | Content::Followup(_) => {
-            let topics = fields.get(filed_under)?.as_array()?;
-            if !topics.iter().any(|topic| holds(Some(topic))) {
-                return None;
-            }
+        Content::Topic(_) | Content::Claim(_) => None,
+    };
+    let Some(filed_under) = filed_under else {
+        return Filing::Neither;
+    };
+    let topics = texts(&target.head.fields, filed_under);
+    if !topics.contains(&from.as_str()) {
+        return if topics.contains(&to.as_str()) {
+            Filing::Already
+        } else {
+            Filing::Neither
+        };
+    }
+    let mut fields = target.shown();
+    let is_from = |value: &Value| value.as_str() == Some(from.as_str());
+    let to_text = || text(to.as_str());
+    let filed = match fields.get(filed_under) {
+        Some(Value::Array(topics)) => {
             let mut replaced: Vec<Value> = Vec::new();
             for topic in topics {
-                let topic = if holds(Some(topic)) {
+                let topic = if is_from(topic) {
                     to_text()
                 } else {
                     topic.clone()
@@ -71,23 +145,28 @@ fn moved(target: &Open, from: &DocumentId, to: &DocumentId) -> Option<Fields> {
                     replaced.push(topic);
                 }
             }
-            fields.insert(filed_under.to_owned(), Value::Array(replaced));
-            if holds(fields.get("touching")) {
-                fields.insert("touching".to_owned(), to_text());
-            }
+            Value::Array(replaced)
         }
-        _ => return None,
+        _ => to_text(),
+    };
+    fields.insert(filed_under.to_owned(), filed);
+    if fields.get("touching").is_some_and(is_from) {
+        fields.insert("touching".to_owned(), to_text());
     }
-    Some(fields)
+    Filing::Under(fields)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::{World, fact, head, head_id, refused, world_with_atlas};
+    use crate::testing::{World, fact, head, head_id, referred, refused, world_with_atlas};
     use alloc::string::{String, ToString};
     use worklog_domain::id::DocumentId;
     use worklog_domain::ports::Store;
+
+    fn move_to(deps: &Deps, documents: &[&str], from: &str, to: &str) -> Result<Moved, Failure> {
+        super::move_to(deps, documents, from, to).map_err(|halted| halted.failure)
+    }
 
     fn followup(
         world: &World,
@@ -119,8 +198,14 @@ mod tests {
             both.as_str(),
             only.as_str(),
         ];
-        let written = move_to(&world.deps(), &addresses, "lantern", "atlas").unwrap();
+        let Moved {
+            to,
+            moved: written,
+            already,
+        } = move_to(&world.deps(), &addresses, "lantern", "atlas").unwrap();
+        assert_eq!((&to.document, to.label.as_str()), (&atlas, "atlas"));
         assert_eq!(written.len(), 4);
+        assert_eq!(already, []);
 
         for (id, written) in [&relay, &lamp].into_iter().zip(&written) {
             assert_eq!(&written.document, id);
@@ -142,16 +227,83 @@ mod tests {
         );
     }
 
+    fn stored(done: &Moved) -> Vec<&str> {
+        (done.moved.iter())
+            .map(|written| written.label.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn a_document_already_under_the_other_topic_is_left_as_it_stands() {
+        let (world, lantern, atlas) = world_with_atlas();
+        fact(&world, &lantern, "relay-pin", "");
+        let map = fact(&world, &atlas, "map", "");
+        let filed = followup(&world, &[&atlas], None);
+        let before = names_of(&world, &[&map, &filed]);
+        let addresses = ["atlas/map", "lantern/relay-pin", filed.as_str()];
+        let done = move_to(&world.deps(), &addresses, "lantern", "atlas").unwrap();
+        assert_eq!(stored(&done), ["atlas/relay-pin"]);
+        assert_eq!(referred(&done.already), ["atlas/map", filed.short()]);
+        assert_eq!(names_of(&world, &[&map, &filed]), before);
+    }
+
+    #[test]
+    fn a_fact_already_moved_is_found_by_the_address_it_had_under_the_first_topic() {
+        let (world, lantern, _) = world_with_atlas();
+        let relay = fact(&world, &lantern, "relay-pin", "");
+        fact(&world, &lantern, "lamp-pin", "");
+        move_to(&world.deps(), &["lantern/relay-pin"], "lantern", "atlas").unwrap();
+        let before = head_id(&world, &relay);
+        let addresses = ["lantern/relay-pin", "lantern/lamp-pin"];
+        let done = move_to(&world.deps(), &addresses, "lantern", "atlas").unwrap();
+        assert_eq!(stored(&done), ["atlas/lamp-pin"]);
+        assert_eq!(referred(&done.already), ["atlas/relay-pin"]);
+        assert_eq!(head_id(&world, &relay), before);
+
+        let text = refused(move_to(
+            &world.deps(),
+            &["lantern/fuse"],
+            "lantern",
+            "atlas",
+        ));
+        assert_eq!(text, "lantern/fuse: names no document");
+    }
+
+    #[test]
+    fn a_move_a_store_problem_stopped_gives_what_it_stored_and_runs_again() {
+        let (world, lantern, _) = world_with_atlas();
+        fact(&world, &lantern, "relay-pin", "");
+        fact(&world, &lantern, "lamp-pin", "");
+        let world = world.counted();
+        let addresses = ["lantern/relay-pin", "lantern/lamp-pin"];
+        world.store.puts_left.set(Some(1));
+        let halted = super::move_to(&world.deps(), &addresses, "lantern", "atlas").unwrap_err();
+        assert!(matches!(halted.failure, Failure::Store(_)), "{halted:?}");
+        let stopped = halted.done.unwrap();
+        assert_eq!(stored(&stopped), ["atlas/relay-pin"]);
+
+        world.store.puts_left.set(Some(0));
+        let halted = super::move_to(&world.deps(), &addresses, "lantern", "atlas").unwrap_err();
+        assert!(matches!(halted.failure, Failure::Store(_)), "{halted:?}");
+        assert_eq!(halted.done, None);
+
+        world.store.puts_left.set(None);
+        let done = move_to(&world.deps(), &addresses, "lantern", "atlas").unwrap();
+        assert_eq!(stored(&done), ["atlas/lamp-pin"]);
+        assert_eq!(referred(&done.already), ["atlas/relay-pin"]);
+    }
+
     #[test]
     fn a_refusal_for_any_document_writes_nothing() {
-        let (world, lantern, atlas) = world_with_atlas();
+        let (world, lantern, _) = world_with_atlas();
+        let phone = crate::testing::topic(&world, "phone", "");
         let relay = fact(&world, &lantern, "relay-pin", "");
         let lamp = fact(&world, &lantern, "lamp-pin", "");
-        let map = fact(&world, &atlas, "map", "");
+        let map = fact(&world, &phone, "map", "");
         let before = (head_id(&world, &relay), head_id(&world, &lamp));
         let text = refused(move_to(
             &world.deps(),
-            &["lantern/relay-pin", "lantern/lamp-pin", "atlas/map"],
+            &["lantern/relay-pin", "lantern/lamp-pin", "phone/map"],
             "lantern",
             "atlas",
         ));

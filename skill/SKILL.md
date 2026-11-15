@@ -136,7 +136,8 @@ draft of its document is open.
   old name keeps working in commands and links.
 - `worklog move <from> <to> <targets…>` files facts, ideas, entries
   and followups under the topic `<to>` where they were under `<from>`,
-  all of them or none.
+  all of them or none. A target already under `<to>` is left as it is and
+  noted, so a move that a store problem stopped is run again as typed.
 
 `--json` on any command returns the same data structured, without the
 notes. Refusals go to stderr with exit 1; a usage error exits 2.

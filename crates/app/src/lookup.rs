@@ -411,11 +411,12 @@ impl<'a> Lookup<'a> {
     }
 
     pub(super) fn one(&self, address: &str) -> Result<DocumentId, Failure> {
-        match self.find(address)? {
-            Found::One(id) => Ok(id),
-            Found::None => Err(names_no_document(address)),
-            Found::Collision(ids) => Err(held_by_several(address, &ids)),
-        }
+        only(self.find(address)?, address)
+    }
+
+    pub(super) fn fact_named(&self, topic: &DocumentId, name: &Name) -> Result<Found, Failure> {
+        let held = Held::Fact(topic.clone(), name.clone());
+        Ok(choose(&self.holders_of(&held)?))
     }
 
     pub(super) fn holding_unreadable(&self) -> Result<Vec<Rc<Document>>, Failure> {
@@ -640,6 +641,14 @@ impl<'a> Lookup<'a> {
             }
         }
         Ok(candidates)
+    }
+}
+
+pub(super) fn only(found: Found, address: &str) -> Result<DocumentId, Failure> {
+    match found {
+        Found::One(id) => Ok(id),
+        Found::None => Err(names_no_document(address)),
+        Found::Collision(ids) => Err(held_by_several(address, &ids)),
     }
 }
 

@@ -631,7 +631,7 @@ mod tests {
         crate::testing::topic(&world, "atlas", "");
         let relay = crate::testing::fact(&world, &lantern, "relay", "");
         let moved = crate::bulk::move_to(&world.deps(), &["lamp/relay"], "lamp", "atlas");
-        let moved = moved.unwrap();
+        let moved = moved.unwrap().moved;
         assert_eq!(moved.len(), 1);
         assert_eq!(
             (&moved[0].document, moved[0].label.as_str()),

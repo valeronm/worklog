@@ -429,6 +429,8 @@ pub struct Counting {
     pub prefixes: Cell<usize>,
     pub unreadables: Cell<usize>,
     pub forks: Cell<usize>,
+    /// How many more versions are stored before a `put` fails; `None` stores every one.
+    pub puts_left: Cell<Option<usize>>,
 }
 
 impl Counting {
@@ -444,6 +446,7 @@ impl Counting {
             prefixes: Cell::new(0),
             unreadables: Cell::new(0),
             forks: Cell::new(0),
+            puts_left: Cell::new(None),
         }
     }
 }
@@ -556,6 +559,11 @@ impl StoreRead for Counting {
 
 impl Store for Counting {
     fn put(&self, version: &Version) -> Result<(), StoreError> {
+        match self.puts_left.get() {
+            Some(0) => return Err(StoreError::io("memory:store", "full")),
+            Some(left) => self.puts_left.set(Some(left - 1)),
+            None => {}
+        }
         self.inner.put(version)
     }
 }

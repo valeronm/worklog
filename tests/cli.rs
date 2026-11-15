@@ -1578,6 +1578,25 @@ fn a_command_that_opens_lists_or_drops_a_draft_prints_one_json_value() {
 }
 
 #[test]
+fn a_move_run_again_leaves_and_notes_what_is_already_under_the_topic() {
+    let host = Host::stocked();
+    let line = ["move", "lantern", "atlas", "lantern/relay", "lantern/fuse"];
+    assert_stored(&host.ok(&line[..4]), "atlas/relay");
+
+    let again = host.run(&line);
+    assert_eq!(again.code, Some(0), "{}", again.stderr);
+    assert_stored(&again.stdout, "atlas/fuse");
+    assert_eq!(again.stderr, "worklog: already under atlas: atlas/relay\n");
+
+    let third = host.json(&line);
+    assert_eq!(third["moved"].as_array().map(Vec::len), Some(0), "{third}");
+    let already: Vec<&str> = (third["already"].as_array().expect("a list").iter())
+        .map(|document| document["label"].as_str().expect("a label"))
+        .collect();
+    assert_eq!(already, ["atlas/relay", "atlas/fuse"]);
+}
+
+#[test]
 fn a_command_that_changes_a_document_prints_its_stored_version_as_json() {
     let host = Host::stocked();
     let (first, second) = (host.followup("Check the driver"), host.followup("s"));
@@ -1594,9 +1613,9 @@ fn a_command_that_changes_a_document_prints_its_stored_version_as_json() {
         "lantern/relay-pin",
         "lantern/fuse",
     ]);
-    assert_eq!(moved.as_array().map(Vec::len), Some(2), "{moved}");
-    assert_written(&moved[0], "atlas/relay-pin");
-    assert_written(&moved[1], "atlas/fuse");
+    assert_eq!(moved["moved"].as_array().map(Vec::len), Some(2), "{moved}");
+    assert_written(&moved["moved"][0], "atlas/relay-pin");
+    assert_written(&moved["moved"][1], "atlas/fuse");
     assert_ended(
         &host.json(&["end", "atlas/fuse", "false", "It was three amps"]),
         "atlas/fuse",

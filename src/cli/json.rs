@@ -137,7 +137,7 @@ mod tests {
 
     pinned! {
         a_stored_version_is_its_document_its_label_and_its_whole_hash: Written = stored,
-        the_versions_a_move_stores_are_listed: Vec<Written> = moved,
+        a_move_is_its_topic_the_versions_stored_and_the_documents_already_there: bulk::Moved = moved,
         an_ending_is_the_version_stored_and_what_still_links_the_document: amend::Ended = ended,
         a_draft_opened_is_its_document_and_its_path: DraftRef = opened,
         a_draft_checked_out_is_its_document_its_path_and_its_text: ShownDraft = checked_out,
@@ -407,17 +407,23 @@ mod tests {
         vec![(ended, expected)]
     }
 
-    fn moved() -> Vec<(Vec<Written>, Value)> {
-        let (world, lantern, _) = world_with_atlas();
+    fn moved() -> Vec<(bulk::Moved, Value)> {
+        let (world, lantern, atlas) = world_with_atlas();
         let relay = fact(&world, &lantern, "relay", "");
-        let moved = bulk::move_to(&world.deps(), &["lantern/relay"], "lantern", "atlas").unwrap();
+        let map = fact(&world, &atlas, "map", "");
+        let addresses = ["lantern/relay", "atlas/map"];
+        let moved = bulk::move_to(&world.deps(), &addresses, "lantern", "atlas").unwrap();
         let version = head_id(&world, &relay);
-        let expected = json!([{
-            "document": relay,
-            "label": "atlas/relay",
-            "version": version,
-            "stale_links": [],
-        }]);
+        let expected = json!({
+            "to": to(&atlas, "atlas"),
+            "moved": [{
+                "document": relay,
+                "label": "atlas/relay",
+                "version": version,
+                "stale_links": [],
+            }],
+            "already": [to(&map, "atlas/map")],
+        });
         vec![(moved, expected)]
     }
 

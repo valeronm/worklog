@@ -1,9 +1,11 @@
 use std::fmt::Write as _;
 
-use super::{INDENT, Render, filed_counts, left_out_note, line, row_fields, row_line, written};
+use super::{
+    INDENT, Render, filed_counts, labels_after, left_out_note, line, row_fields, row_line, written,
+};
 use worklog_app::list::{ClaimRow, EntryRow, FactRow, ForkRow, TopicRow};
 use worklog_app::usage::MachineUsage;
-use worklog_app::{FollowupRow, Reference, Row, counted};
+use worklog_app::{FollowupRow, Row, counted};
 use worklog_render::trigger_state;
 use worklog_schema::Category;
 
@@ -13,18 +15,13 @@ fn dated(text: &mut String, day: &impl ToString, row: &Row) {
     line(text, &fields);
 }
 
-fn edges(word: &str, topics: &[Reference]) -> Option<String> {
-    let labels: Vec<&str> = topics.iter().map(|topic| topic.label.as_str()).collect();
-    (!labels.is_empty()).then(|| format!("{word} {}", labels.join(", ")))
-}
-
 impl Render for Vec<TopicRow> {
     fn text(&self) -> String {
         let mut text = String::new();
         for topic in self {
             let between = [
-                edges("part of", &topic.part_of),
-                edges("uses", &topic.uses),
+                labels_after("part of", &topic.part_of),
+                labels_after("uses", &topic.uses),
                 filed_counts(topic.fact_count, topic.idea_count, topic.open_count),
             ];
             let fields = row_fields(&topic.row, between.into_iter().flatten().collect());

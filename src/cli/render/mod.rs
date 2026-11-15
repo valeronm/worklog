@@ -16,10 +16,11 @@ use serde::Serialize;
 
 use super::json::{Pinned, nothing, printed};
 use worklog_app::amend::Ended;
+use worklog_app::bulk::Moved;
 use worklog_app::draft::{DraftRow, Opener, ShownDraft};
 use worklog_app::followup::Made;
 use worklog_app::show::Linker;
-use worklog_app::{DraftRef, Failure, Row, Written, counted};
+use worklog_app::{DraftRef, Failure, Reference, Row, Written, counted};
 use worklog_domain::id::VersionId;
 use worklog_render::{change_or_ending, ended, written};
 use worklog_schema::Category;
@@ -154,6 +155,13 @@ fn left_out_note(left_out: impl IntoIterator<Item = (Category, usize)>) -> Optio
     (!counts.is_empty()).then(|| format!("left out: {}", counts.join(", ")))
 }
 
+fn labels_after(word: &str, references: &[Reference]) -> Option<String> {
+    let labels: Vec<&str> = (references.iter())
+        .map(|reference| reference.label.as_str())
+        .collect();
+    (!labels.is_empty()).then(|| format!("{word} {}", labels.join(", ")))
+}
+
 fn linker_line(text: &mut String, linker: &Linker) {
     line(text, &row_fields(&linker.row, vec![linker.by.join(",")]));
 }
@@ -180,13 +188,16 @@ impl Render for Written {
     }
 }
 
-impl Render for Vec<Written> {
+impl Render for Moved {
     fn text(&self) -> String {
-        self.iter().map(Render::text).collect()
+        self.moved.iter().map(Render::text).collect()
     }
 
     fn notes(&self) -> Vec<String> {
-        self.iter().flat_map(Render::notes).collect()
+        let already = format!("already under {}:", self.to.label);
+        (self.moved.iter().flat_map(Render::notes))
+            .chain(labels_after(&already, &self.already))
+            .collect()
     }
 }
 
@@ -307,7 +318,7 @@ mod tests {
     use super::*;
     use worklog_app::draft::{BrokenRow, OpenDraft};
     use worklog_app::show::{Shown, ShownDocument, Unread};
-    use worklog_app::testing::stale_link;
+    use worklog_app::testing::{stale_link, to};
     use worklog_domain::testing::{atlas, lantern};
     use worklog_domain::version::Stamp;
 
@@ -317,6 +328,16 @@ mod tests {
             label: label.to_owned(),
             version: VersionId::of(b"lantern"),
             stale_links: Vec::new(),
+        }
+    }
+
+    fn moved(moved: Vec<Written>, already: &[&str]) -> Moved {
+        Moved {
+            to: to(&atlas(), "atlas"),
+            moved,
+            already: (already.iter())
+                .map(|label| to(&lantern(), label))
+                .collect(),
         }
     }
 
@@ -384,10 +405,10 @@ mod tests {
         assert_eq!(short.len(), 12);
         assert_eq!(one.text(), format!("lantern/relay {short}\n"));
         assert_eq!(
-            vec![one.clone(), stored("lantern/fuse")].text(),
+            moved(vec![one.clone(), stored("lantern/fuse")], &[]).text(),
             format!("lantern/relay {short}\nlantern/fuse {short}\n")
         );
-        assert_eq!(Vec::<Written>::new().text(), "");
+        assert_eq!(moved(Vec::new(), &["atlas/map"]).text(), "");
         assert_eq!(Made::Written(one.clone()).text(), one.text());
         assert_eq!(Made::Draft(draft()).text(), draft().text());
     }
@@ -408,8 +429,24 @@ mod tests {
         ];
         assert_eq!(fuse.notes(), notes);
         assert_eq!(Made::Written(fuse.clone()).notes(), notes);
-        assert_eq!(vec![stored("lantern/relay"), fuse].notes(), notes);
+        assert_eq!(
+            moved(vec![stored("lantern/relay"), fuse.clone()], &[]).notes(),
+            notes
+        );
         assert_eq!(stored("lantern/relay").notes(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_move_notes_the_documents_already_under_its_topic_after_its_stale_links() {
+        let mut fuse = stored("atlas/fuse");
+        fuse.stale_links = vec![stale_link("lantern/spare", None)];
+        assert_eq!(
+            moved(vec![fuse], &["atlas/map", "3f9c21d0"]).notes(),
+            [
+                "atlas/fuse: link lantern/spare: resolves to nothing",
+                "already under atlas: atlas/map, 3f9c21d0",
+            ]
+        );
     }
 
     #[test]
