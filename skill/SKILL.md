@@ -201,7 +201,10 @@ anything is written.
    touched; `done` what it completed with a note naming what dissolved it,
    `trigger` what it moved, to the trigger the user set, `drop` what it
    made moot, and rewrite the body of one it advanced and left open
-   (`checkout`, `save`) to where the work now stands.
+   (`checkout`, `save`) to where the work now stands. Then `worklog
+   search` the whole store for each thing the work fixed, moved, renamed,
+   upgraded or removed, under the names it went by before, and rewrite or
+   end each fact and idea that still describes it as it was.
 8. Promote what outlives the entry into a fact. What turns up after the
    save is added with `worklog checkout <date>-<name>` and a save again;
    open work that turns up then is put to the user as in steps 1 and 2,
