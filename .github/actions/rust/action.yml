@@ -20,6 +20,18 @@ runs:
         rustup toolchain install "$rust_version" --profile minimal ${COMPONENTS:+--component "$COMPONENTS"}
         rustup default "$rust_version"
 
+    - name: Remove the runner's other toolchains
+      # rust-cache keys its cache on every installed toolchain.
+      if: inputs.cache == 'true'
+      shell: bash
+      run: |
+        pinned=$(rustup default | cut -d' ' -f1)
+        for toolchain in $(rustup toolchain list --quiet); do
+          if [ "$toolchain" != "$pinned" ]; then
+            rustup toolchain uninstall "$toolchain"
+          fi
+        done
+
     - if: inputs.cache == 'true'
       uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       with:
