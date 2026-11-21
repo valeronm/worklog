@@ -24,3 +24,9 @@ runs:
       uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       with:
         save-if: ${{ github.ref == 'refs/heads/main' }}
+
+    - name: Fetch every target's crates
+      # A build downloads only its own target's crates; `cargo tree --offline`
+      # reads every target's.
+      shell: bash
+      run: cargo fetch --locked
